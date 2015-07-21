@@ -11,6 +11,18 @@
 *.ncb
 *.suo
 *.vcproj.*.user
+*.vcxproj*
+*.sdf
+*.opensdf
+windows/Backup
+windows/*.htm
+windows/*.svg
+windows/x64
+windows/Release-contrib/*.log
+windows/Win32/Release-contrib/*.log
+windows/Debug-contrib/*.log
+windows/Win32/Debug-contrib/*.log
+
 
 # RJW: I copy GhostPDL.sln to something more memorable in each checkout
 # so VS2005 shows me a sensible 'Recent Projects' list. Ignore the copy.

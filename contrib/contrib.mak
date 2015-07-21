@@ -1235,6 +1235,18 @@ $(DEVOBJ)gdevalps.$(OBJ) : $(JAPSRC)gdevalps.c $(PDEVH) \
 	$(DEVCC) $(O_)$@ $(C_) $(JAPSRC)gdevalps.c
 
 #########################################################################
+	
+# Scalable Vector Graphics (SVG) output device
+
+svgwrite_=$(DEVOBJ)gdevsvg.$(OBJ)
+$(DD)svgwrite.dev : $(DEVS_MAK) $(svgwrite_) $(GDEV) $(GLD)vector.dev
+       $(SETDEV2) $(DD)svgwrite $(svgwrite_)
+       $(ADDMOD) $(DD)svgwrite -include $(GLD)vector
+
+$(DEVOBJ)gdevsvg.$(OBJ) : $(CONTRIBSRC)gdevsvg.c $(gx_h) $(gdevvec_h)
+       $(DEVCC) $(DEVO_)gdevsvg.$(OBJ) $(C_) $(CONTRIBSRC)gdevsvg.c
+
+
 #########################################################################
 
 ### ----------------- Additional .upp files ---------------- ###
