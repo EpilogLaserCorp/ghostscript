@@ -1084,14 +1084,18 @@ $(DEVOBJ)gdevalps.$(OBJ) : $(JAPSRC)gdevalps.c $(PDEVH)
 	
 	
 # Scalable Vector Graphics (SVG) output device
+PNGGENDIR=$(GLGENDIR)
+libpng_dev=$(PNGGENDIR)$(D)libpng.dev
+png_i_=-include $(PNGGENDIR)$(D)libpng
+png__h=$(GLSRC)png_.h $(MAKEFILE)
 
 svgwrite_=$(DEVOBJ)gdevsvg.$(OBJ)
-$(DD)svgwrite.dev : $(DEVS_MAK) $(svgwrite_) $(GDEV) $(GLD)vector.dev
+$(DD)svgwrite.dev : $(DEVS_MAK) $(svgwrite_) $(GDEV) $(GLD)vector.dev  $(png__h) $(libpng_dev)
        $(SETDEV2) $(DD)svgwrite $(svgwrite_)
-       $(ADDMOD) $(DD)svgwrite -include $(GLD)vector
+       $(ADDMOD) $(DD)svgwrite $(png_i_) $(GLD)vector 
 
-$(DEVOBJ)gdevsvg.$(OBJ) : $(CONTRIBSRC)gdevsvg.c $(gx_h) $(gdevvec_h)
-       $(DEVCC) $(DEVO_)gdevsvg.$(OBJ) $(C_) $(CONTRIBSRC)gdevsvg.c
+$(DEVOBJ)gdevsvg.$(OBJ) : $(CONTRIBSRC)gdevsvg.c $(gx_h) $(gdevvec_h) $(png__h) $(libpng_dev)
+       $(DEVCC) $(II)$(PI_)$(_I) $(PCF_) $(DEVO_)gdevsvg.$(OBJ) $(C_) $(CONTRIBSRC)gdevsvg.c
 
 	   #########################################################################
 #########################################################################
