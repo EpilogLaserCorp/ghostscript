@@ -195,7 +195,6 @@ static dev_proc_begin_image(svg_begin_image);
 	NULL,			/* map_color_rgb_alpha */\
 	NULL,			/* create_compositor */\
 	NULL			/* get_hardware_params */\
-	/*epilog_text_begin*/\
 }
 
 gs_public_st_suffix_add0_final(st_device_svg, gx_device_svg,
@@ -278,6 +277,7 @@ typedef struct svg_image_enum_s {
 	int rows_left;
 	int width;
 	int height;
+	bool invert;
 	png_struct *png_ptr;
 	png_info *info_ptr;
 	png_color *palettep;
@@ -952,6 +952,7 @@ int *rows_used)
 	unsigned char cmyk[4];
 	double black;
 	byte *row;
+	byte *invRow;
 	raster = pie->num_planes*pie->plane_widths[0] * pie->plane_depths[0] / 8;
 	row = gs_alloc_bytes(pie->memory, raster, "png raster buffer");
 	if (row == 0)
@@ -959,11 +960,20 @@ int *rows_used)
 	// Clear memory
 	memset(row, 0xff, raster);
 
+
 	// Get the planes copied
 	for (y = 0; y < height; y++)
 	{
-		if (pie->num_planes == 1 && pie->plane_depths[0] == 24)
-			memcpy(row, planes[0].data+planes[0].data_x, raster);
+		if (pie->num_planes == 1 && (pie->plane_depths[0] == 24 || pie->plane_depths[0] == 8))
+		{
+			memcpy(row, planes[0].data + planes[0].data_x + (y*raster), raster);
+			if (pie->invert)
+			{
+				invRow = row;
+				for (i = 0; i < raster; ++i)
+					(*invRow++) ^= 0xff;
+			}
+		}
 		else
 		{
 			for (i = 0; i < pie->plane_widths[0]; i++) {
@@ -972,7 +982,7 @@ int *rows_used)
 					if (planes[k].data && pie->num_planes < 4)
 					{
 						bytes = pie->plane_depths[k] / 8;
-						ind = i*pie->num_planes*bytes + k;
+						ind = i*pie->num_planes*bytes + k + (raster * y);
 						memcpy(&row[ind], &planes[k].data[i*bytes], bytes);
 					}
 					else if (pie->num_planes == 4)
@@ -999,8 +1009,6 @@ int *rows_used)
 		png_write_rows(pie->png_ptr, &row, 1);
 	}
 	*rows_used = height;
-	if ((pie->rows_left % (pie->height/100)) == 0)
-		dmprintf1(info->memory, "%g complete\n", (float)(pie->height - pie->rows_left) / pie->height * 100);
 	gs_free_object(pie->memory, row, "png raster buffer");
 	return (pie->rows_left -= height) <= 0;
 }
@@ -1026,14 +1034,14 @@ svg_end_image(gx_image_enum_common_t * info, bool draw_last)
 	/* Flush the buffer as base 64 */
 	
 	buffer = base64_encode(pie->memory, pie->state.buffer, pie->state.size, &outputSize);
-	ty = (pie->ImageMatrix.yy > 0 ? 0 : pie->ctm.yy) + pie->ctm.ty;
+	ty = (pie->ImageMatrix.yy) > 0 ? 0 : pie->ctm.yy;
 	gs_sprintf(line, "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>",
-		pie->ImageMatrix.xx/pie->width*pie->ctm.xx/pie->width,
-		pie->ctm.xy / pie->width,
-		pie->ImageMatrix.yy / pie->height * pie->ctm.yx / pie->height,
-		pie->ImageMatrix.yy/pie->height*pie->ctm.yy/pie->height,
+		pie->ctm.xx/pie->width*pie->ImageMatrix.xx/pie->width,
+		pie->ctm.xy / pie->width*pie->ImageMatrix.xx / pie->width,
+		pie->ctm.yx / pie->height*pie->ImageMatrix.yx / pie->height,
+		pie->ctm.yy/pie->height*pie->ImageMatrix.yy/pie->height,
 		pie->ctm.tx,
-		ty);
+		pie->ctm.ty + ty);
 	svg_write(info->dev, line);
 	gs_sprintf(line, "<image width='%d' height='%d' xlink:href=\"data:image/png;base64,",
 		pie->width,pie->height);
@@ -1109,8 +1117,7 @@ gx_image_enum_common_t ** pinfo)
 	pie->width = ppi->Width;
 	pie->height = ppi->Height;
 	pie->ctm = pis->ctm;
-	pie->ImageMatrix = ppi->ImageMatrix;
-
+	pie->ImageMatrix = pim->ImageMatrix;
 	/* Initialize PNG structures */
 	pie->png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 	pie->info_ptr = png_create_info_struct(pie->png_ptr);
@@ -1189,9 +1196,9 @@ my_png_flush(png_structp png_ptr)
 
 int setup_png(gx_device * pdev , svg_image_enum_t  *pie)
 {
-	int code;			/* return code */
+	int code,i;			/* return code */
 	int factor = 1;
-	int depth = pdev->color_info.depth;
+	int depth = 0;
 	gs_memory_t *mem = pdev->memory;
 	bool invert = false, endian_swap = false, bg_needed = false;
 	png_byte bit_depth = 0;
@@ -1209,13 +1216,25 @@ int setup_png(gx_device * pdev , svg_image_enum_t  *pie)
 	char software_text[256];
 	png_text text_png;
 	int dst_bpc, src_bpc;
-	png_color palette[256];
+	png_color *palette;
 
 	png_struct *png_ptr = pie->png_ptr;
 	png_info *info_ptr = pie->info_ptr;
 
+	palette = (void *)gs_alloc_bytes(mem, 256 * sizeof(png_color),
+		"png palette");
+	if (palette == 0) {
+		return gs_note_error(gs_error_VMerror);
+	}
+
+	for (i = 0; i < pie->num_planes; ++i)
+	{
+		depth += pie->plane_depths[i];
+	}
+
 	pie->ds = 0;
 	pie->palettep = 0;
+	pie->invert = false;
 	/* set the file information here */
 	/* resolution is in pixels per meter vs. dpi */
 	x_pixels_per_unit =
@@ -1256,14 +1275,16 @@ int setup_png(gx_device * pdev , svg_image_enum_t  *pie)
 		break;
 	case 8:
 		bit_depth = 8;
-		if (gx_device_has_color(pdev)) {
-			color_type = PNG_COLOR_TYPE_PALETTE;
-			errdiff = 0;
-		}
-		else {
+		//if (gx_device_has_color(pdev)) {
+		//	color_type = PNG_COLOR_TYPE_PALETTE;
+		//	errdiff = 0;
+		//}
+		//else {
+		/* high level images don't have a color palette */
 			color_type = PNG_COLOR_TYPE_GRAY;
 			errdiff = 1;
-		}
+			pie->invert = true;;
+		//}
 		break;
 	case 4:
 		bit_depth = 4;
@@ -1402,6 +1423,6 @@ int setup_png(gx_device * pdev , svg_image_enum_t  *pie)
 
 	/* Save for later cleanup */
 	pie->ds = ds;
-	pie->palettep = palettep;
+	pie->palettep = palette;
 	return 0;
 }
