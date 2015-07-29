@@ -24,6 +24,9 @@
 #include "gxpath.h"
 #include "gzcpath.h"
 #include "gxdownscale.h"
+#include "gsptype1.h"
+#include "gsptype2.h"
+#include "gxdevmem.h"
 
 /*
 * libpng versions 1.0.3 and later allow disabling access to the stdxxx
@@ -66,6 +69,17 @@
 
 extern_st(st_gs_text_enum);
 extern_st(st_gx_image_enum_common);
+
+enum COLOR_TYPE{
+	COLOR_NULL,
+	COLOR_PURE,
+	COLOR_DEV,
+	COLOR_BINARY_HT,
+	COLOR_COLOR_HT,
+	COLOR_PATTERN2,
+	COLOR_PATERN1,
+	COLOR_UNKNOWN
+};
 
 
 static char encoding_table[] = { 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
@@ -127,6 +141,9 @@ typedef struct gx_device_svg_s {
 	gs_line_cap linecap;
 	gs_line_join linejoin;
 	double miterlimit;
+	gs_string class_string;
+	int class_number;
+	bool from_stroke_path;
 } gx_device_svg;
 
 #define svg_device_body(dname, depth)\
@@ -145,12 +162,16 @@ static dev_proc_close_device(svg_close_device);
 static dev_proc_get_params(svg_get_params);
 static dev_proc_put_params(svg_put_params);
 
+static dev_proc_fill_path(gdev_svg_fill_path);
+static dev_proc_stroke_path(gdev_svg_stroke_path);
+
 
 static dev_proc_begin_typed_image(svg_begin_typed_image);
 static dev_proc_begin_image(svg_begin_image);
 
-//static dev_proc_copy_alpha(svg_copy_alpha);
+static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_color *pdc);
 
+//static dev_proc_copy_alpha(svg_copy_alpha);
 #define svg_device_procs \
 { \
 	svg_open_device, \
@@ -177,8 +198,8 @@ static dev_proc_begin_image(svg_begin_image);
 	NULL,                   /* copy_alpha */\
 	NULL,                   /* get_band */\
 	NULL,                   /* copy_rop */\
-	gdev_vector_fill_path, \
-	gdev_vector_stroke_path, \
+	gdev_svg_fill_path, \
+	gdev_svg_stroke_path, \
 	NULL,			/* fill_mask */\
 	gdev_vector_fill_trapezoid, \
 	gdev_vector_fill_parallelogram, \
@@ -280,16 +301,35 @@ typedef struct svg_image_enum_s {
 	bool invert;
 	png_struct *png_ptr;
 	png_info *info_ptr;
-	png_color *palettep;
-	gx_downscaler_t *ds;
 	struct mem_encode state;
 	gs_matrix_fixed ctm;
 	gs_matrix ImageMatrix;
 } svg_image_enum_t;
 
+
+struct png_setup_s{
+	gs_memory_t *memory;
+	png_struct *png_ptr;
+	png_info *info_ptr;
+	int depth;
+	bool *external_invert;
+	float HWResolution[2];
+	uint width_in;
+	uint height_in;
+};
+
+int setup_png_from_struct(struct png_setup_s* setup);
 int setup_png(gx_device * pdev, svg_image_enum_t  *pie);
+int make_png(gx_device_memory *mdev);
 void my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length);
 void my_png_flush(png_structp png_ptr);
+static int write_base64_png(gx_device* dev,
+	struct mem_encode *state,
+	gs_matrix_fixed ctm,
+	gs_matrix ImageMatrix,
+	uint width,
+	uint height);
+static int make_png_from_mdev(gx_device_memory *mdev,float tx, float ty);
 
 /* Vector device function table */
 
@@ -357,6 +397,9 @@ svg_open_device(gx_device *dev)
 	svg->linecap = SVG_DEFAULT_LINECAP;
 	svg->linejoin = SVG_DEFAULT_LINEJOIN;
 	svg->miterlimit = SVG_DEFAULT_MITERLIMIT;
+	svg->class_string.data = 0;
+	svg->class_string.size = 0;
+	svg->from_stroke_path = false;
 
 	return code;
 }
@@ -463,6 +506,157 @@ svg_put_params(gx_device *dev, gs_param_list *plist)
 	return code;
 }
 
+
+/* RGB mapping for 32-bit RGBA color devices */
+
+static gx_color_index
+svgalpha_encode_color(gx_device * dev, const gx_color_value cv[])
+{
+	/* low 7 are alpha, stored inverted to avoid white/opaque
+	* being 0xffffffff which is also gx_no_color_index.
+	* So 0xff is transparent and 0x00 is opaque.
+	* We always return opaque colors (bits 0-7 = 0).
+	* Return value is 0xRRGGBB00.
+	*/
+	return
+		((uint)gx_color_value_to_byte(cv[2]) << 8) +
+		((ulong)gx_color_value_to_byte(cv[1]) << 16) +
+		((ulong)gx_color_value_to_byte(cv[0]) << 24);
+}
+
+/* Map a color index to a r-g-b color. */
+static int
+svgalpha_decode_color(gx_device * dev, gx_color_index color,
+gx_color_value prgb[3])
+{
+	prgb[0] = gx_color_value_from_byte((color >> 24) & 0xff);
+	prgb[1] = gx_color_value_from_byte((color >> 16) & 0xff);
+	prgb[2] = gx_color_value_from_byte((color >> 8) & 0xff);
+	return 0;
+}
+
+
+/* Stroke a path. */
+static int
+gdev_svg_stroke_path(gx_device * dev, const gs_imager_state * pis,
+gx_path * ppath, const gx_stroke_params * params,
+const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
+{
+	gx_device_svg *svg = (gx_device_svg *)dev;
+	gx_drawing_color color;
+	color_unset(&color);
+	int code = 0;
+	int mark = 0;
+	int i;
+	switch (svg_get_color_type((gx_device_svg *)dev, pdcolor))
+	{
+	case COLOR_PURE:
+		return gdev_vector_stroke_path(dev, pis, ppath, params, pdcolor, pcpath);
+	default:
+		svg_write(svg,"<g class='pathstrokeimage'>\n");
+		mark = svg->mark;
+		svg->from_stroke_path = true;
+		code = gdev_vector_stroke_path(dev, pis, ppath, params, &color, pcpath);
+		while (svg->mark > mark) {
+			svg_write(svg, "</g>\n");
+			svg->mark--;
+		}
+		if (code >= 0)
+		{
+			svg_write(svg, "<g class='image'>\n");
+			/* Make image from stroked path */
+			gx_device_memory *pmdev;
+			gx_device_memory proto;
+			const gx_device_memory *mdproto = gdev_mem_device_for_bits(32);
+			memcpy(&proto, mdproto, sizeof(gx_device_memory));
+			/* Duplicate pngalpha */
+			proto.color_info.max_components = 3;
+			proto.color_info.num_components = 3;
+			proto.color_info.polarity = GX_CINFO_POLARITY_ADDITIVE;
+			proto.color_info.depth = 32;
+			proto.color_info.gray_index = -1;
+			proto.color_info.max_gray = 255;
+			proto.color_info.max_color = 255;
+			proto.color_info.dither_grays = 256;
+			proto.color_info.dither_colors = 256;
+			proto.color_info.anti_alias.graphics_bits = 4;
+			proto.color_info.anti_alias.text_bits = 4;
+			proto.color_info.separable_and_linear = GX_CINFO_SEP_LIN_NONE;
+			for (i = 0; i < GX_DEVICE_COLOR_MAX_COMPONENTS; ++i)
+			{
+				proto.color_info.comp_bits[i] = 0;
+				proto.color_info.comp_shift[i] = 0;
+				proto.color_info.comp_mask[i] = 0;
+			}
+			proto.color_info.cm_name = "DeviceRGB";
+			proto.color_info.opmode = GX_CINFO_OPMODE_UNKNOWN;
+			proto.color_info.process_comps = 0;
+			proto.color_info.black_component = 0;
+
+			gs_fixed_rect bbox;
+			gs_make_mem_device_with_copydevice(&pmdev, &proto, dev->memory, -1, dev);
+			code = gx_path_bbox(ppath, &bbox);
+			if (code < 0)
+				return code;
+			pmdev->width = fixed2int(bbox.q.x - bbox.p.x);
+			pmdev->height = fixed2int(bbox.q.y - bbox.p.y);
+			pmdev->mapped_x = fixed2int(bbox.p.x);
+			pmdev->mapped_y = fixed2int(bbox.p.y);
+			pmdev->bitmap_memory = dev->memory;
+			dev_proc(pmdev, encode_color) = svgalpha_encode_color;
+			dev_proc(pmdev, decode_color) = svgalpha_decode_color;
+
+			//pmdev->color_info = dev->color_info;
+			code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
+			code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0,0,pmdev->width,pmdev->height,0xffffffff);
+			/* Translate the paths */
+			gx_path_translate(ppath, -bbox.p.x, -bbox.p.y);
+			gx_path_translate(pcpath, -bbox.p.x, -bbox.p.y);
+			code = (*dev_proc(pmdev, stroke_path))((gx_device *)pmdev, pis, ppath, params, pdcolor, pcpath);
+			/* Restore the paths to their original locations. Maybe not needed */
+			gx_path_translate(ppath, bbox.p.x, bbox.p.y);
+			gx_path_translate(pcpath, bbox.p.x, bbox.p.y);
+			make_png_from_mdev(pmdev,fixed2float(bbox.p.x),fixed2float(bbox.p.y));
+			code = (*dev_proc(pmdev, close_device))((gx_device *)pmdev);
+			while (svg->mark > mark) {
+				svg_write(svg, "</g>\n");
+				svg->mark--;
+			}
+			svg_write(svg, "</g> <!-- End of image -->\n");
+		}
+		svg_write(svg, "</g> <!-- End of pathstrokeimage -->\n");
+		svg->from_stroke_path = false;
+		return code;
+	}
+}
+
+/* Fill a path */
+int
+gdev_svg_fill_path(gx_device * dev, const gs_imager_state * pis, gx_path * ppath,
+const gx_fill_params * params,
+const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
+{
+	gx_device_svg *svg = (gx_device_svg *)dev;
+	gx_drawing_color color;
+	color_unset(&color);
+	int code = 0;
+	switch (svg_get_color_type((gx_device_svg *)dev, pdcolor))
+	{
+	case COLOR_PURE:
+		return gdev_vector_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
+	default:
+		if (!svg->from_stroke_path)
+		{
+			svg_write(svg, "<g class='pathfillimage'>\n");
+			code = gdev_vector_fill_path(dev, pis, ppath, params, &color, pcpath);
+		}
+		if (code >= 0)
+			code = gx_default_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
+		if (!svg->from_stroke_path) svg_write(svg, "</g>\n");
+		return code;
+	}
+}
+
 /* write a length-limited char buffer */
 static int
 svg_write_bytes(gx_device_svg *svg, const char *string, uint length)
@@ -523,7 +717,44 @@ svg_write_header(gx_device_svg *svg)
 
 	return 0;
 }
+static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_color *pdc)
+{
+	const gx_device_color *pdevc = (gx_device_color *)pdc;
+	if (gx_dc_is_pure(pdc))
+		return COLOR_PURE;
+	else if (gx_dc_is_null(pdc))
+	{
+		// We are null
+		return COLOR_NULL;
+	}
+	else if (gx_dc_is_devn(pdc))
+	{
+		// We are devn
+		return COLOR_DEV;
+	}
+	else if (gx_dc_is_binary_halftone(pdc))
+	{
+		// Binary halftone
+		return COLOR_BINARY_HT;
+	}
+	else if (gx_dc_is_colored_halftone(pdc))
+	{
+		// Colored halftone
+		return COLOR_COLOR_HT;
+	}
+	else if (gx_dc_is_pattern2_color(pdevc))
+	{
+		return COLOR_PATTERN2;
+	}
+	else if (gx_dc_is_pattern1_color(pdevc) ||
+		gx_dc_is_pattern1_color_clist_based(pdevc) ||
+		gx_dc_is_pattern1_color_with_trans(pdevc))
+	{
+		return COLOR_PATERN1;
+	}
+	return COLOR_UNKNOWN;
 
+}
 static gx_color_index
 svg_get_color(gx_device_svg *svg, const gx_drawing_color *pdc)
 {
@@ -720,14 +951,56 @@ svg_setfillcolor(gx_device_vector *vdev, const gs_imager_state *pis,
 const gx_drawing_color *pdc)
 {
 	gx_device_svg *svg = (gx_device_svg*)vdev;
-	gx_color_index fill = svg_get_color(svg, pdc);
+	const gx_device_color *pdevc = (gx_device_color *)pdc;
+	gx_color_index color = gx_no_color_index;
+	if (gx_dc_is_pure(pdc))
+		color = gx_dc_pure_color(pdc);
+	else if (gx_dc_is_null(pdc))
+	{
+		// We are null
+		color++;
+	}
+	else if (gx_dc_is_devn(pdc))
+	{
+		// We are devn
+		color++;
+	}
+	else if (gx_dc_is_binary_halftone(pdc))
+	{
+		// Binary halftone
+		color++;
+	}
+	else if (gx_dc_is_colored_halftone(pdc))
+	{
+		// Colored halftone
+		color++;
+	}
+	else if (!color_is_set(pdc))
+	{
+		// Other color
+		color++;
+	}
+	else if (gx_dc_is_pattern2_color(pdevc))
+	{
+		color--;
+	}
+	else if (gx_dc_is_pattern1_color(pdevc) ||
+		gx_dc_is_pattern1_color_clist_based(pdevc) ||
+		gx_dc_is_pattern1_color_with_trans(pdevc))
+	{
+		color++;
+	}
+	else
+	{
+		color++;
+	}
 
 	if_debug0m('_', svg->memory, "svg_setfillcolor\n");
 
-	if (svg->fillcolor == fill)
+	if (svg->fillcolor == color)
 		return 0; /* not a new color */
 	/* update our state with the new color */
-	svg->fillcolor = fill;
+	svg->fillcolor = color;
 	/* request a new group element */
 	svg->dirty++;
 	return 0;
@@ -1012,6 +1285,40 @@ int *rows_used)
 	gs_free_object(pie->memory, row, "png raster buffer");
 	return (pie->rows_left -= height) <= 0;
 }
+
+
+static int write_base64_png(gx_device* dev,
+	struct mem_encode *state, 
+	gs_matrix_fixed ctm, 
+	gs_matrix ImageMatrix, 
+	uint width, 
+	uint height)
+{
+	char line[SVG_LINESIZE];
+	size_t outputSize = 0;
+	byte *buffer = 0;
+	float ty;
+	/* Flush the buffer as base 64 */
+	buffer = base64_encode(state->memory, state->buffer, state->size, &outputSize);
+	ty = (ImageMatrix.yy) > 0 ? 0 : ctm.yy;
+	gs_sprintf(line, "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>",
+		ctm.xx / width*ImageMatrix.xx / width,
+		ctm.xy / width*ImageMatrix.xx / width,
+		ctm.yx / height*ImageMatrix.yx / height,
+		ctm.yy / height*ImageMatrix.yy / height,
+		ctm.tx,
+		ctm.ty + ty);
+	svg_write(dev, line);
+	gs_sprintf(line, "<image width='%d' height='%d' xlink:href=\"data:image/png;base64,",
+		width, height);
+	svg_write(dev, line);
+	svg_write_bytes(dev, buffer, outputSize);
+	svg_write(dev, "\"/>");
+	svg_write(dev, "</g>");
+	gs_free_object(state->memory, buffer, "base64 buffer");
+	return 0;
+}
+
 static int
 svg_end_image(gx_image_enum_common_t * info, bool draw_last)
 {
@@ -1021,37 +1328,30 @@ svg_end_image(gx_image_enum_common_t * info, bool draw_last)
 	byte *buffer = 0;
 	float ty;
 	/* Do some cleanup */
-	if (pie->palettep)
-		gs_free_object(pie->memory, pie->palettep, "png palette");
-	if (pie->ds)
-	{
-		gx_downscaler_fin(pie->ds);
-		gs_free_object(pie->memory, pie->ds, "png downscaler");
-	}
 	if (pie->png_ptr && pie->info_ptr)
 		png_destroy_write_struct(&pie->png_ptr, &pie->info_ptr);
 
 	/* Flush the buffer as base 64 */
-	
-	buffer = base64_encode(pie->memory, pie->state.buffer, pie->state.size, &outputSize);
-	ty = (pie->ImageMatrix.yy) > 0 ? 0 : pie->ctm.yy;
-	gs_sprintf(line, "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>",
-		pie->ctm.xx/pie->width*pie->ImageMatrix.xx/pie->width,
-		pie->ctm.xy / pie->width*pie->ImageMatrix.xx / pie->width,
-		pie->ctm.yx / pie->height*pie->ImageMatrix.yx / pie->height,
-		pie->ctm.yy/pie->height*pie->ImageMatrix.yy/pie->height,
-		pie->ctm.tx,
-		pie->ctm.ty + ty);
-	svg_write(info->dev, line);
-	gs_sprintf(line, "<image width='%d' height='%d' xlink:href=\"data:image/png;base64,",
-		pie->width,pie->height);
-	svg_write(info->dev, line);
-	svg_write_bytes(info->dev, buffer, outputSize);
-	svg_write(info->dev, "\"/>");
-	svg_write(info->dev, "</g>");
+	write_base64_png(info->dev, &pie->state, pie->ctm, pie->ImageMatrix, pie->width, pie->height);
+	//buffer = base64_encode(pie->memory, pie->state.buffer, pie->state.size, &outputSize);
+	//ty = (pie->ImageMatrix.yy) > 0 ? 0 : pie->ctm.yy;
+	//gs_sprintf(line, "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>",
+	//	pie->ctm.xx/pie->width*pie->ImageMatrix.xx/pie->width,
+	//	pie->ctm.xy / pie->width*pie->ImageMatrix.xx / pie->width,
+	//	pie->ctm.yx / pie->height*pie->ImageMatrix.yx / pie->height,
+	//	pie->ctm.yy/pie->height*pie->ImageMatrix.yy/pie->height,
+	//	pie->ctm.tx,
+	//	pie->ctm.ty + ty);
+	//svg_write(info->dev, line);
+	//gs_sprintf(line, "<image width='%d' height='%d' xlink:href=\"data:image/png;base64,",
+	//	pie->width,pie->height);
+	//svg_write(info->dev, line);
+	//svg_write_bytes(info->dev, buffer, outputSize);
+	//svg_write(info->dev, "\"/>");
+	//svg_write(info->dev, "</g>");
 
 	gs_free_object(pie->memory, pie->state.buffer, "png img buf");
-	gs_free_object(pie->memory, buffer, "base64 buffer");
+	//gs_free_object(pie->memory, buffer, "base64 buffer");
 
 	gx_image_free_enum(&info);
 	return 0;
@@ -1218,6 +1518,30 @@ int setup_png(gx_device * pdev , svg_image_enum_t  *pie)
 	int dst_bpc, src_bpc;
 	png_color *palette;
 
+
+	/* New stuff */
+	struct png_setup_s setup;
+	setup.depth = 0;
+	setup.external_invert = &pie->invert;
+
+	for (i = 0; i < pie->num_planes; ++i)
+	{
+		setup.depth += pie->plane_depths[i];
+	}
+	
+	setup.height_in = pie->height;
+	setup.width_in = pie->width;
+	setup.HWResolution[0] = pdev->HWResolution[0];
+	setup.HWResolution[1] = pdev->HWResolution[1];
+	setup.info_ptr = pie->info_ptr;
+	setup.memory = pdev->memory;
+	setup.png_ptr = pie->png_ptr;
+
+	code = setup_png_from_struct(&setup);
+	
+
+	return code;
+
 	png_struct *png_ptr = pie->png_ptr;
 	png_info *info_ptr = pie->info_ptr;
 
@@ -1232,8 +1556,6 @@ int setup_png(gx_device * pdev , svg_image_enum_t  *pie)
 		depth += pie->plane_depths[i];
 	}
 
-	pie->ds = 0;
-	pie->palettep = 0;
 	pie->invert = false;
 	/* set the file information here */
 	/* resolution is in pixels per meter vs. dpi */
@@ -1417,12 +1739,296 @@ int setup_png(gx_device * pdev , svg_image_enum_t  *pie)
 	info_ptr->num_text = 0;
 	info_ptr->text = NULL;
 #endif
-	
-	
-	gx_downscaler_t *ds = 0;
+	return 0;
+}
 
-	/* Save for later cleanup */
-	pie->ds = ds;
-	pie->palettep = palette;
+//int init_png(gs_memory_t *memory, 
+//	png_struct **png_ptrp, 
+//	png_info **info_ptrp, 
+//struct mem_encode *state, 
+//struct png_setup_s *setup)
+int init_png(struct mem_encode *state, 
+struct png_setup_s *setup)
+{
+	int code = 0;
+	state->buffer = 0;
+	state->memory = setup->memory;
+	state->size = 0;
+	png_struct *png_ptr;
+	png_info *info_ptr;
+	/* Initialize PNG structures */
+	png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+	info_ptr = png_create_info_struct(png_ptr);
+
+	if (png_ptr && info_ptr && !setjmp(png_jmpbuf(png_ptr))) {
+		/* Setup the writing function */
+		png_set_write_fn(png_ptr, state, my_png_write_data, my_png_flush);
+		setup->png_ptr = png_ptr;
+		setup->info_ptr = info_ptr;
+		code = setup_png_from_struct(setup);
+		if (!code)
+		{
+			return 0;
+		}
+	}
+	png_destroy_write_struct(&png_ptr, &info_ptr);
+	setup->png_ptr = 0;
+	setup->info_ptr = 0;
+	return code ? code : gs_note_error(gs_error_VMerror);
+}
+
+static int make_png_from_mdev(gx_device_memory *mdev,float tx,float ty)
+{
+	int code = 0;
+	struct mem_encode state;
+	struct png_setup_s setup;
+	bool invert;
+	int y;
+	setup.depth = mdev->color_info.depth;
+	setup.external_invert = &invert;
+	setup.height_in = mdev->height;
+	setup.HWResolution[0] = mdev->HWResolution[0];
+	setup.HWResolution[1] = mdev->HWResolution[1];
+	setup.memory = mdev->memory;
+	setup.width_in = mdev->width;
+	png_bytep row;
+	gs_matrix m;
+	gs_matrix_fixed ctm;
+	gs_make_identity(&m);
+	m.xx = mdev->width;
+	m.yy = mdev->height;
+	m.tx = tx;
+	m.ty = ty;
+	gs_matrix_fixed_from_matrix(&ctm, &m);
+
+
+	/* The png structures are set up and ready to use after init_png */
+	code = init_png(&state, &setup);
+	if (!code)
+	{
+		// The png data should all be ready for dumping
+		
+		// First we construct the binary buffer of PNG data
+		for (y = 0; y < mdev->height; ++y)
+		{
+			row = mdev->base + y * mdev->raster;
+			png_write_rows(setup.png_ptr, &row, 1);
+		}
+
+		write_base64_png(mdev->target, &state, ctm, m, mdev->width, mdev->height);
+		code = 0;
+	}
+	return code;
+}
+
+int setup_png_from_struct(struct png_setup_s* setup)
+{
+	int code, i;			/* return code */
+	int factor = 1;
+	gs_memory_t *mem = setup->memory;
+	bool invert = false, endian_swap = false, bg_needed = false;
+	png_byte bit_depth = 0;
+	png_byte color_type = 0;
+	png_uint_32 x_pixels_per_unit;
+	png_uint_32 y_pixels_per_unit;
+	png_byte phys_unit_type;
+	png_color_16 background;
+	png_uint_32 width, height;
+	/*png_color *palettep;
+	png_uint_16 num_palette;*/
+	png_uint_32 valid = 0;
+	bool errdiff = 0;
+	char software_key[80];
+	char software_text[256];
+	png_text text_png;
+	int dst_bpc, src_bpc;
+
+	*setup->external_invert = false;
+	/* set the file information here */
+	/* resolution is in pixels per meter vs. dpi */
+	x_pixels_per_unit =
+		(png_uint_32)(setup->HWResolution[0] * (100.0 / 2.54) / factor + 0.5);
+	y_pixels_per_unit =
+		(png_uint_32)(setup->HWResolution[1] * (100.0 / 2.54) / factor + 0.5);
+
+	phys_unit_type = PNG_RESOLUTION_METER;
+	valid |= PNG_INFO_pHYs;
+
+	switch (setup->depth) {
+	case 32:
+		bit_depth = 8;
+		color_type = PNG_COLOR_TYPE_RGB_ALPHA;
+		invert = true;
+
+		{
+			background.index = 0;
+			background.red = 0xff;
+			background.green = 0xff;
+			background.blue = 0xff;
+			background.gray = 0;
+			bg_needed = true;
+		}
+		errdiff = 1;
+		break;
+	case 48:
+		bit_depth = 16;
+		color_type = PNG_COLOR_TYPE_RGB;
+#if defined(ARCH_IS_BIG_ENDIAN) && (!ARCH_IS_BIG_ENDIAN)
+		endian_swap = true;
+#endif
+		break;
+	case 24:
+		bit_depth = 8;
+		color_type = PNG_COLOR_TYPE_RGB;
+		errdiff = 1;
+		break;
+	case 8:
+		bit_depth = 8;
+		//if (gx_device_has_color(pdev)) {
+		//	color_type = PNG_COLOR_TYPE_PALETTE;
+		//	errdiff = 0;
+		//}
+		//else {
+		/* high level images don't have a color palette */
+		color_type = PNG_COLOR_TYPE_GRAY;
+		errdiff = 1;
+		*setup->external_invert = true;;
+		//}
+		break;
+	//case 4:
+	//	bit_depth = 4;
+	//	color_type = PNG_COLOR_TYPE_PALETTE;
+	//	break;
+	case 1:
+		bit_depth = 1;
+		color_type = PNG_COLOR_TYPE_GRAY;
+		/* invert monocrome pixels */
+		invert = true;
+		break;
+	default:
+		/* This was unhandled and we don't know how to recover */
+		return gs_note_error(gs_error_Fatal);
+	}
+
+//	/* set the palette if there is one */
+//	if (color_type == PNG_COLOR_TYPE_PALETTE) {
+//		int i;
+//		int num_colors = 1 << depth;
+//		gx_color_value rgb[3];
+//
+//#if PNG_LIBPNG_VER_MINOR >= 5
+//		palettep = palette;
+//#else
+//		palettep =
+//			(void *)gs_alloc_bytes(mem, 256 * sizeof(png_color),
+//			"png palette");
+//		if (palettep == 0) {
+//			code = gs_note_error(gs_error_VMerror);
+//			goto done;
+//		}
+//#endif
+//		num_palette = num_colors;
+//		valid |= PNG_INFO_PLTE;
+//		for (i = 0; i < num_colors; i++) {
+//			(*dev_proc(pdev, map_color_rgb)) ((gx_device *)pdev,
+//				(gx_color_index)i, rgb);
+//			palettep[i].red = gx_color_value_to_byte(rgb[0]);
+//			palettep[i].green = gx_color_value_to_byte(rgb[1]);
+//			palettep[i].blue = gx_color_value_to_byte(rgb[2]);
+//		}
+//	}
+//	else {
+//		palettep = NULL;
+//		num_palette = 0;
+//	}
+	/* add comment */
+	strncpy(software_key, "Software", sizeof(software_key));
+	gs_sprintf(software_text, "%s %d.%02d", gs_product,
+		(int)(gs_revision / 100), (int)(gs_revision % 100));
+	text_png.compression = -1;	/* uncompressed */
+	text_png.key = software_key;
+	text_png.text = software_text;
+	text_png.text_length = strlen(software_text);
+
+	dst_bpc = bit_depth;
+	src_bpc = dst_bpc;
+	if (errdiff)
+		src_bpc = 8;
+	else
+		factor = 1;
+
+	/* THIS FUCKING SHIT MAKES THE IMAGE SIZE WRONG*/
+	/*width = pdev->width / factor;
+	height = pdev->height / factor;*/
+	/* This makes the image the actual image size */
+	width = setup->width_in;
+	height = setup->height_in;
+
+#if PNG_LIBPNG_VER_MINOR >= 5
+	png_set_pHYs(setup->png_ptr, setup->info_ptr,
+		x_pixels_per_unit, y_pixels_per_unit, phys_unit_type);
+
+	png_set_IHDR(setup->png_ptr, setup->info_ptr,
+		width, height, bit_depth,
+		color_type, PNG_INTERLACE_NONE,
+		PNG_COMPRESSION_TYPE_DEFAULT,
+		PNG_FILTER_TYPE_DEFAULT);
+	/*if (palettep)
+		png_set_PLTE(png_ptr, info_ptr, palettep, num_palette);*/
+
+	png_set_text(setup->png_ptr, setup->info_ptr, &text_png, 1);
+#else
+	info_ptr->bit_depth = bit_depth;
+	info_ptr->color_type = color_type;
+	info_ptr->width = width;
+	info_ptr->height = height;
+	info_ptr->x_pixels_per_unit = x_pixels_per_unit;
+	info_ptr->y_pixels_per_unit = y_pixels_per_unit;
+	info_ptr->phys_unit_type = phys_unit_type;
+	info_ptr->palette = palettep;
+	info_ptr->num_palette = num_palette;
+	info_ptr->valid |= valid;
+	info_ptr->text = &text_png;
+	info_ptr->num_text = 1;
+	/* Set up the ICC information */
+	if (pdev->icc_struct != NULL && pdev->icc_struct->device_profile[0] != NULL) {
+		cmm_profile_t *icc_profile = pdev->icc_struct->device_profile[0];
+		/* PNG can only be RGB or gray.  No CIELAB :(  */
+		if (icc_profile->data_cs == gsRGB || icc_profile->data_cs == gsGRAY) {
+			if (icc_profile->num_comps == pdev->color_info.num_components &&
+				!(pdev->icc_struct->usefastcolor)) {
+				info_ptr->iccp_name = icc_profile->name;
+				info_ptr->iccp_profile = icc_profile->buffer;
+				info_ptr->iccp_proflen = icc_profile->buffer_size;
+				info_ptr->valid |= PNG_INFO_iCCP;
+			}
+		}
+	}
+#endif
+	if (invert) {
+		if (setup->depth == 32)
+			png_set_invert_alpha(setup->png_ptr);
+		else
+			png_set_invert_mono(setup->png_ptr);
+	}
+	if (bg_needed) {
+		png_set_bKGD(setup->png_ptr, setup->info_ptr, &background);
+	}
+#if defined(ARCH_IS_BIG_ENDIAN) && (!ARCH_IS_BIG_ENDIAN)
+	if (endian_swap) {
+		png_set_swap(setup->png_ptr);
+	}
+#endif
+
+	/* write the file information */
+	png_write_info(setup->png_ptr, setup->info_ptr);
+
+#if PNG_LIBPNG_VER_MINOR >= 5
+#else
+	/* don't write the comments twice */
+	info_ptr->num_text = 0;
+	info_ptr->text = NULL;
+#endif
+
 	return 0;
 }
