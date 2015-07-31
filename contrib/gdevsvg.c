@@ -535,6 +535,46 @@ gx_color_value prgb[3])
 	return 0;
 }
 
+static int make_alpha_mdev(gx_device*dev, gx_device_memory **ppmdev,gs_fixed_rect bbox)
+{
+	int i;
+	gx_device_memory proto;
+	const gx_device_memory *mdproto = gdev_mem_device_for_bits(32);
+	memcpy(&proto, mdproto, sizeof(gx_device_memory));
+	/* Duplicate pngalpha */
+	proto.color_info.max_components = 3;
+	proto.color_info.num_components = 3;
+	proto.color_info.polarity = GX_CINFO_POLARITY_ADDITIVE;
+	proto.color_info.depth = 32;
+	proto.color_info.gray_index = -1;
+	proto.color_info.max_gray = 255;
+	proto.color_info.max_color = 255;
+	proto.color_info.dither_grays = 256;
+	proto.color_info.dither_colors = 256;
+	proto.color_info.anti_alias.graphics_bits = 4;
+	proto.color_info.anti_alias.text_bits = 4;
+	proto.color_info.separable_and_linear = GX_CINFO_SEP_LIN_NONE;
+	for (i = 0; i < GX_DEVICE_COLOR_MAX_COMPONENTS; ++i)
+	{
+		proto.color_info.comp_bits[i] = 0;
+		proto.color_info.comp_shift[i] = 0;
+		proto.color_info.comp_mask[i] = 0;
+	}
+	proto.color_info.cm_name = "DeviceRGB";
+	proto.color_info.opmode = GX_CINFO_OPMODE_UNKNOWN;
+	proto.color_info.process_comps = 0;
+	proto.color_info.black_component = 0;
+
+	gs_make_mem_device_with_copydevice(ppmdev, &proto, dev->memory, -1, dev);
+	(*ppmdev)->width = fixed2int(bbox.q.x - bbox.p.x);
+	(*ppmdev)->height = fixed2int(bbox.q.y - bbox.p.y);
+	(*ppmdev)->mapped_x = fixed2int(bbox.p.x);
+	(*ppmdev)->mapped_y = fixed2int(bbox.p.y);
+	(*ppmdev)->bitmap_memory = dev->memory;
+	dev_proc((*ppmdev), encode_color) = svgalpha_encode_color;
+	dev_proc((*ppmdev), decode_color) = svgalpha_decode_color;
+}
+
 
 /* Stroke a path. */
 static int
@@ -565,46 +605,39 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 		{
 			svg_write(svg, "<g class='image'>\n");
 			/* Make image from stroked path */
-			gx_device_memory *pmdev;
-			gx_device_memory proto;
-			const gx_device_memory *mdproto = gdev_mem_device_for_bits(32);
-			memcpy(&proto, mdproto, sizeof(gx_device_memory));
-			/* Duplicate pngalpha */
-			proto.color_info.max_components = 3;
-			proto.color_info.num_components = 3;
-			proto.color_info.polarity = GX_CINFO_POLARITY_ADDITIVE;
-			proto.color_info.depth = 32;
-			proto.color_info.gray_index = -1;
-			proto.color_info.max_gray = 255;
-			proto.color_info.max_color = 255;
-			proto.color_info.dither_grays = 256;
-			proto.color_info.dither_colors = 256;
-			proto.color_info.anti_alias.graphics_bits = 4;
-			proto.color_info.anti_alias.text_bits = 4;
-			proto.color_info.separable_and_linear = GX_CINFO_SEP_LIN_NONE;
-			for (i = 0; i < GX_DEVICE_COLOR_MAX_COMPONENTS; ++i)
-			{
-				proto.color_info.comp_bits[i] = 0;
-				proto.color_info.comp_shift[i] = 0;
-				proto.color_info.comp_mask[i] = 0;
-			}
-			proto.color_info.cm_name = "DeviceRGB";
-			proto.color_info.opmode = GX_CINFO_OPMODE_UNKNOWN;
-			proto.color_info.process_comps = 0;
-			proto.color_info.black_component = 0;
-
 			gs_fixed_rect bbox;
-			gs_make_mem_device_with_copydevice(&pmdev, &proto, dev->memory, -1, dev);
+			gx_device_memory *pmdev;
+			//gx_device_memory proto;
+			//const gx_device_memory *mdproto = gdev_mem_device_for_bits(32);
+			//memcpy(&proto, mdproto, sizeof(gx_device_memory));
+			///* Duplicate pngalpha */
+			//proto.color_info.max_components = 3;
+			//proto.color_info.num_components = 3;
+			//proto.color_info.polarity = GX_CINFO_POLARITY_ADDITIVE;
+			//proto.color_info.depth = 32;
+			//proto.color_info.gray_index = -1;
+			//proto.color_info.max_gray = 255;
+			//proto.color_info.max_color = 255;
+			//proto.color_info.dither_grays = 256;
+			//proto.color_info.dither_colors = 256;
+			//proto.color_info.anti_alias.graphics_bits = 4;
+			//proto.color_info.anti_alias.text_bits = 4;
+			//proto.color_info.separable_and_linear = GX_CINFO_SEP_LIN_NONE;
+			//for (i = 0; i < GX_DEVICE_COLOR_MAX_COMPONENTS; ++i)
+			//{
+			//	proto.color_info.comp_bits[i] = 0;
+			//	proto.color_info.comp_shift[i] = 0;
+			//	proto.color_info.comp_mask[i] = 0;
+			//}
+			//proto.color_info.cm_name = "DeviceRGB";
+			//proto.color_info.opmode = GX_CINFO_OPMODE_UNKNOWN;
+			//proto.color_info.process_comps = 0;
+			//proto.color_info.black_component = 0;
+
+			//
+			//gs_make_mem_device_with_copydevice(&pmdev, &proto, dev->memory, -1, dev);
 			code = gx_path_bbox(ppath, &bbox);
-			if (code < 0)
-				return code;
-			pmdev->width = fixed2int(bbox.q.x - bbox.p.x);
-			pmdev->height = fixed2int(bbox.q.y - bbox.p.y);
-			pmdev->mapped_x = fixed2int(bbox.p.x);
-			pmdev->mapped_y = fixed2int(bbox.p.y);
-			pmdev->bitmap_memory = dev->memory;
-			dev_proc(pmdev, encode_color) = svgalpha_encode_color;
-			dev_proc(pmdev, decode_color) = svgalpha_decode_color;
+			make_alpha_mdev(dev, &pmdev,bbox);
 
 			//pmdev->color_info = dev->color_info;
 			code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
@@ -645,14 +678,56 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 	case COLOR_PURE:
 		return gdev_vector_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
 	default:
-		if (!svg->from_stroke_path)
+		if (svg->from_stroke_path)
 		{
-			svg_write(svg, "<g class='pathfillimage'>\n");
-			code = gdev_vector_fill_path(dev, pis, ppath, params, &color, pcpath);
+			return gx_default_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
 		}
-		if (code >= 0)
-			code = gx_default_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
-		if (!svg->from_stroke_path) svg_write(svg, "</g>\n");
+		else //(!svg->from_stroke_path)
+		{
+			gs_fixed_rect bbox,rect;
+			gx_device_memory *pmdev;
+			int mark = svg->mark;
+			gs_imager_state *pis_noconst = (gs_imager_state *)pis; /* Break const. */
+			gs_matrix_fixed oldCTM = pis_noconst->ctm;
+			gs_matrix m;
+			gs_make_identity(&m);
+			gx_drawing_color dc = *pdcolor;
+			gs_pattern2_instance_t pi = *(gs_pattern2_instance_t *)dc.ccolor.pattern;
+			gs_state *pgs = gs_state_copy(pi.saved, gs_state_memory(pi.saved));
+
+			if (pgs == NULL)
+				return_error(gs_error_VMerror);
+			dc.ccolor.pattern = (gs_pattern_instance_t *)&pi;
+			pi.saved = pgs;
+			svg_write(svg, "<g class='pathfillimage'>\n");
+			// First we need to fill the bounding box with the pattern
+			code = gx_path_bbox(ppath, &bbox);
+			make_alpha_mdev(dev, &pmdev,bbox);
+			code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
+			code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0, pmdev->width, pmdev->height, 0xffffffff);
+			/* Translate the paths */
+			rect.p.x = 0;
+			rect.p.y = 0;
+			rect.q.x = bbox.q.x - bbox.p.x;
+			rect.q.y = bbox.q.y - bbox.p.y;
+			pis_noconst->ctm.tx = 0;
+			pis_noconst->ctm.ty = 0;
+			pis_noconst->ctm.tx_fixed = 0;
+			pis_noconst->ctm.ty_fixed = 0;
+			code = gs_shading_do_fill_rectangle(pi.templat.Shading,
+				NULL, (gx_device *)pmdev, (gs_imager_state *)pis, !pi.shfill);
+			pis_noconst->ctm = oldCTM;
+			/* Restore the paths to their original locations. Maybe not needed */
+			make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
+			code = (*dev_proc(pmdev, close_device))((gx_device *)pmdev);
+			while (svg->mark > mark) {
+				svg_write(svg, "</g>\n");
+				svg->mark--;
+			}
+			// Next we need to do the clip path
+			code = gdev_vector_fill_path(dev, pis, ppath, params, &color, pcpath);
+			svg_write(svg, "</g> <!-- pathfillimage -->\n");
+		}
 		return code;
 	}
 }
@@ -1816,6 +1891,8 @@ static int make_png_from_mdev(gx_device_memory *mdev,float tx,float ty)
 		}
 
 		write_base64_png(mdev->target, &state, ctm, m, mdev->width, mdev->height);
+		gs_free_object(mdev->memory, state.buffer, "png img buf");
+		png_destroy_write_struct(&setup.png_ptr, &setup.info_ptr);
 		code = 0;
 	}
 	return code;
@@ -1866,7 +1943,7 @@ int setup_png_from_struct(struct png_setup_s* setup)
 			background.green = 0xff;
 			background.blue = 0xff;
 			background.gray = 0;
-			bg_needed = true;
+			bg_needed = false;
 		}
 		errdiff = 1;
 		break;
