@@ -10,11 +10,13 @@
 *.ncb
 *.suo
 *.vcproj.*.user
-*.vcxproj*
+*.vcxproj.*
 *.sdf
 *.opensdf
 windows/Backup
 windows/*.htm
+windows/*.pdf
+windows/*.svg
 windows/x64
 
 # Ignore svg files
