@@ -684,7 +684,7 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 		}
 		else //(!svg->from_stroke_path)
 		{
-			gs_fixed_rect bbox,rect;
+			gs_fixed_rect bbox;
 			gx_device_memory *pmdev;
 			int mark = svg->mark;
 			gs_imager_state *pis_noconst = (gs_imager_state *)pis; /* Break const. */
@@ -705,15 +705,14 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 			make_alpha_mdev(dev, &pmdev,bbox);
 			code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
 			code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0, pmdev->width, pmdev->height, 0xffffffff);
-			/* Translate the paths */
-			rect.p.x = 0;
-			rect.p.y = 0;
-			rect.q.x = bbox.q.x - bbox.p.x;
-			rect.q.y = bbox.q.y - bbox.p.y;
-			pis_noconst->ctm.tx = 0;
-			pis_noconst->ctm.ty = 0;
+
+			/* Translate the image sampling area */
+			pis_noconst->ctm.tx = fixed2float(bbox.q.x - bbox.p.x) * 0.0f; 
+			pis_noconst->ctm.ty = fixed2float(bbox.q.y - bbox.p.y) * 1.0f; 
 			pis_noconst->ctm.tx_fixed = 0;
 			pis_noconst->ctm.ty_fixed = 0;
+			pis_noconst->ctm.txy_fixed_valid = false;
+
 			code = gs_shading_do_fill_rectangle(pi.templat.Shading,
 				NULL, (gx_device *)pmdev, (gs_imager_state *)pis, !pi.shfill);
 			pis_noconst->ctm = oldCTM;
