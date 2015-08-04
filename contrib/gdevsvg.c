@@ -673,6 +673,7 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 	gx_drawing_color color;
 	color_unset(&color);
 	int code = 0;
+
 	switch (svg_get_color_type((gx_device_svg *)dev, pdcolor))
 	{
 	case COLOR_PURE:
@@ -700,6 +701,7 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 			dc.ccolor.pattern = (gs_pattern_instance_t *)&pi;
 			pi.saved = pgs;
 			svg_write(svg, "<g class='pathfillimage'>\n");
+
 			// First we need to fill the bounding box with the pattern
 			code = gx_path_bbox(ppath, &bbox);
 			make_alpha_mdev(dev, &pmdev,bbox);
@@ -707,7 +709,8 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 			code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0, pmdev->width, pmdev->height, 0xffffffff);
 
 			/* Translate the image sampling area */
-			pis_noconst->ctm.tx = fixed2float(bbox.q.x - bbox.p.x) * 0.0f; 
+			/* Note: changing pis_noconst also changes pis */
+			pis_noconst->ctm.tx = 0.0f; 
 			pis_noconst->ctm.ty = fixed2float(bbox.q.y - bbox.p.y) * 1.0f; 
 			pis_noconst->ctm.tx_fixed = 0;
 			pis_noconst->ctm.ty_fixed = 0;
@@ -716,6 +719,7 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 			code = gs_shading_do_fill_rectangle(pi.templat.Shading,
 				NULL, (gx_device *)pmdev, (gs_imager_state *)pis, !pi.shfill);
 			pis_noconst->ctm = oldCTM;
+
 			/* Restore the paths to their original locations. Maybe not needed */
 			make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
 			code = (*dev_proc(pmdev, close_device))((gx_device *)pmdev);
@@ -1371,17 +1375,21 @@ static int write_base64_png(gx_device* dev,
 	char line[SVG_LINESIZE];
 	size_t outputSize = 0;
 	byte *buffer = 0;
-	float ty;
+	float tx, ty;
 	/* Flush the buffer as base 64 */
 	buffer = base64_encode(state->memory, state->buffer, state->size, &outputSize);
+
+	tx = (ImageMatrix.yy) > 0 ? 0 : ctm.yx;
 	ty = (ImageMatrix.yy) > 0 ? 0 : ctm.yy;
+	
 	gs_sprintf(line, "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>",
-		ctm.xx / width*ImageMatrix.xx / width,
-		ctm.xy / width*ImageMatrix.xx / width,
-		ctm.yx / height*ImageMatrix.yx / height,
-		ctm.yy / height*ImageMatrix.yy / height,
-		ctm.tx,
+		ctm.xx / width * ImageMatrix.xx / width,
+		ctm.xy / width * ImageMatrix.xx / width,
+		ctm.yx / height * ImageMatrix.yy / height,
+		ctm.yy / height * ImageMatrix.yy / height,
+		ctm.tx + tx,
 		ctm.ty + ty);
+
 	svg_write(dev, line);
 	gs_sprintf(line, "<image width='%d' height='%d' xlink:href=\"data:image/png;base64,",
 		width, height);
@@ -1449,10 +1457,11 @@ gx_image_enum_common_t ** pinfo)
 	int ncomp;
 	int code;			/* return code */
 
-	dmprintf7(dev->memory, "begin_typed_image(type=%d, ImageMatrix=[%g %g %g %g %g %g]",
+	dmprintf7(dev->memory, "begin_typed_image(type=%d, ImageMatrix=[%g %g %g %g %g %g]\n",
 		pim->type->index, pim->ImageMatrix.xx, pim->ImageMatrix.xy,
 		pim->ImageMatrix.yx, pim->ImageMatrix.yy,
 		pim->ImageMatrix.tx, pim->ImageMatrix.ty);
+
 	switch (pim->type->index) {
 	case 1:
 		if (((const gs_image1_t *)ppi)->ImageMask) {
@@ -1484,6 +1493,7 @@ gx_image_enum_common_t ** pinfo)
 		goto dflt;
 	dmprintf4(dev->memory, "\n    Width=%d, Height=%d, BPC=%d, num_components=%d)\n",
 		ppi->Width, ppi->Height, ppi->BitsPerComponent, ncomp);
+
 	/* This is where we add in the code to set up the PNG data copying */
 	pie->state.buffer = NULL;
 	pie->state.size = 0;

@@ -1148,20 +1148,22 @@ gdev_vector_fill_path(gx_device * dev, const gs_imager_state * pis,
 {
     int code;
 
-    if ((code = gdev_vector_update_clip_path(vdev, pcpath)) < 0 ||
-        (code = gdev_vector_prepare_fill(vdev, pis, params, pdevc)) < 0 ||
-        (vdev->bbox_device &&
-         (code = (*dev_proc(vdev->bbox_device, fill_path))
-          ((gx_device *) vdev->bbox_device, pis, ppath, params,
-           pdevc, pcpath)) < 0) ||
-        (code = (*vdev_proc(vdev, dopath))
-         (vdev, ppath,
-          (params->rule > 0 ? gx_path_type_even_odd :
-           gx_path_type_winding_number) | gx_path_type_fill |
-           vdev->fill_options,
-         NULL)) < 0
-        )
-        return gx_default_fill_path(dev, pis, ppath, params, pdevc, pcpath);
+	if ((code = gdev_vector_update_clip_path(vdev, pcpath)) < 0 ||
+		(code = gdev_vector_prepare_fill(vdev, pis, params, pdevc)) < 0 ||
+		(vdev->bbox_device &&
+		(code = (*dev_proc(vdev->bbox_device, fill_path))
+		((gx_device *)vdev->bbox_device, pis, ppath, params,
+		pdevc, pcpath)) < 0) ||
+		(code = (*vdev_proc(vdev, dopath))
+		(vdev, ppath,
+		(params->rule > 0 ? gx_path_type_even_odd :
+		gx_path_type_winding_number) | gx_path_type_fill |
+		vdev->fill_options,
+		NULL)) < 0
+		)
+	{
+		return gx_default_fill_path(dev, pis, ppath, params, pdevc, pcpath);
+	}
     return code;
 }
 
