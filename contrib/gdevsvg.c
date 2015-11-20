@@ -780,7 +780,7 @@ svg_write_header(gx_device_svg *svg)
 		SVG_XMLNS, SVG_VERSION);
 	/* svg_write(svg, line); */
 	sputs(s, (byte *)line, strlen(line), &used);
-	gs_sprintf(line, "\n\twidth='%.3fin' height='%.3fin' viewBox='0 0 %d %d>\n",
+	gs_sprintf(line, "\n\twidth='%.3fin' height='%.3fin' viewBox='0 0 %d %d'>\n",
 		(double)svg->MediaSize[0] / 72.0, (double)svg->MediaSize[1] / 72.0,
 		(int)svg->MediaSize[0], (int)svg->MediaSize[1]);
 	sputs(s, (byte *)line, strlen(line), &used);
