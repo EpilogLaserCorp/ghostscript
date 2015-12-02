@@ -168,6 +168,7 @@ static dev_proc_stroke_path(gdev_svg_stroke_path);
 
 static dev_proc_begin_typed_image(svg_begin_typed_image);
 static dev_proc_begin_image(svg_begin_image);
+static dev_proc_fillpage(svg_fillpage);
 
 static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_color *pdc);
 
@@ -209,13 +210,36 @@ static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_
 	NULL,                   /* image_data */\
 	NULL,                   /* end_image */\
 	NULL,                   /* strip_tile_rectangle */\
-	NULL,			/* strip_copy_rop */\
-	NULL,			/* get_clipping_box */\
-	svg_begin_typed_image, /**/\
-	NULL,			/* get_bits_rectangle */\
-	NULL,			/* map_color_rgb_alpha */\
-	NULL,			/* create_compositor */\
-	NULL			/* get_hardware_params */\
+	NULL,					/* strip_copy_rop */\
+	NULL,					/* get_clipping_box */\
+	svg_begin_typed_image,  /*begin_typed_image*/\
+	NULL,					/* get_bits_rectangle */\
+	NULL,					/* map_color_rgb_alpha */\
+	NULL,					/* create_compositor */\
+	NULL,					/* get_hardware_params */\
+	NULL,				    /* text_begin */\
+	NULL,		            /* finish_copydevice */\
+	NULL,				    /* begin_transparency_group */\
+	NULL,		            /* end_transparency_group */\
+	NULL,				    /* begin_transparency_mask */\
+	NULL,					/* end_transparency_mask */\
+	NULL,					/* discard_transparency_layer */\
+	NULL,					/* get_color_mapping_procs */\
+	NULL,					/* get_color_comp_index */\
+	NULL,					/* encode_color */\
+	NULL,					/* decode_color */\
+	NULL,					/* pattern_manage */\
+	NULL,					/* fill_rectangle_hl_color */\
+	NULL,					/* include_color_space */\
+	NULL,					/* fill_linear_color_scanline */\
+	NULL,					/* fill_linear_color_trapezoid */\
+	NULL,					/* fill_linear_color_triangle */\
+	NULL,					/* update_spot_equivalent_colors */\
+	NULL,					/* ret_devn_params */\
+	svg_fillpage,			/* fillpage */\
+	NULL,					/* push_transparency_state */\
+	NULL,					/* pop_transparency_state */\
+	NULL					/* put_image */\
 }
 
 gs_public_st_suffix_add0_final(st_device_svg, gx_device_svg,
@@ -419,8 +443,8 @@ svg_output_page(gx_device *dev, int num_copies, int flush)
 		svg_write(svg, "</g>\n");
 		svg->mark--;
 	}
-	svg_write(svg, "</page>");
-	svg_write(svg, "<page>");
+	svg_write(svg, "</page>\n");
+	svg_write(svg, "<page>\n");
 	/* Scale drawing so our coordinates are in pixels */
 	gs_sprintf(line, "<g transform='scale(%lf,%lf)'>\n",
 		72.0 / svg->HWResolution[0],
@@ -429,13 +453,13 @@ svg_output_page(gx_device *dev, int num_copies, int flush)
 	svg_write(svg, line);
 	svg->mark++;
 
-
 	svg_write(svg, "\n<!-- svg_output_page -->\n");
 	if (ferror(svg->file))
 		return gs_throw_code(gs_error_ioerror);
 
 	if ((code = gx_finish_output_page(dev, num_copies, flush)) < 0)
 		return code;
+
 	/* Check if we need to change the output file for separate pages */
 	if (gx_outputfile_is_separate_pages(((gx_device_vector *)dev)->fname, dev->memory)) {
 		if ((code = svg_close_device(dev)) < 0)
@@ -860,7 +884,7 @@ svg_write_state(gx_device_svg *svg)
 		svg->mark--;
 	}
 	/* write out the new current state */
-	svg_write(svg, "<g ");
+	svg_write(svg, "<g");
 	if (svg->strokecolor != gx_no_color_index) {
 		gs_sprintf(line, " stroke='#%06x'", (uint)(svg->strokecolor & 0xffffffL));
 		svg_write(svg, line);
@@ -931,6 +955,7 @@ svg_beginpage(gx_device_vector *vdev)
 	char line[300];
 	const byte * pg = (byte*)"<page>\n";
 	if_debug1m('_', svg->memory, "svg_beginpage (page count %d)\n", svg->page_count);
+
 	svg_write_header(svg);
 	/* we may be called from beginpage, so we can't use
 	svg_write() which calls gdev_vector_stream()
@@ -1128,6 +1153,10 @@ fixed x1, fixed y1, gx_path_type_t type)
 	gx_device_svg *svg = (gx_device_svg *)vdev;
 	char line[300];
 
+	// Check if this is a no-fill rectangle
+	bool emptyPen = (!(type & gx_path_type_stroke) && (svg->strokecolor != gx_no_color_index));
+	bool emptyBrush = (!(type & gx_path_type_fill) && (svg->fillcolor != gx_no_color_index));
+
 	if_debug0m('_', svg->memory, "svg_dorect");
 	svg_print_path_type(svg, type);
 	if_debug0m('_', svg->memory, "\n");
@@ -1142,11 +1171,12 @@ fixed x1, fixed y1, gx_path_type_t type)
 		fixed2float(x0), fixed2float(y0),
 		fixed2float(x1 - x0), fixed2float(y1 - y0));
 	svg_write(svg, line);
+
 	/* override the inherited stroke attribute if we're not stroking */
-	if (!(type & gx_path_type_stroke) && (svg->strokecolor != gx_no_color_index))
+	if (emptyPen)
 		svg_write(svg, " stroke='none'");
 	/* override the inherited fill attribute if we're not filling */
-	if (!(type & gx_path_type_fill) && (svg->fillcolor != gx_no_color_index))
+	if (emptyBrush)
 		svg_write(svg, " fill='none'");
 	svg_write(svg, "/>\n");
 
@@ -1541,7 +1571,19 @@ done:
 	return code;
 }
 
+static
+int svg_fillpage(gx_device *dev, 
+gs_imager_state * pis,
+gx_device_color *pdevc)
+{
+	gx_device_svg *const svg = (gx_device_svg*)dev;
 
+	if_debug0m('_', svg->memory, "svg_fillpage\n");
+
+	// Do nothing in this function to prevent white background rects from appearing
+
+	return 0;
+}
 
 /* PNG writing algorithems*/
 
