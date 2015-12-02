@@ -1097,7 +1097,7 @@ $(DD)svgwrite.dev : $(DEVS_MAK) $(svgwrite_) $(GDEV) $(GLD)vector.dev  $(png__h)
 $(DEVOBJ)gdevsvg.$(OBJ) : $(CONTRIBSRC)gdevsvg.c $(gx_h) $(gdevvec_h) $(png__h) $(libpng_dev)
        $(DEVCC) $(II)$(PI_)$(_I) $(PCF_) $(DEVO_)gdevsvg.$(OBJ) $(C_) $(CONTRIBSRC)gdevsvg.c
 
-	   #########################################################################
+#########################################################################
 #########################################################################
 
 ### ----------------- Additional .upp files ---------------- ###
