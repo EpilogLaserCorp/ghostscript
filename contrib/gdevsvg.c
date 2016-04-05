@@ -796,8 +796,6 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 				svg_write(svg, "</g>\n");
 				svg->mark--;
 			}
-			// Next we need to do the clip path
-			code = gdev_vector_fill_path(dev, pis, ppath, params, &color, pcpath);
 			svg_write(svg, "</g> <!-- pathfillimage -->\n");
 		}
 		return code;
@@ -1208,9 +1206,9 @@ fixed x1, fixed y1, gx_path_type_t type)
 
 	svg_write_state(svg);
 
-	if (type & gx_path_type_clip) {
-		svg_write(svg, "<clipPath>\n");
-	}
+	//if (type & gx_path_type_clip) {
+	//	svg_write(svg, "<clipPath>\n");
+	//}
 
 	gs_sprintf(line, "<rect x='%lf' y='%lf' width='%lf' height='%lf'",
 		fixed2float(x0), fixed2float(y0),
@@ -1225,9 +1223,9 @@ fixed x1, fixed y1, gx_path_type_t type)
 		svg_write(svg, " fill='none'");
 	svg_write(svg, "/>\n");
 
-	if (type & gx_path_type_clip) {
-		svg_write(svg, "</clipPath>\n");
-	}
+	//if (type & gx_path_type_clip) {
+	//	svg_write(svg, "</clipPath>\n");
+	//}
 
 	return 0;
 }
@@ -1247,9 +1245,9 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 
 	svg_write_state(svg);
 
-	if (type & gx_path_type_clip) {
-		svg_write(svg, "<clipPath>\n");
-	}
+	//if (type & gx_path_type_clip) {
+	//	svg_write(svg, "<clipPath>\n");
+	//}
 	svg_write(svg, "<path d='");
 
 	return 0;
@@ -1364,9 +1362,9 @@ svg_endpath(gx_device_vector *vdev, gx_path_type_t type)
 		svg_write(svg, " fill='none'");
 
 	svg_write(svg, "/>\n");
-	if (type & gx_path_type_clip) {
-		svg_write(svg, "</clipPath>\n");
-	}
+	//if (type & gx_path_type_clip) {
+	//	svg_write(svg, "</clipPath>\n");
+	//}
 
 	return 0;
 }
