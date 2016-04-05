@@ -144,6 +144,7 @@ typedef struct gx_device_svg_s {
 	gs_string class_string;
 	int class_number;
 	bool from_stroke_path;
+	int usedIds;
 } gx_device_svg;
 
 #define svg_device_body(dname, depth)\
@@ -184,8 +185,8 @@ static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_
 	gx_default_rgb_map_color_rgb, \
 	gdev_vector_fill_rectangle, \
 	NULL,                   /* tile_rectangle */\
-	NULL,			/* copy_mono */\
-	NULL,			/* copy_color */\
+	NULL,                   /* copy_mono */\
+	NULL,			        /* copy_color */\
 	NULL,                   /* draw_line */\
 	NULL,                   /* get_bits */\
 	svg_get_params, \
@@ -201,18 +202,18 @@ static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_
 	NULL,                   /* copy_rop */\
 	gdev_svg_fill_path, \
 	gdev_svg_stroke_path, \
-	NULL,			/* fill_mask */\
+	NULL,			        /* fill_mask */\
 	gdev_vector_fill_trapezoid, \
 	gdev_vector_fill_parallelogram, \
 	gdev_vector_fill_triangle, \
-	NULL,			/* draw_thin_line */\
-	NULL, /*svg_begin_image,			/* begin_image */\
+	NULL,			        /* draw_thin_line */\
+	NULL,                   /* begin_image */\
 	NULL,                   /* image_data */\
 	NULL,                   /* end_image */\
 	NULL,                   /* strip_tile_rectangle */\
 	NULL,					/* strip_copy_rop */\
 	NULL,					/* get_clipping_box */\
-	svg_begin_typed_image,  /*begin_typed_image*/\
+	svg_begin_typed_image,  /* begin_typed_image*/\
 	NULL,					/* get_bits_rectangle */\
 	NULL,					/* map_color_rgb_alpha */\
 	NULL,					/* create_compositor */\
@@ -424,6 +425,7 @@ svg_open_device(gx_device *dev)
 	svg->class_string.data = 0;
 	svg->class_string.size = 0;
 	svg->from_stroke_path = false;
+	svg->usedIds = 0;
 
 	return code;
 }
@@ -734,8 +736,10 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 
 			/* Translate the image sampling area */
 			/* Note: changing pis_noconst also changes pis */
-			pis_noconst->ctm.tx = 0.0f; 
-			pis_noconst->ctm.ty = fixed2float(bbox.q.y - bbox.p.y) * 1.0f; 
+			//pis_noconst->ctm.tx = 0.0f; 
+			//pis_noconst->ctm.ty = fixed2float(bbox.q.y - bbox.p.y) * 1.0f;
+			pis_noconst->ctm.tx = fixed2float(bbox.q.x - bbox.p.x) * 0.5f;
+			pis_noconst->ctm.ty = fixed2float(bbox.q.y - bbox.p.y) * 0.5f;
 			pis_noconst->ctm.tx_fixed = 0;
 			pis_noconst->ctm.ty_fixed = 0;
 			pis_noconst->ctm.txy_fixed_valid = false;
@@ -743,6 +747,47 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 			code = gs_shading_do_fill_rectangle(pi.templat.Shading,
 				NULL, (gx_device *)pmdev, (gs_imager_state *)pis, !pi.shfill);
 			pis_noconst->ctm = oldCTM;
+
+			// Find inverse transform
+			// These matricies are formed the same way that the image transforms are made
+			gs_matrix m2;
+			gs_make_identity(&m2);
+			m2.xx = dev->width;
+			m2.yy = dev->height;
+			m2.tx = fixed2float(bbox.p.x);
+			m2.ty = fixed2float(bbox.p.y);
+
+			float tx, ty;
+			tx = (m2.yy) > 0 ? 0 : m2.yx;
+			ty = (m2.yy) > 0 ? 0 : m2.yy;
+
+			gs_matrix m3;
+			m3.xx = m2.xx / dev->width * m2.xx / dev->width;
+			m3.xy = m2.xy / dev->width * m2.xx / dev->width;
+			m3.yx = m2.yx / dev->height * m2.yy / dev->height;
+			m3.yy = m2.yy / dev->height * m2.yy / dev->height;
+			m3.tx = m2.tx + tx;
+			m3.ty = m2.ty + ty;
+
+			gs_matrix m3Invert;
+			gs_matrix_invert(&m3, &m3Invert);
+
+			// Create a clipping path
+			char clippathStr[100];
+			uint used;
+			gs_sprintf(clippathStr, "<clipPath id='clip%i' transform='matrix(%f,%f,%f,%f,%f,%f)'>\n", 
+				svg->usedIds++,
+				m3Invert.xx, m3Invert.xy, m3Invert.yx, m3Invert.yy, 
+				m3Invert.tx, m3Invert.ty);
+			sputs(svg->strm, (byte *)clippathStr, strlen(clippathStr), &used);
+			if (pcpath->path_list) {
+				gx_cpath_path_list *path_list = pcpath->path_list;
+				do {
+					gdev_vector_dopath(dev, &path_list->path, gx_path_type_stroke, NULL);
+				} while ((path_list = path_list->next));
+			}
+			gdev_vector_dopath(dev, &pcpath->path, gx_path_type_stroke, NULL);
+			svg_write(svg, "</clipPath>\n");
 
 			/* Restore the paths to their original locations. Maybe not needed */
 			make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
@@ -1201,6 +1246,10 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 	if_debug0m('_', svg->memory, "\n");
 
 	svg_write_state(svg);
+
+	if (type & gx_path_type_clip) {
+		svg_write(svg, "<clipPath>\n");
+	}
 	svg_write(svg, "<path d='");
 
 	return 0;
@@ -1315,6 +1364,9 @@ svg_endpath(gx_device_vector *vdev, gx_path_type_t type)
 		svg_write(svg, " fill='none'");
 
 	svg_write(svg, "/>\n");
+	if (type & gx_path_type_clip) {
+		svg_write(svg, "</clipPath>\n");
+	}
 
 	return 0;
 }
@@ -1422,13 +1474,14 @@ static int write_base64_png(gx_device* dev,
 		ctm.ty + ty);
 
 	svg_write(dev, line);
-	gs_sprintf(line, "<image width='%d' height='%d' xlink:href=\"data:image/png;base64,",
-		width, height);
+	gs_sprintf(line, "<image clip-path='url(#clip%i)' width='%d' height='%d' xlink:href=\"data:image/png;base64,",
+		((gx_device_svg *)dev)->usedIds - 1, width, height);
 	svg_write(dev, line);
 	svg_write_bytes(dev, buffer, outputSize);
 	svg_write(dev, "\"/>");
 	svg_write(dev, "</g>");
 	gs_free_object(state->memory, buffer, "base64 buffer");
+
 	return 0;
 }
 
@@ -1440,10 +1493,15 @@ svg_end_image(gx_image_enum_common_t * info, bool draw_last)
 	size_t outputSize = 0;
 	byte *buffer = 0;
 	float ty;
+
+	// Do we need this?
+	//png_write_end(pie->png_ptr, pie->info_ptr);
+
 	/* Do some cleanup */
 	if (pie->png_ptr && pie->info_ptr)
 		png_destroy_write_struct(&pie->png_ptr, &pie->info_ptr);
 
+	png_write_end(pie->png_ptr, pie->info_ptr);
 	/* Flush the buffer as base 64 */
 	write_base64_png(info->dev, &pie->state, pie->ctm, pie->ImageMatrix, pie->width, pie->height);
 	//buffer = base64_encode(pie->memory, pie->state.buffer, pie->state.size, &outputSize);
@@ -1941,6 +1999,8 @@ static int make_png_from_mdev(gx_device_memory *mdev,float tx,float ty)
 			row = mdev->base + y * mdev->raster;
 			png_write_rows(setup.png_ptr, &row, 1);
 		}
+
+		png_write_end(setup.png_ptr, setup.info_ptr);
 
 		write_base64_png(mdev->target, &state, ctm, m, mdev->width, mdev->height);
 		gs_free_object(mdev->memory, state.buffer, "png img buf");
