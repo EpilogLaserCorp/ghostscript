@@ -343,7 +343,7 @@ struct png_setup_s{
 	uint height_in;
 };
 
-int setup_png_from_struct(struct png_setup_s* setup);
+int setup_png_from_struct(gx_device * pdev, struct png_setup_s* setup);
 int setup_png(gx_device * pdev, svg_image_enum_t  *pie);
 int make_png(gx_device_memory *mdev);
 void my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length);
@@ -733,6 +733,21 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 			make_alpha_mdev(dev, &pmdev,bbox);
 			code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
 			code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0, pmdev->width, pmdev->height, 0xffffffff);
+
+
+
+			//if_debug0m('*', dev->memory, "^^^ TESTING\n");
+			//if_debug2m('*', dev->memory, "^^^ Desired offset: %f, %f\n", 
+			//	fixed2float(bbox.q.x - bbox.p.x) * 0.5f,
+			//	fixed2float(bbox.q.y - bbox.p.y) * 0.5f);
+			//if_debug6m('*', dev->memory, "^^^ CTM: xx%f, xy%f, yx%f, yy%f, tx%f, ty%f\n",
+			//	pis->ctm.xx, pis->ctm.xy, pis->ctm.yx, pis->ctm.yy, pis->ctm.tx, pis->ctm.ty);
+			//if_debug2m('*', dev->memory, "^^^ Dev: %f, %f\n", dev->width, dev->height);
+			//if_debug4m('*', dev->memory, "^^^ BBox: %f, %f -> %f, %f\n",
+			//	fixed2float(bbox.p.x), fixed2float(bbox.p.y),
+			//	fixed2float(bbox.q.x), fixed2float(bbox.q.y));
+
+
 
 			/* Translate the image sampling area */
 			/* Note: changing pis_noconst also changes pis */
@@ -1197,8 +1212,8 @@ fixed x1, fixed y1, gx_path_type_t type)
 	char line[300];
 
 	// Check if this is a no-fill rectangle
-	bool emptyPen = (!(type & gx_path_type_stroke) && (svg->strokecolor != gx_no_color_index));
-	bool emptyBrush = (!(type & gx_path_type_fill) && (svg->fillcolor != gx_no_color_index));
+	bool emptyPen = (!(type & gx_path_type_stroke) && (svg->strokecolor != gx_no_color_index)) || (type & gx_path_type_clip);
+	bool emptyBrush = (!(type & gx_path_type_fill) && (svg->fillcolor != gx_no_color_index)) || (type & gx_path_type_clip);
 
 	if_debug0m('_', svg->memory, "svg_dorect");
 	svg_print_path_type(svg, type);
@@ -1354,11 +1369,11 @@ svg_endpath(gx_device_vector *vdev, gx_path_type_t type)
 	svg_write(svg, "'");
 
 	/* override the inherited stroke attribute if we're not stroking */
-	if (!(type & gx_path_type_stroke) && (svg->strokecolor != gx_no_color_index))
+	if ((!(type & gx_path_type_stroke) && (svg->strokecolor != gx_no_color_index)) || (type & gx_path_type_clip))
 		svg_write(svg, " stroke='none'");
 
 	/* override the inherited fill attribute if we're not filling */
-	if (!(type & gx_path_type_fill) && (svg->fillcolor != gx_no_color_index))
+	if ((!(type & gx_path_type_fill) && (svg->fillcolor != gx_no_color_index)) || (type & gx_path_type_clip))
 		svg_write(svg, " fill='none'");
 
 	svg_write(svg, "/>\n");
@@ -1499,7 +1514,16 @@ svg_end_image(gx_image_enum_common_t * info, bool draw_last)
 	if (pie->png_ptr && pie->info_ptr)
 		png_destroy_write_struct(&pie->png_ptr, &pie->info_ptr);
 
+
+	// Invert the image if necessary
+	// ^^^ Palette
+	//png_set_invert_mono(pie->png_ptr); // ^^^
+
+	// Finalize the image
 	png_write_end(pie->png_ptr, pie->info_ptr);
+
+
+
 	/* Flush the buffer as base 64 */
 	write_base64_png(info->dev, &pie->state, pie->ctm, pie->ImageMatrix, pie->width, pie->height);
 	//buffer = base64_encode(pie->memory, pie->state.buffer, pie->state.size, &outputSize);
@@ -1677,7 +1701,7 @@ my_png_flush(png_structp png_ptr)
 {
 }
 
-int setup_png(gx_device * pdev , svg_image_enum_t  *pie)
+int setup_png(gx_device * pdev, svg_image_enum_t  *pie)
 {
 	int code,i;			/* return code */
 	int factor = 1;
@@ -1720,7 +1744,7 @@ int setup_png(gx_device * pdev , svg_image_enum_t  *pie)
 	setup.memory = pdev->memory;
 	setup.png_ptr = pie->png_ptr;
 
-	code = setup_png_from_struct(&setup);
+	code = setup_png_from_struct(pdev, &setup);
 	
 
 	return code;
@@ -1930,7 +1954,7 @@ int setup_png(gx_device * pdev , svg_image_enum_t  *pie)
 //	png_info **info_ptrp, 
 //struct mem_encode *state, 
 //struct png_setup_s *setup)
-int init_png(struct mem_encode *state, 
+int init_png(gx_device * pdev, struct mem_encode *state,
 struct png_setup_s *setup)
 {
 	int code = 0;
@@ -1948,7 +1972,7 @@ struct png_setup_s *setup)
 		png_set_write_fn(png_ptr, state, my_png_write_data, my_png_flush);
 		setup->png_ptr = png_ptr;
 		setup->info_ptr = info_ptr;
-		code = setup_png_from_struct(setup);
+		code = setup_png_from_struct(pdev, setup);
 		if (!code)
 		{
 			return 0;
@@ -1986,7 +2010,7 @@ static int make_png_from_mdev(gx_device_memory *mdev,float tx,float ty)
 
 
 	/* The png structures are set up and ready to use after init_png */
-	code = init_png(&state, &setup);
+	code = init_png(mdev, &state, &setup);
 	if (!code)
 	{
 		// The png data should all be ready for dumping
@@ -2008,7 +2032,7 @@ static int make_png_from_mdev(gx_device_memory *mdev,float tx,float ty)
 	return code;
 }
 
-int setup_png_from_struct(struct png_setup_s* setup)
+int setup_png_from_struct(gx_device * pdev, struct png_setup_s* setup)
 {
 	int code, i;			/* return code */
 	int factor = 1;
@@ -2071,16 +2095,18 @@ int setup_png_from_struct(struct png_setup_s* setup)
 		break;
 	case 8:
 		bit_depth = 8;
-		//if (gx_device_has_color(pdev)) {
-		//	color_type = PNG_COLOR_TYPE_PALETTE;
-		//	errdiff = 0;
-		//}
-		//else {
-		/* high level images don't have a color palette */
-		color_type = PNG_COLOR_TYPE_GRAY;
-		errdiff = 1;
-		*setup->external_invert = true;;
-		//}
+		if (gx_device_has_color(pdev)) {
+			//color_type = PNG_COLOR_TYPE_PALETTE;
+			//errdiff = 0;
+			color_type = PNG_COLOR_TYPE_GRAY;
+			errdiff = 1;
+		}
+		else {
+			/* high level images don't have a color palette */
+			color_type = PNG_COLOR_TYPE_GRAY;
+			errdiff = 1;
+			*setup->external_invert = true;
+		}
 		break;
 	//case 4:
 	//	bit_depth = 4;
