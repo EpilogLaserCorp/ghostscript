@@ -1455,6 +1455,7 @@ int *rows_used)
 		}
 		png_write_rows(pie->png_ptr, &row, 1);
 	}
+
 	*rows_used = height;
 	gs_free_object(pie->memory, row, "png raster buffer");
 	return (pie->rows_left -= height) <= 0;
@@ -1507,22 +1508,14 @@ svg_end_image(gx_image_enum_common_t * info, bool draw_last)
 	byte *buffer = 0;
 	float ty;
 
-	// Do we need this?
-	//png_write_end(pie->png_ptr, pie->info_ptr);
+	png_write_end(pie->png_ptr, pie->info_ptr);
 
 	/* Do some cleanup */
 	if (pie->png_ptr && pie->info_ptr)
 		png_destroy_write_struct(&pie->png_ptr, &pie->info_ptr);
 
-
-	// Invert the image if necessary
-	// ^^^ Palette
-	//png_set_invert_mono(pie->png_ptr); // ^^^
-
 	// Finalize the image
-	png_write_end(pie->png_ptr, pie->info_ptr);
-
-
+	//png_write_end(pie->png_ptr, pie->info_ptr);
 
 	/* Flush the buffer as base 64 */
 	write_base64_png(info->dev, &pie->state, pie->ctm, pie->ImageMatrix, pie->width, pie->height);
@@ -1616,6 +1609,7 @@ gx_image_enum_common_t ** pinfo)
 	/* Initialize PNG structures */
 	pie->png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 	pie->info_ptr = png_create_info_struct(pie->png_ptr);
+	pie->invert = false; // Is this correct?
 
 	if (pie->png_ptr == 0 || pie->info_ptr == 0) {
 		code = gs_note_error(gs_error_VMerror);
@@ -1745,208 +1739,206 @@ int setup_png(gx_device * pdev, svg_image_enum_t  *pie)
 	setup.png_ptr = pie->png_ptr;
 
 	code = setup_png_from_struct(pdev, &setup);
-	
+	return code; 
 
-	return code;
-
-	png_struct *png_ptr = pie->png_ptr;
-	png_info *info_ptr = pie->info_ptr;
-
-	palette = (void *)gs_alloc_bytes(mem, 256 * sizeof(png_color),
-		"png palette");
-	if (palette == 0) {
-		return gs_note_error(gs_error_VMerror);
-	}
-
-	for (i = 0; i < pie->num_planes; ++i)
-	{
-		depth += pie->plane_depths[i];
-	}
-
-	pie->invert = false;
-	/* set the file information here */
-	/* resolution is in pixels per meter vs. dpi */
-	x_pixels_per_unit =
-		(png_uint_32)(pdev->HWResolution[0] * (100.0 / 2.54) / factor + 0.5);
-	y_pixels_per_unit =
-		(png_uint_32)(pdev->HWResolution[1] * (100.0 / 2.54) / factor + 0.5);
-
-	phys_unit_type = PNG_RESOLUTION_METER;
-	valid |= PNG_INFO_pHYs;
-
-	switch (depth) {
-	case 32:
-		bit_depth = 8;
-		color_type = PNG_COLOR_TYPE_RGB_ALPHA;
-		invert = true;
-
-		{ 
-		background.index = 0;
-		background.red =  0xff;
-		background.green = 0xff;
-		background.blue = 0xff;
-		background.gray = 0;
-		bg_needed = true;
-		}
-		errdiff = 1;
-		break;
-	case 48:
-		bit_depth = 16;
-		color_type = PNG_COLOR_TYPE_RGB;
-#if defined(ARCH_IS_BIG_ENDIAN) && (!ARCH_IS_BIG_ENDIAN)
-		endian_swap = true;
-#endif
-		break;
-	case 24:
-		bit_depth = 8;
-		color_type = PNG_COLOR_TYPE_RGB;
-		errdiff = 1;
-		break;
-	case 8:
-		bit_depth = 8;
-		//if (gx_device_has_color(pdev)) {
-		//	color_type = PNG_COLOR_TYPE_PALETTE;
-		//	errdiff = 0;
-		//}
-		//else {
-		/* high level images don't have a color palette */
-			color_type = PNG_COLOR_TYPE_GRAY;
-			errdiff = 1;
-			pie->invert = true;;
-		//}
-		break;
-	case 4:
-		bit_depth = 4;
-		color_type = PNG_COLOR_TYPE_PALETTE;
-		break;
-	case 1:
-		bit_depth = 1;
-		color_type = PNG_COLOR_TYPE_GRAY;
-		/* invert monocrome pixels */
-		invert = true;
-		break;
-	}
-
-	/* set the palette if there is one */
-	if (color_type == PNG_COLOR_TYPE_PALETTE) {
-		int i;
-		int num_colors = 1 << depth;
-		gx_color_value rgb[3];
-
-#if PNG_LIBPNG_VER_MINOR >= 5
-		palettep = palette;
-#else
-		palettep =
-			(void *)gs_alloc_bytes(mem, 256 * sizeof(png_color),
-			"png palette");
-		if (palettep == 0) {
-			code = gs_note_error(gs_error_VMerror);
-			goto done;
-		}
-#endif
-		num_palette = num_colors;
-		valid |= PNG_INFO_PLTE;
-		for (i = 0; i < num_colors; i++) {
-			(*dev_proc(pdev, map_color_rgb)) ((gx_device *)pdev,
-				(gx_color_index)i, rgb);
-			palettep[i].red = gx_color_value_to_byte(rgb[0]);
-			palettep[i].green = gx_color_value_to_byte(rgb[1]);
-			palettep[i].blue = gx_color_value_to_byte(rgb[2]);
-		}
-	}
-	else {
-		palettep = NULL;
-		num_palette = 0;
-	}
-	/* add comment */
-	strncpy(software_key, "Software", sizeof(software_key));
-	gs_sprintf(software_text, "%s %d.%02d", gs_product,
-		(int)(gs_revision / 100), (int)(gs_revision % 100));
-	text_png.compression = -1;	/* uncompressed */
-	text_png.key = software_key;
-	text_png.text = software_text;
-	text_png.text_length = strlen(software_text);
-
-	dst_bpc = bit_depth;
-	src_bpc = dst_bpc;
-	if (errdiff)
-		src_bpc = 8;
-	else
-		factor = 1;
-
-	/* THIS FUCKING SHIT MAKES THE IMAGE SIZE WRONG*/
-	/*width = pdev->width / factor;
-	height = pdev->height / factor;*/
-	/* This makes the image the actual image size */
-	width = pie->width;
-	height = pie->height;
-
-#if PNG_LIBPNG_VER_MINOR >= 5
-	png_set_pHYs(png_ptr, info_ptr,
-		x_pixels_per_unit, y_pixels_per_unit, phys_unit_type);
-
-	png_set_IHDR(png_ptr, info_ptr,
-		width, height, bit_depth,
-		color_type, PNG_INTERLACE_NONE,
-		PNG_COMPRESSION_TYPE_DEFAULT,
-		PNG_FILTER_TYPE_DEFAULT);
-	if (palettep)
-		png_set_PLTE(png_ptr, info_ptr, palettep, num_palette);
-
-	png_set_text(png_ptr, info_ptr, &text_png, 1);
-#else
-	info_ptr->bit_depth = bit_depth;
-	info_ptr->color_type = color_type;
-	info_ptr->width = width;
-	info_ptr->height = height;
-	info_ptr->x_pixels_per_unit = x_pixels_per_unit;
-	info_ptr->y_pixels_per_unit = y_pixels_per_unit;
-	info_ptr->phys_unit_type = phys_unit_type;
-	info_ptr->palette = palettep;
-	info_ptr->num_palette = num_palette;
-	info_ptr->valid |= valid;
-	info_ptr->text = &text_png;
-	info_ptr->num_text = 1;
-	/* Set up the ICC information */
-	if (pdev->icc_struct != NULL && pdev->icc_struct->device_profile[0] != NULL) {
-		cmm_profile_t *icc_profile = pdev->icc_struct->device_profile[0];
-		/* PNG can only be RGB or gray.  No CIELAB :(  */
-		if (icc_profile->data_cs == gsRGB || icc_profile->data_cs == gsGRAY) {
-			if (icc_profile->num_comps == pdev->color_info.num_components &&
-				!(pdev->icc_struct->usefastcolor)) {
-				info_ptr->iccp_name = icc_profile->name;
-				info_ptr->iccp_profile = icc_profile->buffer;
-				info_ptr->iccp_proflen = icc_profile->buffer_size;
-				info_ptr->valid |= PNG_INFO_iCCP;
-			}
-		}
-	}
-#endif
-	if (invert) {
-		if (depth == 32)
-			png_set_invert_alpha(png_ptr);
-		else
-			png_set_invert_mono(png_ptr);
-	}
-	if (bg_needed) {
-		png_set_bKGD(png_ptr, info_ptr, &background);
-	}
-#if defined(ARCH_IS_BIG_ENDIAN) && (!ARCH_IS_BIG_ENDIAN)
-	if (endian_swap) {
-		png_set_swap(png_ptr);
-	}
-#endif
-
-	/* write the file information */
-	png_write_info(png_ptr, info_ptr);
-
-#if PNG_LIBPNG_VER_MINOR >= 5
-#else
-	/* don't write the comments twice */
-	info_ptr->num_text = 0;
-	info_ptr->text = NULL;
-#endif
-	return 0;
+//	png_struct *png_ptr = pie->png_ptr;
+//	png_info *info_ptr = pie->info_ptr;
+//
+//	palette = (void *)gs_alloc_bytes(mem, 256 * sizeof(png_color),
+//		"png palette");
+//	if (palette == 0) {
+//		return gs_note_error(gs_error_VMerror);
+//	}
+//
+//	for (i = 0; i < pie->num_planes; ++i)
+//	{
+//		depth += pie->plane_depths[i];
+//	}
+//
+//	pie->invert = false;
+//	/* set the file information here */
+//	/* resolution is in pixels per meter vs. dpi */
+//	x_pixels_per_unit =
+//		(png_uint_32)(pdev->HWResolution[0] * (100.0 / 2.54) / factor + 0.5);
+//	y_pixels_per_unit =
+//		(png_uint_32)(pdev->HWResolution[1] * (100.0 / 2.54) / factor + 0.5);
+//
+//	phys_unit_type = PNG_RESOLUTION_METER;
+//	valid |= PNG_INFO_pHYs;
+//
+//	switch (depth) {
+//	case 32:
+//		bit_depth = 8;
+//		color_type = PNG_COLOR_TYPE_RGB_ALPHA;
+//		invert = true;
+//
+//		{ 
+//		background.index = 0;
+//		background.red =  0xff;
+//		background.green = 0xff;
+//		background.blue = 0xff;
+//		background.gray = 0;
+//		bg_needed = true;
+//		}
+//		errdiff = 1;
+//		break;
+//	case 48:
+//		bit_depth = 16;
+//		color_type = PNG_COLOR_TYPE_RGB;
+//#if defined(ARCH_IS_BIG_ENDIAN) && (!ARCH_IS_BIG_ENDIAN)
+//		endian_swap = true;
+//#endif
+//		break;
+//	case 24:
+//		bit_depth = 8;
+//		color_type = PNG_COLOR_TYPE_RGB;
+//		errdiff = 1;
+//		break;
+//	case 8:
+//		bit_depth = 8;
+//		//if (gx_device_has_color(pdev)) {
+//		//	color_type = PNG_COLOR_TYPE_PALETTE;
+//		//	errdiff = 0;
+//		//}
+//		//else {
+//		/* high level images don't have a color palette */
+//			color_type = PNG_COLOR_TYPE_GRAY;
+//			errdiff = 1;
+//			pie->invert = true;
+//		//}
+//		break;
+//	case 4:
+//		bit_depth = 4;
+//		color_type = PNG_COLOR_TYPE_PALETTE;
+//		break;
+//	case 1:
+//		bit_depth = 1;
+//		color_type = PNG_COLOR_TYPE_GRAY;
+//		/* invert monocrome pixels */
+//		invert = true;
+//		break;
+//	}
+//
+//	/* set the palette if there is one */
+//	if (color_type == PNG_COLOR_TYPE_PALETTE) {
+//		int i;
+//		int num_colors = 1 << depth;
+//		gx_color_value rgb[3];
+//
+//#if PNG_LIBPNG_VER_MINOR >= 5
+//		palettep = palette;
+//#else
+//		palettep =
+//			(void *)gs_alloc_bytes(mem, 256 * sizeof(png_color),
+//			"png palette");
+//		if (palettep == 0) {
+//			code = gs_note_error(gs_error_VMerror);
+//			goto done;
+//		}
+//#endif
+//		num_palette = num_colors;
+//		valid |= PNG_INFO_PLTE;
+//		for (i = 0; i < num_colors; i++) {
+//			(*dev_proc(pdev, map_color_rgb)) ((gx_device *)pdev,
+//				(gx_color_index)i, rgb);
+//			palettep[i].red = gx_color_value_to_byte(rgb[0]);
+//			palettep[i].green = gx_color_value_to_byte(rgb[1]);
+//			palettep[i].blue = gx_color_value_to_byte(rgb[2]);
+//		}
+//	}
+//	else {
+//		palettep = NULL;
+//		num_palette = 0;
+//	}
+//	/* add comment */
+//	strncpy(software_key, "Software", sizeof(software_key));
+//	gs_sprintf(software_text, "%s %d.%02d", gs_product,
+//		(int)(gs_revision / 100), (int)(gs_revision % 100));
+//	text_png.compression = -1;	/* uncompressed */
+//	text_png.key = software_key;
+//	text_png.text = software_text;
+//	text_png.text_length = strlen(software_text);
+//
+//	dst_bpc = bit_depth;
+//	src_bpc = dst_bpc;
+//	if (errdiff)
+//		src_bpc = 8;
+//	else
+//		factor = 1;
+//
+//	/* THIS FUCKING SHIT MAKES THE IMAGE SIZE WRONG*/
+//	/*width = pdev->width / factor;
+//	height = pdev->height / factor;*/
+//	/* This makes the image the actual image size */
+//	width = pie->width;
+//	height = pie->height;
+//
+//#if PNG_LIBPNG_VER_MINOR >= 5
+//	png_set_pHYs(png_ptr, info_ptr,
+//		x_pixels_per_unit, y_pixels_per_unit, phys_unit_type);
+//
+//	png_set_IHDR(png_ptr, info_ptr,
+//		width, height, bit_depth,
+//		color_type, PNG_INTERLACE_NONE,
+//		PNG_COMPRESSION_TYPE_DEFAULT,
+//		PNG_FILTER_TYPE_DEFAULT);
+//	if (palettep)
+//		png_set_PLTE(png_ptr, info_ptr, palettep, num_palette);
+//
+//	png_set_text(png_ptr, info_ptr, &text_png, 1);
+//#else
+//	info_ptr->bit_depth = bit_depth;
+//	info_ptr->color_type = color_type;
+//	info_ptr->width = width;
+//	info_ptr->height = height;
+//	info_ptr->x_pixels_per_unit = x_pixels_per_unit;
+//	info_ptr->y_pixels_per_unit = y_pixels_per_unit;
+//	info_ptr->phys_unit_type = phys_unit_type;
+//	info_ptr->palette = palettep;
+//	info_ptr->num_palette = num_palette;
+//	info_ptr->valid |= valid;
+//	info_ptr->text = &text_png;
+//	info_ptr->num_text = 1;
+//	/* Set up the ICC information */
+//	if (pdev->icc_struct != NULL && pdev->icc_struct->device_profile[0] != NULL) {
+//		cmm_profile_t *icc_profile = pdev->icc_struct->device_profile[0];
+//		/* PNG can only be RGB or gray.  No CIELAB :(  */
+//		if (icc_profile->data_cs == gsRGB || icc_profile->data_cs == gsGRAY) {
+//			if (icc_profile->num_comps == pdev->color_info.num_components &&
+//				!(pdev->icc_struct->usefastcolor)) {
+//				info_ptr->iccp_name = icc_profile->name;
+//				info_ptr->iccp_profile = icc_profile->buffer;
+//				info_ptr->iccp_proflen = icc_profile->buffer_size;
+//				info_ptr->valid |= PNG_INFO_iCCP;
+//			}
+//		}
+//	}
+//#endif
+//	if (invert) {
+//		if (depth == 32)
+//			png_set_invert_alpha(png_ptr);
+//		else
+//			png_set_invert_mono(png_ptr);
+//	}
+//	if (bg_needed) {
+//		png_set_bKGD(png_ptr, info_ptr, &background);
+//	}
+//#if defined(ARCH_IS_BIG_ENDIAN) && (!ARCH_IS_BIG_ENDIAN)
+//	if (endian_swap) {
+//		png_set_swap(png_ptr);
+//	}
+//#endif
+//
+//	/* write the file information */
+//	png_write_info(png_ptr, info_ptr);
+//
+//#if PNG_LIBPNG_VER_MINOR >= 5
+//#else
+//	/* don't write the comments twice */
+//	info_ptr->num_text = 0;
+//	info_ptr->text = NULL;
+//#endif
+//	return 0;
 }
 
 //int init_png(gs_memory_t *memory, 
@@ -2095,18 +2087,19 @@ int setup_png_from_struct(gx_device * pdev, struct png_setup_s* setup)
 		break;
 	case 8:
 		bit_depth = 8;
-		if (gx_device_has_color(pdev)) {
-			//color_type = PNG_COLOR_TYPE_PALETTE;
-			//errdiff = 0;
-			color_type = PNG_COLOR_TYPE_GRAY;
-			errdiff = 1;
-		}
-		else {
-			/* high level images don't have a color palette */
-			color_type = PNG_COLOR_TYPE_GRAY;
-			errdiff = 1;
-			*setup->external_invert = true;
-		}
+		//if (gx_device_has_color(pdev)) {
+		//	//color_type = PNG_COLOR_TYPE_PALETTE;
+		//	//errdiff = 0;
+		//	color_type = PNG_COLOR_TYPE_GRAY;
+		//	errdiff = 1;
+		//}
+		//else {
+		/* high level images don't have a color palette */
+		color_type = PNG_COLOR_TYPE_GRAY;
+		errdiff = 1;
+		// *setup->external_invert = true;
+		//
+		//}
 		break;
 	//case 4:
 	//	bit_depth = 4;
