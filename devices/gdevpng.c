@@ -581,7 +581,7 @@ do_png_print_page(gx_device_png * pdev, FILE * file, bool monod)
         valid |= PNG_INFO_PLTE;
         for (i = 0; i < num_colors; i++) {
             (*dev_proc(pdev, map_color_rgb)) ((gx_device *) pdev,
-                                              (gx_color_index) i, rgb);
+                                              (gx_color_index)i, rgb);
             palettep[i].red = gx_color_value_to_byte(rgb[0]);
             palettep[i].green = gx_color_value_to_byte(rgb[1]);
             palettep[i].blue = gx_color_value_to_byte(rgb[2]);
