@@ -148,6 +148,8 @@ typedef struct gx_device_svg_s {
 	int class_number;
 	bool from_stroke_path;
 	int usedIds;
+	gx_clip_path *current_clip_path;
+	bool writing_clip;
 } gx_device_svg;
 
 #define svg_device_body(dname, depth)\
@@ -287,6 +289,8 @@ static int
 svg_setstrokecolor(gx_device_vector *vdev, const gs_imager_state *pis,
 const gx_drawing_color *pdc);
 
+static int
+svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix);
 static int
 svg_dorect(gx_device_vector *vdev, fixed x0, fixed y0,
 fixed x1, fixed y1, gx_path_type_t type);
@@ -428,6 +432,8 @@ svg_open_device(gx_device *dev)
 	svg->class_string.size = 0;
 	svg->from_stroke_path = false;
 	svg->usedIds = 0;
+	svg->current_clip_path = NULL;
+	svg->writing_clip = false;
 
 	return code;
 }
@@ -619,7 +625,11 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 	switch (svg_get_color_type((gx_device_svg *)dev, pdcolor))
 	{
 	case COLOR_PURE:
-		return gdev_vector_stroke_path(dev, pis, ppath, params, pdcolor, pcpath);
+		// Record the clip path so that we can clip the shape if necessary
+		svg->current_clip_path = pcpath;
+		code = gdev_vector_stroke_path(dev, pis, ppath, params, pdcolor, pcpath);
+		svg->current_clip_path = NULL;
+		return code;
 	default:
 		svg_write(svg, "<g class='pathstrokeimage'>\n");
 		mark = svg->mark;
@@ -703,11 +713,14 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 	int code = 0;
 
 	int ctype = svg_get_color_type((gx_device_svg *)dev, pdcolor);
-
 	switch (ctype)
 	{
 	case COLOR_PURE:
-		return gdev_vector_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
+		// Record the clip path so that we can clip the shape if necessary
+		svg->current_clip_path = pcpath;
+		code = gdev_vector_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
+		svg->current_clip_path = NULL;
+		return code;
 	default:
 		if (gx_dc_is_pattern1_color(pdcolor))
 		{
@@ -846,62 +859,7 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 			gs_matrix m3Invert;
 			gs_matrix_invert(&m3, &m3Invert);
 
-			// Create a clipping path
-			char clippathStr[100];
-			uint used;
-			gs_sprintf(clippathStr, "<clipPath id='clip%i' transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
-				++svg->usedIds,
-				m3Invert.xx, m3Invert.xy, m3Invert.yx, m3Invert.yy, m3Invert.tx, m3Invert.ty);
-			sputs(svg->strm, (byte *)clippathStr, strlen(clippathStr), &used);
-			int clipPathIndex = -1;
-			if (pcpath->path_list) {
-				/*
-				* In SVG, it is not acceptable to have more than one clipping path. It seems that in
-				* some cases, ghostscript creates multiple clipping paths, one of which is sometimes
-				* the bounding area for the image. To solve this, we will pick the smallest path to
-				* be the clipping path.
-				*/
-				gx_cpath_path_list *path_list = pcpath->path_list;
-				gs_fixed_rect bbox;
-				float bboxArea;
-				float minBboxArea = MAX_FLOAT;
-				int index = 0;
-
-				code = gx_path_bbox(&path_list->path, &bbox);
-				if (code >= 0)
-					minBboxArea =
-					abs(fixed2float(bbox.q.x - bbox.p.x)) *
-					abs(fixed2float(bbox.q.y - bbox.p.y));
-
-				do {
-					code = gx_path_bbox(&path_list->path, &bbox);
-					bboxArea =
-						abs(fixed2float(bbox.q.x - bbox.p.x)) *
-						abs(fixed2float(bbox.q.y - bbox.p.y));
-					if (code >= 0 && bboxArea < minBboxArea)
-					{
-						minBboxArea = bboxArea;
-						clipPathIndex = index;
-					}
-					++index;
-				} while ((path_list = path_list->next));
-
-				index = 0;
-				path_list = pcpath->path_list;
-				do {
-					if (index == clipPathIndex)
-					{
-						gdev_vector_dopath(dev, &path_list->path, gx_path_type_stroke, NULL);
-						break;
-					}
-					++index;
-				} while ((path_list = path_list->next));
-			}
-			if (clipPathIndex == -1)
-			{
-				gdev_vector_dopath(dev, &pcpath->path, gx_path_type_stroke, NULL);
-			}
-			svg_write(svg, "</clipPath>\n");
+			svg_writeclip(svg, pcpath, m3Invert);
 
 			/* Restore the paths to their original locations. Maybe not needed */
 			make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
@@ -1318,6 +1276,71 @@ static int svg_print_path_type(gx_device_svg *svg, gx_path_type_t type)
 }
 
 static int
+svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
+{
+	if (pcpath == NULL) return 0;
+
+	// Create a clipping path
+	char clippathStr[100];
+	uint used;
+	gs_sprintf(clippathStr, "<clipPath id='clip%i' transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
+		++svg->usedIds,
+		matrix.xx, matrix.xy, matrix.yx, matrix.yy, matrix.tx, matrix.ty);
+	sputs(svg->strm, (byte *)clippathStr, strlen(clippathStr), &used);
+	int clipPathIndex = -1;
+	if (pcpath->path_list) {
+		/*
+		* In SVG, it is not acceptable to have more than one clipping path. It seems that in
+		* some cases, ghostscript creates multiple clipping paths, one of which is sometimes
+		* the bounding area for the image. To solve this, we will pick the smallest path to
+		* be the clipping path.
+		*/
+		gx_cpath_path_list *path_list = pcpath->path_list;
+		gs_fixed_rect bbox;
+		float bboxArea;
+		float minBboxArea = MAX_FLOAT;
+		int index = 0, code;
+
+		code = gx_path_bbox(&path_list->path, &bbox);
+		if (code >= 0)
+			minBboxArea =
+			abs(fixed2float(bbox.q.x - bbox.p.x)) *
+			abs(fixed2float(bbox.q.y - bbox.p.y));
+
+		do {
+			code = gx_path_bbox(&path_list->path, &bbox);
+			bboxArea =
+				abs(fixed2float(bbox.q.x - bbox.p.x)) *
+				abs(fixed2float(bbox.q.y - bbox.p.y));
+			if (code >= 0 && bboxArea < minBboxArea)
+			{
+				minBboxArea = bboxArea;
+				clipPathIndex = index;
+			}
+			++index;
+		} while ((path_list = path_list->next));
+
+		index = 0;
+		path_list = pcpath->path_list;
+		do {
+			if (index == clipPathIndex)
+			{
+				gdev_vector_dopath(svg, &path_list->path, gx_path_type_stroke, NULL);
+				break;
+			}
+			++index;
+		} while ((path_list = path_list->next));
+	}
+	if (clipPathIndex == -1)
+	{
+		gdev_vector_dopath(svg, &pcpath->path, gx_path_type_stroke, NULL);
+	}
+	svg_write(svg, "</clipPath>\n");
+
+	return 0;
+
+}
+static int
 svg_dorect(gx_device_vector *vdev, fixed x0, fixed y0,
 fixed x1, fixed y1, gx_path_type_t type)
 {
@@ -1334,10 +1357,6 @@ fixed x1, fixed y1, gx_path_type_t type)
 
 	svg_write_state(svg);
 
-	//if (type & gx_path_type_clip) {
-	//	svg_write(svg, "<clipPath>\n");
-	//}
-
 	gs_sprintf(line, "<rect x='%lf' y='%lf' width='%lf' height='%lf'",
 		fixed2float(x0), fixed2float(y0),
 		fixed2float(x1 - x0), fixed2float(y1 - y0));
@@ -1350,10 +1369,6 @@ fixed x1, fixed y1, gx_path_type_t type)
 	if (emptyBrush)
 		svg_write(svg, " fill='none'");
 	svg_write(svg, "/>\n");
-
-	//if (type & gx_path_type_clip) {
-	//	svg_write(svg, "</clipPath>\n");
-	//}
 
 	return 0;
 }
@@ -1373,7 +1388,24 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 
 	svg_write_state(svg);
 
-	svg_write(svg, "<path d='");
+	if (svg->current_clip_path != NULL && !svg->writing_clip)
+	{
+		svg->writing_clip = true;
+		
+		gs_matrix mIdent;
+		gs_make_identity(&mIdent);
+		svg_writeclip(svg, svg->current_clip_path, mIdent);
+
+		char line[SVG_LINESIZE];
+		gs_sprintf(line, "<path clip-path='url(#clip%i)' d='", svg->usedIds);
+		svg_write(svg, line);
+
+		svg->writing_clip = false;
+	}
+	else
+	{
+		svg_write(svg, "<path d='");
+	}
 
 	return 0;
 }
@@ -1487,9 +1519,6 @@ svg_endpath(gx_device_vector *vdev, gx_path_type_t type)
 		svg_write(svg, " fill='none'");
 
 	svg_write(svg, "/>\n");
-	//if (type & gx_path_type_clip) {
-	//	svg_write(svg, "</clipPath>\n");
-	//}
 
 	return 0;
 }
@@ -1622,7 +1651,8 @@ svg_end_image(gx_image_enum_common_t * info, bool draw_last)
 		png_destroy_write_struct(&pie->png_ptr, &pie->info_ptr);
 
 	/* Flush the buffer as base 64 */
-	write_base64_png(info->dev, &pie->state, pie->ctm, pie->ImageMatrix, pie->width, pie->height);
+	write_base64_png(info->dev, &pie->state, pie->ctm, pie->ImageMatrix, 
+		pie->width, pie->height);
 
 	gs_free_object(pie->memory, pie->state.buffer, "png img buf");
 	//gs_free_object(pie->memory, buffer, "base64 buffer");
@@ -1735,31 +1765,6 @@ gx_image_enum_common_t ** pinfo)
 		goto done;
 	}
 
-
-
-
-
-
-
-
-
-
-	//gs_fixed_rect bbox;
-	//code = gx_path_bbox(&pcpath->path, &bbox);
-
-	//// Find inverse transform
-	//// These matricies are formed the same way that the image transforms are made
-	//gs_matrix m2;
-	//gs_make_identity(&m2);
-	//m2.xx = dev->width;
-	//m2.yy = dev->height;
-	//m2.tx = fixed2float(bbox.p.x);
-	//m2.ty = fixed2float(bbox.p.y);
-
-	//float tx, ty;
-	//tx = (m2.yy) > 0 ? 0 : m2.yx;
-	//ty = (m2.yy) > 0 ? 0 : m2.yy;
-
 	gs_matrix m3;
 	m3.xx = pis->ctm.xx / ppi->Width  * pim->ImageMatrix.xx / ppi->Width;
 	m3.xy = pis->ctm.xy / ppi->Width  * pim->ImageMatrix.xx / ppi->Width;
@@ -1771,71 +1776,7 @@ gx_image_enum_common_t ** pinfo)
 	gs_matrix mInvert;
 	gs_matrix_invert(&m3, &mInvert);
 
-	char clippathStr[100];
-	uint used;
-	gs_sprintf(clippathStr, "<clipPath id='clip%i' transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
-		++svg->usedIds,
-		mInvert.xx, mInvert.xy, mInvert.yx, mInvert.yy, mInvert.tx, mInvert.ty);
-	svg_write(svg, clippathStr);
-	int clipPathIndex = -1;
-	if (pcpath->path_list) {
-		/*
-		* In SVG, it is not acceptable to have more than one clipping path. It seems that in
-		* some cases, ghostscript creates multiple clipping paths, one of which is sometimes
-		* the bounding area for the image. To solve this, we will pick the smallest path to 
-		* be the clipping path.
-		*/
-		gx_cpath_path_list *path_list = pcpath->path_list;
-		gs_fixed_rect bbox;
-		float bboxArea;
-		float minBboxArea = MAX_FLOAT;
-		int index = 0;
-
-		code = gx_path_bbox(&path_list->path, &bbox);
-		if (code >= 0) 
-			minBboxArea = 
-			abs(fixed2float(bbox.q.x - bbox.p.x)) * 
-			abs(fixed2float(bbox.q.y - bbox.p.y));
-
-		do {
-			code = gx_path_bbox(&path_list->path, &bbox);
-			bboxArea = 
-				abs(fixed2float(bbox.q.x - bbox.p.x)) *
-				abs(fixed2float(bbox.q.y - bbox.p.y));
-			if (code >= 0 && bboxArea < minBboxArea)
-			{
-				minBboxArea = bboxArea;
-				clipPathIndex = index;
-			}
-			++index;
-		} while ((path_list = path_list->next));
-
-		index = 0;
-		path_list = pcpath->path_list;
-		do {
-			if (index == clipPathIndex)
-			{
-				gdev_vector_dopath(dev, &path_list->path, gx_path_type_stroke, NULL);
-				break;
-			}
-			++index;
-		} while ((path_list = path_list->next));
-	}
-	if (clipPathIndex == -1)
-	{
-		gdev_vector_dopath(dev, &pcpath->path, gx_path_type_stroke, NULL);
-	}
-	svg_write(svg, "</clipPath>\n");
-
-
-
-
-
-
-
-
-
-
+	svg_writeclip(svg, pcpath, mInvert);
 
 	pie->memory = memory;
 	pie->rows_left = ppi->Height;
