@@ -1306,11 +1306,11 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 
 	// Create a clipping path
 	char clippathStr[100];
-	uint used;
 	gs_sprintf(clippathStr, "<clipPath id='clip%i' transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
 		++svg->usedIds,
 		matrix.xx, matrix.xy, matrix.yx, matrix.yy, matrix.tx, matrix.ty);
-	sputs(svg->strm, (byte *)clippathStr, strlen(clippathStr), &used);
+	svg_write(svg, clippathStr);
+
 	int clipPathIndex = -1;
 	if (pcpath->path_list) {
 		/*
