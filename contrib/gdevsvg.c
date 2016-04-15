@@ -148,6 +148,7 @@ typedef struct gx_device_svg_s {
 	int class_number;
 	bool from_stroke_path;
 	int usedIds;
+	bool validClipPath;
 	gx_clip_path *current_clip_path;
 	bool writing_clip;
 } gx_device_svg;
@@ -290,7 +291,7 @@ svg_setstrokecolor(gx_device_vector *vdev, const gs_imager_state *pis,
 const gx_drawing_color *pdc);
 
 static int
-svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix);
+svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix, bool test);
 static int
 svg_dorect(gx_device_vector *vdev, fixed x0, fixed y0,
 fixed x1, fixed y1, gx_path_type_t type);
@@ -432,6 +433,7 @@ svg_open_device(gx_device *dev)
 	svg->class_string.size = 0;
 	svg->from_stroke_path = false;
 	svg->usedIds = 0;
+	svg->validClipPath = false;
 	svg->current_clip_path = NULL;
 	svg->writing_clip = false;
 
@@ -626,9 +628,9 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 	{
 	case COLOR_PURE:
 		// Record the clip path so that we can clip the shape if necessary
-		//svg->current_clip_path = pcpath;
+		svg->current_clip_path = pcpath;
 		code = gdev_vector_stroke_path(dev, pis, ppath, params, pdcolor, pcpath);
-		//svg->current_clip_path = NULL;
+		svg->current_clip_path = NULL;
 		return code;
 	default:
 		svg_write(svg, "<g class='pathstrokeimage'>\n");
@@ -879,7 +881,7 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 			gs_matrix m3Invert;
 			gs_matrix_invert(&m3, &m3Invert);
 
-			svg_writeclip(svg, pcpath, m3Invert);
+			svg_writeclip(svg, pcpath, m3Invert, false);
 
 			/* Restore the paths to their original locations. Maybe not needed */
 			make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
@@ -1300,18 +1302,29 @@ static int svg_print_path_type(gx_device_svg *svg, gx_path_type_t type)
 }
 
 static int
-svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
+svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix, bool test)
 {
+	char clippathStr[100];
+	gs_fixed_rect bbox;
+	float bboxArea;
+	float minBboxArea = MAX_FLOAT;
+	int code = 0, mainBboxCode;
+	gx_path *clip_path = NULL;
+	gx_cpath_path_list *path_list;
+	int clipPathIndex = -1, index = 0;
+
 	if (pcpath == NULL) return 0;
 
-	// Create a clipping path
-	char clippathStr[100];
-	gs_sprintf(clippathStr, "<clipPath id='clip%i' transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
-		++svg->usedIds,
-		matrix.xx, matrix.xy, matrix.yx, matrix.yy, matrix.tx, matrix.ty);
-	svg_write(svg, clippathStr);
+	code = gx_path_bbox(&pcpath->path, &bbox);
+	if (code >= 0)
+	{
+		minBboxArea =
+			abs(fixed2float(bbox.q.x - bbox.p.x)) *
+			abs(fixed2float(bbox.q.y - bbox.p.y));
+		clip_path = &pcpath->path;
+	}
+	mainBboxCode = code;
 
-	int clipPathIndex = -1;
 	if (pcpath->path_list) {
 		/*
 		* In SVG, it is not acceptable to have more than one clipping path. It seems that in
@@ -1319,47 +1332,43 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 		* the bounding area for the image. To solve this, we will pick the smallest path to
 		* be the clipping path.
 		*/
-		gx_cpath_path_list *path_list = pcpath->path_list;
-		gs_fixed_rect bbox;
-		float bboxArea;
-		float minBboxArea = MAX_FLOAT;
-		int index = 0, code;
-
-		code = gx_path_bbox(&path_list->path, &bbox);
-		if (code >= 0)
-			minBboxArea =
-			abs(fixed2float(bbox.q.x - bbox.p.x)) *
-			abs(fixed2float(bbox.q.y - bbox.p.y));
+		path_list = pcpath->path_list;
 
 		do {
 			code = gx_path_bbox(&path_list->path, &bbox);
-			bboxArea =
-				abs(fixed2float(bbox.q.x - bbox.p.x)) *
-				abs(fixed2float(bbox.q.y - bbox.p.y));
-			if (code >= 0 && bboxArea < minBboxArea)
+			if (code >= 0)
 			{
-				minBboxArea = bboxArea;
-				clipPathIndex = index;
-			}
-			++index;
-		} while ((path_list = path_list->next));
+				bboxArea =
+					abs(fixed2float(bbox.q.x - bbox.p.x)) *
+					abs(fixed2float(bbox.q.y - bbox.p.y));
 
-		index = 0;
-		path_list = pcpath->path_list;
-		do {
-			if (index == clipPathIndex)
-			{
-				gdev_vector_dopath(svg, &path_list->path, gx_path_type_stroke, NULL);
-				break;
+				if (bboxArea < minBboxArea)
+				{
+					minBboxArea = bboxArea;
+					clipPathIndex = index;
+					clip_path = &pcpath->path;
+				}
 			}
 			++index;
 		} while ((path_list = path_list->next));
 	}
-	if (clipPathIndex == -1)
+
+	// Create a clipping path
+	if (clip_path != NULL && minBboxArea > 1 && minBboxArea != MAX_FLOAT)
 	{
-		gdev_vector_dopath(svg, &pcpath->path, gx_path_type_stroke, NULL);
+		gs_sprintf(clippathStr, "<clipPath %sid='clip%i' transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
+			(test ? "a='' " : ""),
+			++svg->usedIds,
+			matrix.xx, matrix.xy, matrix.yx, matrix.yy, matrix.tx, matrix.ty);
+		svg_write(svg, clippathStr);
+		gdev_vector_dopath(svg, clip_path, gx_path_type_stroke, NULL);
+		svg_write(svg, "</clipPath>\n");
+		svg->validClipPath = true;
 	}
-	svg_write(svg, "</clipPath>\n");
+	else
+	{
+		svg->validClipPath = false;
+	}
 
 	return 0;
 
@@ -1418,10 +1427,13 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 		
 		gs_matrix mIdent;
 		gs_make_identity(&mIdent);
-		svg_writeclip(svg, svg->current_clip_path, mIdent);
+		svg_writeclip(svg, svg->current_clip_path, mIdent, true);
+
+		char clip_path_id[SVG_LINESIZE];
+		gs_sprintf(clip_path_id, "clip-path='url(#clip%i)' ", svg->usedIds);
 
 		char line[SVG_LINESIZE];
-		gs_sprintf(line, "<path clip-path='url(#clip%i)' d='", svg->usedIds);
+		gs_sprintf(line, "<path %sd='", svg->validClipPath ? clip_path_id : "");
 		svg_write(svg, line);
 
 		svg->writing_clip = false;
@@ -1645,10 +1657,13 @@ struct mem_encode *state,
 		ctm.yy / height * ImageMatrix.yy / height,
 		ctm.tx + tx,
 		ctm.ty + ty);
-
 	svg_write(dev, line);
-	gs_sprintf(line, "<image clip-path='url(#clip%i)' width='%d' height='%d' xlink:href=\"data:image/png;base64,",
-		((gx_device_svg *)dev)->usedIds, width, height);
+
+	char clip_path_id[SVG_LINESIZE];
+	gs_sprintf(clip_path_id, "clip-path='url(#clip%i)' ", ((gx_device_svg *)dev)->usedIds);
+
+	gs_sprintf(line, "<image %swidth='%d' height='%d' xlink:href=\"data:image/png;base64,",
+		((gx_device_svg *)dev)->validClipPath ? clip_path_id : "", width, height);
 	svg_write(dev, line);
 	svg_write_bytes(dev, buffer, outputSize);
 	svg_write(dev, "\"/>");
@@ -1800,7 +1815,7 @@ gx_image_enum_common_t ** pinfo)
 	gs_matrix mInvert;
 	gs_matrix_invert(&m3, &mInvert);
 
-	svg_writeclip(svg, pcpath, mInvert);
+	svg_writeclip(svg, pcpath, mInvert, false);
 
 	pie->memory = memory;
 	pie->rows_left = ppi->Height;
