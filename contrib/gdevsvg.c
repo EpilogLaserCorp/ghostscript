@@ -626,9 +626,9 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 	{
 	case COLOR_PURE:
 		// Record the clip path so that we can clip the shape if necessary
-		svg->current_clip_path = pcpath;
+		//svg->current_clip_path = pcpath;
 		code = gdev_vector_stroke_path(dev, pis, ppath, params, pdcolor, pcpath);
-		svg->current_clip_path = NULL;
+		//svg->current_clip_path = NULL;
 		return code;
 	default:
 		svg_write(svg, "<g class='pathstrokeimage'>\n");
