@@ -80,7 +80,7 @@ enum COLOR_TYPE{
 	COLOR_BINARY_HT,
 	COLOR_COLOR_HT,
 	COLOR_PATTERN2,
-	COLOR_PATERN1,
+	COLOR_PATTERN1,
 	COLOR_UNKNOWN
 };
 
@@ -225,11 +225,11 @@ static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_
 	NULL,					/* get_hardware_params */\
 	NULL,				    /* text_begin */\
 	NULL,		            /* finish_copydevice */\
-	NULL,				    /* begin_transparency_group */\
-	NULL,		            /* end_transparency_group */\
-	NULL,				    /* begin_transparency_mask */\
-	NULL,					/* end_transparency_mask */\
-	NULL,					/* discard_transparency_layer */\
+	NULL,				    /* begin_transparency_group - Deprecated */\
+	NULL,		            /* end_transparency_group - Deprecated */\
+	NULL,				    /* begin_transparency_mask - Deprecated */\
+	NULL,					/* end_transparency_mask - Deprecated */\
+	NULL,					/* discard_transparency_layer - Deprecated */\
 	NULL,					/* get_color_mapping_procs */\
 	NULL,					/* get_color_comp_index */\
 	NULL,	                /* encode_color */\
@@ -291,7 +291,7 @@ svg_setstrokecolor(gx_device_vector *vdev, const gs_imager_state *pis,
 const gx_drawing_color *pdc);
 
 static int
-svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix, bool test);
+svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix);
 static int
 svg_dorect(gx_device_vector *vdev, fixed x0, fixed y0,
 fixed x1, fixed y1, gx_path_type_t type);
@@ -705,9 +705,12 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 
 /* Fill a path */
 int
-gdev_svg_fill_path(gx_device * dev, const gs_imager_state * pis, gx_path * ppath,
+gdev_svg_fill_path(gx_device * dev, 
+const gs_imager_state * pis,
+gx_path * ppath,
 const gx_fill_params * params,
-const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
+const gx_drawing_color * pdcolor, 
+const gx_clip_path * pcpath)
 {
 	gx_device_svg *svg = (gx_device_svg *)dev;
 	gx_drawing_color color;
@@ -723,75 +726,73 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 		code = gdev_vector_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
 		svg->current_clip_path = NULL;
 		return code;
+	case COLOR_PATTERN1:
+		//gx_hl_saved_color temp;
+		//gs_client_color *pcc; /* fixme: not needed due to gx_hld_get_color_component. */
+
+
+		//gs_color_space *pcs_Device;
+		//gs_color_space_index csi;
+
+		//gx_hld_save_color(pis, pdcolor, &temp);
+		// /* Since we never apply halftones and patterns, we don't need to compare
+		// * halftone/pattern bodies here.
+		// */
+		//if (gx_hld_saved_color_equal(&temp, &svg->saved_fill_color))
+		//	return 0;
+
+		///* Do we have a Pattern colour space ? */
+		//int pause = 0; // ^^^
+		//switch (gx_hld_get_color_space_and_ccolor(pis, pdcolor, &svg->saved_fill_color,
+		//	(const gs_client_color **)&pcc)) {
+		//case pattern_color_space:
+		//	if (pdcolor->type == gx_dc_type_pattern) {
+		//		switch (dev->color_info.num_components) {
+		//		case 1:
+		//			pcs_Device = gs_cspace_new_DeviceGray(dev->memory);
+		//			break;
+		//		case 3:
+		//			pcs_Device = gs_cspace_new_DeviceRGB(dev->memory);
+		//			break;
+		//		case 4:
+		//			pcs_Device = gs_cspace_new_DeviceCMYK(dev->memory);
+		//			break;
+		//		default:
+		//			return_error(gs_error_rangecheck);
+		//		}
+		//	}
+
+		//	/* If color space is CIE based and we have compatibility then go ahead and use the ICC alternative */
+		//	csi = gs_color_space_get_index(pcs_Device);
+
+		//	if (csi == gs_color_space_index_ICC) {
+		//		csi = gsicc_get_default_type(pcs_Device->cmm_icc_profile_data);
+		//	}
+
+		//	/// @todo Add compatibility for other device types
+		//	if (csi != gs_color_space_index_DeviceRGB)
+		//		break;
+
+		//	if (pis->have_pattern_streams)
+		//	{
+		//		*ppres = pdf_find_resource_by_gs_id(pdev, resourcePattern, p_tile->id);
+		//		*ppres = pdf_substitute_pattern(*ppres);
+		//		(*ppres)->where_used |= pdev->used_mask;
+		//	}
+
+		//	break;
+		//case non_pattern_color_space:
+		//	pause = 2; // ^^^
+		//	break;
+		//default: /* must not happen. */
+		//case use_process_color:
+		//	pause = 3; // ^^^
+		//	break;
+		//}
+
+		return gx_default_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
 	default:
-		if (gx_dc_is_pattern1_color(pdcolor))
-		{
-			//gx_hl_saved_color temp;
-			//gs_client_color *pcc; /* fixme: not needed due to gx_hld_get_color_component. */
-
-
-			//gs_color_space *pcs_Device;
-			//gs_color_space_index csi;
-
-			//gx_hld_save_color(pis, pdcolor, &temp);
-			// /* Since we never apply halftones and patterns, we don't need to compare
-			// * halftone/pattern bodies here.
-			// */
-			//if (gx_hld_saved_color_equal(&temp, &svg->saved_fill_color))
-			//	return 0;
-
-			///* Do we have a Pattern colour space ? */
-			//int pause = 0; // ^^^
-			//switch (gx_hld_get_color_space_and_ccolor(pis, pdcolor, &svg->saved_fill_color,
-			//	(const gs_client_color **)&pcc)) {
-			//case pattern_color_space:
-			//	if (pdcolor->type == gx_dc_type_pattern) {
-			//		switch (dev->color_info.num_components) {
-			//		case 1:
-			//			pcs_Device = gs_cspace_new_DeviceGray(dev->memory);
-			//			break;
-			//		case 3:
-			//			pcs_Device = gs_cspace_new_DeviceRGB(dev->memory);
-			//			break;
-			//		case 4:
-			//			pcs_Device = gs_cspace_new_DeviceCMYK(dev->memory);
-			//			break;
-			//		default:
-			//			return_error(gs_error_rangecheck);
-			//		}
-			//	}
-
-			//	/* If color space is CIE based and we have compatibility then go ahead and use the ICC alternative */
-			//	csi = gs_color_space_get_index(pcs_Device);
-
-			//	if (csi == gs_color_space_index_ICC) {
-			//		csi = gsicc_get_default_type(pcs_Device->cmm_icc_profile_data);
-			//	}
-
-			//	/// @todo Add compatibility for other device types
-			//	if (csi != gs_color_space_index_DeviceRGB)
-			//		break;
-
-			//	if (pis->have_pattern_streams)
-			//	{
-			//		*ppres = pdf_find_resource_by_gs_id(pdev, resourcePattern, p_tile->id);
-			//		*ppres = pdf_substitute_pattern(*ppres);
-			//		(*ppres)->where_used |= pdev->used_mask;
-			//	}
-
-			//	break;
-			//case non_pattern_color_space:
-			//	pause = 2; // ^^^
-			//	break;
-			//default: /* must not happen. */
-			//case use_process_color:
-			//	pause = 3; // ^^^
-			//	break;
-			//}
-
-			return gx_default_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
-		}
-		else if (svg->from_stroke_path || !gx_dc_is_pattern2_color(pdcolor))
+		if (svg->from_stroke_path || !gx_dc_is_pattern2_color(pdcolor))
 		{
 			return gx_default_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
 		}
@@ -881,7 +882,7 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 			gs_matrix m3Invert;
 			gs_matrix_invert(&m3, &m3Invert);
 
-			svg_writeclip(svg, pcpath, m3Invert, false);
+			svg_writeclip(svg, pcpath, m3Invert);
 
 			/* Restore the paths to their original locations. Maybe not needed */
 			make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
@@ -1008,7 +1009,7 @@ static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_
 		gx_dc_is_pattern1_color_clist_based(pdevc) ||
 		gx_dc_is_pattern1_color_with_trans(pdevc))
 	{
-		return COLOR_PATERN1;
+		return COLOR_PATTERN1;
 	}
 	return COLOR_UNKNOWN;
 
@@ -1302,7 +1303,7 @@ static int svg_print_path_type(gx_device_svg *svg, gx_path_type_t type)
 }
 
 static int
-svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix, bool test)
+svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 {
 	char clippathStr[100];
 	gs_fixed_rect bbox;
@@ -1356,8 +1357,7 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix, bool t
 	// Create a clipping path
 	if (clip_path != NULL && minBboxArea > 1 && minBboxArea != MAX_FLOAT)
 	{
-		gs_sprintf(clippathStr, "<clipPath %sid='clip%i' transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
-			(test ? "a='' " : ""),
+		gs_sprintf(clippathStr, "<clipPath id='clip%i' transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
 			++svg->usedIds,
 			matrix.xx, matrix.xy, matrix.yx, matrix.yy, matrix.tx, matrix.ty);
 		svg_write(svg, clippathStr);
@@ -1421,26 +1421,34 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 
 	svg_write_state(svg);
 
+	char path_fill_rule[SVG_LINESIZE];
+	gx_path_type_t rule = type & gx_path_type_rule;
+	gs_sprintf(path_fill_rule, "%s", 
+		rule == gx_path_type_even_odd ?
+		"fill-rule='evenodd' " : "fill-rule='nonzero' ");
+
 	if (svg->current_clip_path != NULL && !svg->writing_clip)
 	{
 		svg->writing_clip = true;
 		
 		gs_matrix mIdent;
 		gs_make_identity(&mIdent);
-		svg_writeclip(svg, svg->current_clip_path, mIdent, true);
+		svg_writeclip(svg, svg->current_clip_path, mIdent);
 
 		char clip_path_id[SVG_LINESIZE];
 		gs_sprintf(clip_path_id, "clip-path='url(#clip%i)' ", svg->usedIds);
 
 		char line[SVG_LINESIZE];
-		gs_sprintf(line, "<path %sd='", svg->validClipPath ? clip_path_id : "");
+		gs_sprintf(line, "<path %s%sd='", path_fill_rule, svg->validClipPath ? clip_path_id : "");
 		svg_write(svg, line);
 
 		svg->writing_clip = false;
 	}
 	else
 	{
-		svg_write(svg, "<path d='");
+		char line[SVG_LINESIZE];
+		gs_sprintf(line, "<path %sd='", path_fill_rule);
+		svg_write(svg, line);
 	}
 
 	return 0;
@@ -1815,7 +1823,7 @@ gx_image_enum_common_t ** pinfo)
 	gs_matrix mInvert;
 	gs_matrix_invert(&m3, &mInvert);
 
-	svg_writeclip(svg, pcpath, mInvert, false);
+	svg_writeclip(svg, pcpath, mInvert);
 
 	pie->memory = memory;
 	pie->rows_left = ppi->Height;
