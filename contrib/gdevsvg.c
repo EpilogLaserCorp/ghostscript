@@ -960,6 +960,19 @@ svg_write_header(gx_device_svg *svg)
 
 	gs_sprintf(line, "<defs>\n");
 	sputs(s, (byte *)line, strlen(line), &used);
+
+	gs_sprintf(line, "<clipPath id='clip0'>\n");
+	sputs(s, (byte *)line, strlen(line), &used);
+
+	gs_sprintf(line, "<rect x='%d' y='%d' width='%d' height='%d' stroke='none' fill='none'/>\n",
+		0, 0, (int)svg->MediaSize[0], (int)svg->MediaSize[1]);
+	sputs(s, (byte *)line, strlen(line), &used);
+
+	gs_sprintf(line, "</clipPath>\n");
+	sputs(s, (byte *)line, strlen(line), &used);
+
+
+
 	gs_sprintf(line, "<!-- Move all clipPaths into here for a properly formatted svg file -->\n");
 	sputs(s, (byte *)line, strlen(line), &used);
 	gs_sprintf(line, "</defs>\n");
@@ -1109,7 +1122,8 @@ svg_beginpage(gx_device_vector *vdev)
 	gx_device_svg *svg = (gx_device_svg *)vdev;
 	uint used;
 	char line[300];
-	const byte * pg = (byte*)"<page>\n";
+
+	const byte * pg = (byte*)"<page clip-path='url(#clip0)'>\n";
 	if_debug1m('_', svg->memory, "svg_beginpage (page count %d)\n", svg->page_count);
 
 	svg_write_header(svg);
