@@ -611,6 +611,43 @@ static int make_alpha_mdev(gx_device*dev, gx_device_memory **ppmdev, gs_fixed_re
 	dev_proc((*ppmdev), decode_color) = svgalpha_decode_color;
 }
 
+static void
+print_path(const gx_path *path)
+{
+	gs_path_enum penum;
+
+	gx_path_enum_init(&penum, path);
+	for (;;) {
+		gs_fixed_point pts[3];
+
+		switch (gx_path_enum_next(&penum, pts)) {
+		case gs_pe_moveto:
+			dmprintf2(path->memory, "    %g %g moveto\n", fixed2float(pts[0].x),
+				fixed2float(pts[0].y));
+			continue;
+		case gs_pe_lineto:
+			dmprintf2(path->memory, "    %g %g lineto\n", fixed2float(pts[0].x),
+				fixed2float(pts[0].y));
+			continue;
+		case gs_pe_gapto:
+			dmprintf2(path->memory, "    %g %g gapto\n", fixed2float(pts[0].x),
+				fixed2float(pts[0].y));
+			continue;
+		case gs_pe_curveto:
+			dmprintf6(path->memory, "    %g %g %g %g %g %g curveto\n", fixed2float(pts[0].x),
+				fixed2float(pts[0].y), fixed2float(pts[1].x),
+				fixed2float(pts[1].y), fixed2float(pts[2].x),
+				fixed2float(pts[2].y));
+			continue;
+		case gs_pe_closepath:
+			dmputs(path->memory, "    closepath\n");
+			continue;
+		default:
+			break;
+		}
+		break;
+	}
+}
 
 /* Stroke a path. */
 static int
@@ -727,70 +764,201 @@ const gx_clip_path * pcpath)
 		svg->current_clip_path = NULL;
 		return code;
 	case COLOR_PATTERN1:
-		//gx_hl_saved_color temp;
-		//gs_client_color *pcc; /* fixme: not needed due to gx_hld_get_color_component. */
+	if(true){
+		//gs_fixed_rect bbox;
+		//gx_device_memory *pmdev;
+		//int mark = svg->mark;
+		//gx_drawing_color dc = *pdcolor;
+		//gs_pattern1_instance_t pi = *(gs_pattern1_instance_t *)dc.ccolor.pattern;
+
+		//svg_write(svg, "<g class='pathfillimage'>\n");
+
+		//// First we need to fill the bounding box with the pattern
+		//code = gx_path_bbox(ppath, &bbox);
+
+		//make_alpha_mdev(dev, &pmdev, bbox);
+		//code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
+		//code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0,
+		//	pmdev->width, pmdev->height, 0xffffffff);
+
+		//// Adjust bounds
+		//code = (*dev_proc(pmdev, close_device))((gx_device *)pmdev);
+
+		//bbox.p.x -= int2fixed(pmdev->mapped_x /*10*/);
+		//bbox.p.y -= int2fixed(pmdev->mapped_y /*100*/);
+
+		//make_alpha_mdev(dev, &pmdev, bbox);
+		//code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
+		//code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0,
+		//	pmdev->width, pmdev->height, 0xffffffff);
+
+		//int sx = fixed2int(bbox.p.x);
+		//int sy = fixed2int(bbox.p.y);
+		//gs_int_point rect_size;
+		//rect_size.x = fixed2int(bbox.q.x + fixed_half) - sx;
+		//rect_size.y = fixed2int(bbox.q.y + fixed_half) - sy;
+		//if (rect_size.x == 0 || rect_size.y == 0) return 0;
+
+		//code = gx_default_fill_path((gx_device *)pmdev, (gs_imager_state *)pis,
+		//	ppath, params, pdcolor, NULL /*pcpath*/);
+
+		// /*code = gs_shading_do_fill_rectangle(pi.templat.Shading,
+		//	NULL, (gx_device *)pmdev, (gs_imager_state *)pis, !pi.shfill);*/
+
+		//// Find inverse transform
+		//// These matricies are formed the same way that the image transforms are made
+		//gs_matrix m2;
+		//gs_make_identity(&m2);
+		//m2.xx = dev->width;
+		//m2.yy = dev->height;
+		//m2.tx = fixed2float(bbox.p.x);
+		//m2.ty = fixed2float(bbox.p.y);
+
+		//float tx, ty;
+		//tx = (m2.yy) > 0 ? 0 : m2.yx;
+		//ty = (m2.yy) > 0 ? 0 : m2.yy;
+
+		//gs_matrix m3;
+		//m3.xx = m2.xx / dev->width * m2.xx / dev->width;
+		//m3.xy = m2.xy / dev->width * m2.xx / dev->width;
+		//m3.yx = m2.yx / dev->height * m2.yy / dev->height;
+		//m3.yy = m2.yy / dev->height * m2.yy / dev->height;
+		//m3.tx = m2.tx + tx;
+		//m3.ty = m2.ty + ty;
+
+		//gs_matrix m3Invert;
+		//gs_matrix_invert(&m3, &m3Invert);
+
+		//svg_writeclip(svg, pcpath, m3Invert);
+
+		///* Restore the paths to their original locations. Maybe not needed */
+		//make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
+		//code = (*dev_proc(pmdev, close_device))((gx_device *)pmdev);
+
+		//svg_write(svg, "</g> <!-- pathfillimage -->\n");
+		////while (svg->mark > mark) {
+		////	svg_write(svg, "</g>\n");
+		////	svg->mark--;
+		////}
 
 
-		//gs_color_space *pcs_Device;
-		//gs_color_space_index csi;
 
-		//gx_hld_save_color(pis, pdcolor, &temp);
-		// /* Since we never apply halftones and patterns, we don't need to compare
-		// * halftone/pattern bodies here.
-		// */
-		//if (gx_hld_saved_color_equal(&temp, &svg->saved_fill_color))
-		//	return 0;
 
-		///* Do we have a Pattern colour space ? */
-		//int pause = 0; // ^^^
-		//switch (gx_hld_get_color_space_and_ccolor(pis, pdcolor, &svg->saved_fill_color,
-		//	(const gs_client_color **)&pcc)) {
-		//case pattern_color_space:
-		//	if (pdcolor->type == gx_dc_type_pattern) {
-		//		switch (dev->color_info.num_components) {
-		//		case 1:
-		//			pcs_Device = gs_cspace_new_DeviceGray(dev->memory);
-		//			break;
-		//		case 3:
-		//			pcs_Device = gs_cspace_new_DeviceRGB(dev->memory);
-		//			break;
-		//		case 4:
-		//			pcs_Device = gs_cspace_new_DeviceCMYK(dev->memory);
-		//			break;
-		//		default:
-		//			return_error(gs_error_rangecheck);
-		//		}
-		//	}
 
-		//	/* If color space is CIE based and we have compatibility then go ahead and use the ICC alternative */
-		//	csi = gs_color_space_get_index(pcs_Device);
 
-		//	if (csi == gs_color_space_index_ICC) {
-		//		csi = gsicc_get_default_type(pcs_Device->cmm_icc_profile_data);
-		//	}
 
-		//	/// @todo Add compatibility for other device types
-		//	if (csi != gs_color_space_index_DeviceRGB)
-		//		break;
 
-		//	if (pis->have_pattern_streams)
-		//	{
-		//		*ppres = pdf_find_resource_by_gs_id(pdev, resourcePattern, p_tile->id);
-		//		*ppres = pdf_substitute_pattern(*ppres);
-		//		(*ppres)->where_used |= pdev->used_mask;
-		//	}
 
-		//	break;
-		//case non_pattern_color_space:
-		//	pause = 2; // ^^^
-		//	break;
-		//default: /* must not happen. */
-		//case use_process_color:
-		//	pause = 3; // ^^^
-		//	break;
+
+
+		gs_fixed_rect bbox, bbox1;
+		gx_device_memory *pmdev;
+		int mark = svg->mark;
+		gs_imager_state *pis_noconst = (gs_imager_state *)pis; /* Break const. */
+		gs_matrix_fixed oldCTM = pis_noconst->ctm;
+		gs_matrix save_ctm = ctm_only(pis);
+		gs_matrix m;
+		gx_drawing_color dc = *pdcolor;
+		gs_pattern1_instance_t pi = *(gs_pattern1_instance_t *)dc.ccolor.pattern;
+		gs_state *pgs = gs_state_copy(pi.saved, gs_state_memory(pi.saved));
+
+		gs_make_identity(&m);
+
+		if (pgs == NULL)
+			return_error(gs_error_VMerror);
+		dc.ccolor.pattern = (gs_pattern_instance_t *)&pi;
+		pi.saved = pgs;
+		svg_write(svg, "<g class='pathfillimage'>\n");
+
+		// First we need to fill the bounding box with the pattern
+		code = gx_path_bbox(ppath, &bbox);
+		make_alpha_mdev(dev, &pmdev, bbox);
+		code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
+		code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0,
+			pmdev->width, pmdev->height, 0xffffffff);
+
+
+
+		//code = gx_dc_pattern2_get_bbox(pdcolor, &bbox1);
+		//if (code)
+		//	rect_intersect(bbox, bbox1);
+
+
+		// Adjust bounds
+		code = (*dev_proc(pmdev, close_device))((gx_device *)pmdev);
+
+		bbox.p.x -= int2fixed(pmdev->mapped_x /*10*/);
+		bbox.p.y -= int2fixed(pmdev->mapped_y /*100*/);
+
+		make_alpha_mdev(dev, &pmdev, bbox);
+		code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
+		code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0,
+			pmdev->width, pmdev->height, 0xffffffff);
+
+		int sx = fixed2int(bbox.p.x);
+		int sy = fixed2int(bbox.p.y);
+		gs_int_point rect_size;
+		rect_size.x = fixed2int(bbox.q.x + fixed_half) - sx;
+		rect_size.y = fixed2int(bbox.q.y + fixed_half) - sy;
+		if (rect_size.x == 0 || rect_size.y == 0) return 0;
+
+
+
+		//code = gs_shading_do_fill_rectangle(pi.templat.templat.Shading,
+		//	NULL, (gx_device *)pmdev, (gs_imager_state *)pis, !pi.shfill);
+
+		code = gx_default_fill_path((gx_device *)pmdev, (gs_imager_state *)pis,
+			ppath, params, pdcolor, NULL /*pcpath*/);
+
+
+		pis_noconst->ctm = oldCTM;
+
+		// Find inverse transform
+		// These matricies are formed the same way that the image transforms are made
+		gs_matrix m2;
+		gs_make_identity(&m2);
+		m2.xx = dev->width;
+		m2.yy = dev->height;
+		m2.tx = fixed2float(bbox.p.x);
+		m2.ty = fixed2float(bbox.p.y);
+
+		float tx, ty;
+		tx = (m2.yy) > 0 ? 0 : m2.yx;
+		ty = (m2.yy) > 0 ? 0 : m2.yy;
+
+		gs_matrix m3;
+		m3.xx = m2.xx / dev->width * m2.xx / dev->width;
+		m3.xy = m2.xy / dev->width * m2.xx / dev->width;
+		m3.yx = m2.yx / dev->height * m2.yy / dev->height;
+		m3.yy = m2.yy / dev->height * m2.yy / dev->height;
+		m3.tx = m2.tx + tx;
+		m3.ty = m2.ty + ty;
+
+		gs_matrix m3Invert;
+		gs_matrix_invert(&m3, &m3Invert);
+
+		svg_writeclip(svg, pcpath, m3Invert);
+
+		/* Restore the paths to their original locations. Maybe not needed */
+		make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
+		code = (*dev_proc(pmdev, close_device))((gx_device *)pmdev);
+
+		svg_write(svg, "</g> <!-- pathfillimage -->\n");
+		//while (svg->mark > mark) {
+		//	svg_write(svg, "</g>\n");
+		//	svg->mark--;
 		//}
 
-		return gx_default_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
+		gs_setmatrix((gs_state *)pis, &save_ctm);
+		gs_state_free(pgs);
+
+
+
+
+
+
+		return code;
+	}
 	default:
 		if (svg->from_stroke_path || !gx_dc_is_pattern2_color(pdcolor))
 		{
@@ -804,11 +972,12 @@ const gx_clip_path * pcpath)
 			gs_imager_state *pis_noconst = (gs_imager_state *)pis; /* Break const. */
 			gs_matrix_fixed oldCTM = pis_noconst->ctm;
 			gs_matrix save_ctm = ctm_only(pis);
-			gs_matrix m, ctmi;
-			gs_make_identity(&m);
+			gs_matrix m;
 			gx_drawing_color dc = *pdcolor;
 			gs_pattern2_instance_t pi = *(gs_pattern2_instance_t *)dc.ccolor.pattern;
 			gs_state *pgs = gs_state_copy(pi.saved, gs_state_memory(pi.saved));
+
+			gs_make_identity(&m);
 
 			if (pgs == NULL)
 				return_error(gs_error_VMerror);
@@ -2579,7 +2748,9 @@ static int make_png_from_mdev(gx_device_memory *mdev, float tx, float ty)
 	struct mem_encode state;
 	struct png_setup_s setup;
 	bool invert;
-	int y;
+	int y, i;
+	double black;
+	unsigned char cmyk[4];
 	setup.depth = mdev->color_info.depth;
 	//setup.external_invert = &invert;
 	setup.height_in = mdev->height;
@@ -2608,6 +2779,44 @@ static int make_png_from_mdev(gx_device_memory *mdev, float tx, float ty)
 		for (y = 0; y < mdev->height; ++y)
 		{
 			row = mdev->base + y * mdev->raster;
+
+			//if (setup.depth == 32) /* CMYK */
+			//{
+			//	for (i = 0; i < mdev->width; i++) {
+			//		cmyk[0] = row[i * 4 + 3];
+			//		cmyk[1] = row[i * 4 + 2];
+			//		cmyk[2] = row[i * 4 + 1];
+			//		cmyk[3] = row[i * 4 + 0];
+
+			//		// CMYK to RGBA
+			//		black = (1.0 - (double)cmyk[3] / 255.0);
+			//		/*R*/ row[i * 4 + 0] = (unsigned char)(255 * (1.0 - cmyk[0] / 255.0)*black);
+			//		/*G*/ row[i * 4 + 1] = (unsigned char)(255 * (1.0 - cmyk[1] / 255.0)*black);
+			//		/*B*/ row[i * 4 + 2] = (unsigned char)(255 * (1.0 - cmyk[2] / 255.0)*black);
+			//		/*A*/ row[i * 4 + 3] = 0; // Alpha is inverted, 0 -> Full Opacity
+
+			//		//if (black)
+			//		//{
+			//		//	row[i * 4 + 0] = 0;
+			//		//	row[i * 4 + 1] = 0;
+			//		//	row[i * 4 + 2] = 255;
+			//		//	row[i * 4 + 3] = 0;
+
+			//		//	/*R*/ row[i * 4 + 0] = (unsigned char)(255 * (1.0 - cmyk[0] / 255.0)*black);
+			//		//	/*G*/ row[i * 4 + 1] = (unsigned char)(255 * (1.0 - cmyk[1] / 255.0)*black);
+			//		//	/*B*/ row[i * 4 + 2] = (unsigned char)(255 * (1.0 - cmyk[2] / 255.0)*black);
+			//		//	/*A*/ row[i * 4 + 3] = 0; // Alpha is inverted, 0 -> Full Opacity
+			//		//}
+			//		//else
+			//		//{
+			//		//	row[i * 4 + 0] = 255;
+			//		//	row[i * 4 + 1] = 255;
+			//		//	row[i * 4 + 2] = 255;
+			//		//	row[i * 4 + 3] = 0;
+			//		//}
+			//	}
+			//}
+
 			png_write_rows(setup.png_ptr, &row, 1);
 		}
 
