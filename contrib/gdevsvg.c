@@ -1530,7 +1530,7 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 				{
 					minBboxArea = bboxArea;
 					clipPathIndex = index;
-					clip_path = &pcpath->path;
+					clip_path = &path_list->path;
 				}
 			}
 			++index;
