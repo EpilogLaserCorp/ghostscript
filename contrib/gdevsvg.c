@@ -1625,12 +1625,14 @@ int *rows_used)
 
 						memcpy(&row[ind], &planes[k].data[i * bytes], bytes);
 
+						if (pie->num_planes == 1 && pie->plane_depths[k] == 32)
 						{
 							invRow = &row[ind];
 							*(invRow + 0) ^= 0xff;
 							*(invRow + 1) ^= 0xff;
 							*(invRow + 2) ^= 0xff;
 							*(invRow + 3) ^= 0xff;
+						}
 					}
 					else if (pie->num_planes == 4)
 					{
