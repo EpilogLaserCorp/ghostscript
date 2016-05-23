@@ -1621,8 +1621,16 @@ int *rows_used)
 					{
 						// This hasn't been tested yet
 						bytes = pie->plane_depths[k] / 8;
-						ind = i*pie->num_planes*bytes + k + (raster * y);
-						memcpy(&row[ind], &planes[k].data[i*bytes], bytes);
+						ind = i * pie->num_planes * bytes + k + (raster * y);
+
+						memcpy(&row[ind], &planes[k].data[i * bytes], bytes);
+
+						{
+							invRow = &row[ind];
+							*(invRow + 0) ^= 0xff;
+							*(invRow + 1) ^= 0xff;
+							*(invRow + 2) ^= 0xff;
+							*(invRow + 3) ^= 0xff;
 					}
 					else if (pie->num_planes == 4)
 					{
