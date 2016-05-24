@@ -607,8 +607,8 @@ static int make_alpha_mdev(gx_device*dev, gx_device_memory **ppmdev, gs_fixed_re
 	(*ppmdev)->mapped_x = fixed2int(bbox.p.x);
 	(*ppmdev)->mapped_y = fixed2int(bbox.p.y);
 	(*ppmdev)->bitmap_memory = dev->memory;
-	dev_proc((*ppmdev), encode_color) = svgalpha_encode_color;
-	dev_proc((*ppmdev), decode_color) = svgalpha_decode_color;
+	dev_proc((*ppmdev), encode_color) = /*svgalpha_encode_color*/ gx_default_rgb_map_rgb_color;
+	dev_proc((*ppmdev), decode_color) = /*svgalpha_decode_color*/ gx_default_rgb_map_color_rgb;
 }
 
 static void
@@ -718,7 +718,8 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 
 			//pmdev->color_info = dev->color_info;
 			code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
-			code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0, pmdev->width, pmdev->height, 0xffffffff);
+			code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0, 
+				pmdev->width, pmdev->height, 0xffffffff);
 			/* Translate the paths */
 			gx_path_translate(ppath, -bbox.p.x, -bbox.p.y);
 			gx_path_translate(pcpath, -bbox.p.x, -bbox.p.y);
@@ -854,9 +855,6 @@ const gx_clip_path * pcpath)
 		gs_fixed_rect bbox, bbox1;
 		gx_device_memory *pmdev;
 		int mark = svg->mark;
-		gs_imager_state *pis_noconst = (gs_imager_state *)pis; /* Break const. */
-		gs_matrix_fixed oldCTM = pis_noconst->ctm;
-		gs_matrix save_ctm = ctm_only(pis);
 		gs_matrix m;
 		gx_drawing_color dc = *pdcolor;
 		gs_pattern1_instance_t pi = *(gs_pattern1_instance_t *)dc.ccolor.pattern;
@@ -907,11 +905,11 @@ const gx_clip_path * pcpath)
 		//code = gs_shading_do_fill_rectangle(pi.templat.templat.Shading,
 		//	NULL, (gx_device *)pmdev, (gs_imager_state *)pis, !pi.shfill);
 
-		code = gx_default_fill_path((gx_device *)pmdev, (gs_imager_state *)pis,
-			ppath, params, pdcolor, NULL /*pcpath*/);
-
-
-		pis_noconst->ctm = oldCTM;
+		//code = 0;
+		//code = gx_default_fill_path((gx_device *)pmdev, pis,
+		//	ppath, params, pdcolor, NULL /*pcpath*/);
+		code = (*dev_proc(pmdev, fill_path))((gx_device *)pmdev, pis,
+			ppath, params, pdcolor, NULL);
 
 		// Find inverse transform
 		// These matricies are formed the same way that the image transforms are made
@@ -937,7 +935,7 @@ const gx_clip_path * pcpath)
 		gs_matrix m3Invert;
 		gs_matrix_invert(&m3, &m3Invert);
 
-		svg_writeclip(svg, pcpath, m3Invert);
+		//svg_writeclip(svg, pcpath, m3Invert);
 
 		/* Restore the paths to their original locations. Maybe not needed */
 		make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
@@ -949,7 +947,6 @@ const gx_clip_path * pcpath)
 		//	svg->mark--;
 		//}
 
-		gs_setmatrix((gs_state *)pis, &save_ctm);
 		gs_state_free(pgs);
 
 
