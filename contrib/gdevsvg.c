@@ -16,6 +16,8 @@
 
 /* SVG (Scalable Vector Graphics) output device */
 
+#include <stdio.h>
+
 #include "string_.h"
 #include "gx.h"
 #include "gserrors.h"
@@ -571,17 +573,18 @@ gx_color_value prgb[3])
 	return 0;
 }
 
-static int make_alpha_mdev(gx_device*dev, gx_device_memory **ppmdev, gs_fixed_rect bbox)
+static int make_alpha_mdev(gx_device *dev, gx_device_memory **ppmdev, gs_fixed_rect bbox,
+	int depth)
 {
 	int i;
 	gx_device_memory proto;
-	const gx_device_memory *mdproto = gdev_mem_device_for_bits(32);
+	const gx_device_memory *mdproto = gdev_mem_device_for_bits(depth);
 	memcpy(&proto, mdproto, sizeof(gx_device_memory));
 	/* Duplicate pngalpha */
 	proto.color_info.max_components = 3;
 	proto.color_info.num_components = 3;
 	proto.color_info.polarity = GX_CINFO_POLARITY_ADDITIVE;
-	proto.color_info.depth = 32;
+	proto.color_info.depth = depth;
 	proto.color_info.gray_index = -1;
 	proto.color_info.max_gray = 255;
 	proto.color_info.max_color = 255;
@@ -604,11 +607,13 @@ static int make_alpha_mdev(gx_device*dev, gx_device_memory **ppmdev, gs_fixed_re
 	gs_make_mem_device_with_copydevice(ppmdev, &proto, dev->memory, -1, dev);
 	(*ppmdev)->width = fixed2int(bbox.q.x - bbox.p.x);
 	(*ppmdev)->height = fixed2int(bbox.q.y - bbox.p.y);
+	(*ppmdev)->band_offset_x = 0;
+	(*ppmdev)->band_offset_y = 0;
 	(*ppmdev)->mapped_x = fixed2int(bbox.p.x);
 	(*ppmdev)->mapped_y = fixed2int(bbox.p.y);
 	(*ppmdev)->bitmap_memory = dev->memory;
-	dev_proc((*ppmdev), encode_color) = /*svgalpha_encode_color*/ gx_default_rgb_map_rgb_color;
-	dev_proc((*ppmdev), decode_color) = /*svgalpha_decode_color*/ gx_default_rgb_map_color_rgb;
+	dev_proc((*ppmdev), encode_color) = svgalpha_encode_color;
+	dev_proc((*ppmdev), decode_color) = svgalpha_decode_color;
 }
 
 static void
@@ -684,37 +689,9 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 			/* Make image from stroked path */
 			gs_fixed_rect bbox;
 			gx_device_memory *pmdev;
-			//gx_device_memory proto;
-			//const gx_device_memory *mdproto = gdev_mem_device_for_bits(32);
-			//memcpy(&proto, mdproto, sizeof(gx_device_memory));
-			///* Duplicate pngalpha */
-			//proto.color_info.max_components = 3;
-			//proto.color_info.num_components = 3;
-			//proto.color_info.polarity = GX_CINFO_POLARITY_ADDITIVE;
-			//proto.color_info.depth = 32;
-			//proto.color_info.gray_index = -1;
-			//proto.color_info.max_gray = 255;
-			//proto.color_info.max_color = 255;
-			//proto.color_info.dither_grays = 256;
-			//proto.color_info.dither_colors = 256;
-			//proto.color_info.anti_alias.graphics_bits = 4;
-			//proto.color_info.anti_alias.text_bits = 4;
-			//proto.color_info.separable_and_linear = GX_CINFO_SEP_LIN_NONE;
-			//for (i = 0; i < GX_DEVICE_COLOR_MAX_COMPONENTS; ++i)
-			//{
-			//	proto.color_info.comp_bits[i] = 0;
-			//	proto.color_info.comp_shift[i] = 0;
-			//	proto.color_info.comp_mask[i] = 0;
-			//}
-			//proto.color_info.cm_name = "DeviceRGB";
-			//proto.color_info.opmode = GX_CINFO_OPMODE_UNKNOWN;
-			//proto.color_info.process_comps = 0;
-			//proto.color_info.black_component = 0;
 
-			//
-			//gs_make_mem_device_with_copydevice(&pmdev, &proto, dev->memory, -1, dev);
 			code = gx_path_bbox(ppath, &bbox);
-			make_alpha_mdev(dev, &pmdev, bbox);
+			make_alpha_mdev(dev, &pmdev, bbox, 32);
 
 			//pmdev->color_info = dev->color_info;
 			code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
@@ -766,93 +743,8 @@ const gx_clip_path * pcpath)
 		return code;
 	case COLOR_PATTERN1:
 	if(true){
-		//gs_fixed_rect bbox;
-		//gx_device_memory *pmdev;
-		//int mark = svg->mark;
-		//gx_drawing_color dc = *pdcolor;
-		//gs_pattern1_instance_t pi = *(gs_pattern1_instance_t *)dc.ccolor.pattern;
 
-		//svg_write(svg, "<g class='pathfillimage'>\n");
-
-		//// First we need to fill the bounding box with the pattern
-		//code = gx_path_bbox(ppath, &bbox);
-
-		//make_alpha_mdev(dev, &pmdev, bbox);
-		//code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
-		//code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0,
-		//	pmdev->width, pmdev->height, 0xffffffff);
-
-		//// Adjust bounds
-		//code = (*dev_proc(pmdev, close_device))((gx_device *)pmdev);
-
-		//bbox.p.x -= int2fixed(pmdev->mapped_x /*10*/);
-		//bbox.p.y -= int2fixed(pmdev->mapped_y /*100*/);
-
-		//make_alpha_mdev(dev, &pmdev, bbox);
-		//code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
-		//code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0,
-		//	pmdev->width, pmdev->height, 0xffffffff);
-
-		//int sx = fixed2int(bbox.p.x);
-		//int sy = fixed2int(bbox.p.y);
-		//gs_int_point rect_size;
-		//rect_size.x = fixed2int(bbox.q.x + fixed_half) - sx;
-		//rect_size.y = fixed2int(bbox.q.y + fixed_half) - sy;
-		//if (rect_size.x == 0 || rect_size.y == 0) return 0;
-
-		//code = gx_default_fill_path((gx_device *)pmdev, (gs_imager_state *)pis,
-		//	ppath, params, pdcolor, NULL /*pcpath*/);
-
-		// /*code = gs_shading_do_fill_rectangle(pi.templat.Shading,
-		//	NULL, (gx_device *)pmdev, (gs_imager_state *)pis, !pi.shfill);*/
-
-		//// Find inverse transform
-		//// These matricies are formed the same way that the image transforms are made
-		//gs_matrix m2;
-		//gs_make_identity(&m2);
-		//m2.xx = dev->width;
-		//m2.yy = dev->height;
-		//m2.tx = fixed2float(bbox.p.x);
-		//m2.ty = fixed2float(bbox.p.y);
-
-		//float tx, ty;
-		//tx = (m2.yy) > 0 ? 0 : m2.yx;
-		//ty = (m2.yy) > 0 ? 0 : m2.yy;
-
-		//gs_matrix m3;
-		//m3.xx = m2.xx / dev->width * m2.xx / dev->width;
-		//m3.xy = m2.xy / dev->width * m2.xx / dev->width;
-		//m3.yx = m2.yx / dev->height * m2.yy / dev->height;
-		//m3.yy = m2.yy / dev->height * m2.yy / dev->height;
-		//m3.tx = m2.tx + tx;
-		//m3.ty = m2.ty + ty;
-
-		//gs_matrix m3Invert;
-		//gs_matrix_invert(&m3, &m3Invert);
-
-		//svg_writeclip(svg, pcpath, m3Invert);
-
-		///* Restore the paths to their original locations. Maybe not needed */
-		//make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
-		//code = (*dev_proc(pmdev, close_device))((gx_device *)pmdev);
-
-		//svg_write(svg, "</g> <!-- pathfillimage -->\n");
-		////while (svg->mark > mark) {
-		////	svg_write(svg, "</g>\n");
-		////	svg->mark--;
-		////}
-
-
-
-
-
-
-
-
-
-
-
-		gs_fixed_rect bbox, bbox1;
+		gs_fixed_rect bbox;
 		gx_device_memory *pmdev;
 		int mark = svg->mark;
 		gs_matrix m;
@@ -870,28 +762,15 @@ const gx_clip_path * pcpath)
 
 		// First we need to fill the bounding box with the pattern
 		code = gx_path_bbox(ppath, &bbox);
-		make_alpha_mdev(dev, &pmdev, bbox);
+
+		make_alpha_mdev(dev, &pmdev, bbox, pdcolor->colors.pattern.p_tile->depth);
+		pmdev->color_info = dev->color_info;
+
+
 		code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
 		code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0,
 			pmdev->width, pmdev->height, 0xffffffff);
 
-
-
-		//code = gx_dc_pattern2_get_bbox(pdcolor, &bbox1);
-		//if (code)
-		//	rect_intersect(bbox, bbox1);
-
-
-		// Adjust bounds
-		code = (*dev_proc(pmdev, close_device))((gx_device *)pmdev);
-
-		bbox.p.x -= int2fixed(pmdev->mapped_x /*10*/);
-		bbox.p.y -= int2fixed(pmdev->mapped_y /*100*/);
-
-		make_alpha_mdev(dev, &pmdev, bbox);
-		code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
-		code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0,
-			pmdev->width, pmdev->height, 0xffffffff);
 
 		int sx = fixed2int(bbox.p.x);
 		int sy = fixed2int(bbox.p.y);
@@ -901,15 +780,20 @@ const gx_clip_path * pcpath)
 		if (rect_size.x == 0 || rect_size.y == 0) return 0;
 
 
+		/* Translate the paths */
+		gx_path_translate(ppath, -bbox.p.x, -bbox.p.y);
+		gx_path_translate(pcpath, -bbox.p.x, -bbox.p.y);
 
-		//code = gs_shading_do_fill_rectangle(pi.templat.templat.Shading,
-		//	NULL, (gx_device *)pmdev, (gs_imager_state *)pis, !pi.shfill);
+		/* Translate the pattern as well */
+		dc.mask.m_phase.x += fixed2int(bbox.p.x);
+		dc.mask.m_phase.y += fixed2int(bbox.p.y);
 
-		//code = 0;
-		//code = gx_default_fill_path((gx_device *)pmdev, pis,
-		//	ppath, params, pdcolor, NULL /*pcpath*/);
-		code = (*dev_proc(pmdev, fill_path))((gx_device *)pmdev, pis,
-			ppath, params, pdcolor, NULL);
+		code = (*dev_proc(pmdev, fill_path))((gx_device *)pmdev, 
+			pis, ppath, params, /*pdcolor*/ &dc, pcpath);
+
+		/* Restore the paths to their original locations. Maybe not needed */
+		gx_path_translate(ppath, bbox.p.x, bbox.p.y);
+		gx_path_translate(pcpath, bbox.p.x, bbox.p.y);
 
 		// Find inverse transform
 		// These matricies are formed the same way that the image transforms are made
@@ -935,7 +819,7 @@ const gx_clip_path * pcpath)
 		gs_matrix m3Invert;
 		gs_matrix_invert(&m3, &m3Invert);
 
-		//svg_writeclip(svg, pcpath, m3Invert);
+		svg_writeclip(svg, pcpath, m3Invert);
 
 		/* Restore the paths to their original locations. Maybe not needed */
 		make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
@@ -948,11 +832,6 @@ const gx_clip_path * pcpath)
 		//}
 
 		gs_state_free(pgs);
-
-
-
-
-
 
 		return code;
 	}
@@ -984,15 +863,10 @@ const gx_clip_path * pcpath)
 
 			// First we need to fill the bounding box with the pattern
 			code = gx_path_bbox(ppath, &bbox);
-			make_alpha_mdev(dev, &pmdev, bbox);
+			make_alpha_mdev(dev, &pmdev, bbox, 32);
 			code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
 			code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0, 
 				pmdev->width, pmdev->height, 0xffffffff);
-
-
-
-
-
 
 
 			code = gx_dc_pattern2_get_bbox(pdcolor, &bbox1);
@@ -1000,8 +874,6 @@ const gx_clip_path * pcpath)
 				rect_intersect(bbox, bbox1);
 
 
-			//float tx_test = 0.0f;
-			//float ty_test = fixed2float(bbox.q.y - bbox.p.y) * 1.0f;
 			int sx = fixed2int(bbox.p.x);
 			int sy = fixed2int(bbox.p.y);
 			gs_int_point rect_size;
@@ -2769,7 +2641,7 @@ static int make_png_from_mdev(gx_device_memory *mdev, float tx, float ty)
 	struct mem_encode state;
 	struct png_setup_s setup;
 	bool invert;
-	int y, i;
+	int y, i, j, k;
 	double black;
 	unsigned char cmyk[4];
 	setup.depth = mdev->color_info.depth;
@@ -2780,6 +2652,7 @@ static int make_png_from_mdev(gx_device_memory *mdev, float tx, float ty)
 	setup.memory = mdev->memory;
 	setup.width_in = mdev->width;
 	png_bytep row;
+	char *buffer;
 	gs_matrix m;
 	gs_matrix_fixed ctm;
 	gs_make_identity(&m);
@@ -2789,6 +2662,7 @@ static int make_png_from_mdev(gx_device_memory *mdev, float tx, float ty)
 	m.ty = ty;
 	gs_matrix_fixed_from_matrix(&ctm, &m);
 
+#undef fopen
 
 	/* The png structures are set up and ready to use after init_png */
 	code = init_png(mdev, &state, &setup);
@@ -2799,46 +2673,44 @@ static int make_png_from_mdev(gx_device_memory *mdev, float tx, float ty)
 		// First we construct the binary buffer of PNG data
 		for (y = 0; y < mdev->height; ++y)
 		{
-			row = mdev->base + y * mdev->raster;
+			if (setup.depth == 32)
+			{
+				buffer = gs_alloc_bytes(mdev->memory, mdev->raster, "png raster buffer");
+				row = mdev->base + y * mdev->raster;
+				j = 0;
+				k = 0;
+				for (i = 0; i < mdev->width; ++i)
+				{
+					//buffer[j + 0] = i % 256;
+					//buffer[j + 1] = y % 256;
+					//buffer[j + 2] = 0;
+					////buffer[j + 3] = row[k + 0];
+					//buffer[j + 3] = 0x80; // Full opacity
+					
+					buffer[j + 0] = row[k + 0];
+					buffer[j + 1] = row[k + 1];
+					buffer[j + 2] = row[k + 2];
+					buffer[j + 3] = row[k + 3];
+					//buffer[j + 3] = 0x00; // Full opacity
+					
+					j += 4;
+					//k += 3;
+					k += 4;
+				}
+				row = buffer;
+			}
+			else
+			{
+				row = mdev->base + y * mdev->raster;
+			}
 
-			//if (setup.depth == 32) /* CMYK */
-			//{
-			//	for (i = 0; i < mdev->width; i++) {
-			//		cmyk[0] = row[i * 4 + 3];
-			//		cmyk[1] = row[i * 4 + 2];
-			//		cmyk[2] = row[i * 4 + 1];
-			//		cmyk[3] = row[i * 4 + 0];
-
-			//		// CMYK to RGBA
-			//		black = (1.0 - (double)cmyk[3] / 255.0);
-			//		/*R*/ row[i * 4 + 0] = (unsigned char)(255 * (1.0 - cmyk[0] / 255.0)*black);
-			//		/*G*/ row[i * 4 + 1] = (unsigned char)(255 * (1.0 - cmyk[1] / 255.0)*black);
-			//		/*B*/ row[i * 4 + 2] = (unsigned char)(255 * (1.0 - cmyk[2] / 255.0)*black);
-			//		/*A*/ row[i * 4 + 3] = 0; // Alpha is inverted, 0 -> Full Opacity
-
-			//		//if (black)
-			//		//{
-			//		//	row[i * 4 + 0] = 0;
-			//		//	row[i * 4 + 1] = 0;
-			//		//	row[i * 4 + 2] = 255;
-			//		//	row[i * 4 + 3] = 0;
-
-			//		//	/*R*/ row[i * 4 + 0] = (unsigned char)(255 * (1.0 - cmyk[0] / 255.0)*black);
-			//		//	/*G*/ row[i * 4 + 1] = (unsigned char)(255 * (1.0 - cmyk[1] / 255.0)*black);
-			//		//	/*B*/ row[i * 4 + 2] = (unsigned char)(255 * (1.0 - cmyk[2] / 255.0)*black);
-			//		//	/*A*/ row[i * 4 + 3] = 0; // Alpha is inverted, 0 -> Full Opacity
-			//		//}
-			//		//else
-			//		//{
-			//		//	row[i * 4 + 0] = 255;
-			//		//	row[i * 4 + 1] = 255;
-			//		//	row[i * 4 + 2] = 255;
-			//		//	row[i * 4 + 3] = 0;
-			//		//}
-			//	}
-			//}
 
 			png_write_rows(setup.png_ptr, &row, 1);
+
+			if (setup.depth == 32)
+			{
+				gs_free_object(mdev->memory, buffer, "png raster buffer");
+			}
 		}
 
 		png_write_end(setup.png_ptr, setup.info_ptr);
@@ -2848,6 +2720,7 @@ static int make_png_from_mdev(gx_device_memory *mdev, float tx, float ty)
 		png_destroy_write_struct(&setup.png_ptr, &setup.info_ptr);
 		code = 0;
 	}
+
 	return code;
 }
 
