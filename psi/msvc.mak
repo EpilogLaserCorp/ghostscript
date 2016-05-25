@@ -114,7 +114,11 @@ BINDIR=.\debugbin
 !if "$(DEBUGSYM)"=="1"
 BINDIR=.\profbin
 !else
-BINDIR=.\bin
+!ifdef WIN64
+BINDIR=.\bin\x64
+!else
+BINDIR=.\bin\x86
+!endif
 !endif
 !endif
 !endif

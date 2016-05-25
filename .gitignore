@@ -14,6 +14,7 @@
 *.sdf
 *.opensdf
 windows/Backup
+windows/Release-contrib
 windows/*.htm
 windows/*.pdf
 windows/*.svg
@@ -28,8 +29,8 @@ windows/x64
 win32/GhostPDLGit.sln
 
 # Ignore all the object files
-bin
-debugbin
+bin/*.lib
+bin/*.exp
 profbin
 membin
 bin64
