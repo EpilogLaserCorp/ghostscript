@@ -458,7 +458,8 @@ svg_output_page(gx_device *dev, int num_copies, int flush)
 		svg->mark--;
 	}
 	svg_write(svg, "</page>\n");
-	svg_write(svg, "<page>\n");
+	svg_write(svg, "<page clip-path='url(#clip0)'>\n");
+	svg->dirty = true; // Rewrite attributes for new svg items
 	/* Scale drawing so our coordinates are in pixels */
 	gs_sprintf(line, "<g transform='scale(%lf,%lf)'>\n",
 		72.0 / svg->HWResolution[0],
