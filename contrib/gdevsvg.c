@@ -1358,7 +1358,7 @@ static int svg_print_path_type(gx_device_svg *svg, gx_path_type_t type)
 static int
 svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 {
-	char clippathStr[100];
+	char clippathStr[200];
 	gs_fixed_rect bbox;
 	float bboxArea;
 	float minBboxArea = MAX_FLOAT;
@@ -1367,7 +1367,10 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 	gx_cpath_path_list *path_list;
 	int clipPathIndex = -1, index = 0;
 
-	if (pcpath == NULL) return 0;
+	if (pcpath == NULL)
+	{
+		return 0;
+	}
 
 	code = gx_path_bbox(&pcpath->path, &bbox);
 	if (code >= 0)
@@ -1379,7 +1382,8 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 	}
 	mainBboxCode = code;
 
-	if (pcpath->path_list) {
+	if (pcpath->path_list) 
+	{
 		/*
 		* In SVG, it is not acceptable to have more than one clipping path. It seems that in
 		* some cases, ghostscript creates multiple clipping paths, one of which is sometimes
@@ -1388,7 +1392,8 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 		*/
 		path_list = pcpath->path_list;
 
-		do {
+		do 
+		{
 			code = gx_path_bbox(&path_list->path, &bbox);
 			if (code >= 0)
 			{
@@ -1407,8 +1412,8 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 		} while ((path_list = path_list->next));
 	}
 
-	// Create a clipping path
-	if (clip_path != NULL && minBboxArea > 1 && minBboxArea != MAX_FLOAT)
+	//// Create a clipping path
+	if ((clip_path != NULL) && (minBboxArea > 1) && (minBboxArea != MAX_FLOAT))
 	{
 		gs_sprintf(clippathStr, "<clipPath id='clip%i' transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
 			++svg->usedIds,
