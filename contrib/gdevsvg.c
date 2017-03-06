@@ -2155,9 +2155,26 @@ int setup_png(gx_device * pdev, svg_image_enum_t  *pie, const gs_color_space *pc
 				gs_client_color cc;
 				gs_cspace_indexed_lookup(pcs, i, &cc);
 
-				palettep[i].red = (int)((cc.paint.values[0] * 255) + 0.5);
-				palettep[i].green = (int)((cc.paint.values[1] * 255) + 0.5);
-				palettep[i].blue = (int)((cc.paint.values[2] * 255) + 0.5);
+				const int base_num_comp = cs_num_components(pcs->base_space);
+				if (base_num_comp == 4)
+				{
+					// Things get a bit funky when the base color space has an alpha channel.
+					// Since the indexed colors map to colors with an alpha channel and the palette
+					// is in the RGB space, we have a problem.
+
+					const double alpha = cc.paint.values[3];
+					const double oneMinusAlpha = 1.0 - alpha;
+
+					palettep[i].red = (int)(((cc.paint.values[0] * alpha + oneMinusAlpha) * 255) + 0.5); //  Assume white background
+					palettep[i].green = (int)(((cc.paint.values[1] * alpha + oneMinusAlpha) * 255) + 0.5); //  Assume white background
+					palettep[i].blue = (int)(((cc.paint.values[2] * alpha + oneMinusAlpha) * 255) + 0.5); //  Assume white background
+				}
+				else
+				{
+					palettep[i].red = (int)((cc.paint.values[0] * 255) + 0.5);
+					palettep[i].green = (int)((cc.paint.values[1] * 255) + 0.5);
+					palettep[i].blue = (int)((cc.paint.values[2] * 255) + 0.5);
+				}
 			}
 			/*
 			This is for normal 24-bit images
