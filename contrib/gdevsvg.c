@@ -32,6 +32,8 @@
 #include "gxdevcli.h"
 #include "gxpcolor.h"
 #include "gxcolor2.h"
+#include "gzstate.h"
+
 
 /*
 * libpng versions 1.0.3 and later allow disabling access to the stdxxx
@@ -852,7 +854,10 @@ const gx_clip_path * pcpath)
 			gs_matrix m;
 			gx_drawing_color dc = *pdcolor;
 			gs_pattern2_instance_t pi = *(gs_pattern2_instance_t *)dc.ccolor.pattern;
-			gs_state *pgs = gs_state_copy(pi.saved, gs_state_memory(pi.saved));
+
+			// Note: Do not use gs_state_memory(pi.saved)
+			// This strips the pointer to 32 bits and causes a crash
+			gs_state *pgs = gs_state_copy(pi.saved, pi.saved->memory /*gs_state_memory(pi.saved)*/);
 
 			gs_make_identity(&m);
 
@@ -1032,7 +1037,9 @@ static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_
 {
 	const gx_device_color *pdevc = (gx_device_color *)pdc;
 	if (gx_dc_is_pure(pdc))
+	{
 		return COLOR_PURE;
+	}
 	else if (gx_dc_is_null(pdc))
 	{
 		// We are null
@@ -1069,7 +1076,6 @@ static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_
 static gx_color_index
 svg_get_color(gx_device_svg *svg, const gx_drawing_color *pdc)
 {
-
 	gx_color_index color = gx_no_color_index;
 
 	if (gx_dc_is_pure(pdc))
@@ -1084,34 +1090,46 @@ svg_write_state(gx_device_svg *svg)
 
 	/* has anything changed? */
 	if (!svg->dirty)
+	{
 		return 0;
+	}
 
 	/* close the current graphics state element, if any */
-	if (svg->mark > 1) {
+	if (svg->mark > 1) 
+	{
 		svg_write(svg, "</g>\n");
 		svg->mark--;
 	}
 	/* write out the new current state */
 	svg_write(svg, "<g");
-	if (svg->strokecolor != gx_no_color_index) {
+	if (svg->strokecolor != gx_no_color_index) 
+	{
 		gs_sprintf(line, " stroke='#%06x'", (uint)(svg->strokecolor & 0xffffffL));
 		svg_write(svg, line);
 	}
-	else {
+	else 
+	{
 		svg_write(svg, " stroke='none'");
 	}
-	if (svg->fillcolor != gx_no_color_index) {
+
+	if (svg->fillcolor != gx_no_color_index) 
+	{
 		gs_sprintf(line, " fill='#%06x'", (uint)(svg->fillcolor & 0xffffffL));
 		svg_write(svg, line);
 	}
-	else {
+	else 
+	{
 		svg_write(svg, " fill='none'");
 	}
-	if (svg->linewidth != 1.0) {
+
+	if (svg->linewidth != 1.0) 
+	{
 		gs_sprintf(line, " stroke-width='%lf'", svg->linewidth);
 		svg_write(svg, line);
 	}
-	if (svg->linecap != SVG_DEFAULT_LINECAP) {
+
+	if (svg->linecap != SVG_DEFAULT_LINECAP) 
+	{
 		switch (svg->linecap) {
 		case gs_cap_round:
 			svg_write(svg, " stroke-linecap='round'");
@@ -1126,7 +1144,9 @@ svg_write_state(gx_device_svg *svg)
 			break;
 		}
 	}
-	if (svg->linejoin != SVG_DEFAULT_LINEJOIN) {
+
+	if (svg->linejoin != SVG_DEFAULT_LINEJOIN) 
+	{
 		switch (svg->linejoin) {
 		case gs_join_round:
 			svg_write(svg, " stroke-linejoin='round'");
@@ -1141,10 +1161,13 @@ svg_write_state(gx_device_svg *svg)
 			break;
 		}
 	}
-	if (svg->miterlimit != SVG_DEFAULT_MITERLIMIT) {
+
+	if (svg->miterlimit != SVG_DEFAULT_MITERLIMIT) 
+	{
 		gs_sprintf(line, " stroke-miterlimit='%lf'", svg->miterlimit);
 		svg_write(svg, line);
 	}
+
 	svg_write(svg, ">\n");
 	svg->mark++;
 
