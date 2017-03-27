@@ -34,6 +34,7 @@ bin/*.exp
 profbin
 membin
 bin64
+debugbin
 debugbin64
 profbin64
 debugobj
