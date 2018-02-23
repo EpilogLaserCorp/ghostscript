@@ -1542,8 +1542,6 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 		gs_sprintf(line, "<path %s%sd='", path_fill_rule, svg->validClipPath ? clip_path_id : "");
 		svg_write(svg, line);
 
-		close_clip_groups(svg);
-
 		svg->writing_clip = false;
 	}
 	else
@@ -1665,6 +1663,11 @@ svg_endpath(gx_device_vector *vdev, gx_path_type_t type)
 		svg_write(svg, " fill='none'");
 
 	svg_write(svg, "/>\n");
+
+	if (svg->current_clip_path != NULL && !svg->writing_clip)
+	{
+		close_clip_groups(svg);
+	}
 
 	return 0;
 }
