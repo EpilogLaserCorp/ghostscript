@@ -676,28 +676,39 @@ gx_path * ppath, const gx_stroke_params * params,
 const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 {
 	gx_device_svg *svg = (gx_device_svg *)dev;
+	gs_matrix mIdent;
 	gx_drawing_color color;
 	color_unset(&color);
 	int code = 0;
 	int mark = 0;
 	int i;
+	char clip_path_id[SVG_LINESIZE], line[SVG_LINESIZE];
+
+	gs_make_identity(&mIdent); // Form identity matrix
+
 	switch (svg_get_color_type((gx_device_svg *)dev, pdcolor))
 	{
 	case COLOR_PURE:
 		// Record the clip path so that we can clip the shape if necessary
-		svg->current_clip_path = pcpath;
-		code = gdev_vector_stroke_path(dev, pis, ppath, params, pdcolor, pcpath);
-		svg->current_clip_path = NULL;
+		svg_writeclip(svg, pcpath, mIdent);
+
+		gs_sprintf(clip_path_id, " clip-path='url(#clip%i)'", svg->usedIds);
+		gs_sprintf(line, "<g%s>\n", svg->validClipPath ? clip_path_id : "");
+		svg_write(svg, line);
+
+		mark = svg->mark;
+		code = gdev_vector_stroke_path(dev, pis, ppath, params, pdcolor, NULL);
+		close_groups(svg, mark);
+
+		svg_write(svg, "</g>\n");
+
 		return code;
 	default:
 		svg_write(svg, "<g class='pathstrokeimage'>\n");
 		mark = svg->mark;
 		svg->from_stroke_path = true;
 		code = gdev_vector_stroke_path(dev, pis, ppath, params, &color, pcpath);
-		while (svg->mark > mark) {
-			svg_write(svg, "</g>\n");
-			svg->mark--;
-		}
+		close_groups(svg, mark);
 		if (code >= 0)
 		{
 			svg_write(svg, "<g class='image'>\n");
@@ -743,18 +754,33 @@ const gx_drawing_color * pdcolor,
 const gx_clip_path * pcpath)
 {
 	gx_device_svg *svg = (gx_device_svg *)dev;
+	gs_matrix mIdent;
 	gx_drawing_color color;
 	color_unset(&color);
 	int code = 0;
+	int mark = 0;
+	char clip_path_id[SVG_LINESIZE], line[SVG_LINESIZE];
 
 	int ctype = svg_get_color_type((gx_device_svg *)dev, pdcolor);
+
+	gs_make_identity(&mIdent); // Form identity matrix
+
 	switch (ctype)
 	{
 	case COLOR_PURE:
 		// Record the clip path so that we can clip the shape if necessary
-		svg->current_clip_path = pcpath;
-		code = gdev_vector_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
-		svg->current_clip_path = NULL;
+		svg_writeclip(svg, pcpath, mIdent);
+
+		gs_sprintf(clip_path_id, " clip-path='url(#clip%i)'", svg->usedIds);
+		gs_sprintf(line, "<g%s>\n", svg->validClipPath ? clip_path_id : "");
+		svg_write(svg, line);
+
+		mark = svg->mark;
+		code = gdev_vector_fill_path(dev, pis, ppath, params, pdcolor, NULL);
+		close_groups(svg, mark);
+
+		svg_write(svg, "</g>\n");
+
 		return code;
 	case COLOR_PATTERN1:
 	if(true){
@@ -1336,10 +1362,29 @@ static int svg_print_path_type(gx_device_svg *svg, gx_path_type_t type)
 	return 0;
 }
 
+static int svg_write_clip_start(gx_device_svg *svg, gs_matrix matrix)
+{
+	char clippathStr[200];
+
+	gs_sprintf(clippathStr, "<clipPath id='clip%i' transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
+		++svg->highestUsedId,
+		matrix.xx, matrix.xy, matrix.yx, matrix.yy, matrix.tx, matrix.ty
+		);
+	svg_write(svg, clippathStr);
+
+	return 0;
+}
+
+static int svg_write_clip_end(gx_device_svg *svg)
+{
+	svg_write(svg, "</clipPath>\n");
+
+	return 0;
+}
+
 static int
 svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 {
-	char clippathStr[200];
 	gs_fixed_rect bbox;
 	float bboxArea;
 	float minBboxArea = MAX_FLOAT;
@@ -1421,13 +1466,9 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 		}
 
 		// Write the path
-		gs_sprintf(clippathStr, "<clipPath id='clip%i' transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
-			++svg->highestUsedId,
-			matrix.xx, matrix.xy, matrix.yx, matrix.yy, matrix.tx, matrix.ty
-			);
-		svg_write(svg, clippathStr);
+		svg_write_clip_start(svg, matrix);
 		gdev_vector_dopath(svg, path, gx_path_type_stroke, NULL);
-		svg_write(svg, "</clipPath>\n");
+		svg_write_clip_end(svg);
 
 		svg->validClipPath = true;
 	}
@@ -1513,7 +1554,9 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 
 	/* skip non-drawing paths for now */
 	if (!(type & gx_path_type_fill) && !(type & gx_path_type_stroke))
+	{
 		return 0;
+	}
 
 	if_debug0m('_', svg->memory, "svg_beginpath ");
 	svg_print_path_type(svg, type);
@@ -1527,7 +1570,7 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 		rule == gx_path_type_even_odd ?
 		"fill-rule='evenodd' " : "fill-rule='nonzero' ");
 
-	if (svg->current_clip_path != NULL && !svg->writing_clip)
+	if ((svg->current_clip_path != NULL) && !svg->writing_clip)
 	{
 		svg->writing_clip = true;
 		
@@ -1645,7 +1688,9 @@ svg_endpath(gx_device_vector *vdev, gx_path_type_t type)
 
 	/* skip non-drawing paths for now */
 	if (!(type & gx_path_type_fill) && !(type & gx_path_type_stroke))
+	{
 		return 0;
+	}
 
 	if_debug0m('_', svg->memory, "svg_endpath ");
 	svg_print_path_type(svg, type);
@@ -1656,15 +1701,19 @@ svg_endpath(gx_device_vector *vdev, gx_path_type_t type)
 
 	/* override the inherited stroke attribute if we're not stroking */
 	if ((!(type & gx_path_type_stroke) && (svg->strokecolor != gx_no_color_index)) || (type & gx_path_type_clip))
+	{
 		svg_write(svg, " stroke='none'");
+	}
 
 	/* override the inherited fill attribute if we're not filling */
 	if ((!(type & gx_path_type_fill) && (svg->fillcolor != gx_no_color_index)) || (type & gx_path_type_clip))
+	{
 		svg_write(svg, " fill='none'");
+	}
 
 	svg_write(svg, "/>\n");
 
-	if (svg->current_clip_path != NULL && !svg->writing_clip)
+	if ((svg->current_clip_path != NULL) && !svg->writing_clip)
 	{
 		close_clip_groups(svg);
 	}
