@@ -690,18 +690,9 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 	{
 	case COLOR_PURE:
 		// Record the clip path so that we can clip the shape if necessary
-		svg_writeclip(svg, pcpath, mIdent);
-
-		gs_sprintf(clip_path_id, " clip-path='url(#clip%i)'", svg->usedIds);
-		gs_sprintf(line, "<g%s>\n", svg->validClipPath ? clip_path_id : "");
-		svg_write(svg, line);
-
-		mark = svg->mark;
+		svg->current_clip_path = pcpath;
 		code = gdev_vector_stroke_path(dev, pis, ppath, params, pdcolor, NULL);
-		close_groups(svg, mark);
-
-		svg_write(svg, "</g>\n");
-
+		svg->current_clip_path = NULL;
 		return code;
 	default:
 		svg_write(svg, "<g class='pathstrokeimage'>\n");
@@ -769,18 +760,9 @@ const gx_clip_path * pcpath)
 	{
 	case COLOR_PURE:
 		// Record the clip path so that we can clip the shape if necessary
-		svg_writeclip(svg, pcpath, mIdent);
-
-		gs_sprintf(clip_path_id, " clip-path='url(#clip%i)'", svg->usedIds);
-		gs_sprintf(line, "<g%s>\n", svg->validClipPath ? clip_path_id : "");
-		svg_write(svg, line);
-
-		mark = svg->mark;
+		svg->current_clip_path = pcpath;
 		code = gdev_vector_fill_path(dev, pis, ppath, params, pdcolor, NULL);
-		close_groups(svg, mark);
-
-		svg_write(svg, "</g>\n");
-
+		svg->current_clip_path = NULL;
 		return code;
 	case COLOR_PATTERN1:
 	if(true){
@@ -1531,10 +1513,32 @@ fixed x1, fixed y1, gx_path_type_t type)
 
 	svg_write_state(svg);
 
-	gs_sprintf(line, "<rect x='%lf' y='%lf' width='%lf' height='%lf'",
-		fixed2float(x0), fixed2float(y0),
-		fixed2float(x1 - x0), fixed2float(y1 - y0));
-	svg_write(svg, line);
+	if ((svg->current_clip_path != NULL) && !svg->writing_clip)
+	{
+		svg->writing_clip = true;
+
+		gs_matrix mIdent;
+		gs_make_identity(&mIdent);
+		svg_writeclip(svg, svg->current_clip_path, mIdent);
+
+		char clip_path_id[SVG_LINESIZE];
+		gs_sprintf(clip_path_id, "clip-path='url(#clip%i)' ", svg->usedIds);
+
+		gs_sprintf(line, "<rect %sx='%lf' y='%lf' width='%lf' height='%lf'", 
+			(svg->validClipPath ? clip_path_id : ""),
+			fixed2float(x0), fixed2float(y0),
+			fixed2float(x1 - x0), fixed2float(y1 - y0));
+		svg_write(svg, line);
+
+		svg->writing_clip = false;
+	}
+	else
+	{
+		gs_sprintf(line, "<rect x='%lf' y='%lf' width='%lf' height='%lf'", 
+			fixed2float(x0), fixed2float(y0),
+			fixed2float(x1 - x0), fixed2float(y1 - y0));
+		svg_write(svg, line);
+	}
 
 	/* override the inherited stroke attribute if we're not stroking */
 	if (emptyPen)
