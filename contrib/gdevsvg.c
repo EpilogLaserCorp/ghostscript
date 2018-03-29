@@ -676,22 +676,17 @@ gx_path * ppath, const gx_stroke_params * params,
 const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 {
 	gx_device_svg *svg = (gx_device_svg *)dev;
-	gs_matrix mIdent;
 	gx_drawing_color color;
 	color_unset(&color);
 	int code = 0;
 	int mark = 0;
 	int i;
-	char clip_path_id[SVG_LINESIZE], line[SVG_LINESIZE];
-
-	gs_make_identity(&mIdent); // Form identity matrix
-
 	switch (svg_get_color_type((gx_device_svg *)dev, pdcolor))
 	{
 	case COLOR_PURE:
 		// Record the clip path so that we can clip the shape if necessary
 		svg->current_clip_path = pcpath;
-		code = gdev_vector_stroke_path(dev, pis, ppath, params, pdcolor, NULL);
+		code = gdev_vector_stroke_path(dev, pis, ppath, params, pdcolor, pcpath);
 		svg->current_clip_path = NULL;
 		return code;
 	default:
@@ -745,23 +740,17 @@ const gx_drawing_color * pdcolor,
 const gx_clip_path * pcpath)
 {
 	gx_device_svg *svg = (gx_device_svg *)dev;
-	gs_matrix mIdent;
 	gx_drawing_color color;
 	color_unset(&color);
 	int code = 0;
-	int mark = 0;
-	char clip_path_id[SVG_LINESIZE], line[SVG_LINESIZE];
 
 	int ctype = svg_get_color_type((gx_device_svg *)dev, pdcolor);
-
-	gs_make_identity(&mIdent); // Form identity matrix
-
 	switch (ctype)
 	{
 	case COLOR_PURE:
 		// Record the clip path so that we can clip the shape if necessary
 		svg->current_clip_path = pcpath;
-		code = gdev_vector_fill_path(dev, pis, ppath, params, pdcolor, NULL);
+		code = gdev_vector_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
 		svg->current_clip_path = NULL;
 		return code;
 	case COLOR_PATTERN1:
