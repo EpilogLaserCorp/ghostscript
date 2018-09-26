@@ -1038,11 +1038,93 @@ svg_get_color(gx_device_svg *svg, const gx_drawing_color *pdc)
 	return color;
 }
 
-static int
-svg_write_state(gx_device_svg *svg)
+static bool pen_is_empty(gx_device_svg *svg, const gx_path_type_t type)
+{
+	return (!(type & gx_path_type_stroke) && (svg->strokecolor != gx_no_color_index)) 
+		|| (type & gx_path_type_clip);
+}
+
+static bool fill_is_empty(gx_device_svg *svg, const gx_path_type_t type)
+{
+	return (!(type & gx_path_type_fill) && (svg->fillcolor != gx_no_color_index)) 
+		|| (type & gx_path_type_clip);
+}
+
+static void svg_write_state_to_svg(gx_device_svg *svg, const bool emptyPen, const bool emptyFill)
 {
 	char line[SVG_LINESIZE];
 
+	/* write out the new current state */
+	if ((svg->strokecolor != gx_no_color_index) && !emptyPen)
+	{
+		gs_sprintf(line, "stroke='#%06x' ", (uint)(svg->strokecolor & 0xffffffL));
+		svg_write(svg, line);
+	}
+	else 
+	{
+		svg_write(svg, "stroke='none' ");
+	}
+
+	if ((svg->fillcolor != gx_no_color_index) && !emptyFill)
+	{
+		gs_sprintf(line, "fill='#%06x' ", (uint)(svg->fillcolor & 0xffffffL));
+		svg_write(svg, line);
+	}
+	else 
+	{
+		svg_write(svg, "fill='none' ");
+	}
+
+	if (svg->linewidth != 1.0) 
+	{
+		gs_sprintf(line, "stroke-width='%lf' ", svg->linewidth);
+		svg_write(svg, line);
+	}
+
+	if (svg->linecap != SVG_DEFAULT_LINECAP) 
+	{
+		switch (svg->linecap) {
+		case gs_cap_round:
+			svg_write(svg, "stroke-linecap='round' ");
+			break;
+		case gs_cap_square:
+			svg_write(svg, "stroke-linecap='square' ");
+			break;
+		case gs_cap_butt:
+		default:
+			/* treat all the other options as the default */
+			svg_write(svg, "stroke-linecap='butt' ");
+			break;
+		}
+	}
+
+	if (svg->linejoin != SVG_DEFAULT_LINEJOIN) 
+	{
+		switch (svg->linejoin) {
+		case gs_join_round:
+			svg_write(svg, "stroke-linejoin='round' ");
+			break;
+		case gs_join_bevel:
+			svg_write(svg, "stroke-linejoin='bevel' ");
+			break;
+		case gs_join_miter:
+		default:
+			/* SVG doesn't support any other variants */
+			svg_write(svg, "stroke-linejoin='miter' ");
+			break;
+		}
+	}
+
+	if (svg->miterlimit != SVG_DEFAULT_MITERLIMIT) 
+	{
+		gs_sprintf(line, "stroke-miterlimit='%lf' ", svg->miterlimit);
+		svg_write(svg, line);
+	}
+}
+
+static int
+svg_write_state(gx_device_svg *svg)
+{
 	/* has anything changed? */
 	if (!svg->dirty)
 	{
@@ -1055,76 +1137,6 @@ svg_write_state(gx_device_svg *svg)
 		svg_write(svg, "</g>\n");
 		svg->mark--;
 	}
-	/* write out the new current state */
-	svg_write(svg, "<g");
-	if (svg->strokecolor != gx_no_color_index) 
-	{
-		gs_sprintf(line, " stroke='#%06x'", (uint)(svg->strokecolor & 0xffffffL));
-		svg_write(svg, line);
-	}
-	else 
-	{
-		svg_write(svg, " stroke='none'");
-	}
-
-	if (svg->fillcolor != gx_no_color_index) 
-	{
-		gs_sprintf(line, " fill='#%06x'", (uint)(svg->fillcolor & 0xffffffL));
-		svg_write(svg, line);
-	}
-	else 
-	{
-		svg_write(svg, " fill='none'");
-	}
-
-	if (svg->linewidth != 1.0) 
-	{
-		gs_sprintf(line, " stroke-width='%lf'", svg->linewidth);
-		svg_write(svg, line);
-	}
-
-	if (svg->linecap != SVG_DEFAULT_LINECAP) 
-	{
-		switch (svg->linecap) {
-		case gs_cap_round:
-			svg_write(svg, " stroke-linecap='round'");
-			break;
-		case gs_cap_square:
-			svg_write(svg, " stroke-linecap='square'");
-			break;
-		case gs_cap_butt:
-		default:
-			/* treat all the other options as the default */
-			svg_write(svg, " stroke-linecap='butt'");
-			break;
-		}
-	}
-
-	if (svg->linejoin != SVG_DEFAULT_LINEJOIN) 
-	{
-		switch (svg->linejoin) {
-		case gs_join_round:
-			svg_write(svg, " stroke-linejoin='round'");
-			break;
-		case gs_join_bevel:
-			svg_write(svg, " stroke-linejoin='bevel'");
-			break;
-		case gs_join_miter:
-		default:
-			/* SVG doesn't support any other variants */
-			svg_write(svg, " stroke-linejoin='miter'");
-			break;
-		}
-	}
-
-	if (svg->miterlimit != SVG_DEFAULT_MITERLIMIT) 
-	{
-		gs_sprintf(line, " stroke-miterlimit='%lf'", svg->miterlimit);
-		svg_write(svg, line);
-	}
-
-	svg_write(svg, ">\n");
-	svg->mark++;
 
 	svg->dirty = 0;
 	return 0;
@@ -1492,9 +1504,9 @@ fixed x1, fixed y1, gx_path_type_t type)
 	gx_device_svg *svg = (gx_device_svg *)vdev;
 	char line[300];
 
-	// Check if this is a no-fill rectangle
-	bool emptyPen = (!(type & gx_path_type_stroke) && (svg->strokecolor != gx_no_color_index)) || (type & gx_path_type_clip);
-	bool emptyBrush = (!(type & gx_path_type_fill) && (svg->fillcolor != gx_no_color_index)) || (type & gx_path_type_clip);
+	// Check if the pen or brush is empty
+	const bool emptyPen = pen_is_empty(svg, type);
+	const bool emptyBrush = fill_is_empty(svg, type);
 
 	if_debug0m('_', svg->memory, "svg_dorect");
 	svg_print_path_type(svg, type);
@@ -1513,7 +1525,11 @@ fixed x1, fixed y1, gx_path_type_t type)
 		char clip_path_id[SVG_LINESIZE];
 		gs_sprintf(clip_path_id, "clip-path='url(#clip%i)' ", svg->usedIds);
 
-		gs_sprintf(line, "<rect %sx='%lf' y='%lf' width='%lf' height='%lf'", 
+		svg_write(svg, "<rect ");
+
+		svg_write_state_to_svg(svg, emptyPen, emptyBrush);
+
+		gs_sprintf(line, "%sx='%lf' y='%lf' width='%lf' height='%lf'", 
 			(svg->validClipPath ? clip_path_id : ""),
 			fixed2float(x0), fixed2float(y0),
 			fixed2float(x1 - x0), fixed2float(y1 - y0));
@@ -1523,18 +1539,28 @@ fixed x1, fixed y1, gx_path_type_t type)
 	}
 	else
 	{
-		gs_sprintf(line, "<rect x='%lf' y='%lf' width='%lf' height='%lf'", 
+		svg_write(svg, "<rect ");
+
+		gs_sprintf(line, "x='%lf' y='%lf' width='%lf' height='%lf'", 
 			fixed2float(x0), fixed2float(y0),
 			fixed2float(x1 - x0), fixed2float(y1 - y0));
 		svg_write(svg, line);
 	}
 
-	/* override the inherited stroke attribute if we're not stroking */
-	if (emptyPen)
-		svg_write(svg, " stroke='none'");
-	/* override the inherited fill attribute if we're not filling */
-	if (emptyBrush)
-		svg_write(svg, " fill='none'");
+	if ((svg->current_clip_path == NULL) || svg->writing_clip)
+	{
+		/* override the inherited stroke attribute if we're not stroking */
+		if (emptyPen)
+		{
+			svg_write(svg, " stroke='none'");
+		}
+		/* override the inherited fill attribute if we're not filling */
+		if (emptyBrush)
+		{
+			svg_write(svg, " fill='none'");
+		}
+	}
+
 	svg_write(svg, "/>\n");
 
 	return 0;
@@ -1574,16 +1600,25 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 		char clip_path_id[SVG_LINESIZE];
 		gs_sprintf(clip_path_id, "clip-path='url(#clip%i)' ", svg->usedIds);
 
-		char line[SVG_LINESIZE];
-		gs_sprintf(line, "<path %s%sd='", path_fill_rule, svg->validClipPath ? clip_path_id : "");
+		svg_write(svg, "<path ");
+
+		const bool emptyPen = pen_is_empty(svg, type);
+		const bool emptyBrush = fill_is_empty(svg, type);
+
+		svg_write_state_to_svg(svg, emptyPen, emptyBrush);
+
+		char line[SVG_LINESIZE * 2];
+		gs_sprintf(line, "%s%sd='", path_fill_rule, svg->validClipPath ? clip_path_id : "");
 		svg_write(svg, line);
 
 		svg->writing_clip = false;
 	}
 	else
 	{
-		char line[SVG_LINESIZE];
-		gs_sprintf(line, "<path %sd='", path_fill_rule);
+		svg_write(svg, "<path ");
+
+		char line[SVG_LINESIZE * 2];
+		gs_sprintf(line, "%sd='", path_fill_rule);
 		svg_write(svg, line);
 	}
 
@@ -1692,16 +1727,23 @@ svg_endpath(gx_device_vector *vdev, gx_path_type_t type)
 	/* close the path data attribute */
 	svg_write(svg, "'");
 
-	/* override the inherited stroke attribute if we're not stroking */
-	if ((!(type & gx_path_type_stroke) && (svg->strokecolor != gx_no_color_index)) || (type & gx_path_type_clip))
+	if ((svg->current_clip_path == NULL) || svg->writing_clip)
 	{
-		svg_write(svg, " stroke='none'");
-	}
+		// Check if the pen or brush is empty
+		const bool emptyPen = pen_is_empty(svg, type);
+		const bool emptyBrush = fill_is_empty(svg, type);
 
-	/* override the inherited fill attribute if we're not filling */
-	if ((!(type & gx_path_type_fill) && (svg->fillcolor != gx_no_color_index)) || (type & gx_path_type_clip))
-	{
-		svg_write(svg, " fill='none'");
+		/* override the inherited stroke attribute if we're not stroking */
+		if (emptyPen)
+		{
+			svg_write(svg, " stroke='none'");
+		}
+
+		/* override the inherited fill attribute if we're not filling */
+		if (emptyBrush)
+		{
+			svg_write(svg, " fill='none'");
+		}
 	}
 
 	svg_write(svg, "/>\n");
