@@ -279,8 +279,8 @@
     <IncludePath>$(ProjectDir)\..\libpng;$(ProjectDir)\..\base;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-contrib|Win32'">
-    <OutDir>$(Configuration)\</OutDir>
-    <IntDir>$(Configuration)\</IntDir>
+    <OutDir>$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
     <NMakeBuildCommandLine>cd .. &amp;&amp; nmake -f psi\msvc32.mak WITH_CONTRIB=1 SBR=1 DEVSTUDIO= gs &amp;&amp; nmake -f psi\msvc32.mak  WITH_CONTRIB=1 DEVSTUDIO= bsc</NMakeBuildCommandLine>
     <NMakeReBuildCommandLine>cd .. &amp;&amp; nmake -f psi\msvc32.mak WITH_CONTRIB=1 DEVSTUDIO= clean &amp;&amp; nmake -f psi\msvc32.mak SBR=1  WITH_CONTRIB=1 DEVSTUDIO= gs &amp;&amp; nmake -f psi\msvc32.mak  WITH_CONTRIB=1 DEVSTUDIO= bsc</NMakeReBuildCommandLine>
     <NMakeCleanCommandLine>cd .. &amp;&amp; nmake -f psi\msvc32.mak WITH_CONTRIB=1 DEVSTUDIO= clean</NMakeCleanCommandLine>
