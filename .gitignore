@@ -5,6 +5,18 @@
 *.rej
 *.orig
 
+# Ignore outputs that are not what we want
+bin/x64/*.exp
+bin/x64/*.lib
+bin/x64/gpcl*
+bin/x64/gpdl*
+bin/x64/gxps*
+bin/x86/*.exp
+bin/x86/*.lib
+bin/x86/gpcl*
+bin/x86/gpdl*
+bin/x86/gxps*
+
 # Ignore Visual Studio local and binary files
 *.pdb
 *.ncb
