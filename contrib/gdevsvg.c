@@ -801,6 +801,9 @@ const gx_clip_path * pcpath)
 		dc.mask.m_phase.x += fixed2int(bbox.p.x);
 		dc.mask.m_phase.y += fixed2int(bbox.p.y);
 
+		dc.phase.x = dc.mask.m_phase.x;
+		dc.phase.y = dc.mask.m_phase.y;
+
 		// Give fill_path a null clip path because it will be in the wrong place and because
 		// we will be adding in our own clip path later
 		code = (*dev_proc(pmdev, fill_path))((gx_device *)pmdev, 
