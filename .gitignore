@@ -16,6 +16,7 @@ bin/x86/*.lib
 bin/x86/gpcl*
 bin/x86/gpdl*
 bin/x86/gxps*
+*.log
 
 # Ignore Visual Studio local and binary files
 *.pdb
