@@ -789,24 +789,29 @@ const gx_clip_path * pcpath)
 		gs_int_point rect_size;
 		rect_size.x = fixed2int(bbox.q.x + fixed_half) - sx;
 		rect_size.y = fixed2int(bbox.q.y + fixed_half) - sy;
-		if (rect_size.x == 0 || rect_size.y == 0) return 0;
-
+		if (rect_size.x == 0 || rect_size.y == 0)
+		{
+			return 0;
+		}
 
 		/* Translate the paths */
 		gx_path_translate(ppath, -bbox.p.x, -bbox.p.y);
-		gx_path_translate(pcpath, -bbox.p.x, -bbox.p.y);
 
 		/* Translate the pattern as well */
 		dc.mask.m_phase.x += fixed2int(bbox.p.x);
 		dc.mask.m_phase.y += fixed2int(bbox.p.y);
 
+		dc.phase.x = dc.mask.m_phase.x;
+		dc.phase.y = dc.mask.m_phase.y;
+
+		// Give fill_path a null clip path because it will be in the wrong place and because
+		// we will be adding in our own clip path later
 		code = (*dev_proc(pmdev, fill_path))((gx_device *)pmdev, 
-			pis, ppath, params, /*pdcolor*/ &dc, pcpath);
+			pis, ppath, params, &dc, NULL);
 
 		/* Restore the paths to their original locations. Maybe not needed */
 		gx_path_translate(ppath, bbox.p.x, bbox.p.y);
-		gx_path_translate(pcpath, bbox.p.x, bbox.p.y);
-
+		
 		svg->current_image_clip_path = pcpath;
 
 		/* Restore the paths to their original locations. Maybe not needed */
