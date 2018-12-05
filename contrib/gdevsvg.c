@@ -1788,16 +1788,25 @@ int *rows_used)
 	// Get the planes copied
 	for (y = 0; y < height; y++)
 	{
-		if (pie->num_planes == 1 && (pie->plane_depths[0] == 24 || pie->plane_depths[0] == 8))
+		if ((pie->num_planes == 1) && ((pie->plane_depths[0] == 24) || (pie->plane_depths[0] == 8) || (pie->plane_depths[0] == 1)))
 		{
 			memcpy(row, planes[0].data + planes[0].data_x + (y * raster), raster);
 		}
 		else
 		{
-			for (i = 0; i < pie->plane_widths[0]; i++) {
-				for (k = 0; k < pie->num_planes; ++k) {
+			for (i = 0; i < pie->plane_widths[0]; i++) 
+			{
+				for (k = 0; k < pie->num_planes; ++k) 
+				{
 
-					if (planes[k].data && pie->num_planes < 4)
+					if (planes[k].data && (pie->num_planes == 1))
+					{
+						bytes = 1;
+						ind = i * pie->num_planes * bytes + k + (raster * y);
+
+						memcpy(&row[ind], &planes[k].data[i * bytes], bytes);
+					}
+					else if (planes[k].data && (pie->num_planes < 4))
 					{
 						// This hasn't been tested yet
 						bytes = pie->plane_depths[k] / 8;
@@ -2239,8 +2248,15 @@ int setup_png(gx_device * pdev, svg_image_enum_t  *pie, const gs_color_space *pc
 		break;
 	case 1:
 		bit_depth = 1;
-		color_type = PNG_COLOR_TYPE_GRAY;
-		invert = true;
+		if (gx_device_has_color(pdev))
+		{
+			color_type = PNG_COLOR_TYPE_PALETTE;
+		}
+		else
+		{
+			color_type = PNG_COLOR_TYPE_GRAY;
+			invert = true;
+		}
 		break;
 	}
 
@@ -2271,7 +2287,22 @@ int setup_png(gx_device * pdev, svg_image_enum_t  *pie, const gs_color_space *pc
 			This crap kept me busy for 4 days straight. Needed to apply the palette
 			to the image when the image is an 8-bit indexed image.
 			*/
-			if (depth == 8)
+			if (depth == 1)
+			{
+				if (i == 0)
+				{
+					palettep[i].red = 0; //  Assume black foreground
+					palettep[i].green = 0; //  Assume black foreground
+					palettep[i].blue = 0; //  Assume black foreground
+				}
+				else if (i == 1)
+				{
+					palettep[i].red = 255; //  Assume white background
+					palettep[i].green = 255; //  Assume white background
+					palettep[i].blue = 255; //  Assume white background
+				}
+			}
+			else if (depth == 8)
 			{
 				gs_client_color cc;
 				gs_cspace_indexed_lookup(pcs, i, &cc);
@@ -2345,7 +2376,9 @@ int setup_png(gx_device * pdev, svg_image_enum_t  *pie, const gs_color_space *pc
 		PNG_COMPRESSION_TYPE_DEFAULT,
 		PNG_FILTER_TYPE_DEFAULT);
 	if (palettep)
+	{
 		png_set_PLTE(png_ptr, info_ptr, palettep, num_palette);
+	}
 
 	png_set_text(png_ptr, info_ptr, &text_png, 1);
 #else
