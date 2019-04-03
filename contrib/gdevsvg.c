@@ -1798,15 +1798,7 @@ int *rows_used)
 			{
 				for (k = 0; k < pie->num_planes; ++k) 
 				{
-
-					if (planes[k].data && (pie->num_planes == 1))
-					{
-						bytes = 1;
-						ind = i * pie->num_planes * bytes + k + (raster * y);
-
-						memcpy(&row[ind], &planes[k].data[i * bytes], bytes);
-					}
-					else if (planes[k].data && (pie->num_planes < 4))
+					if (planes[k].data && (pie->num_planes < 4))
 					{
 						// This hasn't been tested yet
 						bytes = pie->plane_depths[k] / 8;
@@ -1817,10 +1809,15 @@ int *rows_used)
 						if (pie->num_planes == 1 && pie->plane_depths[k] == 32)
 						{
 							invRow = &row[ind];
-							*(invRow + 0) ^= 0xff;
-							*(invRow + 1) ^= 0xff;
-							*(invRow + 2) ^= 0xff;
-							*(invRow + 3) ^= 0xff;
+							
+							byte cmyk_c = *(invRow + 0), cmyk_m = *(invRow + 1), cmyk_y = *(invRow + 2), cmyk_k = *(invRow + 3);
+
+							// CMYK to RGBA
+							black = (1.0 - cmyk_k / 255.0);
+							/*R*/ *(invRow + 0) = (unsigned char)(255 * (1.0 - cmyk_c / 255.0)*black);
+							/*G*/ *(invRow + 1) = (unsigned char)(255 * (1.0 - cmyk_m / 255.0)*black);
+							/*B*/ *(invRow + 2) = (unsigned char)(255 * (1.0 - cmyk_y / 255.0)*black);
+							/*A*/ *(invRow + 3) = 0; // Alpha is inverted, 0 -> Full Opacity
 						}
 					}
 					else if (pie->num_planes == 4)
