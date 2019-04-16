@@ -1861,20 +1861,16 @@ struct mem_encode *state,
 	char line[SVG_LINESIZE];
 	size_t outputSize = 0;
 	byte *buffer = 0;
-	float tx, ty;
 	/* Flush the buffer as base 64 */
 	buffer = base64_encode(state->memory, state->buffer, state->size, &outputSize);
-
-	tx = (ImageMatrix.yy) > 0 ? 0 : ctm.yx;
-	ty = (ImageMatrix.yy) > 0 ? 0 : ctm.yy;
 
 	gs_matrix m3;
 	m3.xx = ctm.xx / width * ImageMatrix.xx / width;
 	m3.xy = ctm.xy / width * ImageMatrix.xx / width;
 	m3.yx = ctm.yx / height * ImageMatrix.yy / height;
 	m3.yy = ctm.yy / height * ImageMatrix.yy / height;
-	m3.tx = ctm.tx + tx;
-	m3.ty = ctm.ty + ty;
+	m3.tx = ctm.tx;
+	m3.ty = ctm.ty;
 
 	gs_sprintf(line, "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>",
 		m3.xx, m3.xy, m3.yx, m3.yy, m3.tx, m3.ty
@@ -2017,6 +2013,10 @@ gx_image_enum_common_t ** pinfo)
 	pie->height = ppi->Height;
 	pie->ctm = pis->ctm;
 	pie->ImageMatrix = pim->ImageMatrix;
+
+	pie->ctm.tx += (pie->ImageMatrix.yy) > 0 ? -pie->ctm.yx : pie->ctm.yx;
+	pie->ctm.ty += (pie->ImageMatrix.yy) > 0 ? -pie->ctm.yy : pie->ctm.yy;
+
 	/* Initialize PNG structures */
 	pie->png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 	pie->info_ptr = png_create_info_struct(pie->png_ptr);
