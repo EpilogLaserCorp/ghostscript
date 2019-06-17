@@ -35,6 +35,57 @@
 #include "gxcolor2.h"
 #include "gzstate.h"
 
+struct path_type_stack_node
+{
+	gx_path_type_t data;
+	struct path_type_stack_node* next;
+};
+
+struct path_type_stack_node* new_path_type_node(gx_path_type_t data)
+{
+	struct path_type_stack_node* stackNode =
+		(struct path_type_stack_node*) malloc(sizeof(struct path_type_stack_node));
+	stackNode->data = data;
+	stackNode->next = NULL;
+	return stackNode;
+}
+
+bool path_type_stack_is_empty(struct path_type_stack_node *root)
+{
+	return !root;
+}
+
+void push_path_type(struct path_type_stack_node** root, gx_path_type_t data)
+{
+	struct path_type_stack_node* stackNode = new_path_type_node(data);
+	stackNode->next = *root;
+	*root = stackNode;
+}
+
+gx_path_type_t pop_path_type(struct path_type_stack_node** root)
+{
+	if (path_type_stack_is_empty(*root))
+	{
+		return gx_path_type_none;
+	}
+
+	struct path_type_stack_node* temp = *root;
+	*root = (*root)->next;
+	gx_path_type_t popped = temp->data;
+	free(temp);
+
+	return popped;
+}
+
+gx_path_type_t peek_path_type(struct path_type_stack_node* root)
+{
+	if (path_type_stack_is_empty(root))
+	{
+		return gx_path_type_none;
+	}
+
+	return root->data;
+}
 
 /*
 * libpng versions 1.0.3 and later allow disabling access to the stdxxx
@@ -159,6 +210,7 @@ typedef struct gx_device_svg_s {
 	gx_clip_path *current_clip_path;
 	gx_clip_path *current_image_clip_path;
 	bool writing_clip;
+	struct path_type_stack_node* path_type_stack;
 } gx_device_svg;
 
 #define svg_device_body(dname, depth)\
@@ -458,6 +510,7 @@ svg_open_device(gx_device *dev)
 	svg->current_clip_path = NULL;
 	svg->current_image_clip_path = NULL;
 	svg->writing_clip = false;
+	svg->path_type_stack = NULL;
 
 	return code;
 }
@@ -1489,6 +1542,7 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 			{
 				// Write the rect path
 				svg_write_clip_start(svg, matrix);
+
 				gdev_vector_dorect(
 					svg,
 					int2fixed(rect->xmin),
@@ -1671,6 +1725,8 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 {
 	gx_device_svg *svg = (gx_device_svg *)vdev;
 
+	push_path_type(&svg->path_type_stack, type);
+
 	/* skip non-drawing paths for now */
 	if (!(type & gx_path_type_fill) && !(type & gx_path_type_stroke))
 	{
@@ -1733,6 +1789,7 @@ double x, double y, gx_path_type_t type)
 	char line[SVG_LINESIZE];
 
 	/* skip non-drawing paths for now */
+	type = peek_path_type(svg->path_type_stack); // Use the type from the path-type stack
 	if (!(type & gx_path_type_fill) && !(type & gx_path_type_stroke))
 		return 0;
 
@@ -1754,6 +1811,7 @@ double x, double y, gx_path_type_t type)
 	char line[SVG_LINESIZE];
 
 	/* skip non-drawing paths for now */
+	type = peek_path_type(svg->path_type_stack); // Use the type from the path-type stack
 	if (!(type & gx_path_type_fill) && !(type & gx_path_type_stroke))
 		return 0;
 
@@ -1776,6 +1834,7 @@ double x3, double y3, gx_path_type_t type)
 	char line[SVG_LINESIZE];
 
 	/* skip non-drawing paths for now */
+	type = peek_path_type(svg->path_type_stack); // Use the type from the path-type stack
 	if (!(type & gx_path_type_fill) && !(type & gx_path_type_stroke))
 		return 0;
 
@@ -1797,6 +1856,7 @@ double x_start, double y_start, gx_path_type_t type)
 	gx_device_svg *svg = (gx_device_svg *)vdev;
 
 	/* skip non-drawing paths for now */
+	type = peek_path_type(svg->path_type_stack); // Use the type from the path-type stack
 	if (!(type & gx_path_type_fill) && !(type & gx_path_type_stroke))
 		return 0;
 
@@ -1813,6 +1873,8 @@ static int
 svg_endpath(gx_device_vector *vdev, gx_path_type_t type)
 {
 	gx_device_svg *svg = (gx_device_svg *)vdev;
+
+	pop_path_type(&svg->path_type_stack);
 
 	/* skip non-drawing paths for now */
 	if (!(type & gx_path_type_fill) && !(type & gx_path_type_stroke))
