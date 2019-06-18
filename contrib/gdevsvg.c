@@ -35,6 +35,57 @@
 #include "gxcolor2.h"
 #include "gzstate.h"
 
+struct path_type_stack_node
+{
+	gx_path_type_t data;
+	struct path_type_stack_node* next;
+};
+
+struct path_type_stack_node* new_path_type_node(gx_path_type_t data)
+{
+	struct path_type_stack_node* stackNode =
+		(struct path_type_stack_node*) malloc(sizeof(struct path_type_stack_node));
+	stackNode->data = data;
+	stackNode->next = NULL;
+	return stackNode;
+}
+
+bool path_type_stack_is_empty(struct path_type_stack_node *root)
+{
+	return !root;
+}
+
+void push_path_type(struct path_type_stack_node** root, gx_path_type_t data)
+{
+	struct path_type_stack_node* stackNode = new_path_type_node(data);
+	stackNode->next = *root;
+	*root = stackNode;
+}
+
+gx_path_type_t pop_path_type(struct path_type_stack_node** root)
+{
+	if (path_type_stack_is_empty(*root))
+	{
+		return gx_path_type_none;
+	}
+
+	struct path_type_stack_node* temp = *root;
+	*root = (*root)->next;
+	gx_path_type_t popped = temp->data;
+	free(temp);
+
+	return popped;
+}
+
+gx_path_type_t peek_path_type(struct path_type_stack_node* root)
+{
+	if (path_type_stack_is_empty(root))
+	{
+		return gx_path_type_none;
+	}
+
+	return root->data;
+}
 
 /*
 * libpng versions 1.0.3 and later allow disabling access to the stdxxx
@@ -159,6 +210,7 @@ typedef struct gx_device_svg_s {
 	gx_clip_path *current_clip_path;
 	gx_clip_path *current_image_clip_path;
 	bool writing_clip;
+	struct path_type_stack_node* path_type_stack;
 } gx_device_svg;
 
 #define svg_device_body(dname, depth)\
@@ -458,6 +510,7 @@ svg_open_device(gx_device *dev)
 	svg->current_clip_path = NULL;
 	svg->current_image_clip_path = NULL;
 	svg->writing_clip = false;
+	svg->path_type_stack = NULL;
 
 	return code;
 }
@@ -1375,10 +1428,11 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 {
 	gs_fixed_rect bbox;
 	float bboxArea;
-	float minBboxArea = MAX_FLOAT;
 	int code = 0, mainBboxCode;
 	gx_cpath_path_list *path_list;
 	int clipPathIndex = -1, index = 0;
+
+	bool has_main_clip = false;
 
 	if (pcpath == NULL)
 	{
@@ -1400,21 +1454,18 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 					abs(fixed2float(bbox.q.x - bbox.p.x)) *
 					abs(fixed2float(bbox.q.y - bbox.p.y));
 
-				if (bboxArea < minBboxArea)
-				{
-					minBboxArea = bboxArea;
-				}
-
 				++path_list_size;
 			}
 		} while ((path_list = path_list->next));
 	}
 	++path_list_size; // Add once for the path contained in pcpath->path
 
-	// Fill in an array of path pointers, with the 1st being the main path
-	gx_path **all_paths = (gx_path**)malloc(path_list_size * sizeof(gx_path*));
+	// Increment used ID
 	svg->usedIds = svg->highestUsedId + 1;
 	int original_clip_path_id = svg->usedIds;
+
+	// Fill in an array of path pointers, with the 1st being the main path
+	gx_path **all_paths = (gx_path**)malloc(path_list_size * sizeof(gx_path*));
 	all_paths[0] = &pcpath->path;
 	if (pcpath->path_list != NULL)
 	{
@@ -1461,12 +1512,110 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 		svg->validClipPath = true;
 	}
 
-	if (!svg->validClipPath)
+	// If we have a valid clipping path by now, then using pcpath->rect_list won't benefit us.
+	// It seems that pcpath->rect_list will only provide a series of rectangles/pixels that contain
+	// the artwork. The combination of these rects as a whole will make a correct clipping area,
+	// but they will be redundant if a clipping path has been provided and will also take up a lot
+	// of space in the output svg file.
+	if (!svg->validClipPath && (pcpath->rect_list != NULL))
+	{
+		// Note: We will only add one clipping path (which will have one or more rectangles)
+		++path_list_size; // Add once for the path contained in pcpath->path
+
+		if (pcpath->rect_list->list.count == 1)
+		{
+			gx_clip_rect *rect = &pcpath->rect_list->list.single;
+
+			// Check the bounds
+			if ((rect->xmax == rect->xmin) || (rect->ymax == rect->ymin))
+			{
+				// A rect with zero width or height will not clip anything
+				++null_path_count;
+			}
+			// Check if it's the page-rect
+			else if ((rect->xmin == 0) && (rect->ymin == 0) && (rect->xmax == svg->width) && (rect->ymax == svg->height))
+			{
+				++null_path_count;
+				has_main_clip = true;
+			}
+			else
+			{
+				// Write the rect path
+				svg_write_clip_start(svg, matrix);
+
+				gdev_vector_dorect(
+					svg,
+					int2fixed(rect->xmin),
+					int2fixed(rect->ymin),
+					int2fixed(rect->xmax),
+					int2fixed(rect->ymax),
+					gx_path_type_stroke
+					);
+				svg_write_clip_end(svg);
+
+				svg->validClipPath = true;
+			}
+		}
+		else if (pcpath->rect_list->list.head != NULL)
+		{
+			svg_write_clip_start(svg, matrix);
+
+			gx_clip_rect *rect = pcpath->rect_list->list.head;
+			do
+			{
+				// Check the bounds
+				if ((rect->xmax == rect->xmin) || (rect->ymax == rect->ymin))
+				{
+					// A rect with zero width or height will not clip anything
+					continue;
+				}
+				// Check if it's the page-rect
+				else if ((rect->xmin == 0) && (rect->ymin == 0) && (rect->xmax == svg->width) && (rect->ymax == svg->height))
+				{
+					continue;
+				}
+				else
+				{
+					// Write the rect path
+					gdev_vector_dorect(
+						svg,
+						int2fixed(rect->xmin),
+						int2fixed(rect->ymin),
+						int2fixed(rect->xmax),
+						int2fixed(rect->ymax),
+						gx_path_type_stroke
+						);
+				}
+			} while ((rect = rect->next));
+
+			svg_write_clip_end(svg);
+			svg->validClipPath = true;
+		}
+	}
+
+	if (!svg->validClipPath && !has_main_clip)
+	{
+		svg_write_clip_start(svg, matrix);
+		gdev_vector_dorect(
+			svg,
+			int2fixed(0),
+			int2fixed(0),
+			int2fixed(0),
+			int2fixed(0),
+			gx_path_type_stroke
+			);
+		svg_write_clip_end(svg);
+
+		svg->validClipPath = true;
+	}
+	
+	if (!svg->validClipPath && has_main_clip)
 	{
 		svg->start_clip_mark = -1;
 
 		--svg->usedIds; // Return to original value
 		svg->highestUsedId = svg->usedIds;
+
 		return 1;
 	}
 	else
@@ -1475,7 +1624,7 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 	}
 
 	// begin groups when there is more than one clip path
-	for (int i = 1; i < path_list_size - null_path_count; ++i)
+	for (int i = 1; i < (path_list_size - null_path_count); ++i)
 	{
 		++svg->mark;
 
@@ -1576,6 +1725,8 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 {
 	gx_device_svg *svg = (gx_device_svg *)vdev;
 
+	push_path_type(&svg->path_type_stack, type);
+
 	/* skip non-drawing paths for now */
 	if (!(type & gx_path_type_fill) && !(type & gx_path_type_stroke))
 	{
@@ -1638,6 +1789,7 @@ double x, double y, gx_path_type_t type)
 	char line[SVG_LINESIZE];
 
 	/* skip non-drawing paths for now */
+	type = peek_path_type(svg->path_type_stack); // Use the type from the path-type stack
 	if (!(type & gx_path_type_fill) && !(type & gx_path_type_stroke))
 		return 0;
 
@@ -1659,6 +1811,7 @@ double x, double y, gx_path_type_t type)
 	char line[SVG_LINESIZE];
 
 	/* skip non-drawing paths for now */
+	type = peek_path_type(svg->path_type_stack); // Use the type from the path-type stack
 	if (!(type & gx_path_type_fill) && !(type & gx_path_type_stroke))
 		return 0;
 
@@ -1681,6 +1834,7 @@ double x3, double y3, gx_path_type_t type)
 	char line[SVG_LINESIZE];
 
 	/* skip non-drawing paths for now */
+	type = peek_path_type(svg->path_type_stack); // Use the type from the path-type stack
 	if (!(type & gx_path_type_fill) && !(type & gx_path_type_stroke))
 		return 0;
 
@@ -1702,6 +1856,7 @@ double x_start, double y_start, gx_path_type_t type)
 	gx_device_svg *svg = (gx_device_svg *)vdev;
 
 	/* skip non-drawing paths for now */
+	type = peek_path_type(svg->path_type_stack); // Use the type from the path-type stack
 	if (!(type & gx_path_type_fill) && !(type & gx_path_type_stroke))
 		return 0;
 
@@ -1718,6 +1873,8 @@ static int
 svg_endpath(gx_device_vector *vdev, gx_path_type_t type)
 {
 	gx_device_svg *svg = (gx_device_svg *)vdev;
+
+	pop_path_type(&svg->path_type_stack);
 
 	/* skip non-drawing paths for now */
 	if (!(type & gx_path_type_fill) && !(type & gx_path_type_stroke))
