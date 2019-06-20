@@ -1403,12 +1403,16 @@ static int svg_print_path_type(gx_device_svg *svg, gx_path_type_t type)
 	return 0;
 }
 
-static int svg_write_clip_start(gx_device_svg *svg, gs_matrix matrix)
+static int svg_write_clip_start(gx_device_svg *svg, gs_matrix matrix, bool winding_fill)
 {
 	char clippathStr[200];
+	char path_fill_rule[SVG_LINESIZE];
+	
+	gs_sprintf(path_fill_rule, "%s", winding_fill ? "clip-rule='nonzero'" : "clip-rule='evenodd'");
 
-	gs_sprintf(clippathStr, "<clipPath id='clip%i' transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
+	gs_sprintf(clippathStr, "<clipPath id='clip%i' %s transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
 		++svg->highestUsedId,
+		path_fill_rule,
 		matrix.xx, matrix.xy, matrix.yx, matrix.yy, matrix.tx, matrix.ty
 		);
 	svg_write(svg, clippathStr);
@@ -1439,6 +1443,9 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 		svg->validClipPath = false;
 		return 0;
 	}
+
+	bool winding_fill = (pcpath->rule <= 0);
+	gx_path_type_t clip_path_type = gx_path_type_stroke | (winding_fill ? gx_path_type_winding_number : gx_path_type_even_odd);
 
 	// Count how many paths there are
 	int path_list_size = 0;
@@ -1505,8 +1512,8 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 		}
 
 		// Write the path
-		svg_write_clip_start(svg, matrix);
-		gdev_vector_dopath(svg, path, gx_path_type_stroke, NULL);
+		svg_write_clip_start(svg, matrix, winding_fill);
+		gdev_vector_dopath(svg, path, clip_path_type, NULL);
 		svg_write_clip_end(svg);
 
 		svg->validClipPath = true;
@@ -1541,7 +1548,7 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 			else
 			{
 				// Write the rect path
-				svg_write_clip_start(svg, matrix);
+				svg_write_clip_start(svg, matrix, winding_fill);
 
 				gdev_vector_dorect(
 					svg,
@@ -1549,7 +1556,7 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 					int2fixed(rect->ymin),
 					int2fixed(rect->xmax),
 					int2fixed(rect->ymax),
-					gx_path_type_stroke
+					clip_path_type
 					);
 				svg_write_clip_end(svg);
 
@@ -1558,7 +1565,7 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 		}
 		else if (pcpath->rect_list->list.head != NULL)
 		{
-			svg_write_clip_start(svg, matrix);
+			svg_write_clip_start(svg, matrix, winding_fill);
 
 			gx_clip_rect *rect = pcpath->rect_list->list.head;
 			do
@@ -1583,7 +1590,7 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 						int2fixed(rect->ymin),
 						int2fixed(rect->xmax),
 						int2fixed(rect->ymax),
-						gx_path_type_stroke
+						clip_path_type
 						);
 				}
 			} while ((rect = rect->next));
@@ -1595,14 +1602,14 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 
 	if (!svg->validClipPath && !has_main_clip)
 	{
-		svg_write_clip_start(svg, matrix);
+		svg_write_clip_start(svg, matrix, winding_fill);
 		gdev_vector_dorect(
 			svg,
 			int2fixed(0),
 			int2fixed(0),
 			int2fixed(0),
 			int2fixed(0),
-			gx_path_type_stroke
+			clip_path_type
 			);
 		svg_write_clip_end(svg);
 
