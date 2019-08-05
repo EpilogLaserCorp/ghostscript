@@ -1941,7 +1941,7 @@ int *rows_used)
 	double black;
 	byte *row;
 	byte *invRow;
-	raster = pie->num_planes * pie->plane_widths[0] * pie->plane_depths[0] / 8;
+	raster = (int)ceil(pie->num_planes * pie->plane_widths[0] * pie->plane_depths[0] / 8.0);
 	row = gs_alloc_bytes(pie->memory, raster, "png raster buffer");
 	if (row == 0)
 		return gs_note_error(gs_error_VMerror);
