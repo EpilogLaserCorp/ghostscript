@@ -187,6 +187,7 @@ byte *base64_encode(gs_memory_t *memory, const unsigned char *data,
 
 /* ---------------- Device definition ---------------- */
 
+#define MAX_PATTERNS 255
 typedef struct gx_device_svg_s {
 	/* superclass state */
 	gx_device_vector_common;
@@ -201,6 +202,9 @@ typedef struct gx_device_svg_s {
 	gs_line_cap linecap;
 	gs_line_join linejoin;
 	double miterlimit;
+	float dashPattern[MAX_PATTERNS];
+	int dashPatternCount;
+	double dashPatternOffset;
 	gs_string class_string;
 	int class_number;
 	bool from_stroke_path;
@@ -501,6 +505,12 @@ svg_open_device(gx_device *dev)
 	svg->linecap = SVG_DEFAULT_LINECAP;
 	svg->linejoin = SVG_DEFAULT_LINEJOIN;
 	svg->miterlimit = SVG_DEFAULT_MITERLIMIT;
+	for (int i = 0; i < MAX_PATTERNS; ++i)
+	{
+		svg->dashPattern[i] = 0.0f;
+	}
+	svg->dashPatternCount = 0;
+	svg->dashPatternOffset = 0.0;
 	svg->class_string.data = 0;
 	svg->class_string.size = 0;
 	svg->from_stroke_path = false;
@@ -1178,6 +1188,29 @@ static void svg_write_state_to_svg(gx_device_svg *svg, const bool emptyPen, cons
 		gs_sprintf(line, "stroke-miterlimit='%lf' ", svg->miterlimit);
 		svg_write(svg, line);
 	}
+
+	if (svg->dashPatternCount > 0)
+	{
+		gs_sprintf(line, "stroke-dasharray='");
+		svg_write(svg, line);
+
+		for (int i = 0; (i < svg->dashPatternCount) && (i < MAX_PATTERNS); ++i)
+		{
+			if (i != 0)
+			{
+				gs_sprintf(line, " ");
+				svg_write(svg, line);
+			}
+			gs_sprintf(line, "%f", svg->dashPattern[i]);
+			svg_write(svg, line);
+		}
+
+		gs_sprintf(line, "' ");
+		svg_write(svg, line);
+
+		gs_sprintf(line, "stroke-dashoffset='%f' ", svg->dashPatternOffset);
+		svg_write(svg, line);
+	}
 }
 
 static int
@@ -1285,6 +1318,16 @@ svg_setdash(gx_device_vector *vdev, const float *pattern,
 uint count, double offset)
 {
 	if_debug0m('_', vdev->memory, "svg_setdash\n");
+
+	gx_device_svg *svg = (gx_device_svg *)vdev;
+	for (int i = 0; (i < count) && (i < MAX_PATTERNS); ++i)
+	{
+		svg->dashPattern[i] = pattern[i];
+	}
+	svg->dashPatternCount = count;
+	svg->dashPatternOffset = offset;
+	svg->dirty++;
+
 	return 0;
 }
 static int
