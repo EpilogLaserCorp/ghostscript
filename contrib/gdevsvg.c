@@ -417,7 +417,7 @@ struct png_setup_s{
 };
 
 int setup_png_from_struct(gx_device * pdev, struct png_setup_s* setup);
-int setup_png(gx_device * pdev, svg_image_enum_t  *pie, const gs_color_space *pcs);
+int setup_png(gx_device * pdev, svg_image_enum_t  *pie, const gs_color_space *pcs, bool monod);
 int make_png(gx_device_memory *mdev);
 void my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length);
 void my_png_flush(png_structp png_ptr);
@@ -2072,10 +2072,10 @@ struct mem_encode *state,
 	buffer = base64_encode(state->memory, state->buffer, state->size, &outputSize);
 
 	gs_matrix m3;
-	m3.xx = ctm.xx / width * ImageMatrix.xx / width;
-	m3.xy = ctm.xy / width * ImageMatrix.xx / width;
-	m3.yx = ctm.yx / height * ImageMatrix.yy / height;
-	m3.yy = ctm.yy / height * ImageMatrix.yy / height;
+	m3.xx = ctm.xx / ImageMatrix.xx;
+	m3.xy = ctm.xy / ImageMatrix.xx;
+	m3.yx = ctm.yx / ImageMatrix.yy;
+	m3.yy = ctm.yy / ImageMatrix.yy;
 	m3.tx = ctm.tx;
 	m3.ty = ctm.ty;
 
@@ -2220,8 +2220,8 @@ gx_image_enum_common_t ** pinfo)
 	pie->ctm = pis->ctm;
 	pie->ImageMatrix = pim->ImageMatrix;
 
-	pie->ctm.tx += (pie->ImageMatrix.yy) > 0 ? -pie->ctm.yx : pie->ctm.yx;
-	pie->ctm.ty += (pie->ImageMatrix.yy) > 0 ? -pie->ctm.yy : pie->ctm.yy;
+	pie->ctm.tx += -copysignf(1.0, pie->ImageMatrix.yy) * (pie->ctm.xx * pie->ImageMatrix.tx / abs(pie->ImageMatrix.xx) + pie->ctm.yx * pie->ImageMatrix.ty / abs(pie->ImageMatrix.yy));
+	pie->ctm.ty += -copysignf(1.0, pie->ImageMatrix.yy) * (pie->ctm.xy * pie->ImageMatrix.tx / abs(pie->ImageMatrix.xx) + pie->ctm.yy * pie->ImageMatrix.ty / abs(pie->ImageMatrix.yy));
 
 	/* Initialize PNG structures */
 	pie->png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
@@ -2241,7 +2241,7 @@ gx_image_enum_common_t ** pinfo)
 	code = 0;			/* for normal path */
 
 	png_set_write_fn(pie->png_ptr, &pie->state, my_png_write_data, my_png_flush);
-	code = setup_png(dev, pie, ppi->ColorSpace);
+	code = setup_png(dev, pie, ppi->ColorSpace, (ppi->Decode[0] <= 0.5f));
 
 	if (code) {
 		goto done;
@@ -2318,7 +2318,11 @@ my_png_flush(png_structp png_ptr)
 
 }
 
-int setup_png(gx_device * pdev, svg_image_enum_t  *pie, const gs_color_space *pcs)
+int setup_png(
+	gx_device * pdev, 
+	svg_image_enum_t  *pie,
+	const gs_color_space *pcs,
+	bool monod)
 {
 	gs_memory_t *mem = pdev->memory;
 	//int raster = gdev_prn_raster(pdev);
@@ -2453,15 +2457,8 @@ int setup_png(gx_device * pdev, svg_image_enum_t  *pie, const gs_color_space *pc
 		break;
 	case 1:
 		bit_depth = 1;
-		if (gx_device_has_color(pdev))
-		{
-			color_type = PNG_COLOR_TYPE_PALETTE;
-		}
-		else
-		{
-			color_type = PNG_COLOR_TYPE_GRAY;
-			invert = true;
-		}
+		color_type = PNG_COLOR_TYPE_GRAY;
+		invert = !monod;
 		break;
 	}
 
