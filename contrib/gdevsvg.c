@@ -2090,10 +2090,7 @@ svg_end_image(gx_image_enum_common_t * info, bool draw_last)
 	write_base64_png(info->dev, &pie->state, pie->ctm, pie->ImageMatrix, 
 		pie->width, pie->height);
 
-	//free(pie->state.buffer);
 	gs_free_object(pie->memory, pie->state.buffer, "png img buf");
-
-	//gs_free_object(pie->memory, buffer, "base64 buffer");
 
 	gx_image_free_enum(&info);
 	return 0;
@@ -2253,12 +2250,10 @@ my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
 	if (p->buffer)
 	{
 		buffer = gs_resize_object(p->memory, p->buffer, nsize, "png img buf");
-		//buffer = realloc(p->buffer, nsize);
 	}
 	else
 	{
 		buffer = gs_alloc_bytes(p->memory, nsize, "png img buf");
-		//buffer = malloc(nsize);
 	}
 
 	if (!buffer)
