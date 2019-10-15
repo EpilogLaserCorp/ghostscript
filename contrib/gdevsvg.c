@@ -1966,11 +1966,11 @@ int *rows_used)
 					{
 						// This hasn't been tested yet
 						bytes = pie->plane_depths[k] / 8;
-						ind = i * pie->num_planes * bytes + k + (raster * y);
+						ind = i * pie->num_planes * bytes + planes[0].data_x + k;
 
-						memcpy(&row[ind], &planes[k].data[i * bytes], bytes);
+						memcpy(&row[ind], &planes[k].data[i * bytes + y * raster], bytes);
 
-						if (pie->num_planes == 1 && pie->plane_depths[k] == 32)
+						if ((pie->num_planes == 1) && (pie->plane_depths[k] == 32))
 						{
 							invRow = &row[ind];
 							
@@ -2091,7 +2091,6 @@ svg_end_image(gx_image_enum_common_t * info, bool draw_last)
 		pie->width, pie->height);
 
 	gs_free_object(pie->memory, pie->state.buffer, "png img buf");
-	//gs_free_object(pie->memory, buffer, "base64 buffer");
 
 	gx_image_free_enum(&info);
 	return 0;
@@ -2249,11 +2248,13 @@ my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
 
 	/* allocate or grow buffer */
 	if (p->buffer)
+	{
 		buffer = gs_resize_object(p->memory, p->buffer, nsize, "png img buf");
-	/*p->buffer = realloc(p->buffer, nsize);*/
+	}
 	else
+	{
 		buffer = gs_alloc_bytes(p->memory, nsize, "png img buf");
-	/*p->buffer = malloc(nsize);*/
+	}
 
 	if (!buffer)
 	{
