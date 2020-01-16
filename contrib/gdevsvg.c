@@ -2240,8 +2240,14 @@ gx_image_enum_common_t ** pinfo)
 	}
 	code = 0;			/* for normal path */
 
+	int ppiDecode = 0.0; // Not sure if this is an appropriate default, have't needed to use the default yet in testing
+	if (ppi->Decode != NULL)
+	{
+		ppiDecode = ppi->Decode[0];
+	}
+
 	png_set_write_fn(pie->png_ptr, &pie->state, my_png_write_data, my_png_flush);
-	code = setup_png(dev, pie, ppi->ColorSpace, (ppi->Decode[0] <= 0.5f));
+	code = setup_png(dev, pie, ppi->ColorSpace, (ppiDecode <= 0.5f));
 
 	if (code) {
 		goto done;
