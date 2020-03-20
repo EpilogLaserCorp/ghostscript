@@ -392,7 +392,6 @@ struct mem_encode
 };
 
 typedef struct svg_image_enum_s {
-	gx_image_enum_common;
 	int rows_left;
 	int width;
 	int height;
@@ -402,6 +401,7 @@ typedef struct svg_image_enum_s {
 	struct mem_encode state;
 	gs_matrix_fixed ctm;
 	gs_matrix ImageMatrix;
+	gx_image_enum_common;
 } svg_image_enum_t;
 
 
@@ -421,8 +421,9 @@ int setup_png(gx_device * pdev, svg_image_enum_t  *pie, const gs_color_space *pc
 int make_png(gx_device_memory *mdev);
 void my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length);
 void my_png_flush(png_structp png_ptr);
-static int write_base64_png(gx_device* dev,
-struct mem_encode *state,
+static int write_base64_png(
+	gx_device* dev,
+	struct mem_encode *state,
 	gs_matrix_fixed ctm,
 	gs_matrix ImageMatrix,
 	uint width,
@@ -2058,8 +2059,9 @@ int *rows_used)
 }
 
 
-static int write_base64_png(gx_device* dev,
-struct mem_encode *state,
+static int write_base64_png(
+	gx_device* dev,
+	struct mem_encode *state,
 	gs_matrix_fixed ctm,
 	gs_matrix ImageMatrix,
 	uint width,
@@ -3013,8 +3015,9 @@ int setup_png(
 //	png_info **info_ptrp,
 //struct mem_encode *state,
 //struct png_setup_s *setup)
-int init_png(gx_device * pdev, struct mem_encode *state,
-struct png_setup_s *setup)
+int init_png(gx_device * pdev,
+	struct mem_encode *state,
+	struct png_setup_s *setup)
 {
 	int code = 0;
 	state->buffer = 0;
