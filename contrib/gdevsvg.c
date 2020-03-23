@@ -2340,11 +2340,6 @@ gx_device_color *pdevc)
 void
 my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
 {
-	// ^^^ TEMP
-	static int c = 0;
-	++c;
-
-
 	/* with libpng15 next line causes pointer deference error; use libpng12 */
 	struct mem_encode* p = (struct mem_encode*)png_get_io_ptr(png_ptr); /* was png_ptr->io_ptr */
 	size_t nsize = p->size + length;
