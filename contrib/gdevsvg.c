@@ -437,8 +437,16 @@ static int write_png_partial(
 	gx_device* dev,
 	struct mem_encode *state,
 	int len);
+static int write_png_base(
+	gx_device* dev,
+	struct mem_encode *state,
+	byte *buffer,
+	int len);
 static int write_png_end(gx_device* dev);
-static int make_png_from_mdev(gx_device_memory *mdev, float tx, float ty);
+static int make_png_from_mdev(
+	gx_device_memory *mdev,
+	float tx,
+	float ty);
 
 /* Vector device function table */
 
@@ -2116,7 +2124,21 @@ static int write_png_data(
 	gx_device* dev,
 	struct mem_encode *state)
 {
-	return write_png_partial(dev, state, state->size);
+	int code = 0;
+	byte *buffer = 0;
+
+	code = write_png_base(dev, state, buffer, state->size);
+	if (code)
+	{
+		return code;
+	}
+
+	if (buffer)
+	{
+		gs_free_object(state->memory, buffer, "base64 buffer");
+	}
+
+	return code;
 }
 
 static int write_png_partial(
@@ -2124,14 +2146,23 @@ static int write_png_partial(
 	struct mem_encode *state,
 	int len)
 {
+	byte *buffer = 0;
+	return write_png_base(dev, state, buffer, len);
+}
+
+static int write_png_base(
+	gx_device* dev,
+	struct mem_encode *state,
+	byte *buffer,
+	int len)
+{
 	char line[SVG_LINESIZE];
 	size_t outputSize = 0;
-	byte *buffer = 0;
+	
 	/* Flush the buffer as base 64 */
 	buffer = base64_encode(state->memory, state->buffer, len, &outputSize);
 
 	svg_write_bytes(dev, buffer, outputSize);
-	gs_free_object(state->memory, buffer, "base64 buffer");
 
 	return 0;
 }
@@ -2194,15 +2225,16 @@ gs_memory_t * memory, gx_image_enum_common_t ** pinfo)
 	return 0;
 }
 
-static int
-svg_begin_typed_image(gx_device * dev, const gs_imager_state * pis,
-const gs_matrix * pmat,
-const gs_image_common_t * pim,
-const gs_int_rect * prect,
-const gx_drawing_color * pdcolor,
-const gx_clip_path * pcpath,
-gs_memory_t * memory,
-gx_image_enum_common_t ** pinfo)
+static int svg_begin_typed_image(
+	gx_device * dev,
+	const gs_imager_state * pis,
+	const gs_matrix * pmat,
+	const gs_image_common_t * pim,
+	const gs_int_rect * prect,
+	const gx_drawing_color * pdcolor,
+	const gx_clip_path * pcpath,
+	gs_memory_t * memory,
+	gx_image_enum_common_t ** pinfo)
 {
 	gx_device_svg *svg = (gx_device_svg *)dev;
 	svg_image_enum_t *pie;
@@ -3133,7 +3165,10 @@ int init_png(gx_device * pdev,
 	return code ? code : gs_note_error(gs_error_VMerror);
 }
 
-static int make_png_from_mdev(gx_device_memory *mdev, float tx, float ty)
+static int make_png_from_mdev(
+	gx_device_memory *mdev,
+	float tx,
+	float ty)
 {
 	int code = 0;
 	struct mem_encode state;
@@ -3163,7 +3198,15 @@ static int make_png_from_mdev(gx_device_memory *mdev, float tx, float ty)
 #undef fopen
 
 	/* The png structures are set up and ready to use after init_png */
-	code = init_png(mdev, &state, &setup);
+	code = init_png(mdev->target, &state, &setup);
+	write_png_start(
+		mdev->target,
+		ctm,
+		m,
+		mdev->width,
+		mdev->height
+		);
+
 	if (!code)
 	{
 		// The png data should all be ready for dumping
@@ -3213,13 +3256,6 @@ static int make_png_from_mdev(gx_device_memory *mdev, float tx, float ty)
 
 		png_write_end(setup.png_ptr, setup.info_ptr);
 
-		write_png_start(
-			mdev->target,
-			ctm,
-			m,
-			mdev->width,
-			mdev->height
-			);
 		write_png_data(
 			mdev->target,
 			&state
