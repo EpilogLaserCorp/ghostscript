@@ -392,6 +392,7 @@ struct mem_encode
 };
 
 typedef struct svg_image_enum_s {
+	gx_image_enum_common;
 	int rows_left;
 	int width;
 	int height;
@@ -401,7 +402,6 @@ typedef struct svg_image_enum_s {
 	struct mem_encode state;
 	gs_matrix_fixed ctm;
 	gs_matrix ImageMatrix;
-	gx_image_enum_common;
 } svg_image_enum_t;
 
 
@@ -421,13 +421,16 @@ int setup_png(gx_device * pdev, svg_image_enum_t  *pie, const gs_color_space *pc
 int make_png(gx_device_memory *mdev);
 void my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length);
 void my_png_flush(png_structp png_ptr);
-static int write_base64_png(
+static int write_png_start(
 	gx_device* dev,
-	struct mem_encode *state,
 	gs_matrix_fixed ctm,
 	gs_matrix ImageMatrix,
 	uint width,
 	uint height);
+static int write_png_data(
+	gx_device* dev,
+	struct mem_encode *state);
+static int write_png_end(gx_device* dev);
 static int make_png_from_mdev(gx_device_memory *mdev, float tx, float ty);
 
 /* Vector device function table */
@@ -2058,21 +2061,15 @@ int *rows_used)
 	return (pie->rows_left -= height) <= 0;
 }
 
-
-static int write_base64_png(
+static int write_png_start(
 	gx_device* dev,
-	struct mem_encode *state,
 	gs_matrix_fixed ctm,
 	gs_matrix ImageMatrix,
 	uint width,
 	uint height)
 {
 	char line[SVG_LINESIZE];
-	size_t outputSize = 0;
-	byte *buffer = 0;
-	/* Flush the buffer as base 64 */
-	buffer = base64_encode(state->memory, state->buffer, state->size, &outputSize);
-
+	
 	gs_matrix m3;
 	m3.xx = ctm.xx / ImageMatrix.xx;
 	m3.xy = ctm.xy / ImageMatrix.xx;
@@ -2104,13 +2101,34 @@ static int write_base64_png(
 	gs_sprintf(line, "<image %swidth='%d' height='%d' xlink:href=\"data:image/png;base64,",
 		svg->validClipPath ? clip_path_id : "", width, height);
 	svg_write(dev, line);
-	svg_write_bytes(dev, buffer, outputSize);
-	svg_write(dev, "\"/>");
 
-	close_clip_groups(svg);
-	
-	svg_write(dev, "</g>");
+	return 0;
+}
+
+static int write_png_data(
+	gx_device* dev,
+	struct mem_encode *state)
+{
+	char line[SVG_LINESIZE];
+	size_t outputSize = 0;
+	byte *buffer = 0;
+	/* Flush the buffer as base 64 */
+	buffer = base64_encode(state->memory, state->buffer, state->size, &outputSize);
+
+	svg_write_bytes(dev, buffer, outputSize);
 	gs_free_object(state->memory, buffer, "base64 buffer");
+
+	return 0;
+}
+
+static int write_png_end(gx_device* dev)
+{
+	char line[SVG_LINESIZE];
+
+	gx_device_svg *svg = (gx_device_svg *)dev;
+	svg_write(dev, "\"/>");
+	close_clip_groups(svg);
+	svg_write(dev, "</g>");
 
 	return 0;
 }
@@ -2132,8 +2150,20 @@ svg_end_image(gx_image_enum_common_t * info, bool draw_last)
 		png_destroy_write_struct(&pie->png_ptr, &pie->info_ptr);
 
 	/* Flush the buffer as base 64 */
-	write_base64_png(info->dev, &pie->state, pie->ctm, pie->ImageMatrix, 
-		pie->width, pie->height);
+	write_png_start(
+		info->dev,
+		pie->ctm,
+		pie->ImageMatrix,
+		pie->width,
+		pie->height
+		);
+	write_png_data(
+		info->dev,
+		&pie->state
+		);
+	write_png_end(
+		info->dev
+		);
 
 	gs_free_object(pie->memory, pie->state.buffer, "png img buf");
 
@@ -2292,6 +2322,11 @@ gx_device_color *pdevc)
 void
 my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
 {
+	// ^^^ TEMP
+	static int c = 0;
+	++c;
+
+
 	/* with libpng15 next line causes pointer deference error; use libpng12 */
 	struct mem_encode* p = (struct mem_encode*)png_get_io_ptr(png_ptr); /* was png_ptr->io_ptr */
 	size_t nsize = p->size + length;
@@ -3126,7 +3161,21 @@ static int make_png_from_mdev(gx_device_memory *mdev, float tx, float ty)
 
 		png_write_end(setup.png_ptr, setup.info_ptr);
 
-		write_base64_png(mdev->target, &state, ctm, m, mdev->width, mdev->height);
+		write_png_start(
+			mdev->target,
+			ctm,
+			m,
+			mdev->width,
+			mdev->height
+			);
+		write_png_data(
+			mdev->target,
+			&state
+			);
+		write_png_end(
+			mdev->target
+			);
+
 		gs_free_object(mdev->memory, state.buffer, "png img buf");
 		png_destroy_write_struct(&setup.png_ptr, &setup.info_ptr);
 		code = 0;
