@@ -153,10 +153,12 @@ static char *decoding_table = NULL;
 static int mod_table[] = { 0, 2, 1 };
 
 
-byte *base64_encode(gs_memory_t *memory, const unsigned char *data,
+byte *base64_encode(
+	gs_memory_t *memory, 
+	const unsigned char *data,
 	size_t input_length,
-	size_t *output_length) {
-
+	size_t *output_length)
+{
 	*output_length = 4 * ((input_length + 2) / 3);
 
 	byte *encoded_data = gs_alloc_bytes(memory, *output_length, "base64 buffer");
@@ -389,6 +391,7 @@ struct mem_encode
 	char *buffer;
 	size_t size;
 	gs_memory_t *memory;
+	gx_device *dev;
 };
 
 typedef struct svg_image_enum_s {
@@ -430,6 +433,10 @@ static int write_png_start(
 static int write_png_data(
 	gx_device* dev,
 	struct mem_encode *state);
+static int write_png_partial(
+	gx_device* dev,
+	struct mem_encode *state,
+	int len);
 static int write_png_end(gx_device* dev);
 static int make_png_from_mdev(gx_device_memory *mdev, float tx, float ty);
 
@@ -2109,11 +2116,19 @@ static int write_png_data(
 	gx_device* dev,
 	struct mem_encode *state)
 {
+	return write_png_partial(dev, state, state->size);
+}
+
+static int write_png_partial(
+	gx_device* dev,
+	struct mem_encode *state,
+	int len)
+{
 	char line[SVG_LINESIZE];
 	size_t outputSize = 0;
 	byte *buffer = 0;
 	/* Flush the buffer as base 64 */
-	buffer = base64_encode(state->memory, state->buffer, state->size, &outputSize);
+	buffer = base64_encode(state->memory, state->buffer, len, &outputSize);
 
 	svg_write_bytes(dev, buffer, outputSize);
 	gs_free_object(state->memory, buffer, "base64 buffer");
@@ -2150,13 +2165,6 @@ svg_end_image(gx_image_enum_common_t * info, bool draw_last)
 		png_destroy_write_struct(&pie->png_ptr, &pie->info_ptr);
 
 	/* Flush the buffer as base 64 */
-	write_png_start(
-		info->dev,
-		pie->ctm,
-		pie->ImageMatrix,
-		pie->width,
-		pie->height
-		);
 	write_png_data(
 		info->dev,
 		&pie->state
@@ -2247,6 +2255,7 @@ gx_image_enum_common_t ** pinfo)
 	pie->state.buffer = NULL;
 	pie->state.size = 0;
 	pie->state.memory = /*dev->*/memory;
+	pie->state.dev = dev;
 	pie->width = ppi->Width;
 	pie->height = ppi->Height;
 	pie->ctm = pis->ctm;
@@ -2290,6 +2299,15 @@ gx_image_enum_common_t ** pinfo)
 	pie->memory = memory;
 	pie->rows_left = ppi->Height;
 	*pinfo = (gx_image_enum_common_t *)pie;
+
+	write_png_start(
+		dev,
+		pie->ctm,
+		pie->ImageMatrix,
+		pie->width,
+		pie->height
+		);
+
 	return 0;
 dflt:
 	dmputs(dev->memory, ") DEFAULTED\n");
@@ -2352,6 +2370,43 @@ my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
 	/* copy new bytes to end of buffer */
 	memcpy(p->buffer + p->size, data, length);
 	p->size += length;
+
+	// Flush the buffer every once in a while to make sure we don't accumulate
+	// too much memory. Doing so prevents the program from crashing when trying to
+	// print an image that is very large.
+	//
+	// Note: To do this, we will only send data in amounts that are divisble by 3
+	// to ensure that the base 64 conversion does not add any zeros in the middle
+	// of the image data. The reason that we only do amounts divisible by 3 is
+	// because base 64 encoding increases the length of the data by 4/3rds. So if
+	// The data is not divisible by 3, the encoding will have to add some zeros at
+	// the end, just destroying the integrity of the data.
+	//
+	// Note: We've chosen to flush the memory when the image buffer reaches 1MB.
+	// This value is fairly arbitrary, but the job that prompted this code crashed
+	// when it reached about 5MB in size. Doing it too often will slow the program
+	// down, not doing it enough could cause the program to crash.
+	//
+	// Note: This code was necessary because ghostscript was compressing memory.
+	// When it did this, it compressed the svg_image_enum_s object, which in turn
+	// destroyed the values contained in (mem_encode) state. Thebn                                      
+
+	if (p->buffer && (p->size >= 1000000))
+	{
+		int flush_size = p->size / 3 * 3; // Round to nearest incrememnt of 3
+		int flush_remainder = p->size - flush_size;
+		char *temp = 0;
+
+		temp = malloc(flush_remainder);
+		memcpy(temp, p->buffer + p->size - flush_remainder, flush_remainder);
+
+		write_png_partial(p->dev, p, flush_size);
+
+		p->buffer = gs_resize_object(p->memory, p->buffer, flush_remainder, "png img buf");
+		memcpy(p->buffer, temp, flush_remainder);
+
+		p->size -= flush_size;
+	}
 }
 
 /* This is optional but included to show how png_set_write_fn() is called */
@@ -3058,6 +3113,8 @@ int init_png(gx_device * pdev,
 	state->buffer = 0;
 	state->memory = setup->memory;
 	state->size = 0;
+	state->dev = pdev;
+
 	png_struct *png_ptr;
 	png_info *info_ptr;
 	/* Initialize PNG structures */
