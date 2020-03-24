@@ -437,11 +437,6 @@ static int write_png_partial(
 	gx_device* dev,
 	struct mem_encode *state,
 	int len);
-static int write_png_base(
-	gx_device* dev,
-	struct mem_encode *state,
-	byte *buffer,
-	int len);
 static int write_png_end(gx_device* dev);
 static int make_png_from_mdev(
 	gx_device_memory *mdev,
@@ -2124,21 +2119,7 @@ static int write_png_data(
 	gx_device* dev,
 	struct mem_encode *state)
 {
-	int code = 0;
-	byte *buffer = 0;
-
-	code = write_png_base(dev, state, buffer, state->size);
-	if (code)
-	{
-		return code;
-	}
-
-	if (buffer)
-	{
-		gs_free_object(state->memory, buffer, "base64 buffer");
-	}
-
-	return code;
+	return write_png_partial(dev, state, state->size);
 }
 
 static int write_png_partial(
@@ -2146,31 +2127,20 @@ static int write_png_partial(
 	struct mem_encode *state,
 	int len)
 {
-	byte *buffer = 0;
-	return write_png_base(dev, state, buffer, len);
-}
-
-static int write_png_base(
-	gx_device* dev,
-	struct mem_encode *state,
-	byte *buffer,
-	int len)
-{
-	char line[SVG_LINESIZE];
 	size_t outputSize = 0;
-	
+	byte *buffer = 0;
+
 	/* Flush the buffer as base 64 */
 	buffer = base64_encode(state->memory, state->buffer, len, &outputSize);
 
 	svg_write_bytes(dev, buffer, outputSize);
+	gs_free_object(state->memory, buffer, "base64 buffer");
 
 	return 0;
 }
 
 static int write_png_end(gx_device* dev)
 {
-	char line[SVG_LINESIZE];
-
 	gx_device_svg *svg = (gx_device_svg *)dev;
 	svg_write(dev, "\"/>");
 	close_clip_groups(svg);
@@ -2183,11 +2153,7 @@ static int
 svg_end_image(gx_image_enum_common_t * info, bool draw_last)
 {
 	svg_image_enum_t *pie = (svg_image_enum_t *)info;
-	char line[SVG_LINESIZE];
-	size_t outputSize = 0;
-	byte *buffer = 0;
-	float ty;
-
+	
 	// Finalize the image
 	png_write_end(pie->png_ptr, pie->info_ptr);
 
@@ -2416,7 +2382,7 @@ my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
 	//
 	// Note: This code was necessary because ghostscript was compressing memory.
 	// When it did this, it compressed the svg_image_enum_s object, which in turn
-	// destroyed the values contained in (mem_encode) state. Thebn                                      
+	// destroyed the values contained in (mem_encode) state.
 
 	if (p->buffer && (p->size >= 1000000))
 	{
