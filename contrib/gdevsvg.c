@@ -2637,16 +2637,26 @@ int setup_png(
 				const int base_num_comp = cs_num_components(pcs->base_space);
 				if (base_num_comp == 4)
 				{
-					// Things get a bit funky when the base color space has an alpha channel.
-					// Since the indexed colors map to colors with an alpha channel and the palette
-					// is in the RGB space, we have a problem.
+					// Things get a bit funky when the base color space has an
+					// alpha channel. Since the indexed colors map to colors
+					// with an alpha channel and the palette is in the RGB
+					// space, we have a problem. To fix this, we first assume
+					// that we have a white background (sice there's not really
+					// anything else we can do). Then we determine what the RGB
+					// values would be with that alpha.
+
+					// Note: The alpha is inverted, so 1 is transparent and 0
+					// is opaque.
+
+					// Note: I'm unsure if alpha is 0.0 to 1.0 or 0 to 255. So
+					// we may find out later that we chose the wrong scale.
 
 					const double alpha = cc.paint.values[3];
 					const double oneMinusAlpha = 1.0 - alpha;
 
-					palettep[i].red = (int)(((cc.paint.values[0] * alpha + oneMinusAlpha) * 255) + 0.5); //  Assume white background
-					palettep[i].green = (int)(((cc.paint.values[1] * alpha + oneMinusAlpha) * 255) + 0.5); //  Assume white background
-					palettep[i].blue = (int)(((cc.paint.values[2] * alpha + oneMinusAlpha) * 255) + 0.5); //  Assume white background
+					palettep[i].red = (int)(((1.0 - (alpha + cc.paint.values[0] * oneMinusAlpha)) * 255) + 0.5); //  Assume white background
+					palettep[i].green = (int)(((1.0 - (alpha + cc.paint.values[1] * oneMinusAlpha)) * 255) + 0.5); //  Assume white background
+					palettep[i].blue = (int)(((1.0 - (alpha + cc.paint.values[2] * oneMinusAlpha)) * 255) + 0.5); //  Assume white background
 				}
 				else
 				{
