@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -29,63 +29,12 @@
 
 /* ================ Types and structures ================ */
 
-/*
- * We accumulate text, and possibly horizontal or vertical moves (depending
- * on the font's writing direction), until forced to emit them.  This
- * happens when changing text state parameters, when the buffer is full, or
- * when exiting text mode.
- *
- * Note that movement distances are measured in unscaled text space.
- */
-typedef struct pdf_text_move_s {
-    int index;			/* within buffer.chars */
-    float amount;
-} pdf_text_move_t;
-#define MAX_TEXT_BUFFER_CHARS 200 /* arbitrary, but overflow costs 5 chars */
-#define MAX_TEXT_BUFFER_MOVES 50 /* ibid. */
-typedef struct pdf_text_buffer_s {
-    /*
-     * Invariant:
-     *   count_moves <= MAX_TEXT_BUFFER_MOVES
-     *   count_chars <= MAX_TEXT_BUFFER_CHARS
-     *   0 < moves[0].index < moves[1].index < ... moves[count_moves-1].index
-     *	   <= count_chars
-     *   moves[*].amount != 0
-     */
-    pdf_text_move_t moves[MAX_TEXT_BUFFER_MOVES + 1];
-    byte chars[MAX_TEXT_BUFFER_CHARS];
-    int count_moves;
-    int count_chars;
-} pdf_text_buffer_t;
 #define TEXT_BUFFER_DEFAULT\
     { { 0, 0 } },		/* moves */\
     { 0 },			/* chars */\
     0,				/* count_moves */\
     0				/* count_chars */
 
-/*
- * We maintain two sets of text state values (as defined in gdevpdts.h): the
- * "in" set reflects the current state as seen by the client, while the
- * "out" set reflects the current state as seen by an interpreter processing
- * the content stream emitted so far.  We emit commands to make "out" the
- * same as "in" when necessary.
- */
-/*typedef struct pdf_text_state_s pdf_text_state_t;*/  /* gdevpdts.h */
-struct pdf_text_state_s {
-    /* State as seen by client */
-    pdf_text_state_values_t in; /* see above */
-    gs_point start;		/* in.txy as of start of buffer */
-    pdf_text_buffer_t buffer;
-    int wmode;			/* WMode of in.font */
-    /* State relative to content stream */
-    pdf_text_state_values_t out; /* see above */
-    double leading;		/* TL (not settable, only used internally) */
-    bool use_leading;		/* if true, use T* or ' */
-    bool continue_line;
-    gs_point line_start;
-    gs_point out_pos;		/* output position */
-    double PaintType0Width;
-};
 static const pdf_text_state_t ts_default = {
     /* State as seen by client */
     { TEXT_STATE_VALUES_DEFAULT },	/* in */
@@ -98,7 +47,9 @@ static const pdf_text_state_t ts_default = {
     0 /*false*/,		/* use_leading */
     0 /*false*/,		/* continue_line */
     { 0, 0 },			/* line_start */
-    { 0, 0 }			/* output position */
+    { 0, 0 },			/* output position */
+    0.0,                /* PaintType0Width */
+    1 /* false */       /* can_use_TJ */
 };
 /* GC descriptor */
 gs_private_st_ptrs2(st_pdf_text_state, pdf_text_state_t,  "pdf_text_state_t",
@@ -152,8 +103,13 @@ append_text_move(pdf_text_state_t *pts, double dw)
 static int
 set_text_distance(gs_point *pdist, double dx, double dy, const gs_matrix *pmat)
 {
-    int code = gs_distance_transform_inverse(dx, dy, pmat, pdist);
+    int code;
     double rounded;
+
+    if (dx > 1e38 || dy > 1e38)
+        code = gs_error_undefinedresult;
+    else
+        code = gs_distance_transform_inverse(dx, dy, pmat, pdist);
 
     if (code == gs_error_undefinedresult) {
         /* The CTM is degenerate.
@@ -206,7 +162,18 @@ add_text_delta_move(gx_device_pdf *pdev, const gs_matrix *pmat)
             dw = dist.y, dnotw = dist.x;
         else
             dw = dist.x, dnotw = dist.y;
-        if (dnotw == 0 && pts->buffer.count_chars > 0 &&
+        tdw = dw * -1000.0 / pts->in.size;
+
+        /* can_use_TJ is normally true, it is false only when we get a
+         * x/y/xyshow, and the width != real_width. In this case we cannot
+         * be certain of exactly how we got there. If its a PDF file with
+         * a /Widths override, and the operation is an x/y/xyshow (which
+         * will happen if the FontMatrix is nither horizontal not vertical)
+         * then we don't want to use a TJ as that will apply the Width once
+         * for the xhow and once for the Width override. Otherwise, we do
+         * want to use TJ as it makes for smaller files.
+         */
+        if (pts->can_use_TJ && dnotw == 0 && pts->buffer.count_chars > 0 &&
             /*
              * Acrobat Reader limits the magnitude of user-space
              * coordinates.  Also, AR apparently doesn't handle large
@@ -237,11 +204,15 @@ add_text_delta_move(gx_device_pdf *pdev, const gs_matrix *pmat)
               * therefore use large kerning values. Instead we check the kerned value
               * multiplied by the point size of the font.
               */
-            (tdw = dw * -1000.0 / pts->in.size,
-             tdw >= -MAX_USER_COORD && (tdw * pts->in.size) < MAX_USER_COORD)
+            (tdw >= -MAX_USER_COORD && (tdw * pts->in.size) < MAX_USER_COORD)
             ) {
             /* Use TJ. */
-            int code = append_text_move(pts, tdw);
+            int code;
+
+            if (tdw < MAX_USER_COORD || pdev->CompatibilityLevel > 1.4)
+                code = append_text_move(pts, tdw);
+            else
+                return -1;
 
             if (code >= 0)
                 goto finish;
@@ -294,11 +265,22 @@ pdf_set_text_matrix(gx_device_pdf * pdev)
          * matrix adjustments.
          */
         double sx = 72.0 / pdev->HWResolution[0],
-            sy = 72.0 / pdev->HWResolution[1];
+            sy = 72.0 / pdev->HWResolution[1], ax = sx, bx = sx, ay = sy, by = sy;
 
+        /* We have a precision limit on decimal places with %g, make sure
+         * we don't end up with values which will be truncated to 0
+         */
+        if (pts->in.matrix.xx != 0 && fabs(pts->in.matrix.xx) * ax < 0.00000001)
+            ax = ceil(0.00000001 / pts->in.matrix.xx);
+        if (pts->in.matrix.xy != 0 && fabs(pts->in.matrix.xy) * ay < 0.00000001)
+            ay = ceil(0.00000001 / pts->in.matrix.xy);
+        if (pts->in.matrix.yx != 0 && fabs(pts->in.matrix.yx) * bx < 0.00000001)
+            bx = ceil(0.00000001 / pts->in.matrix.yx);
+        if (pts->in.matrix.yy != 0 && fabs(pts->in.matrix.yy) * by < 0.00000001)
+            by = ceil(0.00000001 / pts->in.matrix.yy);
         pprintg6(s, "%g %g %g %g %g %g Tm\n",
-                 pts->in.matrix.xx * sx, pts->in.matrix.xy * sy,
-                 pts->in.matrix.yx * sx, pts->in.matrix.yy * sy,
+                 pts->in.matrix.xx * ax, pts->in.matrix.xy * ay,
+                 pts->in.matrix.yx * bx, pts->in.matrix.yy * by,
                  pts->start.x * sx, pts->start.y * sy);
     }
     pts->line_start.x = pts->start.x;
@@ -378,12 +360,6 @@ pdf_from_stream_to_text(gx_device_pdf *pdev)
     pts->buffer.count_chars = 0;
     pts->buffer.count_moves = 0;
     return 0;
-}
-
-int
-pdf_get_stoted_text_size(pdf_text_state_t *state)
-{
-    return state->buffer.count_chars;
 }
 
 /*
@@ -691,7 +667,7 @@ pdf_append_chars(gx_device_pdf * pdev, const byte * str, uint size,
  * with a previous text operation using text rendering modes.
  */
 bool pdf_compare_text_state_for_charpath(pdf_text_state_t *pts, gx_device_pdf *pdev,
-                                         gs_imager_state *pis, gs_font *font,
+                                         gs_gstate *pgs, gs_font *font,
                                          const gs_text_params_t *text)
 {
     int code;
@@ -704,6 +680,7 @@ bool pdf_compare_text_state_for_charpath(pdf_text_state_t *pts, gx_device_pdf *p
         return(false);
 
     if(font->FontType == ft_user_defined ||
+        font->FontType == ft_PDF_user_defined ||
         font->FontType == ft_PCL_user_defined ||
         font->FontType == ft_MicroType ||
         font->FontType == ft_GL2_stick_user_defined ||
@@ -728,11 +705,11 @@ bool pdf_compare_text_state_for_charpath(pdf_text_state_t *pts, gx_device_pdf *p
      * NB! only check 2 decimal places, allow some slack in the match. This
      * still may prove to be too tight a requirement.
      */
-    if(fabs(pts->start.x - pis->current_point.x) > 0.01 ||
-       fabs(pts->start.y - pis->current_point.y) > 0.01)
+    if(fabs(pts->start.x - pgs->current_point.x) > 0.01 ||
+       fabs(pts->start.y - pgs->current_point.y) > 0.01)
         return(false);
 
-    size = pdf_calculate_text_size(pis, pdfont, &font->FontMatrix, &smat, &tmat, font, pdev);
+    size = pdf_calculate_text_size(pgs, pdfont, &font->FontMatrix, &smat, &tmat, font, pdev);
 
     /* Finally, check the calculated size against the size stored in
      * the text state.
@@ -809,11 +786,11 @@ int pdf_modify_text_render_mode(pdf_text_state_t *pts, int render_mode)
     return(0);
 }
 
-int pdf_set_PaintType0_params (gx_device_pdf *pdev, gs_imager_state *pis, float size,
+int pdf_set_PaintType0_params (gx_device_pdf *pdev, gs_gstate *pgs, float size,
                                double scaled_width, const pdf_text_state_values_t *ptsv)
 {
     pdf_text_state_t *pts = pdev->text->text_state;
-    double saved_width = pis->line_params.half_width;
+    double saved_width = pgs->line_params.half_width;
     int code;
 
     /* This routine is used to check if we have accumulated glyphs waiting for output
@@ -833,19 +810,19 @@ int pdf_set_PaintType0_params (gx_device_pdf *pdev, gs_imager_state *pis, float 
      */
     if (pts->buffer.count_chars > 0) {
         if (pts->PaintType0Width != scaled_width) {
-            pis->line_params.half_width = scaled_width / 2;
+            pgs->line_params.half_width = scaled_width / 2;
             code = pdf_set_text_state_values(pdev, ptsv);
             if (code < 0)
                 return code;
             if (pdev->text->text_state->in.render_mode == ptsv->render_mode){
-                code = pdf_prepare_stroke(pdev, pis);
+                code = pdf_prepare_stroke(pdev, pgs, false);
                 if (code >= 0)
                     code = gdev_vector_prepare_stroke((gx_device_vector *)pdev,
-                                              pis, NULL, NULL, 1);
+                                              pgs, NULL, NULL, 1);
             }
             if (code < 0)
                 return code;
-            pis->line_params.half_width = saved_width;
+            pgs->line_params.half_width = saved_width;
             pts->PaintType0Width = scaled_width;
         }
     }

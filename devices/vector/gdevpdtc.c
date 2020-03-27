@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -143,7 +143,7 @@ process_composite_text(gs_text_enum_t *pte, void *vbuf, uint bsize)
             if (code < 0) {
                 if (code == gs_error_undefined && new_font && new_font->FontType == ft_encrypted2)
                 /* Caused by trying to make a CFF font resource for ps2write, which doesn't support CFF, abort now! */
-                    return gs_error_invalidfont;
+		  return_error(gs_error_invalidfont);
                 return code;
             }
             curr.xy_index = out.xy_index; /* pdf_encode_process_string advanced it. */
@@ -286,7 +286,11 @@ attach_cmap_resource(gx_device_pdf *pdev, pdf_font_resource_t *pdfont,
         if (pcmap->CMapName.size == strlen(*pcmn) &&
             !memcmp(*pcmn, pcmap->CMapName.data, pcmap->CMapName.size))
             break;
-    if (*pcmn == 0) {
+
+    /* For PDF/A we need to write out all non-identity CMaps
+     * first force the identity check.
+     */
+    if (*pcmn == 0 || pdev->PDFA != 0) {
         /*
          * PScript5.dll Version 5.2 creates identity CMaps with
          * instandard name. Check this specially here
@@ -295,7 +299,10 @@ attach_cmap_resource(gx_device_pdf *pdev, pdf_font_resource_t *pdfont,
          */
         is_identity = gs_cmap_is_identity(pcmap, font_index_only);
     }
-    if (*pcmn == 0 && !is_identity) {		/* not standard */
+    /* If the CMap is non-standard, or we are producing PDF/A, and its not
+     * an Identity CMap, then we need to emit it.
+     */
+    if ((*pcmn == 0  || pdev->PDFA != 0) && !is_identity) {		/* not standard */
         pcmres = pdf_find_resource_by_gs_id(pdev, resourceCMap, pcmap->id + font_index_only);
         if (pcmres == 0) {
             /* Create and write the CMap object. */
@@ -376,7 +383,7 @@ static int estimate_fontbbox(pdf_text_enum_t *pte, gs_font_base *font,
         return_error(gs_error_undefined);
     if (pfmat == 0)
         pfmat = &font->FontMatrix;
-    m = ctm_only(pte->pis);
+    m = ctm_only(pte->pgs);
     m.tx = fixed2float(pte->origin.x);
     m.ty = fixed2float(pte->origin.y);
     gs_matrix_multiply(pfmat, &m, &m);
@@ -472,7 +479,9 @@ scan_cmap_text(pdf_text_enum_t *pte, void *vbuf)
                         return code;
                     break;
                 }
-                case ft_user_defined: {
+                case ft_user_defined:
+                case ft_PDF_user_defined:
+                {
                     gs_string str1;
 
                     str1.data = NULL;
@@ -503,10 +512,10 @@ scan_cmap_text(pdf_text_enum_t *pte, void *vbuf)
                 return code;
             if (break_index > start_index && pdev->charproc_just_accumulated)
                 break;
-            if (subfont->FontType == ft_user_defined &&
+            if ((subfont->FontType == ft_user_defined || subfont->FontType == ft_PDF_user_defined )&&
                 (break_index > start_index || !pdev->charproc_just_accumulated) &&
                 !(pdsubf->u.simple.s.type3.cached[cid >> 3] & (0x80 >> (cid & 7)))) {
-                if (subfont0 && subfont0->FontType != ft_user_defined)
+                if (subfont0 && subfont0->FontType != ft_user_defined && subfont0->FontType != ft_PDF_user_defined)
                     /* This is hacky. By pretending to be in a type 3 font doing a charpath we force
                      * text handling to fall right back to bitmap glyphs. This is because we can't handle
                      * CIDFonts with mixed type 1/3 descendants. Ugly but it produces correct output for
@@ -514,7 +523,7 @@ scan_cmap_text(pdf_text_enum_t *pte, void *vbuf)
                      */
                     pdev->type3charpath = 1;
                 pte->current_font = subfont;
-                return gs_error_undefined;
+                return_error(gs_error_undefined);
             }
             if (subfont->FontType == ft_encrypted || subfont->FontType == ft_encrypted2) {
                 font_change = (subfont != subfont0 && subfont0 != NULL);
@@ -544,7 +553,7 @@ scan_cmap_text(pdf_text_enum_t *pte, void *vbuf)
                 }
                 if (cid >= char_cache_size || cid >= width_cache_size)
                     return_error(gs_error_unregistered); /* Must not happen */
-                if (pdsubf->FontType == ft_user_defined  || pdsubf->FontType == ft_encrypted ||
+                if (pdsubf->FontType == ft_user_defined  || pdsubf->FontType == ft_PDF_user_defined  || pdsubf->FontType == ft_encrypted ||
                                 pdsubf->FontType == ft_encrypted2) {
                 } else {
                     pdf_font_resource_t *pdfont;
@@ -566,10 +575,10 @@ scan_cmap_text(pdf_text_enum_t *pte, void *vbuf)
                          * this code can be exercised.
                          */
                         if (chr == glyph - GS_MIN_CID_GLYPH)
-                            code = subfont->procs.decode_glyph((gs_font *)subfont, glyph, -1);
+                            code = subfont->procs.decode_glyph((gs_font *)subfont, glyph, -1, NULL, 0);
                         else
-                            code = subfont->procs.decode_glyph((gs_font *)subfont, glyph, chr);
-                        if (code != GS_NO_CHAR)
+                            code = subfont->procs.decode_glyph((gs_font *)subfont, glyph, chr, NULL, 0);
+                        if (code != 0)
                             /* Since PScript5.dll creates GlyphNames2Unicode with character codes
                                instead CIDs, and with the WinCharSetFFFF-H2 CMap
                                character codes appears different than CIDs (Bug 687954),
@@ -605,6 +614,32 @@ scan_cmap_text(pdf_text_enum_t *pte, void *vbuf)
                                       (unsigned int)(glyph - GS_MIN_CID_GLYPH),
                                       buf);
                             pdsubf->used[cid >> 3] |= 0x80 >> (cid & 7);
+                            if (pdev->PDFA != 0) {
+                                switch (pdev->PDFACompatibilityPolicy) {
+                                    /* Default behaviour matches Adobe Acrobat, warn and continue,
+                                     * output file will not be PDF/A compliant
+                                     */
+                                    case 0:
+                                    case 1:
+                                    case 3:
+                                        emprintf(pdev->memory,
+                                             "All used glyphs mst be present in fonts for PDF/A, reverting to normal PDF output.\n");
+                                        pdev->AbortPDFAX = true;
+                                        pdev->PDFA = 0;
+                                        break;
+                                    case 2:
+                                        emprintf(pdev->memory,
+                                             "All used glyphs mst be present in fonts for PDF/A, aborting conversion.\n");
+                                        return_error(gs_error_invalidfont);
+                                        break;
+                                    default:
+                                        emprintf(pdev->memory,
+                                             "All used glyphs mst be present in fonts for PDF/A, unrecognised PDFACompatibilityLevel,\nreverting to normal PDF output\n");
+                                        pdev->AbortPDFAX = true;
+                                        pdev->PDFA = 0;
+                                        break;
+                                }
+                            }
                         }
                         cid = 0, code = 1;  /* undefined glyph. */
                         notdef_subst = true;
@@ -617,6 +652,29 @@ scan_cmap_text(pdf_text_enum_t *pte, void *vbuf)
                         }
                     } else if (code < 0)
                         return code;
+                    if (glyph == GS_MIN_CID_GLYPH && pdev->PDFA != 0) {
+                        switch (pdev->PDFACompatibilityPolicy) {
+                            case 0:
+                            case 1:
+                            case 3:
+                                emprintf(pdev->memory,
+                                     "A CIDFont uses CID 0, which is not legal for PDF/A, reverting to normal PDF output.\n");
+                                pdev->AbortPDFAX = true;
+                                pdev->PDFA = 0;
+                                break;
+                            case 2:
+                                emprintf(pdev->memory,
+                                     "A CIDFont uses CID 0, which is not legal for PDF/A, aborting conversion.\n");
+                                return_error(gs_error_invalidfont);
+                                break;
+                            default:
+                                emprintf(pdev->memory,
+                                     "A CIDFont uses CID 0, which is not legal for PDF/A, unrecognised PDFACompatibilityLevel,\nreverting to normal PDF output\n");
+                                pdev->AbortPDFAX = true;
+                                pdev->PDFA = 0;
+                                break;
+                        }
+                    }
                     if ((code == 0 /* just copied */ || pdsubf->Widths[cid] == 0) && !notdef_subst) {
                         pdf_glyph_widths_t widths;
 
@@ -651,10 +709,17 @@ scan_cmap_text(pdf_text_enum_t *pte, void *vbuf)
                         w0[cid] = widths.Width.w;
                     }
                     if (pdsubf->u.cidfont.CIDToGIDMap != 0) {
+                        uint gid = 0;
                         gs_font_cid2 *subfont2 = (gs_font_cid2 *)subfont;
 
-                        pdsubf->u.cidfont.CIDToGIDMap[cid] =
-                        subfont2->cidata.CIDMap_proc(subfont2, glyph);
+                        gid = subfont2->cidata.CIDMap_proc(subfont2, glyph);
+
+                        /* If this is a TrueType CIDFont, check the GSUB table to see if there's
+                         * a suitable substitute glyph.
+                         */
+                        if (subfont2->FontType == ft_CID_TrueType)
+                            gid = subfont2->data.substitute_glyph_index_vertical((gs_font_type42 *)subfont, gid, subfont2->WMode, glyph);
+                        pdsubf->u.cidfont.CIDToGIDMap[cid] = gid;
                     }
                 }
                 if (wmode)
@@ -715,7 +780,7 @@ scan_cmap_text(pdf_text_enum_t *pte, void *vbuf)
             /* We thought that it should be gs_matrix_multiply(&font->FontMatrix, &subfont0->FontMatrix, &m3); */
             if (code < 0)
                 return code;
-            if (pdsubf0->FontType == ft_user_defined  || pdsubf->FontType == ft_encrypted ||
+            if (pdsubf0->FontType == ft_user_defined  || pdsubf0->FontType == ft_PDF_user_defined  || pdsubf->FontType == ft_encrypted ||
                 pdsubf->FontType == ft_encrypted2)
                     pdfont = pdsubf0;
             else {
@@ -847,6 +912,7 @@ process_cmap_text(gs_text_enum_t *penum, void *vbuf, uint bsize)
     int code;
     pdf_text_enum_t *pte = (pdf_text_enum_t *)penum;
     byte *save;
+    uint start = pte->index;
 
     if (pte->text.operation &
         (TEXT_FROM_ANY - (TEXT_FROM_STRING | TEXT_FROM_BYTES))
@@ -873,6 +939,7 @@ process_cmap_text(gs_text_enum_t *penum, void *vbuf, uint bsize)
     code = scan_cmap_text(pte, vbuf);
     gs_free_string(pte->memory, (byte *)pte->text.data.bytes,  pte->text.size, "pdf_text_process");
     pte->text.data.bytes = save;
+    pte->bytes_decoded = pte->index - start;
 
     if (code == TEXT_PROCESS_CDEVPROC)
         pte->cdevproc_callout = true;
@@ -940,7 +1007,9 @@ process_cid_text(gs_text_enum_t *pte, void *vbuf, uint bsize)
     for (font = scaled_font; font->base != font; )
         font = font->base;
     /* Compute the scaling matrix. */
-    gs_matrix_invert(&font->FontMatrix, &scale_matrix);
+    code = gs_matrix_invert(&font->FontMatrix, &scale_matrix);
+    if (code < 0)
+        return code;
     gs_matrix_multiply(&scale_matrix, &scaled_font->FontMatrix, &scale_matrix);
 
     /* Find or create the CIDFont resource. */

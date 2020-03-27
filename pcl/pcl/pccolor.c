@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -88,18 +88,19 @@ set_color_comp_3(pcl_args_t * pargs, pcl_state_t * pcs)
 static int
 assign_color_index(pcl_args_t * pargs, pcl_state_t * pcs)
 {
+    int code = 0;
     int indx = int_arg(pargs);
 
     if (pcs->personality == pcl5e)
         return 0;
     if (!pcs->raster_state.graphics_mode) {
         if ((indx >= 0) && (indx < pcl_palette_get_num_entries(pcs->ppalet)))
-            pcl_palette_set_color(pcs, indx, pcs->color_comps);
+            code = pcl_palette_set_color(pcs, indx, pcs->color_comps);
         pcs->color_comps[0] = 0.0;
         pcs->color_comps[1] = 0.0;
         pcs->color_comps[2] = 0.0;
     }
-    return 0;
+    return code;
 }
 
 /*
@@ -140,7 +141,7 @@ color_do_registration(pcl_parser_state_t * pcl_parser_state,
 /*
  * Handle the various forms of reset.
  */
-static void
+static int
 color_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
     static const uint mask = (pcl_reset_initial
@@ -151,6 +152,8 @@ color_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
         pcs->color_comps[1] = 0.0;
         pcs->color_comps[2] = 0.0;
     }
+
+    return 0;
 }
 
 /*

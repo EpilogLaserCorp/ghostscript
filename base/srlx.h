@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,6 +19,8 @@
 
 #ifndef srlx_INCLUDED
 #  define srlx_INCLUDED
+
+#include "scommon.h"
 
 /* Common state */
 #define stream_RL_state_common\
@@ -30,9 +32,15 @@ typedef struct stream_RLE_state_s {
     stream_RL_state_common;
     /* The following parameters are set by the client. */
     ulong record_size;
+    bool omitEOD;
     /* The following change dynamically. */
     ulong record_left;		/* bytes left in current record */
-    int copy_left;		/* # of bytes waiting to be copied */
+    byte n0;
+    byte n1;
+    byte n2;
+    byte state;
+    int run_len;
+    byte literals[128];
 } stream_RLE_state;
 
 #define private_st_RLE_state()	/* in srle.c */\
@@ -40,12 +48,14 @@ typedef struct stream_RLE_state_s {
 /* We define the initialization procedure here, so that clients */
 /* can avoid a procedure call. */
 #define s_RLE_set_defaults_inline(ss)\
-  ((ss)->EndOfData = true, (ss)->record_size = 0)
+  ((ss)->EndOfData = true, (ss)->omitEOD = false, (ss)->record_size = 0)
 #define s_RLE_init_inline(ss)\
   ((ss)->record_left =\
    ((ss)->record_size == 0 ? ((ss)->record_size = max_uint) :\
     (ss)->record_size),\
-   (ss)->copy_left = 0)
+   (ss)->n0=(ss)->n1=(ss)->n2=0,\
+   (ss)->run_len=0,\
+   (ss)->state=0)
 extern const stream_template s_RLE_template;
 
 /* RunLengthDecode */

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -222,7 +222,16 @@ ref_param_write_typed(gs_param_list * plist, gs_param_name pkey,
             make_int(&value, pvalue->value.i);
             break;
         case gs_param_type_long:
+            /* FIXME: Rangecheck? */
             make_int(&value, pvalue->value.l);
+            break;
+        case gs_param_type_size_t:
+            /* FIXME: Rangecheck? */
+            make_int(&value, pvalue->value.z);
+            break;
+        case gs_param_type_i64:
+            /* FIXME: Rangecheck? */
+            make_int(&value, pvalue->value.i64);
             break;
         case gs_param_type_float:
             make_real(&value, pvalue->value.f);
@@ -770,19 +779,20 @@ ref_param_read_typed(gs_param_list * plist, gs_param_name pkey,
                 gs_param_enumerator_t enumr;
                 gs_param_key_t key;
                 ref_type keytype;
+                dict_param_list *dlist = (dict_param_list *) pvalue->value.d.list;
 
                 param_init_enumerator(&enumr);
-                if (!(*((iparam_list *) plist)->enumerate)
-                    ((iparam_list *) pvalue->value.d.list, &enumr, &key, &keytype)
+                if (!(*(dlist->enumerate))
+                    ((iparam_list *) dlist, &enumr, &key, &keytype)
                     && keytype == t_integer) {
-                    ((dict_param_list *) pvalue->value.d.list)->int_keys = 1;
+                    dlist->int_keys = 1;
                     pvalue->type = gs_param_type_dict_int_keys;
                 }
             }
             return 0;
         case t_integer:
-            pvalue->type = gs_param_type_long;
-            pvalue->value.l = loc.pvalue->value.intval;
+            pvalue->type = gs_param_type_i64;
+            pvalue->value.i64 = loc.pvalue->value.intval;
             return 0;
         case t_name:
             pvalue->type = gs_param_type_name;
@@ -821,10 +831,11 @@ static int
 ref_param_read_signal_error(gs_param_list * plist, gs_param_name pkey, int code)
 {
     iparam_list *const iplist = (iparam_list *) plist;
-    iparam_loc loc;
+    iparam_loc loc = {0};
 
-    ref_param_read(iplist, pkey, &loc, -1);	/* can't fail */
-    *loc.presult = code;
+    ref_param_read(iplist, pkey, &loc, -1);
+    if (loc.presult)
+        *loc.presult = code;
     switch (ref_param_read_get_policy(plist, pkey)) {
         case gs_param_policy_ignore:
             return 0;

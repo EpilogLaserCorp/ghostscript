@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -207,14 +207,15 @@ xps_hash_debug(xps_hash_table_t *table)
 {
     int i;
 
-    printf("hash table load %d / %d\n", table->load, table->size);
+    dlprintf2("hash table load %d / %d\n", table->load, table->size);
 
     for (i = 0; i < table->size; i++)
     {
         if (!table->entries[i].value)
-            printf("table % 4d: empty\n", i);
+            dlprintf1("table % 4d: empty\n", i);
         else
-            printf("table % 4d: key=%s value=%p\n", i,
-                    table->entries[i].key, table->entries[i].value);
+            dlprintf3("table % 4d: key=%s value="PRI_INTPTR"\n", i,
+                      table->entries[i].key,
+                      (intptr_t)table->entries[i].value);
     }
 }

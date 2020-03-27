@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -33,7 +33,7 @@
 #include "gdebug.h"
 #include "memory_.h"
 #include "math_.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gxpaint.h"
 #include "gzspotan.h"
 #include <stdarg.h>
@@ -76,15 +76,17 @@ static void gx_ttfReader__Read(ttfReader *self, void *p, int n)
     gx_ttfReader *r = (gx_ttfReader *)self;
     const byte *q;
 
-    if (!r->error) {
+    if (r->error >= 0) {
         if (r->extra_glyph_index != -1) {
             q = r->glyph_data.bits.data + r->pos;
-            r->error = (r->glyph_data.bits.size - r->pos < n ?
+            r->error = ((r->pos >= r->glyph_data.bits.size ||
+                        r->glyph_data.bits.size - r->pos < n) ?
                             gs_note_error(gs_error_invalidfont) : 0);
             if (r->error == 0)
                 memcpy(p, q, n);
         } else {
             unsigned int cnt;
+            r->error = 0;
 
             for (cnt = 0; cnt < (uint)n; cnt += r->error) {
                 r->error = r->pfont->data.string_proc(r->pfont, (ulong)r->pos + cnt, (ulong)n - cnt, &q);
@@ -99,7 +101,7 @@ static void gx_ttfReader__Read(ttfReader *self, void *p, int n)
             }
         }
     }
-    if (r->error) {
+    if (r->error < 0) {
         memset(p, 0, n);
         return;
     }
@@ -170,7 +172,7 @@ static void gx_ttfReader__Reset(gx_ttfReader *self)
         self->extra_glyph_index = -1;
         gs_glyph_data_free(&self->glyph_data, "gx_ttfReader__Reset");
     }
-    self->error = false;
+    self->error = 0;
     self->pos = 0;
 }
 
@@ -187,7 +189,7 @@ gx_ttfReader *gx_ttfReader__create(gs_memory_t *mem)
         r->super.LoadGlyph = gx_ttfReader__LoadGlyph;
         r->super.ReleaseGlyph = gx_ttfReader__ReleaseGlyph;
         r->pos = 0;
-        r->error = false;
+        r->error = 0;
         r->extra_glyph_index = -1;
         memset(&r->glyph_data, 0, sizeof(r->glyph_data));
         r->pfont = NULL;
@@ -212,8 +214,6 @@ gx_ttfReader__default_get_metrics(const ttfReader *ttf, uint glyph_index, bool b
     int code;
     int factor = self->pfont->data.unitsPerEm;
 
-    if (bVertical)
-        factor = factor; /* See simple_glyph_metrics */
     code = self->pfont->data.get_metrics(self->pfont, glyph_index, bVertical, sbw);
     if (code < 0)
         return code;
@@ -239,6 +239,7 @@ static void DebugRepaint(ttfFont *ttf)
 {
 }
 
+#ifdef DEBUG
 static int DebugPrint(ttfFont *ttf, const char *fmt, ...)
 {
     char buf[500];
@@ -255,6 +256,7 @@ static int DebugPrint(ttfFont *ttf, const char *fmt, ...)
     }
     return 0;
 }
+#endif
 
 static void WarnBadInstruction(gs_font_type42 *pfont, int glyph_index)
 {
@@ -482,7 +484,7 @@ static void gx_ttfExport__MoveTo(ttfExport *self, FloatPoint *p)
 {
     gx_ttfExport *e = (gx_ttfExport *)self;
 
-    if (!e->error)
+    if (e->error >= 0)
         e->error = gx_path_add_point(e->path, float2fixed(p->x), float2fixed(p->y));
 }
 
@@ -490,7 +492,7 @@ static void gx_ttfExport__LineTo(ttfExport *self, FloatPoint *p)
 {
     gx_ttfExport *e = (gx_ttfExport *)self;
 
-    if (!e->error)
+    if (e->error >= 0)
         e->error = gx_path_add_line_notes(e->path, float2fixed(p->x), float2fixed(p->y), sn_none);
 }
 
@@ -498,7 +500,7 @@ static void gx_ttfExport__CurveTo(ttfExport *self, FloatPoint *p0, FloatPoint *p
 {
     gx_ttfExport *e = (gx_ttfExport *)self;
 
-    if (!e->error) {
+    if (e->error >= 0) {
         if (e->monotonize) {
             curve_segment s;
 
@@ -518,7 +520,7 @@ static void gx_ttfExport__Close(ttfExport *self)
 {
     gx_ttfExport *e = (gx_ttfExport *)self;
 
-    if (!e->error)
+    if (e->error >= 0)
         e->error = gx_path_close_subpath_notes(e->path, sn_none);
 }
 
@@ -646,7 +648,7 @@ static int grid_fit(gx_device_spot_analyzer *padev, gx_path *path,
         gs_font_type42 *pfont, const gs_log2_scale_point *pscale, gx_ttfExport *e, ttfOutliner *o)
 {
     /* Not completed yet. */
-    gs_imager_state is_stub;
+    gs_gstate gs_stub;
     gx_fill_params params;
     gx_device_color devc_stub;
     int code;
@@ -686,7 +688,7 @@ static int grid_fit(gx_device_spot_analyzer *padev, gx_path *path,
         o->post_transform.b = o->post_transform.c = 0;
         o->post_transform.tx = o->post_transform.ty = 0;
         ttfOutliner__DrawGlyphOutline(o);
-        if (e->error)
+        if (e->error < 0)
             return e->error;
         code = t1_hinter__set_font42_data(&h.super, FontType, &pfont->data, false);
         if (code < 0)
@@ -697,8 +699,8 @@ static int grid_fit(gx_device_spot_analyzer *padev, gx_path *path,
         code = gx_path_bbox(path, &bbox);
         if (code < 0)
             return code;
-        memset(&is_stub, 0, sizeof(is_stub));
-        is_stub.memory = padev->memory;
+        memset(&gs_stub, 0, sizeof(gs_stub));
+        gs_stub.memory = padev->memory;
         set_nonclient_dev_color(&devc_stub, 1);
         params.rule = gx_rule_winding_number;
         params.adjust.x = params.adjust.y = 0;
@@ -710,7 +712,7 @@ static int grid_fit(gx_device_spot_analyzer *padev, gx_path *path,
                 transpose_path(path);
             gx_san_begin(padev);
             code = dev_proc(padev, fill_path)((gx_device *)padev,
-                            &is_stub, path, &params, &devc_stub, NULL);
+                            &gs_stub, path, &params, &devc_stub, NULL);
             gx_san_end(padev);
             if (code >= 0)
                 code = gx_san_generate_stems(padev, OVERALL_HINT && h.transpose,
@@ -733,7 +735,7 @@ static int grid_fit(gx_device_spot_analyzer *padev, gx_path *path,
         code = t1_hinter__endglyph(&h.super);
     } else {
         ttfOutliner__DrawGlyphOutline(o);
-        if (e->error)
+        if (e->error < 0)
             return e->error;
     }
     return code;

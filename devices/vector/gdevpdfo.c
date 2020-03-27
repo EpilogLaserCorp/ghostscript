@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -558,7 +558,7 @@ cos_array_write(const cos_object_t *pco, gx_device_pdf *pdev, gs_id object_id)
                 /* Careful here, only certain errors will bubble up
                  * through the text processing.
                  */
-                return gs_error_limitcheck;
+                return_error(gs_error_limitcheck);
                 break;
             default:
                 emprintf(pdev->memory,
@@ -891,7 +891,7 @@ cos_elements_write(stream *s, const cos_dict_element_t *pcde,
                         /* Careful here, only certain errors will bubble up
                          * through the text processing.
                          */
-                        return gs_error_limitcheck;
+                        return_error(gs_error_limitcheck);
                         break;
                     default:
                         emprintf(pdev->memory,
@@ -992,10 +992,12 @@ static int find_first_dict_entry(const cos_dict_t *d, const cos_dict_element_t *
             if (length2 < length1) {
                 First = pcde;
                 length1 = length2;
+                offset1 = offset2;
             }
         } else if (code < 0) {
             First = pcde;
             length1 = length2;
+            offset1 = offset2;
         }
         pcde = pcde->next;
     }
@@ -1059,21 +1061,8 @@ static int find_next_dict_entry(const cos_dict_t *d, const cos_dict_element_t **
                 code = strncmp((const char *)&pcde->key.data[offset2], (const char *)&Next->key.data[offset3], length);
                 if (code < 0 || (code == 0 && length3 > length2)) {
                     Next = pcde;
-                    for (i = 0;Next->key.data[i] == 0x00; i++)
-                        ;
-                    length3 = Next->key.size - i;
-                    offset3 = i;
-                    if (Next->key.data[offset3] == '/') {
-                        length3 -= 1;
-                        offset3 += 1;
-                    } else {
-                        if (Next->key.data[0] == '(') {
-                            length3 -= 2;
-                            offset3 = 1;
-                        } else {
-                            return_error(gs_error_typecheck);
-                        }
-                    }
+                    length3 = length2;
+                    offset3 = offset2;
                 }
             } else {
                 Next = pcde;
@@ -1083,11 +1072,11 @@ static int find_next_dict_entry(const cos_dict_t *d, const cos_dict_element_t **
                 offset3 = i;
                 if (Next->key.data[offset3] == '/') {
                     length3 -= 1;
-                    offset3 = 1;
+                    offset3 += 1;
                 } else {
                     if (Next->key.data[0] == '(') {
                         length3 -= 2;
-                        offset3 = 1;
+                        offset3 += 1;
                     } else {
                         return_error(gs_error_typecheck);
                     }
@@ -1119,7 +1108,7 @@ static int find_last_dict_entry(const cos_dict_t *d, const cos_dict_element_t **
 }
 static int write_key_as_string_encrypted(const gx_device_pdf *pdev, const byte *str, uint size, gs_id object_id)
 {
-    stream sinp, sout;
+    stream sout;
     stream_PSSD_state st;
     stream_state so;
     byte bufo[100], *buffer;
@@ -1145,7 +1134,7 @@ static int write_key_as_string_encrypted(const gx_device_pdf *pdev, const byte *
     stream_write(&sout, buffer, size);
     sclose(&sout); /* Writes ')'. */
     gs_free_object(pdev->pdf_memory, buffer, "Free encryption buffer");
-    return (int)stell(&sinp) + 1;
+    return 0;
 }
 
 static int write_key_as_string(const gx_device_pdf *pdev, stream *s, const cos_dict_element_t *element, gs_id object_id)
@@ -1701,14 +1690,14 @@ static int hash_cos_stream(const cos_object_t *pco0, gs_md5_state_t *md5, gs_md5
 {
     const cos_stream_t *pcs = (const cos_stream_t *)pco0;
     cos_stream_piece_t *pcsp = pcs->pieces;
-    FILE *sfile = pdev->streams.file;
+    gp_file *sfile = pdev->streams.file;
     byte *ptr;
     int64_t position_save;
     int result;
 
     sflush(pdev->strm);
     sflush(pdev->streams.strm);
-    position_save = gp_ftell_64(sfile);
+    position_save = gp_ftell(sfile);
 
     if (!pcsp)
         return -1;
@@ -1720,10 +1709,10 @@ static int hash_cos_stream(const cos_object_t *pco0, gs_md5_state_t *md5, gs_md5
             result = gs_note_error(gs_error_VMerror);
             return result;
         }
-        if (gp_fseek_64(sfile, pcsp->position, SEEK_SET) != 0)
-            return gs_error_ioerror;
+        if (gp_fseek(sfile, pcsp->position, SEEK_SET) != 0)
+	  return_error(gs_error_ioerror);
 
-        if (fread(ptr, 1, pcsp->size, sfile) != pcsp->size) {
+        if (gp_fread(ptr, 1, pcsp->size, sfile) != pcsp->size) {
             gs_free(pdev->memory, ptr, sizeof (byte), pcsp->size, "hash_cos_stream");
             result = gs_note_error(gs_error_ioerror);
             return result;
@@ -1733,8 +1722,8 @@ static int hash_cos_stream(const cos_object_t *pco0, gs_md5_state_t *md5, gs_md5
         pcsp = pcsp->next;
     }
     gs_md5_finish(md5, (gs_md5_byte_t *)hash);
-    if (gp_fseek_64(sfile, position_save, SEEK_SET) != 0)
-        return gs_error_ioerror;
+    if (gp_fseek(sfile, position_save, SEEK_SET) != 0)
+      return_error(gs_error_ioerror);
 
     return 0;
 }
@@ -1816,7 +1805,7 @@ cos_stream_contents_write(const cos_stream_t *pcs, gx_device_pdf *pdev)
     cos_stream_piece_t *pcsp;
     cos_stream_piece_t *last;
     cos_stream_piece_t *next;
-    FILE *sfile = pdev->streams.file;
+    gp_file *sfile = pdev->streams.file;
     int64_t end_pos;
     bool same_file = (pdev->sbstack_depth > 0);
     int code;
@@ -1835,15 +1824,19 @@ cos_stream_contents_write(const cos_stream_t *pcs, gx_device_pdf *pdev)
     for (pcsp = pcs->pieces, last = NULL; pcsp; pcsp = next)
         next = pcsp->next, pcsp->next = last, last = pcsp;
     for (pcsp = last, code = 0; pcsp && code >= 0; pcsp = pcsp->next) {
-        if (same_file)
-            pdf_copy_data_safe(s, sfile, pcsp->position, pcsp->size);
-        else {
-            end_pos = gp_ftell_64(sfile);
-            if (gp_fseek_64(sfile, pcsp->position, SEEK_SET) != 0)
-                return gs_error_ioerror;
-            pdf_copy_data(s, sfile, pcsp->size, ss);
-            if (gp_fseek_64(sfile, end_pos, SEEK_SET) != 0)
-                return gs_error_ioerror;
+        if (same_file) {
+            code = pdf_copy_data_safe(s, sfile, pcsp->position, pcsp->size);
+            if (code < 0)
+                return code;
+        } else {
+            end_pos = gp_ftell(sfile);
+            if (gp_fseek(sfile, pcsp->position, SEEK_SET) != 0)
+	      return_error(gs_error_ioerror);
+            code = pdf_copy_data(s, sfile, pcsp->size, ss);
+            if (code < 0)
+                return code;
+            if (gp_fseek(sfile, end_pos, SEEK_SET) != 0)
+	      return_error(gs_error_ioerror);
         }
     }
     /* Reverse the elements back. */
@@ -1999,9 +1992,13 @@ cos_write_stream_process(stream_state * st, stream_cursor_read * pr,
     cos_write_stream_state_t *ss = (cos_write_stream_state_t *)st;
     stream *target = ss->target;
     gx_device_pdf *pdev = ss->pdev;
-    gs_offset_t start_pos = stell(pdev->streams.strm);
+    gs_offset_t start_pos;
     int code;
 
+    while(pdev->child != NULL)
+        pdev = (gx_device_pdf *)pdev->child;
+
+    start_pos = stell(pdev->streams.strm);
     stream_write(target, pr->ptr + 1, count);
     gs_md5_append(&ss->pcs->md5, pr->ptr + 1, count);
     pr->ptr = pr->limit;
@@ -2014,9 +2011,13 @@ cos_write_stream_close(stream *s)
 {
     cos_write_stream_state_t *ss = (cos_write_stream_state_t *)s->state;
     int status;
+    gx_device_pdf *target_dev = (gx_device_pdf *)ss->pdev;
+
+    while (target_dev->child != NULL)
+        target_dev = (gx_device_pdf *)target_dev->child;
 
     sflush(s);
-    status = s_close_filters(&ss->target, ss->pdev->streams.strm);
+    status = s_close_filters(&ss->target, target_dev->streams.strm);
     gs_md5_finish(&ss->pcs->md5, (gs_md5_byte_t *)ss->pcs->stream_hash);
     ss->pcs->stream_md5_valid = 1;
     return (status < 0 ? status : s_std_close(s));
@@ -2048,6 +2049,8 @@ cos_write_stream_alloc(cos_stream_t *pcs, gx_device_pdf *pdev,
     gs_md5_init(&ss->pcs->md5);
     memset(&ss->pcs->hash, 0x00, 16);
     ss->pdev = pdev;
+    while(ss->pdev->parent)
+        ss->pdev = (gx_device_pdf *)ss->pdev->parent;
     ss->s = s;
     ss->target = pdev->streams.strm; /* not s->strm */
     s_std_init(s, buf, CWS_BUF_SIZE, &cos_s_procs, s_mode_write);
@@ -2067,17 +2070,12 @@ cos_stream_from_pipeline(stream *s)
 {
     cos_write_stream_state_t *ss;
 
-    while(s->procs.process != cos_s_procs.process)
+    while(s->procs.process != cos_s_procs.process) {
         s = s->strm;
+        if (s == 0L)
+            return 0L;
+    }
+
     ss = (cos_write_stream_state_t *)s->state;
     return ss->pcs;
-}
-
-/* Get cos write stream from pipeline. */
-stream *
-cos_write_stream_from_pipeline(stream *s)
-{
-    while(s->procs.process != cos_s_procs.process)
-        s = s->strm;
-    return s;
 }

@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2015 Artifex Software, Inc.
+# Copyright (C) 2001-2019 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 # of the license contained in the file LICENSE in this distribution.
 #
 # Refer to licensing information at http://www.artifex.com or contact
-# Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-# CA  94903, U.S.A., +1(415)492-9861, for further information.
+# Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+# CA 94945, U.S.A., +1(415)492-9861, for further information.
 #
 #
 # $Id: msvc32.mak 12087 2011-02-01 11:57:26Z robin $
@@ -97,6 +97,9 @@ DEFAULT_OBJ_DIR=$(DEFAULT_OBJ_DIR)rt
 !ifdef WIN64
 DEFAULT_OBJ_DIR=$(DEFAULT_OBJ_DIR)64
 !endif
+!ifdef XP
+DEFAULT_OBJ_DIR=$(DEFAULT_OBJ_DIR)xp
+!endif
 
 !ifndef AUXDIR
 AUXDIR=$(DEFAULT_OBJ_DIR)\aux_
@@ -122,6 +125,9 @@ BINDIR=.\bin\x86
 !endif
 !endif
 !endif
+!ifdef XP
+BINDIR=$(BINDIR)xp
+!endif
 !endif
 !ifndef GLSRCDIR
 GLSRCDIR=.\base
@@ -133,13 +139,13 @@ GLGENDIR=$(DEFAULT_OBJ_DIR)
 DEVSRCDIR=.\devices
 !endif
 !ifndef GLOBJDIR
-GLOBJDIR=$(DEFAULT_OBJ_DIR)
+GLOBJDIR=$(GLGENDIR)
 !endif
 !ifndef DEVGENDIR
-DEVGENDIR=$(DEFAULT_OBJ_DIR)
+DEVGENDIR=$(GLGENDIR)
 !endif
 !ifndef DEVOBJDIR
-DEVOBJDIR=$(DEFAULT_OBJ_DIR)
+DEVOBJDIR=$(GLOBJDIR)
 !endif
 
 !ifndef PSSRCDIR
@@ -152,13 +158,13 @@ PSLIBDIR=.\lib
 PSRESDIR=.\Resource
 !endif
 !ifndef PSGENDIR
-PSGENDIR=$(DEFAULT_OBJ_DIR)
+PSGENDIR=$(GLGENDIR)
 !endif
 !ifndef PSOBJDIR
-PSOBJDIR=$(DEFAULT_OBJ_DIR)
+PSOBJDIR=$(GLOBJDIR)
 !endif
 !ifndef SBRDIR
-SBRDIR=$(DEFAULT_OBJ_DIR)
+SBRDIR=$(GLOBJDIR)
 !endif
 
 !ifndef EXPATGENDIR
@@ -166,7 +172,7 @@ EXPATGENDIR=$(GLGENDIR)
 !endif
 
 !ifndef EXPATOBJDIR
-EXPATOBJDIR=$(GLGENDIR)
+EXPATOBJDIR=$(GLOBJDIR)
 !endif
 
 !ifndef JPEGXR_GENDIR
@@ -174,7 +180,7 @@ JPEGXR_GENDIR=$(GLGENDIR)
 !endif
 
 !ifndef JPEGXR_OBJDIR
-JPEGXR_OBJDIR=$(GLGENDIR)
+JPEGXR_OBJDIR=$(GLOBJDIR)
 !endif
 
 
@@ -183,11 +189,11 @@ PCL5SRCDIR=.\pcl\pcl
 !endif
 
 !ifndef PCL5GENDIR
-PCL5GENDIR=.\$(DEFAULT_OBJ_DIR)
+PCL5GENDIR=$(GLGENDIR)
 !endif
 
 !ifndef PCL5OBJDIR
-PCL5OBJDIR=.\$(DEFAULT_OBJ_DIR)
+PCL5OBJDIR=$(GLOBJDIR)
 !endif
 
 !ifndef PXLSRCDIR
@@ -195,11 +201,11 @@ PXLSRCDIR=.\pcl\pxl
 !endif
 
 !ifndef PXLGENDIR
-PXLGENDIR=.\$(DEFAULT_OBJ_DIR)
+PXLGENDIR=$(GLGENDIR)
 !endif
 
 !ifndef PXLOBJDIR
-PXLOBJDIR=.\$(DEFAULT_OBJ_DIR)
+PXLOBJDIR=$(GLOBJDIR)
 !endif
 
 !ifndef PLSRCDIR
@@ -207,11 +213,11 @@ PLSRCDIR=.\pcl\pl
 !endif
 
 !ifndef PLGENDIR
-PLGENDIR=.\$(DEFAULT_OBJ_DIR)
+PLGENDIR=$(GLGENDIR)
 !endif
 
 !ifndef PLOBJDIR
-PLOBJDIR=.\$(DEFAULT_OBJ_DIR)
+PLOBJDIR=$(GLOBJDIR)
 !endif
 
 !ifndef XPSSRCDIR
@@ -219,16 +225,42 @@ XPSSRCDIR=.\xps
 !endif
 
 !ifndef XPSGENDIR
-XPSGENDIR=.\$(DEFAULT_OBJ_DIR)
+XPSGENDIR=$(GLGENDIR)
 !endif
 
 !ifndef XPSOBJDIR
-XPSOBJDIR=.\$(DEFAULT_OBJ_DIR)
+XPSOBJDIR=$(GLOBJDIR)
 !endif
 
+!ifndef GPDLSRCDIR
 GPDLSRCDIR=.\gpdl
-GPDLGENDIR=.\$(DEFAULT_OBJ_DIR)
-GPDLOBJDIR=.\$(DEFAULT_OBJ_DIR)
+!endif
+!ifndef GPDLGENDIR
+GPDLGENDIR=$(GLGENDIR)
+!endif
+!ifndef GPDLOBJDIR
+GPDLOBJDIR=$(GLOBJDIR)
+!endif
+
+!ifndef URFSRCDIR
+URFSRCDIR=.\urf
+!endif
+!ifndef URFGENDIR
+URFGENDIR=$(GLGENDIR)
+!endif
+!ifndef URFOBJDIR
+URFOBJDIR=$(GLOBJDIR)
+!endif
+
+!ifndef IMGSRCDIR
+IMGSRCDIR=.\gpdl\img
+!endif
+!ifndef IMGGENDIR
+IMGGENDIR=$(GLGENDIR)
+!endif
+!ifndef IMGOBJDIR
+IMGOBJDIR=$(GLOBJDIR)
+!endif
 
 CONTRIBDIR=.\contrib
 
@@ -269,7 +301,7 @@ XPS_TARGET=gxps
 GPDL_TARGET=gpdl
 !endif
 
-PCL_XPS_TARGETS=$(PCL_TARGET) $(XPS_TARGET) $(GPDL_TARGET)
+PCL_XPS_PDL_TARGETS=$(PCL_TARGET) $(XPS_TARGET) $(GPDL_TARGET)
 
 # Define the root directory for Ghostscript installation.
 
@@ -442,6 +474,7 @@ GPDL=gpdlwin32
 !ifndef GSCONSOLE
 GSCONSOLE=$(GS)c
 !endif
+
 !ifndef GSDLL
 !ifdef METRO
 !ifdef WIN64
@@ -462,11 +495,75 @@ GSDLL=gsdll32
 !endif
 !endif
 
+!ifndef GPCL6DLL
+!ifdef METRO
+!ifdef WIN64
+GPCL6DLL=gpcl6dll64metro
+!else
+!ifdef ARM
+GPCL6DLL=gpcl6dllARM32metro
+!else
+GPCL6DLL=gpcl6dll32metro
+!endif
+!endif
+!else
+!ifdef WIN64
+GPCL6DLL=gpcl6dll64
+!else
+GPCL6DLL=gpcl6dll32
+!endif
+!endif
+!endif
+
+!ifndef GXPSDLL
+!ifdef METRO
+!ifdef WIN64
+GXPSDLL=gxpsdll64metro
+!else
+!ifdef ARM
+GXPSDLL=gxpsdllARM32metro
+!else
+GXPSDLL=gxpsdll32metro
+!endif
+!endif
+!else
+!ifdef WIN64
+GXPSDLL=gxpsdll64
+!else
+GXPSDLL=gxpsdll32
+!endif
+!endif
+!endif
+
+!ifndef GPDLDLL
+!ifdef METRO
+!ifdef WIN64
+GPDLDLL=gpdldll64metro
+!else
+!ifdef ARM
+GPDLDLL=gpdldllARM32metro
+!else
+GPDLDLL=gpdldll32metro
+!endif
+!endif
+!else
+!ifdef WIN64
+GPDLDLL=gpdldll64
+!else
+GPDLDLL=gpdldll32
+!endif
+!endif
+!endif
+
 # To build two small executables and a large DLL use MAKEDLL=1
 # To build two large executables use MAKEDLL=0
 
 !ifndef MAKEDLL
+!if "$(PROFILE)"=="1"
+MAKEDLL=0
+!else
 MAKEDLL=1
+!endif
 !endif
 
 # Should we build in the cups device....
@@ -478,6 +575,44 @@ WITH_CUPS=0
 !endif
 !else
 WITH_CUPS=0
+!endif
+
+# Should we build URF...
+!ifdef WITH_URF
+!if "$(WITH_URF)"!="0"
+WITH_URF=1
+!else
+WITH_URF=0
+!endif
+!else
+!if exist ("$(URFSRCDIR)")
+WITH_URF=1
+!else
+WITH_URF=0
+!endif
+!endif
+!if "$(WITH_URF)"=="1"
+ENABLE_URF=$(D_)URF_INCLUDED$(_D)
+GPDL_URF_TOP_OBJ=$(GPDLOBJ)/$(GPDL_URF_TOP_OBJ_FILE)
+URF_INCLUDE=$(I_)$(URFSRCDIR)$(_I)
+URF_DEV=$(GLD)urfd.dev
+SURFX_H=$(URFSRCDIR)$(D)surfx.h
+!endif
+
+# Should we build using CAL....
+CALSRCDIR=cal
+!ifdef WITH_CAL
+!if "$(WITH_CAL)"!="0"
+WITH_CAL=1
+!else
+WITH_CAL=0
+!endif
+!else
+!if exist ("$(CALSRCDIR)")
+WITH_CAL=1
+!else
+WITH_CAL=0
+!endif
 !endif
 
 # We can't build cups libraries in a Metro friendly way,
@@ -534,6 +669,8 @@ TIFFSRCDIR=tiff$(D)
 TIFFCONFDIR=$(TIFFSRCDIR)
 TIFFCONFIG_SUFFIX=.vc
 TIFFPLATFORM=win32
+TIFF_CFLAGS=-DJPEG_SUPPORT -DOJPEG_SUPPORT -DJPEG_LIB_MK1_OR_12BIT=0
+ENABLE_TIFF=$(D_)TIFF_INCLUDED$(_D)
 !endif
 
 # Define the directory where the zlib sources are stored.
@@ -593,10 +730,11 @@ JPX_LIB=openjpeg
 # Alternatively, you can build a separate DLL
 # and define SHARE_JPX=1 in src/winlib.mak
 
-# Define the directory where the lcms source is stored.
-# See lcms.mak for more information
-!ifndef LCMSSRCDIR
-LCMSSRCDIR=lcms
+# Define the directory where the lcms2mt source is stored.
+# See lcms2mt.mak for more information
+SHARE_LCMS=0
+!ifndef LCMS2MTSRCDIR
+LCMS2MTSRCDIR=lcms2mt
 !endif
 
 # Define the directory where the lcms2 source is stored.
@@ -654,7 +792,7 @@ SHARE_EXPAT=0
 !endif
 
 !ifndef EXPAT_CFLAGS
-EXPAT_CFLAGS=/DHAVE_MEMMOVE
+EXPAT_CFLAGS=/DWIN32
 !endif
 
 # Define any other compilation flags.
@@ -664,16 +802,25 @@ EXPAT_CFLAGS=/DHAVE_MEMMOVE
 XCFLAGS=
 !endif
 
-# We now build with unicode support by default. To avoid this, build
-# with GS_NO_UTF8=1.
-!if "$(GS_NO_UTF8)" != ""
-UNICODECFLAGS=/DGS_NO_UTF8
+!ifndef CFLAGS
+!if !defined(DEBUG) || "$(DEBUG)"=="0"
+CFLAGS=/DNDEBUG
 !else
-UNICODECFLAGS=
+CFLAGS=
+!endif
 !endif
 
-!ifndef CFLAGS
-CFLAGS=
+!ifdef DEVSTUDIO
+CFLAGS=$(CFLAGS) /FC
+!endif
+
+!ifdef XP
+CFLAGS=$(CFLAGS) /D_USING_V110_SDK71_
+SUBSUBSYS=,"5.01"
+!endif
+
+!ifdef CLUSTER
+CFLAGS=$(CFLAGS) -DCLUSTER
 !endif
 
 !if "$(MEMENTO)"=="1"
@@ -689,7 +836,7 @@ CFLAGS=$(CFLAGS) -DMETRO -DWINAPI_FAMILY=WINAPI_PARTITION_APP -DTIF_PLATFORM_CON
 PNG_CFLAGS=/DExitProcess=exit
 !endif
 
-CFLAGS=$(CFLAGS) $(XCFLAGS) $(UNICODECFLAGS)
+CFLAGS=$(CFLAGS) $(XCFLAGS)
 
 # 1 --> Use 64 bits for gx_color_index.  This is required only for
 # non standard devices or DeviceN process color model devices.
@@ -718,6 +865,7 @@ WARNOPT=-W2
 # The following is a hack to get around the special treatment of \ at
 # the end of a line.
 NUL=
+D_=-D
 DD=$(GLGENDIR)\$(NUL)
 GLD=$(GLGENDIR)\$(NUL)
 PSD=$(PSGENDIR)\$(NUL)
@@ -744,6 +892,7 @@ SBRFLAGS=/FR$(SBRDIR)\$(NUL)
 MSVC_VERSION=5
 !endif
 !if "$(_NMAKE_VER)" == "6.00.8168.0"
+# VC 6
 MSVC_VERSION=6
 !endif
 !if "$(_NMAKE_VER)" == "7.00.9466"
@@ -757,41 +906,82 @@ MSVC_VERSION=7
 MSVC_MINOR_VERSION=1
 !endif
 !if "$(_NMAKE_VER)" == "8.00.40607.16"
+# VS2005
 MSVC_VERSION=8
 !endif
 !if "$(_NMAKE_VER)" == "8.00.50727.42"
+# VS2005
 MSVC_VERSION=8
 !endif
 !if "$(_NMAKE_VER)" == "8.00.50727.762"
+# VS2005
 MSVC_VERSION=8
 !endif
 !if "$(_NMAKE_VER)" == "9.00.21022.08"
+# VS2008
 MSVC_VERSION=9
 !endif
 !if "$(_NMAKE_VER)" == "9.00.30729.01"
+# VS2008
 MSVC_VERSION=9
 !endif
 !if "$(_NMAKE_VER)" == "10.00.30319.01"
+# VS2010
 MSVC_VERSION=10
 !endif
 !if "$(_NMAKE_VER)" == "11.00.50522.1"
+# VS2012
 MSVC_VERSION=11
 !endif
 !if "$(_NMAKE_VER)" == "11.00.50727.1"
+# VS2012
 MSVC_VERSION=11
 !endif
 !if "$(_NMAKE_VER)" == "11.00.60315.1"
+# VS2012
 MSVC_VERSION=11
 !endif
 !if "$(_NMAKE_VER)" == "11.00.60610.1"
+# VS2012
 MSVC_VERSION=11
 !endif
 !if "$(_NMAKE_VER)" == "12.00.21005.1"
+# VS 2013
 MSVC_VERSION=12
+!endif
+!if "$(_NMAKE_VER)" == "14.00.23506.0"
+# VS2015
+MSVC_VERSION=14
+!endif
+!if "$(_NMAKE_VER)" == "14.00.24210.0"
+# VS2015
+MSVC_VERSION=14
+!endif
+!if "$(_NMAKE_VER)" == "14.16.27034.0"
+# VS2017 or VS2019 (Toolset v141)
+MSVC_VERSION=15
+MS_TOOLSET_VERSION=14.16.27034
+!endif
+!if "$(_NMAKE_VER)" == "14.24.28314.0"
+# VS2019 (Toolset v142)
+MSVC_VERSION=16
+MS_TOOLSET_VERSION=14.24.28314
+!endif
+!if "$(_NMAKE_VER)" == "14.24.28315.0"
+# VS2019 (Toolset v142 - update)
+MSVC_VERSION=16
+MS_TOOLSET_VERSION=14.24.28315
+!endif
+!if "$(_NMAKE_VER)" == "14.24.28316.0"
+# VS2019 (Toolset v142 - update)
+MSVC_VERSION=16
+MS_TOOLSET_VERSION=14.24.28316
 !endif
 !endif
 
 !ifndef MSVC_VERSION
+!MESSAGE Could not determine MSVC_VERSION! Guessing at an ancient one.
+!MESSAGE Unknown nmake version: $(_NMAKE_VER)
 MSVC_VERSION=6
 !endif
 !ifndef MSVC_MINOR_VERSION
@@ -997,44 +1187,139 @@ LINKLIBPATH=/LIBPATH:"$(COMPBASE)\lib\amd64" /LIBPATH:"$(COMPBASE)\PlatformSDK\L
 
 !if $(MSVC_VERSION) == 12
 ! ifndef DEVSTUDIO
-!if $(BUILD_SYSTEM) == 64
+!  if $(BUILD_SYSTEM) == 64
 DEVSTUDIO=C:\Program Files (x86)\Microsoft Visual Studio 12.0
-!else
+!  else
 DEVSTUDIO=C:\Program Files\Microsoft Visual Studio 12.0
-!endif
+!  endif
 ! endif
-!if "$(DEVSTUDIO)"==""
+! if "$(DEVSTUDIO)"==""
 COMPBASE=
 SHAREDBASE=
-!else
+! else
 # There are at least 4 different values:
 # "v6.0"=Vista, "v6.0A"=Visual Studio 2008,
 # "v6.1"=Windows Server 2008, "v7.0"=Windows 7
-! ifdef MSSDK
-!  ifdef WIN64
+!  ifdef MSSDK
+!   ifdef WIN64
 RCDIR=$(MSSDK)\bin\x64
-!  else
+!   else
 RCDIR=$(MSSDK)\bin
-!  endif
-! else
-!if $(BUILD_SYSTEM) == 64
+!   endif
+!  else
+!   if $(BUILD_SYSTEM) == 64
 RCDIR=C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1A\Bin
-!else
+!   else
 RCDIR=C:\Program Files\Microsoft SDKs\Windows\v7.1A\Bin
-!endif
-! endif
+!   endif
+!  endif
 COMPBASE=$(DEVSTUDIO)\VC
 SHAREDBASE=$(DEVSTUDIO)\VC
-!ifdef WIN64
-!if $(BUILD_SYSTEM) == 64
+!  ifdef WIN64
+!   if $(BUILD_SYSTEM) == 64
 COMPDIR64=$(COMPBASE)\bin\x86_amd64
 LINKLIBPATH=/LIBPATH:"$(COMPBASE)\lib\amd64"
-!else
+!   else
 COMPDIR64=$(COMPBASE)\bin\x86_amd64
 LINKLIBPATH=/LIBPATH:"$(COMPBASE)\lib\amd64" /LIBPATH:"$(COMPBASE)\PlatformSDK\Lib\x64"
+!   endif
+!  endif
+! endif
 !endif
+
+!if $(MSVC_VERSION) == 14
+! ifndef DEVSTUDIO
+!  if $(BUILD_SYSTEM) == 64
+DEVSTUDIO=C:\Program Files (x86)\Microsoft Visual Studio 14.0
+!  else
+DEVSTUDIO=C:\Program Files\Microsoft Visual Studio 14.0
+!  endif
+! endif
+! if "$(DEVSTUDIO)"==""
+COMPBASE=
+SHAREDBASE=
+! else
+# There are at least 4 different values:
+# "v6.0"=Vista, "v6.0A"=Visual Studio 2008,
+# "v6.1"=Windows Server 2008, "v7.0"=Windows 7
+!  ifdef MSSDK
+!   ifdef WIN64
+RCDIR=$(MSSDK)\bin\x64
+!   else
+RCDIR=$(MSSDK)\bin
+!   endif
+!  else
+!   if $(BUILD_SYSTEM) == 64
+RCDIR=C:\Program Files (x86)\Microsoft SDKs\Windows\v10.0A\Bin
+!   else
+RCDIR=C:\Program Files\Microsoft SDKs\Windows\v10.0A\Bin
+!   endif
+!  endif
+COMPBASE=$(DEVSTUDIO)\VC
+SHAREDBASE=$(DEVSTUDIO)\VC
+!  ifdef WIN64
+!   if $(BUILD_SYSTEM) == 64
+COMPDIR64=$(COMPBASE)\bin\x86_amd64
+LINKLIBPATH=/LIBPATH:"$(COMPBASE)\lib\amd64"
+!   else
+COMPDIR64=$(COMPBASE)\bin\x86_amd64
+LINKLIBPATH=/LIBPATH:"$(COMPBASE)\lib\amd64" /LIBPATH:"$(COMPBASE)\PlatformSDK\Lib\x64"
+!   endif
+!  endif
+! endif
 !endif
+
+!if $(MSVC_VERSION) == 15
+! ifndef DEVSTUDIO
+DEVSTUDIO=C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Tools\MSVC\$(MS_TOOLSET_VERSION)
+! endif
+! if "$(DEVSTUDIO)"==""
+COMPBASE=
+SHAREDBASE=
+! else
+!  if $(BUILD_SYSTEM) == 64
+DEVSTUDIO_HOST=Hostx64
+!  else
+DEVSTUDIO_HOST=Hostx86
+!  endif
+!  ifdef WIN64
+DEVSTUDIO_TARGET=x64
+!  else
+DEVSTUDIO_TARGET=x86
+!  endif
+COMPDIR=$(DEVSTUDIO)\bin\$(DEVSTUDIO_HOST)\$(DEVSTUDIO_TARGET)
+RCDIR=
+LINKLIBPATH=/LIBPATH:"$(DEVSTUDIO)\lib\$(DEVSTUDIO_TARGET)"
+! endif
 !endif
+
+!if $(MSVC_VERSION) == 16
+! ifndef DEVSTUDIO
+!  if exist("C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional")
+DEVSTUDIO_VARIANT="Professional"
+!  else
+DEVSTUDIO_VARIANT="Community"
+!  endif
+DEVSTUDIO=C:\Program Files (x86)\Microsoft Visual Studio\2019\$(DEVSTUDIO_VARIANT)\VC\Tools\MSVC\$(MS_TOOLSET_VERSION)
+! endif
+! if "$(DEVSTUDIO)"==""
+COMPBASE=
+SHAREDBASE=
+! else
+!  if $(BUILD_SYSTEM) == 64
+DEVSTUDIO_HOST=Hostx64
+!  else
+DEVSTUDIO_HOST=Hostx86
+!  endif
+!  ifdef WIN64
+DEVSTUDIO_TARGET=x64
+!  else
+DEVSTUDIO_TARGET=x86
+!  endif
+COMPDIR=$(DEVSTUDIO)\bin\$(DEVSTUDIO_HOST)\$(DEVSTUDIO_TARGET)
+RCDIR=
+LINKLIBPATH=/LIBPATH:"$(DEVSTUDIO)\lib\$(DEVSTUDIO_TARGET)"
+! endif
 !endif
 
 !if "$(ARM)"=="1"
@@ -1255,12 +1540,12 @@ JPXSRCDIR=openjpeg
 !endif
 !ifndef JPX_CFLAGS
 !ifdef WIN64
-JPX_CFLAGS=-DUSE_OPENJPEG_JP2 -DUSE_JPIP $(JPX_SSE_CFLAGS) -DWIN64
+JPX_CFLAGS=-DMUTEX_pthread=0 -DUSE_OPENJPEG_JP2 -DUSE_JPIP $(JPX_SSE_CFLAGS) -DOPJ_STATIC -DWIN64
 !else
-JPX_CFLAGS=-DUSE_OPENJPEG_JP2 -DUSE_JPIP $(JPX_SSE_CFLAGS) -DWIN32
+JPX_CFLAGS=-DMUTEX_pthread=0 -DUSE_OPENJPEG_JP2 -DUSE_JPIP $(JPX_SSE_CFLAGS) -DOPJ_STATIC -DWIN32
 !endif
 !else
-JPX_CFLAGS = $JPX_CFLAGS -DUSE_JPIP -DUSE_OPENJPEG_JP2
+JPX_CFLAGS = $JPX_CFLAGS -DUSE_JPIP -DUSE_OPENJPEG_JP2 -DOPJ_STATIC
 !endif
 !endif
 
@@ -1272,7 +1557,7 @@ JPX_CFLAGS = $JPX_CFLAGS -DUSE_JPIP -DUSE_OPENJPEG_JP2
 # Choose the language feature(s) to include.  See gs.mak for details.
 
 # if it's included, $(PSD)gs_pdfwr.dev should always be one of the last in the list
-PSI_FEATURE_DEVS=$(PSD)psl3.dev $(PSD)pdf.dev $(PSD)dpsnext.dev $(PSD)epsf.dev $(PSD)ttfont.dev \
+PSI_FEATURE_DEVS=$(PSD)psl3.dev $(PSD)pdf.dev $(PSD)epsf.dev $(PSD)ttfont.dev \
                  $(PSD)jbig2.dev $(PSD)jpx.dev $(PSD)fapi_ps.dev $(GLD)winutf8.dev $(PSD)gs_pdfwr.dev
 
 
@@ -1283,10 +1568,11 @@ XPS_FEATURE_DEVS=$(XPSOBJDIR)/pl.dev $(XPSOBJDIR)/xps.dev
 
 FEATURE_DEVS=$(GLD)pipe.dev $(GLD)gsnogc.dev $(GLD)htxlib.dev $(GLD)psl3lib.dev $(GLD)psl2lib.dev \
              $(GLD)dps2lib.dev $(GLD)path1lib.dev $(GLD)patlib.dev $(GLD)psl2cs.dev $(GLD)rld.dev $(GLD)gxfapiu$(UFST_BRIDGE).dev\
-             $(GLD)ttflib.dev  $(GLD)cielib.dev $(GLD)pipe.dev $(GLD)htxlib.dev $(GLD)sdctd.dev $(GLD)libpng.dev\
+             $(GLD)ttflib.dev  $(GLD)cielib.dev $(GLD)pipe.dev $(GLD)htxlib.dev $(GLD)sdct.dev $(GLD)libpng.dev\
 	     $(GLD)seprlib.dev $(GLD)translib.dev $(GLD)cidlib.dev $(GLD)psf0lib.dev $(GLD)psf1lib.dev\
              $(GLD)psf2lib.dev $(GLD)lzwd.dev $(GLD)sicclib.dev $(GLD)mshandle.dev $(GLD)mspoll.dev \
-             $(GLD)ramfs.dev $(GLD)sjpx.dev $(GLD)sjbig2.dev
+             $(GLD)ramfs.dev $(GLD)sjpx.dev $(GLD)sjbig2.dev \
+             $(GLD)pwgd.dev $(GLD)siscale.dev $(URF_DEV)
 
 
 !ifndef METRO
@@ -1322,13 +1608,6 @@ BAND_LIST_COMPRESSOR=zlib
 FILE_IMPLEMENTATION=stdio
 !endif
 
-# Choose the implementation of stdio: '' for file I/O and 'c' for callouts
-# See gs.mak and ziodevs.c/ziodevsc.c for more details.
-
-!ifndef STDIO_IMPLEMENTATION
-STDIO_IMPLEMENTATION=c
-!endif
-
 # Choose the device(s) to include.  See devs.mak for details,
 # devs.mak and contrib.mak for the list of available devices.
 
@@ -1336,8 +1615,7 @@ STDIO_IMPLEMENTATION=c
 !ifdef METRO
 DEVICE_DEVS=
 !else
-# $(DD)mswindll.dev 
-DEVICE_DEVS=$(DD)display.dev $(DD)mswinpr2.dev $(DD)ijs.dev $(DD)mswindll.dev 
+DEVICE_DEVS=$(DD)display.dev $(DD)mswinpr2.dev $(DD)ijs.dev
 !endif
 DEVICE_DEVS2=$(DD)epson.dev $(DD)eps9high.dev $(DD)eps9mid.dev $(DD)epsonc.dev $(DD)ibmpro.dev
 DEVICE_DEVS3=$(DD)deskjet.dev $(DD)djet500.dev $(DD)laserjet.dev $(DD)ljetplus.dev $(DD)ljet2p.dev
@@ -1349,22 +1627,25 @@ DEVICE_DEVS8=$(DD)pcxmono.dev $(DD)pcxgray.dev $(DD)pcx16.dev $(DD)pcx256.dev $(
 DEVICE_DEVS9=$(DD)pbm.dev $(DD)pbmraw.dev $(DD)pgm.dev $(DD)pgmraw.dev $(DD)pgnm.dev $(DD)pgnmraw.dev $(DD)pkmraw.dev
 DEVICE_DEVS10=$(DD)tiffcrle.dev $(DD)tiffg3.dev $(DD)tiffg32d.dev $(DD)tiffg4.dev $(DD)tifflzw.dev $(DD)tiffpack.dev
 DEVICE_DEVS11=$(DD)bmpmono.dev $(DD)bmpgray.dev $(DD)bmp16.dev $(DD)bmp256.dev $(DD)bmp16m.dev $(DD)tiff12nc.dev $(DD)tiff24nc.dev $(DD)tiff48nc.dev $(DD)tiffgray.dev $(DD)tiff32nc.dev $(DD)tiff64nc.dev $(DD)tiffsep.dev $(DD)tiffsep1.dev $(DD)tiffscaled.dev $(DD)tiffscaled8.dev $(DD)tiffscaled24.dev $(DD)tiffscaled32.dev $(DD)tiffscaled4.dev
-DEVICE_DEVS12=$(DD)bit.dev $(DD)bitrgb.dev $(DD)bitcmyk.dev
+DEVICE_DEVS12=$(DD)bit.dev $(DD)bitrgb.dev $(DD)bitcmyk.dev $(DD)bitrgbtags.dev $(DD)chameleon.dev
 DEVICE_DEVS13=$(DD)pngmono.dev $(DD)pngmonod.dev $(DD)pnggray.dev $(DD)png16.dev $(DD)png256.dev $(DD)png16m.dev $(DD)pngalpha.dev $(DD)fpng.dev $(DD)psdcmykog.dev
-DEVICE_DEVS14=$(DD)jpeg.dev $(DD)jpeggray.dev $(DD)jpegcmyk.dev
+DEVICE_DEVS14=$(DD)jpeg.dev $(DD)jpeggray.dev $(DD)jpegcmyk.dev $(DD)pdfimage8.dev $(DD)pdfimage24.dev $(DD)pdfimage32.dev $(DD)PCLm.dev
 DEVICE_DEVS15=$(DD)pdfwrite.dev $(DD)ps2write.dev $(DD)eps2write.dev $(DD)txtwrite.dev $(DD)pxlmono.dev $(DD)pxlcolor.dev $(DD)xpswrite.dev $(DD)inkcov.dev $(DD)ink_cov.dev
-DEVICE_DEVS16=$(DD)bbox.dev $(DD)plib.dev $(DD)plibg.dev $(DD)plibm.dev $(DD)plibc.dev $(DD)plibk.dev $(DD)plan.dev $(DD)plang.dev $(DD)planm.dev $(DD)planc.dev $(DD)plank.dev
+DEVICE_DEVS16=$(DD)bbox.dev $(DD)plib.dev $(DD)plibg.dev $(DD)plibm.dev $(DD)plibc.dev $(DD)plibk.dev $(DD)plan.dev $(DD)plang.dev $(DD)planm.dev $(DD)planc.dev $(DD)plank.dev $(DD)planr.dev
 !if "$(WITH_CUPS)" == "1"
 DEVICE_DEVS16=$(DEVICE_DEVS16) $(DD)cups.dev
+!endif
+!if "$(WITH_URF)" == "1"
+DEVICE_DEVS16=$(DEVICE_DEVS16) $(DD)urfgray.dev $(DD)urfrgb.dev $(DD)urfcmyk.dev
 !endif
 # Overflow for DEVS3,4,5,6,9
 DEVICE_DEVS17=$(DD)ljet3.dev $(DD)ljet3d.dev $(DD)ljet4.dev $(DD)ljet4d.dev
 DEVICE_DEVS18=$(DD)pj.dev $(DD)pjxl.dev $(DD)pjxl300.dev $(DD)jetp3852.dev $(DD)r4081.dev
 DEVICE_DEVS19=$(DD)lbp8.dev $(DD)m8510.dev $(DD)necp6.dev $(DD)bjc600.dev $(DD)bjc800.dev
 DEVICE_DEVS20=$(DD)pnm.dev $(DD)pnmraw.dev $(DD)ppm.dev $(DD)ppmraw.dev $(DD)pamcmyk32.dev $(DD)pamcmyk4.dev $(DD)pnmcmyk.dev $(DD)pam.dev
-DEVICE_DEVS21=$(DD)spotcmyk.dev $(DD)devicen.dev $(DD)bmpsep1.dev $(DD)bmpsep8.dev $(DD)bmp16m.dev $(DD)bmp32b.dev $(DD)psdcmyk.dev $(DD)psdrgb.dev $(DD)cp50.dev
+DEVICE_DEVS21=$(DD)spotcmyk.dev $(DD)devicen.dev $(DD)bmpsep1.dev $(DD)bmpsep8.dev $(DD)bmp16m.dev $(DD)bmp32b.dev $(DD)psdcmyk.dev $(DD)psdrgb.dev $(DD)psdcmyk16.dev $(DD)psdrgb16.dev
 !endif
-CONTRIB_DEVS=$(DD)pcl3.dev $(DD)hpdjplus.dev $(DD)hpdjportable.dev $(DD)hpdj310.dev $(DD)hpdj320.dev $(DD)hpdj340.dev $(DD)hpdj400.dev $(DD)hpdj500.dev $(DD)hpdj500c.dev $(DD)hpdj510.dev $(DD)hpdj520.dev $(DD)hpdj540.dev $(DD)hpdj550c.dev $(DD)hpdj560c.dev $(DD)hpdj600.dev $(DD)hpdj660c.dev $(DD)hpdj670c.dev $(DD)hpdj680c.dev $(DD)hpdj690c.dev $(DD)hpdj850c.dev $(DD)hpdj855c.dev $(DD)hpdj870c.dev $(DD)hpdj890c.dev $(DD)hpdj1120c.dev $(DD)cdj670.dev $(DD)cdj850.dev $(DD)cdj880.dev $(DD)cdj890.dev $(DD)cdj970.dev $(DD)cdj1600.dev $(DD)cdnj500.dev $(DD)chp2200.dev $(DD)lips3.dev $(DD)lxm3200.dev $(DD)lex2050.dev $(DD)lxm3200.dev $(DD)lex5700.dev $(DD)lex7000.dev $(DD)oki4w.dev $(DD)gdi.dev $(DD)samsunggdi.dev $(DD)dl2100.dev $(DD)la50.dev $(DD)la70.dev $(DD)la75.dev $(DD)la75plus.dev $(DD)ln03.dev $(DD)xes.dev $(DD)md2k.dev $(DD)md5k.dev $(DD)lips4.dev $(DD)bj10v.dev $(DD)bj10vh.dev $(DD)md50Mono.dev $(DD)md50Eco.dev $(DD)md1xMono.dev $(DD)lp2000.dev $(DD)escpage.dev $(DD)npdl.dev $(DD)rpdl.dev $(DD)fmpr.dev $(DD)fmlbp.dev $(DD)jj100.dev $(DD)lbp310.dev $(DD)lbp320.dev $(DD)mj700v2c.dev $(DD)mj500c.dev $(DD)mj6000c.dev $(DD)mj8000c.dev $(DD)pr201.dev $(DD)pr150.dev $(DD)pr1000.dev $(DD)pr1000_4.dev $(DD)lips2p.dev $(DD)bjc880j.dev $(DD)mag16.dev $(DD)mag256.dev $(DD)bjcmono.dev $(DD)bjcgray.dev $(DD)bjccmyk.dev $(DD)bjccolor.dev $(DD)svgwrite.dev
+CONTRIB_DEVS=$(DD)pcl3.dev $(DD)hpdjplus.dev $(DD)hpdjportable.dev $(DD)hpdj310.dev $(DD)hpdj320.dev $(DD)hpdj340.dev $(DD)hpdj400.dev $(DD)hpdj500.dev $(DD)hpdj500c.dev $(DD)hpdj510.dev $(DD)hpdj520.dev $(DD)hpdj540.dev $(DD)hpdj550c.dev $(DD)hpdj560c.dev $(DD)hpdj600.dev $(DD)hpdj660c.dev $(DD)hpdj670c.dev $(DD)hpdj680c.dev $(DD)hpdj690c.dev $(DD)hpdj850c.dev $(DD)hpdj855c.dev $(DD)hpdj870c.dev $(DD)hpdj890c.dev $(DD)hpdj1120c.dev $(DD)cdj670.dev $(DD)cdj850.dev $(DD)cdj880.dev $(DD)cdj890.dev $(DD)cdj970.dev $(DD)cdj1600.dev $(DD)cdnj500.dev $(DD)chp2200.dev $(DD)lips3.dev $(DD)lxm3200.dev $(DD)lex2050.dev $(DD)lxm3200.dev $(DD)lex5700.dev $(DD)lex7000.dev $(DD)oki4w.dev $(DD)gdi.dev $(DD)samsunggdi.dev $(DD)dl2100.dev $(DD)la50.dev $(DD)la70.dev $(DD)la75.dev $(DD)la75plus.dev $(DD)ln03.dev $(DD)xes.dev $(DD)md2k.dev $(DD)md5k.dev $(DD)lips4.dev $(DD)bj10v.dev $(DD)bj10vh.dev $(DD)md50Mono.dev $(DD)md50Eco.dev $(DD)md1xMono.dev $(DD)lp2000.dev $(DD)escpage.dev $(DD)npdl.dev $(DD)rpdl.dev $(DD)fmpr.dev $(DD)fmlbp.dev $(DD)jj100.dev $(DD)lbp310.dev $(DD)lbp320.dev $(DD)mj700v2c.dev $(DD)mj500c.dev $(DD)mj6000c.dev $(DD)mj8000c.dev $(DD)pr201.dev $(DD)pr150.dev $(DD)pr1000.dev $(DD)pr1000_4.dev $(DD)lips2p.dev $(DD)bjc880j.dev $(DD)bjcmono.dev $(DD)bjcgray.dev $(DD)bjccmyk.dev $(DD)bjccolor.dev $(DD)svgwrite.dev
 
 !if "$(WITH_CONTRIB)" == "1"
 DEVICE_DEVS16=$(DEVICE_DEVS16) $(CONTRIB_DEVS)
@@ -1379,7 +1660,7 @@ BITSTREAM_CFLAGS=
 
 # Define the name of the makefile -- used in dependencies.
 
-MAKEFILE=$(PSSRCDIR)\msvc32.mak
+MAKEFILE=$(PSSRCDIR)\msvc.mak
 TOP_MAKEFILES=$(MAKEFILE) $(GLSRCDIR)\msvccmd.mak $(GLSRCDIR)\msvctail.mak $(GLSRCDIR)\winlib.mak $(PSSRCDIR)\winint.mak
 
 # Define the files to be removed by `make clean'.
@@ -1430,6 +1711,11 @@ BEGINFILES2=$(BEGINFILES2) $(BSCFILE)
 GSCONSOLE_XE=$(BINDIR)\$(GSCONSOLE).exe
 GSDLL_DLL=$(BINDIR)\$(GSDLL).dll
 GSDLL_OBJS=$(PSOBJ)gsdll.$(OBJ) $(GLOBJ)gp_msdll.$(OBJ)
+
+GPCL6DLL_DLL=$(BINDIR)\$(GPCL6DLL).dll
+GXPSDLL_DLL=$(BINDIR)\$(GXPSDLL).dll
+GPDLDLL_DLL=$(BINDIR)\$(GPDLDLL).dll
+
 INT_ARCHIVE_SOME=$(GLOBJ)gconfig.$(OBJ) $(GLOBJ)gscdefs.$(OBJ)
 INT_ARCHIVE_ALL=$(PSOBJ)imainarg.$(OBJ) $(PSOBJ)imain.$(OBJ) $(GLOBJ)iconfig.$(OBJ) \
  $(INT_ARCHIVE_SOME)
@@ -1525,10 +1811,10 @@ $(GPDLGEN)gpdllib.rsp: $(TOP_MAKEFILES)
 $(GS_XE): $(GSDLL_DLL)
 
 !else
-$(GS_XE): $(GSDLL_DLL)  $(DWOBJ) $(GSCONSOLE_XE) $(GLOBJ)gp_wutf8.$(OBJ)
-	echo /SUBSYSTEM:WINDOWS > $(PSGEN)gswin.rsp
+$(GS_XE): $(GSDLL_DLL)  $(DWOBJ) $(GSCONSOLE_XE) $(GLOBJ)gp_wutf8.$(OBJ) $(TOP_MAKEFILES)
+	echo /SUBSYSTEM:WINDOWS$(SUBSUBSYS) > $(PSGEN)gswin.rsp
 !if "$(PROFILE)"=="1"
-	echo /PROFILE >> $(PSGEN)gswin.rsp 
+	echo /Profile >> $(PSGEN)gswin.rsp
 !endif
 !ifdef WIN64
 	echo /DEF:$(PSSRCDIR)\dwmain64.def /OUT:$(GS_XE) >> $(PSGEN)gswin.rsp
@@ -1540,10 +1826,10 @@ $(GS_XE): $(GSDLL_DLL)  $(DWOBJ) $(GSCONSOLE_XE) $(GLOBJ)gp_wutf8.$(OBJ)
 !endif
 
 # The console mode small EXE loader
-$(GSCONSOLE_XE): $(OBJC) $(GS_OBJ).res $(PSSRCDIR)\dw64c.def $(PSSRCDIR)\dw32c.def $(GLOBJ)gp_wutf8.$(OBJ)
-	echo /SUBSYSTEM:CONSOLE > $(PSGEN)gswin.rsp
+$(GSCONSOLE_XE): $(OBJC) $(GS_OBJ).res $(PSSRCDIR)\dw64c.def $(PSSRCDIR)\dw32c.def $(GLOBJ)gp_wutf8.$(OBJ) $(TOP_MAKEFILES)
+	echo /SUBSYSTEM:CONSOLE$(SUBSUBSYS) > $(PSGEN)gswin.rsp
 !if "$(PROFILE)"=="1"
-	echo /PROFILE >> $(PSGEN)gswin.rsp
+	echo /Profile >> $(PSGEN)gswin.rsp
 !endif
 !ifdef WIN64
 	echo  /DEF:$(PSSRCDIR)\dw64c.def /OUT:$(GSCONSOLE_XE) >> $(PSGEN)gswin.rsp
@@ -1551,22 +1837,119 @@ $(GSCONSOLE_XE): $(OBJC) $(GS_OBJ).res $(PSSRCDIR)\dw64c.def $(PSSRCDIR)\dw32c.d
 	echo  /DEF:$(PSSRCDIR)\dw32c.def /OUT:$(GSCONSOLE_XE) >> $(PSGEN)gswin.rsp
 !endif
 	$(LINK) $(LCT) @$(PSGEN)gswin.rsp $(OBJC) $(LINKLIBPATH) @$(LIBCTR) $(GS_OBJ).res $(GLOBJ)gp_wutf8.$(OBJ)
-	del $(PSGEN)gswin.rsp
 
 # The big DLL
-$(GSDLL_DLL): $(ECHOGS_XE) $(gs_tr) $(GS_ALL) $(DEVS_ALL) $(GSDLL_OBJS) $(GSDLL_OBJ).res $(PSGEN)lib.rsp $(PSOBJ)gsromfs$(COMPILE_INITS).$(OBJ)
+$(GSDLL_DLL): $(ECHOGS_XE) $(gs_tr) $(GS_ALL) $(DEVS_ALL) $(GSDLL_OBJS) $(GSDLL_OBJ).res $(PSGEN)lib.rsp \
+              $(PSOBJ)gsromfs$(COMPILE_INITS).$(OBJ) $(TOP_MAKEFILES)
 	echo Linking $(GSDLL)  $(GSDLL_DLL) $(METRO)
 	echo /DLL /DEF:$(PSSRCDIR)\$(GSDLL).def /OUT:$(GSDLL_DLL) > $(PSGEN)gswin.rsp
 !if "$(PROFILE)"=="1"
-	echo /PROFILE >> $(PSGEN)gswin.rsp
+	echo /Profile >> $(PSGEN)gswin.rsp
 !endif
 	$(LINK) $(LCT) @$(PSGEN)gswin.rsp $(GSDLL_OBJS) @$(gsld_tr) $(PSOBJ)gsromfs$(COMPILE_INITS).$(OBJ) @$(PSGEN)lib.rsp $(LINKLIBPATH) @$(LIBCTR) $(GSDLL_OBJ).res
 	del $(PSGEN)gswin.rsp
 
+$(GPCL6DLL_DLL): $(ECHOGS_XE) $(GSDLL_OBJ).res $(LIBCTR) $(LIB_ALL) $(PCL_DEVS_ALL) $(PCLGEN)pcllib.rsp \
+                $(PCLOBJ)pclromfs$(COMPILE_INITS).$(OBJ) $(ld_tr) $(pcl_tr) $(MAIN_OBJ) $(TOP_OBJ) \
+                $(XOBJS) $(INT_ARCHIVE_SOME) $(TOP_MAKEFILES)
+	echo Linking $(GPCL6DLL)  $(GPCL6DLL_DLL) $(METRO)
+	copy $(pclld_tr) $(PCLGEN)gpclwin.tr
+	echo $(MAIN_OBJ) $(TOP_OBJ) $(INT_ARCHIVE_SOME) $(XOBJS) >> $(PCLGEN)gpclwin.tr
+	echo $(PCLOBJ)pclromfs$(COMPILE_INITS).$(OBJ) >> $(PCLGEN)gpclwin.tr
+	echo /DLL /DEF:$(PLSRCDIR)\$(GPCL6DLL).def /OUT:$(GPCL6DLL_DLL) > $(PCLGEN)gpclwin.rsp
+!if "$(PROFILE)"=="1"
+	echo /Profile >> $(PSGEN)gpclwin.rsp
+!endif
+	$(LINK) $(LCT) @$(PCLGEN)gpclwin.rsp $(GPCL6DLL_OBJS) @$(PCLGEN)gpclwin.tr @$(PSGEN)pcllib.rsp $(LINKLIBPATH) @$(LIBCTR) $(GSDLL_OBJ).res
+	del $(PCLGEN)gpclwin.rsp
+
+$(GPCL_XE): $(GPCL6DLL_DLL) $(DWMAINOBJS) $(GS_OBJ).res $(TOP_MAKEFILES)
+	echo /SUBSYSTEM:CONSOLE$(SUBSUBSYS) > $(PCLGEN)gpclwin.rsp
+!if "$(PROFILE)"=="1"
+	echo /Profile >> $(PCLGEN)gpclwin.rsp
+!endif
+!ifdef WIN64
+	echo  /OUT:$(GPCL_XE) >> $(PCLGEN)gpclwin.rsp
+!else
+	echo  /OUT:$(GPCL_XE) >> $(PCLGEN)gpclwin.rsp
+!endif
+	$(LINK) $(LCT) @$(PCLGEN)gpclwin.rsp $(DWMAINOBJS) $(BINDIR)\$(GPCL6DLL).lib $(LINKLIBPATH) @$(LIBCTR) $(GS_OBJ).res
+	del $(PXLGEN)gpclwin.rsp
+
+
+$(GXPSDLL_DLL): $(ECHOGS_XE) $(GSDLL_OBJ).res $(LIBCTR) $(LIB_ALL) $(XPS_DEVS_ALL) $(XPSGEN)xpslib.rsp \
+                $(XPSOBJ)xpsromfs$(COMPILE_INITS).$(OBJ) $(ld_tr) $(xps_tr) $(MAIN_OBJ) $(XPS_TOP_OBJS) \
+                $(XOBJS) $(INT_ARCHIVE_SOME) $(TOP_MAKEFILES)
+	echo Linking $(GXPSDLL)  $(GXPSDLL_DLL) $(METRO)
+	copy $(xpsld_tr) $(XPSGEN)gxpswin.tr
+	echo $(MAIN_OBJ) $(XPS_TOP_OBJS) $(INT_ARCHIVE_SOME) $(XOBJS) >> $(XPSGEN)gxpswin.tr
+	echo $(PCLOBJ)xpsromfs$(COMPILE_INITS).$(OBJ) >> $(XPSGEN)gxpswin.tr
+	echo /DLL /DEF:$(PLSRCDIR)\$(GXPSDLL).def /OUT:$(GXPSDLL_DLL) > $(XPSGEN)gxpswin.rsp
+!if "$(PROFILE)"=="1"
+	echo /Profile >> $(XPSGEN)gxpswin.rsp
+!endif
+	$(LINK) $(LCT) @$(XPSGEN)gxpswin.rsp $(GXPSDLL_OBJS) @$(XPSGEN)gxpswin.tr @$(XPSGEN)xpslib.rsp $(LINKLIBPATH) @$(LIBCTR) $(GSDLL_OBJ).res
+	del $(PCLGEN)gxpswin.rsp
+
+$(GXPS_XE): $(GXPSDLL_DLL) $(DWMAINOBJS) $(GS_OBJ).res $(TOP_MAKEFILES)
+	echo /SUBSYSTEM:CONSOLE$(SUBSUBSYS) > $(XPSGEN)gxpswin.rsp
+!if "$(PROFILE)"=="1"
+	echo /Profile >> $(XPSGEN)gxpswin.rsp
+!endif
+!ifdef WIN64
+	echo  /OUT:$(GXPS_XE) >> $(XPSGEN)gxpswin.rsp
+!else
+	echo  /OUT:$(GXPS_XE) >> $(XPSGEN)gxpswin.rsp
+!endif
+	$(LINK) $(LCT) @$(XPSGEN)gxpswin.rsp $(DWMAINOBJS) $(BINDIR)\$(GXPSDLL).lib $(LINKLIBPATH) @$(LIBCTR) $(GS_OBJ).res
+	del $(XPSGEN)gxpswin.rsp
+
+
+
+$(GPDLDLL_DLL): $(ECHOGS_XE) $(GSDLL_OBJ).res $(LIBCTR) $(LIB_ALL) $(PCL_DEVS_ALL) $(XPS_DEVS_ALL) $(GS_ALL) \
+                $(GPDLGEN)gpdllib.rsp \
+		$(GPDLOBJ)pdlromfs$(COMPILE_INITS).$(OBJ) \
+		$(GPDLOBJ)pdlromfs$(COMPILE_INITS)c0.$(OBJ) \
+		$(GPDLOBJ)pdlromfs$(COMPILE_INITS)c1.$(OBJ) \
+		$(GPDLOBJ)pdlromfs$(COMPILE_INITS)c2.$(OBJ) \
+		$(GPDLOBJ)pdlromfs$(COMPILE_INITS)c3.$(OBJ) \
+                $(ld_tr) $(gpdl_tr) $(MAIN_OBJ) $(XPS_TOP_OBJS) \
+		$(GPDL_PSI_TOP_OBJS) $(PCL_PXL_TOP_OBJS) $(PSI_TOP_OBJ) $(XPS_TOP_OBJ) \
+		$(REALMAIN_OBJ) $(MAIN_OBJ) $(XOBJS) $(INT_ARCHIVE_SOME) $(TOP_MAKEFILES)
+	echo Linking $(GPDLDLL)  $(GPDLDLL_DLL) $(METRO)
+	copy $(gpdlld_tr) $(GPDLGEN)gpdlwin.tr
+	echo $(MAIN_OBJ) $(GPDL_PSI_TOP_OBJS) $(PCL_PXL_TOP_OBJS) $(PSI_TOP_OBJ) $(XPS_TOP_OBJ) $(XOBJS) >> $(GPDLGEN)gpdlwin.tr
+	echo $(PCLOBJ)pdlromfs$(COMPILE_INITS).$(OBJ) >> $(GPDLGEN)gpdlwin.tr
+	echo $(PCLOBJ)pdlromfs$(COMPILE_INITS)c0.$(OBJ) >> $(GPDLGEN)gpdlwin.tr
+	echo $(PCLOBJ)pdlromfs$(COMPILE_INITS)c1.$(OBJ) >> $(GPDLGEN)gpdlwin.tr
+	echo $(PCLOBJ)pdlromfs$(COMPILE_INITS)c2.$(OBJ) >> $(GPDLGEN)gpdlwin.tr
+	echo $(PCLOBJ)pdlromfs$(COMPILE_INITS)c3.$(OBJ) >> $(GPDLGEN)gpdlwin.tr
+	echo /DLL /DEF:$(PLSRCDIR)\$(GPDLDLL).def /OUT:$(GPDLDLL_DLL) > $(GPDLGEN)gpdlwin.rsp
+!if "$(PROFILE)"=="1"
+	echo /Profile >> $(GPDLGEN)gpdlwin.rsp
+!endif
+	$(LINK) $(LCT) @$(GPDLGEN)gpdlwin.rsp $(GPDLDLL_OBJS) @$(GPDLGEN)gpdlwin.tr @$(GPDLGEN)gpdllib.rsp $(LINKLIBPATH) @$(LIBCTR) $(GSDLL_OBJ).res
+	del $(GPDLGEN)gpdlwin.rsp
+
+$(GPDL_XE): $(GPDLDLL_DLL) $(DWMAINOBJS) $(GS_OBJ).res $(TOP_MAKEFILES)
+	echo /SUBSYSTEM:CONSOLE$(SUBSUBSYS) > $(GPDLGEN)gpdlwin.rsp
+!if "$(PROFILE)"=="1"
+	echo /Profile >> $(XPSGEN)gpdlwin.rsp
+!endif
+!ifdef WIN64
+	echo  /OUT:$(GPDL_XE) >> $(GPDLGEN)gpdlwin.rsp
+!else
+	echo  /OUT:$(GPDL_XE) >> $(GPDLGEN)gpdlwin.rsp
+!endif
+	$(LINK) $(LCT) @$(GPDLGEN)gpdlwin.rsp $(DWMAINOBJS) $(BINDIR)\$(GPDLDLL).lib $(LINKLIBPATH) @$(LIBCTR) $(GS_OBJ).res
+	del $(GPDLGEN)gpdlwin.rsp
+
+
 !else
 # The big graphical EXE
 $(GS_XE): $(GSCONSOLE_XE) $(GS_ALL) $(DEVS_ALL) $(GSDLL_OBJS) $(DWOBJNO) $(GSDLL_OBJ).res $(PSSRCDIR)\dwmain32.def\
-		$(ld_tr) $(gs_tr) $(PSSRCDIR)\dwmain64.def $(PSGEN)lib.rsp $(PSOBJ)gsromfs$(COMPILE_INITS).$(OBJ)
+		$(ld_tr) $(gs_tr) $(PSSRCDIR)\dwmain64.def $(PSGEN)lib.rsp $(PSOBJ)gsromfs$(COMPILE_INITS).$(OBJ) \
+                $(TOP_MAKEFILES)
 	copy $(gsld_tr) $(PSGEN)gswin.tr
 	echo $(PSOBJ)gsromfs$(COMPILE_INITS).$(OBJ) >> $(PSGEN)gswin.tr
 	echo $(PSOBJ)dwnodll.obj >> $(PSGEN)gswin.tr
@@ -1580,7 +1963,7 @@ $(GS_XE): $(GSCONSOLE_XE) $(GS_ALL) $(DEVS_ALL) $(GSDLL_OBJS) $(DWOBJNO) $(GSDLL
 	echo /DEF:$(PSSRCDIR)\dwmain32.def /OUT:$(GS_XE) > $(PSGEN)gswin.rsp
 !endif
 !if "$(PROFILE)"=="1"
-	echo /PROFILE >> $(PSGEN)gswin.rsp
+	echo /Profile >> $(PSGEN)gswin.rsp
 !endif
 	$(LINK) $(LCT) @$(PSGEN)gswin.rsp $(GLOBJ)gsdll @$(PSGEN)gswin.tr $(LINKLIBPATH) @$(LIBCTR) @$(PSGEN)lib.rsp $(GSDLL_OBJ).res $(DWTRACE)
 	del $(PSGEN)gswin.tr
@@ -1588,14 +1971,14 @@ $(GS_XE): $(GSCONSOLE_XE) $(GS_ALL) $(DEVS_ALL) $(GSDLL_OBJS) $(DWOBJNO) $(GSDLL
 
 # The big console mode EXE
 $(GSCONSOLE_XE): $(ECHOGS_XE) $(gs_tr) $(GS_ALL) $(DEVS_ALL) $(GSDLL_OBJS) $(OBJCNO) $(GS_OBJ).res $(PSSRCDIR)\dw64c.def $(PSSRCDIR)\dw32c.def \
-		$(PSGEN)lib.rsp $(PSOBJ)gsromfs$(COMPILE_INITS).$(OBJ)
+		$(PSGEN)lib.rsp $(PSOBJ)gsromfs$(COMPILE_INITS).$(OBJ) $(TOP_MAKEFILES)
 	copy $(gsld_tr) $(PSGEN)gswin.tr
 	echo $(PSOBJ)gsromfs$(COMPILE_INITS).$(OBJ) >> $(PSGEN)gswin.tr
 	echo $(PSOBJ)dwnodllc.obj >> $(PSGEN)gswin.tr
 	echo $(GLOBJ)dwimg.obj >> $(PSGEN)gswin.tr
 	echo $(PSOBJ)dwmainc.obj >> $(PSGEN)gswin.tr
 	echo $(PSOBJ)dwreg.obj >> $(PSGEN)gswin.tr
-	echo /SUBSYSTEM:CONSOLE > $(PSGEN)gswin.rsp
+	echo /SUBSYSTEM:CONSOLE$(SUBSUBSYS) > $(PSGEN)gswin.rsp
 !ifdef WIN64
 	echo /DEF:$(PSSRCDIR)\dw64c.def /OUT:$(GSCONSOLE_XE) >> $(PSGEN)gswin.rsp
 !else
@@ -1604,47 +1987,48 @@ $(GSCONSOLE_XE): $(ECHOGS_XE) $(gs_tr) $(GS_ALL) $(DEVS_ALL) $(GSDLL_OBJS) $(OBJ
 	$(LINK) $(LCT) @$(PSGEN)gswin.rsp $(GLOBJ)gsdll @$(PSGEN)gswin.tr $(LINKLIBPATH) @$(LIBCTR) @$(PSGEN)lib.rsp $(GS_OBJ).res $(DWTRACE)
 	del $(PSGEN)gswin.rsp
 	del $(PSGEN)gswin.tr
-!endif
 
 
 $(GPCL_XE): $(ECHOGS_XE) $(LIBCTR) $(LIB_ALL) $(WINMAINOBJS) $(PCL_DEVS_ALL) $(PCLGEN)pcllib.rsp \
                 $(PCLOBJ)pclromfs$(COMPILE_INITS).$(OBJ) \
-		$(ld_tr) $(pcl_tr) $(REALMAIN_OBJ) $(MAIN_OBJ) $(TOP_OBJ) $(XOBJS) $(INT_ARCHIVE_SOME)
-	copy $(ld_tr) $(PCLGEN)gpclwin.tr
-	$(ECHOGS_XE) -a $(PCLGEN)gpclwin.tr -n -R $(pcl_tr)
-	echo $(WINMAINOBJS) $(TOP_OBJ) $(INT_ARCHIVE_SOME) $(XOBJS) >> $(PCLGEN)gpclwin.tr
+		$(ld_tr) $(pcl_tr) $(MAIN_OBJ) $(TOP_OBJ) $(XOBJS) $(INT_ARCHIVE_SOME) \
+                $(TOP_MAKEFILES)
+	copy $(pclld_tr) $(PCLGEN)gpclwin.tr
+	echo $(WINMAINOBJS) $(MAIN_OBJ) $(TOP_OBJ) $(INT_ARCHIVE_SOME) $(XOBJS) >> $(PCLGEN)gpclwin.tr
 	echo $(PCLOBJ)pclromfs$(COMPILE_INITS).$(OBJ) >> $(PCLGEN)gpclwin.tr
-	echo /SUBSYSTEM:CONSOLE > $(PCLGEN)pclwin.rsp
+	echo /SUBSYSTEM:CONSOLE$(SUBSUBSYS) > $(PCLGEN)pclwin.rsp
         echo /OUT:$(GPCL_XE) >> $(PCLGEN)pclwin.rsp
 	$(LINK) $(LCT) @$(PCLGEN)pclwin.rsp @$(PCLGEN)gpclwin.tr $(LINKLIBPATH) @$(LIBCTR) @$(PCLGEN)pcllib.rsp
-	del $(PCLGEN)pclwin.rsp
-	del $(PCLGEN)gpclwin.tr
+        del $(PCLGEN)pclwin.rsp
+        del $(PCLGEN)gpclwin.tr
 
 $(GXPS_XE): $(ECHOGS_XE) $(LIBCTR) $(LIB_ALL) $(WINMAINOBJS) $(XPS_DEVS_ALL) $(XPSGEN)xpslib.rsp \
                 $(XPS_TOP_OBJS) $(XPSOBJ)xpsromfs$(COMPILE_INITS).$(OBJ) \
-		$(ld_tr) $(xps_tr) $(REALMAIN_OBJ) $(MAIN_OBJ) $(XOBJS) $(INT_ARCHIVE_SOME)
-	copy $(ld_tr) $(XPSGEN)gxpswin.tr
-	$(ECHOGS_XE) -a $(PCLGEN)gxpswin.tr -n -R $(xps_tr)
-	echo $(WINMAINOBJS) $(XPS_TOP_OBJS) $(INT_ARCHIVE_SOME) $(XOBJS) >> $(XPSGEN)gxpswin.tr
+		$(ld_tr) $(xps_tr) $(MAIN_OBJ) $(XOBJS) $(INT_ARCHIVE_SOME) \
+                $(TOP_MAKEFILES)
+	copy $(xpsld_tr) $(XPSGEN)gxpswin.tr
+	echo $(WINMAINOBJS) $(MAIN_OBJ) $(XPS_TOP_OBJS) $(INT_ARCHIVE_SOME) $(XOBJS) >> $(XPSGEN)gxpswin.tr
 	echo $(PCLOBJ)xpsromfs$(COMPILE_INITS).$(OBJ) >> $(XPSGEN)gxpswin.tr
-	echo /SUBSYSTEM:CONSOLE > $(XPSGEN)xpswin.rsp
+	echo /SUBSYSTEM:CONSOLE$(SUBSUBSYS) > $(XPSGEN)xpswin.rsp
         echo /OUT:$(GXPS_XE) >> $(XPSGEN)xpswin.rsp
 	$(LINK) $(LCT) @$(XPSGEN)xpswin.rsp @$(XPSGEN)gxpswin.tr $(LINKLIBPATH) @$(LIBCTR) @$(XPSGEN)xpslib.rsp
-	del $(XPSGEN)xpswin.rsp
-	del $(XPSGEN)gxpswin.tr
+        del $(XPSGEN)xpswin.rsp
+        del $(XPSGEN)gxpswin.tr
 
 $(GPDL_XE): $(ECHOGS_XE) $(ld_tr) $(gpdl_tr) $(LIBCTR) $(LIB_ALL) $(WINMAINOBJS) $(XPS_DEVS_ALL) $(PCL_DEVS_ALL) $(GS_ALL) \
                 $(GPDLGEN)gpdllib.rsp $(GPDLOBJ)pdlromfs$(COMPILE_INITS).$(OBJ) \
                 $(GPDL_PSI_TOP_OBJS) $(PCL_PXL_TOP_OBJS) $(PSI_TOP_OBJ) $(XPS_TOP_OBJ) \
-		$(REALMAIN_OBJ) $(MAIN_OBJ) $(XOBJS) $(INT_ARCHIVE_SOME)
+		$(MAIN_OBJ) $(XOBJS) $(INT_ARCHIVE_SOME) \
+                $(TOP_MAKEFILES)
 	copy $(gpdlld_tr) $(GPDLGEN)gpdlwin.tr
-	echo $(WINMAINOBJS) $(GPDL_PSI_TOP_OBJS) $(PCL_PXL_TOP_OBJS) $(PSI_TOP_OBJ) $(XPS_TOP_OBJ) $(XOBJS) >> $(GPDLGEN)gpdlwin.tr
+	echo $(WINMAINOBJS) $(MAIN_OBJ) $(GPDL_PSI_TOP_OBJS) $(PCL_PXL_TOP_OBJS) $(PSI_TOP_OBJ) $(XPS_TOP_OBJ) $(XOBJS) >> $(GPDLGEN)gpdlwin.tr
 	echo $(PCLOBJ)pdlromfs$(COMPILE_INITS).$(OBJ) >> $(GPDLGEN)gpdlwin.tr
-	echo /SUBSYSTEM:CONSOLE > $(GPDLGEN)gpdlwin.rsp
+	echo /SUBSYSTEM:CONSOLE$(SUBSUBSYS) > $(GPDLGEN)gpdlwin.rsp
         echo /OUT:$(GPDL_XE) >> $(GPDLGEN)gpdlwin.rsp
 	$(LINK) $(LCT) @$(GPDLGEN)gpdlwin.rsp @$(GPDLGEN)gpdlwin.tr $(LINKLIBPATH) @$(LIBCTR) @$(GPDLGEN)gpdllib.rsp
 	del $(GPDLGEN)gpdlwin.rsp
 	del $(GPDLGEN)gpdlwin.tr
+!endif
 
 # ---------------------- Debug targets ---------------------- #
 # Simply set some definitions and call ourselves back         #
@@ -1655,28 +2039,36 @@ WINDEFS=WIN64= BUILD_SYSTEM="$(BUILD_SYSTEM)" PGMFILES="$(PGMFILES)" PGMFILESx86
 WINDEFS=BUILD_SYSTEM="$(BUILD_SYSTEM)" PGMFILES="$(PGMFILES)" PGMFILESx86="$(PGMFILESx86)"
 !endif
 
-DEBUGDEFS=DEBUG=1 TDEBUG=1
+RECURSIVEDEFS=$(WINDEFS)
+!ifdef XP
+RECURSIVEDEFS=XP=$(XP) $(RECURSIVEDEFS)
+!endif
+!ifdef DEVSTUDIO
+RECURSIVEDEFS=DEVSTUDIO="$(DEVSTUDIO)" $(RECURSIVEDEFS)
+!endif
+
+DEBUGDEFS=DEBUG=1 TDEBUG=1 $(RECURSIVEDEFS)
 
 debug:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(DEBUGDEFS) $(WINDEFS)
+	nmake -f $(MAKEFILE) $(DEBUGDEFS) FT_BRIDGE=$(FT_BRIDGE)
 
 gsdebug:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(DEBUGDEFS) $(WINDEFS) gs
+	nmake -f $(MAKEFILE) $(DEBUGDEFS) FT_BRIDGE=$(FT_BRIDGE) gs
 
 gpcl6debug:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(DEBUGDEFS) $(WINDEFS) gpcl6
+	nmake -f $(MAKEFILE) $(DEBUGDEFS) FT_BRIDGE=$(FT_BRIDGE) gpcl6
 
 gxpsdebug:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(DEBUGDEFS) $(WINDEFS) gxps
+	nmake -f $(MAKEFILE) $(DEBUGDEFS) FT_BRIDGE=$(FT_BRIDGE) gxps
 
 gpdldebug:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(DEBUGDEFS) $(WINDEFS) gpdl
+	nmake -f $(MAKEFILE) $(DEBUGDEFS) FT_BRIDGE=$(FT_BRIDGE) gpdl
 
 debugclean:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(DEBUGDEFS) $(WINDEFS) clean
+	nmake -f $(MAKEFILE) $(DEBUGDEFS) FT_BRIDGE=$(FT_BRIDGE) clean
 
 debugbsc:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(DEBUGDEFS) $(WINDEFS) bsc
+	nmake -f $(MAKEFILE) $(DEBUGDEFS) FT_BRIDGE=$(FT_BRIDGE) bsc
 
 # --------------------- Memento targets --------------------- #
 # Simply set some definitions and call ourselves back         #
@@ -1684,52 +2076,52 @@ debugbsc:
 MEMENTODEFS=$(DEBUGDEFS) MEMENTO=1
 
 memento-target:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(MEMENTODEFS) $(WINDEFS)
+	nmake -f $(MAKEFILE) $(MEMENTODEFS) FT_BRIDGE=$(FT_BRIDGE)
 
 gsmemento:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(MEMENTODEFS) $(WINDEFS) gs
+	nmake -f $(MAKEFILE) $(MEMENTODEFS) FT_BRIDGE=$(FT_BRIDGE) gs
 
 gpcl6memento:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(MEMENTODEFS) $(WINDEFS) gpcl6
+	nmake -f $(MAKEFILE) $(MEMENTODEFS) FT_BRIDGE=$(FT_BRIDGE) gpcl6
 
 gxpsmemento:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(MEMENTODEFS) $(WINDEFS) gxps
+	nmake -f $(MAKEFILE) $(MEMENTODEFS) FT_BRIDGE=$(FT_BRIDGE) gxps
 
 gpdlmemento:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(MEMENTODEFS) $(WINDEFS) gpdl
+	nmake -f $(MAKEFILE) $(MEMENTODEFS) FT_BRIDGE=$(FT_BRIDGE) gpdl
 
 mementoclean:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(MEMENTODEFS) $(WINDEFS) clean
+	nmake -f $(MAKEFILE) $(MEMENTODEFS) FT_BRIDGE=$(FT_BRIDGE) clean
 
 mementobsc:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(MEMENTODEFS) $(WINDEFS) bsc
+	nmake -f $(MAKEFILE) $(MEMENTODEFS) FT_BRIDGE=$(FT_BRIDGE) bsc
 
 # --------------------- Profile targets --------------------- #
 # Simply set some definitions and call ourselves back         #
 
-PROFILEDEFS=PROFILE=1
+PROFILEDEFS=$(RECURSIVEDEFS) PROFILE=1
 
 profile:
 profile-target:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(PROFILEDEFS) $(WINDEFS)
+	nmake -f $(MAKEFILE) $(PROFILEDEFS) FT_BRIDGE=$(FT_BRIDGE)
 
 gsprofile:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(PROFILEDEFS) $(WINDEFS) gs
+	nmake -f $(MAKEFILE) $(PROFILEDEFS) FT_BRIDGE=$(FT_BRIDGE) gs
 
 gpcl6profile:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(PROFILEDEFS) $(WINDEFS) gpcl6
+	nmake -f $(MAKEFILE) $(PROFILEDEFS) FT_BRIDGE=$(FT_BRIDGE) gpcl6
 
 gxpsprofile:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(PROFILEDEFS) $(WINDEFS) gxps
+	nmake -f $(MAKEFILE) $(PROFILEDEFS) FT_BRIDGE=$(FT_BRIDGE) gxps
 
 gpdlprofile:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(PROFILEDEFS) $(WINDEFS) gpdl
+	nmake -f $(MAKEFILE) $(PROFILEDEFS) FT_BRIDGE=$(FT_BRIDGE) gpdl
 
 profileclean:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(PROFILEDEFS) $(WINDEFS) clean
+	nmake -f $(MAKEFILE) $(PROFILEDEFS) FT_BRIDGE=$(FT_BRIDGE) clean
 
 profilebsc:
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(PROFILEDEFS) $(WINDEFS) bsc
+	nmake -f $(MAKEFILE) $(PROFILEDEFS) FT_BRIDGE=$(FT_BRIDGE) bsc
 
 
 
@@ -1737,7 +2129,7 @@ profilebsc:
 # Simply set some definitions and call ourselves back        #
 
 !ifndef UFST_ROOT
-UFST_ROOT=C:\ufst
+UFST_ROOT=.\ufst
 !endif
 
 UFST_ROMFS_ARGS=-b \
@@ -1751,11 +2143,13 @@ UFSTDISCFONTDIR="$(UFST_ROOT)/fontdata"
 UFSTBASEDEFS=UFST_BRIDGE=1 FT_BRIDGE=1 UFST_ROOT="$(UFST_ROOT)" UFST_ROMFS_ARGS="$(UFST_ROMFS_ARGS)" UFSTFONTDIR="$(UFSTFONTDIR)" UFSTROMFONTDIR="$(UFSTROMFONTDIR)"
 
 !ifdef WIN64
-UFSTDEBUGDEFS=BINDIR=.\ufstdebugbin GLGENDIR=.\ufstdebugobj64 GLOBJDIR=.\ufstdebugobj64 PSLIBDIR=.\lib PSGENDIR=.\ufstdebugobj64 PSOBJDIR=.\ufstdebugobj64 DEBUG=1 TDEBUG=1 SBRDIR=.\ufstdebugobj64
-UFSTDEFS=BINDIR=.\ufstbin GLGENDIR=.\ufstobj64 GLOBJDIR=.\ufstobj64 PSLIBDIR=.\lib PSGENDIR=.\ufstobj64 PSOBJDIR=.\ufstobj64 SBRDIR=.\ufstobj64
+UFSTDEBUGDEFS=BINDIR=.\ufstdebugbin GLGENDIR=.\ufstdebugobj64 GLOBJDIR=.\ufstdebugobj64 DEBUG=1 TDEBUG=1
+
+UFSTDEFS=BINDIR=.\ufstbin GLGENDIR=.\ufstobj64 GLOBJDIR=.\ufstobj64
 !else
-UFSTDEBUGDEFS=BINDIR=.\ufstdebugbin GLGENDIR=.\ufstdebugobj GLOBJDIR=.\ufstdebugobj PSLIBDIR=.\lib PSGENDIR=.\ufstdebugobj PSOBJDIR=.\ufstdebugobj DEBUG=1 TDEBUG=1 SBRDIR=.\ufstdebugobj
-UFSTDEFS=BINDIR=.\ufstbin GLGENDIR=.\ufstobj GLOBJDIR=.\ufstobj PSLIBDIR=.\lib PSGENDIR=.\ufstobj PSOBJDIR=.\ufstobj SBRDIR=.\ufstobj
+UFSTDEBUGDEFS=BINDIR=.\ufstdebugbin GLGENDIR=.\ufstdebugobj DEBUG=1 TDEBUG=1
+
+UFSTDEFS=BINDIR=.\ufstbin GLGENDIR=.\ufstobj GLOBJDIR=.\ufstobj
 !endif
 
 ufst-lib:
@@ -1764,22 +2158,22 @@ ufst-lib:
 #	nmake -f makefile.artifex fco_lib.a if_lib.a psi_lib.a tt_lib.a
 
 ufst-debug: ufst-lib
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" $(UFSTBASEDEFS) $(UFSTDEBUGDEFS) UFST_CFLAGS="$(UFST_CFLAGS)" $(WINDEFS)
+	nmake -f $(MAKEFILE) $(RECURSIVEDEFS) $(UFSTBASEDEFS) $(UFSTDEBUGDEFS) UFST_CFLAGS="$(UFST_CFLAGS)"
 
 ufst-debugclean: ufst-lib
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" $(UFSTBASEDEFS) $(UFSTDEBUGDEFS) UFST_CFLAGS="$(UFST_CFLAGS)" $(WINDEFS) clean
+	nmake -f $(MAKEFILE) $(RECURSIVEDEFS) $(UFSTBASEDEFS) $(UFSTDEBUGDEFS) UFST_CFLAGS="$(UFST_CFLAGS)" clean
 
 ufst-debugbsc: ufst-lib
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" $(UFSTBASEDEFS) $(UFSTDEBUGDEFS) UFST_CFLAGS="$(UFST_CFLAGS)" $(WINDEFS) bsc
+	nmake -f $(MAKEFILE) $(RECURSIVEDEFS) $(UFSTBASEDEFS) $(UFSTDEBUGDEFS) UFST_CFLAGS="$(UFST_CFLAGS)" bsc
 
 ufst: ufst-lib
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" $(UFSTBASEDEFS) $(UFSTDEFS) UFST_CFLAGS="$(UFST_CFLAGS)" $(WINDEFS)
+	nmake -f $(MAKEFILE) $(RECURSIVEDEFS) $(UFSTBASEDEFS) $(UFSTDEFS) UFST_CFLAGS="$(UFST_CFLAGS)"
 
 ufst-clean: ufst-lib
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" $(UFSTBASEDEFS) $(UFSTDEFS) UFST_CFLAGS="$(UFST_CFLAGS)" $(WINDEFS) clean
+	nmake -f $(MAKEFILE) $(RECURSIVEDEFS) $(UFSTBASEDEFS) $(UFSTDEFS) UFST_CFLAGS="$(UFST_CFLAGS)" clean
 
 ufst-bsc: ufst-lib
-	nmake -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" $(UFSTBASEDEFS) $(UFSTDEFS) UFST_CFLAGS="$(UFST_CFLAGS)" $(WINDEFS) bsc
+	nmake -f $(MAKEFILE) $(RECURSIVEDEFS) $(UFSTBASEDEFS) $(UFSTDEFS) UFST_CFLAGS="$(UFST_CFLAGS)" bsc
 
 #----------------------- Individual Product Targets --------------------#
 gs:$(GS_XE) $(GSCONSOLE_XE)

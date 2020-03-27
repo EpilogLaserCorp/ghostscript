@@ -1,4 +1,4 @@
-;  Copyright (C) 2001-2012 Artifex Software, Inc.
+;  Copyright (C) 2001-2019 Artifex Software, Inc.
 ;  All Rights Reserved.
 ;
 ;  This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 ;  of the license contained in the file LICENSE in this distribution.
 ;  
 ;  Refer to licensing information at http://www.artifex.com or contact
-;  Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-;  CA  94903, U.S.A., +1(415)492-9861, for further information.
+;  Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+;  CA 94945, U.S.A., +1(415)492-9861, for further information.
 ;
 
 ; This script should be compiled with e.g.:
@@ -105,6 +105,11 @@
 !define VERSION 8.99
 !endif
 
+; Defaulting to 0 is the safer option
+!ifndef COMPILE_INITS
+!define COMPILE_INITS 0
+!endif
+
 SetCompressor /SOLID /FINAL lzma
 XPStyle on
 CRCCheck on
@@ -123,12 +128,32 @@ CRCCheck on
 !define MUI_FINISHPAGE_LINK_LOCATION http://www.ghostscript.com/
 
 !insertmacro MUI_PAGE_WELCOME
+
+Page custom OldVersionsPageCreate
+
 !insertmacro MUI_PAGE_LICENSE "LICENSE"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_LANGUAGE "English"
+
+Function OldVersionsPageCreate
+  !insertmacro MUI_HEADER_TEXT "Previous Ghostscript Installations" "Optionally run the uninstallers for previous Ghostscript installations$\nClick $\"Cancel$\" to stop uninstalling previous installs"
+
+  StrCpy $0 0
+  loop:
+    EnumRegKey $1 HKLM "Software\Artifex\GPL Ghostscript" $0
+    StrCmp $1 "" done
+    IntOp $0 $0 + 1
+    MessageBox MB_YESNOCANCEL|MB_ICONQUESTION "Uninstall Ghostscript Version $1?" IDNO loop IDCANCEL done
+    Var /GLOBAL uninstexe
+    ReadRegStr $uninstexe HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\GPL Ghostscript $1" "UninstallString"
+    ExecWait "$uninstexe"
+    Goto loop
+  done:
+
+FunctionEnd
 
 !searchparse /ignorecase /noerrors "${TARGET}" w WINTYPE
 !echo "Building ${WINTYPE}-bit installer"
@@ -173,9 +198,13 @@ Section "" ; (default section)
 SetOutPath "$INSTDIR"
 CreateDirectory "$INSTDIR\bin"
 ; add files / whatever that need to be installed here.
-File   /r /x contrib /x lcms /x lcms2 /x expat /x .svn doc
-File   /r /x zlib /x expat /x .svn /x lcms2 examples
-File   /r /x contrib /x expat /x luratech /x lwf_jp2 /x lcms /x lcms2 /x .svn /x lib/gssetgs.bat lib
+File /r /x arch /x base /x cups /x contrib /x devices /x expat /x freetype /x gpdl /x ijs /x ios /x jbig2dec /x jpeg /x jpegxr /x lcms2mt /x lib /x libpng /x man /x obj /x openjpeg /x pcl /x psi /x tiff /x toolbin /x windows /x xps /x zlib doc
+File /r /x arch /x base /x cups /x contrib /x devices /x expat /x freetype /x gpdl /x ijs /x ios /x jbig2dec /x jpeg /x jpegxr /x lcms2mt /x lib /x libpng /x man /x obj /x openjpeg /x pcl /x psi /x tiff /x toolbin /x windows /x xps /x zlib examples
+File /r /x arch /x base /x cups /x contrib /x devices /x expat /x freetype /x gpdl /x ijs /x ios /x jbig2dec /x jpeg /x jpegxr /x lcms2mt /x libpng /x man /x obj /x openjpeg /x pcl /x psi /x tiff /x toolbin /x windows /x xps /x zlib /x lib/gssetgs.bat lib
+File /r /x arch /x base /x cups /x contrib /x devices /x expat /x freetype /x gpdl /x ijs /x ios /x jbig2dec /x jpeg /x jpegxr /x lcms2mt /x lib /x libpng /x man /x obj /x openjpeg /x pcl /x psi /x tiff /x toolbin /x windows /x xps /x zlib Resource
+File /r /x arch /x base /x cups /x contrib /x devices /x expat /x freetype /x gpdl /x ijs /x ios /x jbig2dec /x jpeg /x jpegxr /x lcms2mt /x lib /x libpng /x man /x obj /x openjpeg /x pcl /x psi /x tiff /x toolbin /x windows /x xps /x zlib iccprofiles
+
+
 File /oname=lib\gssetgs.bat .\lib\gssetgs${WINTYPE}.bat
 File /oname=bin\gsdll${WINTYPE}.dll .\bin\gsdll${WINTYPE}.dll
 File /oname=bin\gsdll${WINTYPE}.lib .\bin\gsdll${WINTYPE}.lib
@@ -187,7 +216,13 @@ File /oname=bin\gswin${WINTYPE}c.exe .\bin\gswin${WINTYPE}c.exe
 !endif
 
 WriteRegStr HKEY_LOCAL_MACHINE "Software\GPL Ghostscript\${VERSION}" "GS_DLL" "$INSTDIR\bin\gsdll${WINTYPE}.dll"
+
+!if "${COMPILE_INITS}" == "0"
+WriteRegStr HKEY_LOCAL_MACHINE "Software\GPL Ghostscript\${VERSION}" "GS_LIB" "$INSTDIR\Resource\Init;$INSTDIR\bin;$INSTDIR\lib;$INSTDIR\fonts"
+!else
 WriteRegStr HKEY_LOCAL_MACHINE "Software\GPL Ghostscript\${VERSION}" "GS_LIB" "$INSTDIR\bin;$INSTDIR\lib;$INSTDIR\fonts"
+!endif
+
 WriteRegStr HKEY_LOCAL_MACHINE "Software\Artifex\GPL Ghostscript\${VERSION}" "" "$INSTDIR"
 WriteRegStr HKEY_LOCAL_MACHINE "Software\Microsoft\Windows\CurrentVersion\Uninstall\GPL Ghostscript ${VERSION}" "DisplayName" "GPL Ghostscript"
 WriteRegStr HKEY_LOCAL_MACHINE "Software\Microsoft\Windows\CurrentVersion\Uninstall\GPL Ghostscript ${VERSION}" "UninstallString" '"$INSTDIR\uninstgs.exe"'
@@ -213,7 +248,7 @@ Function CJKGen
     ${StrRep} $0 "$FONTS" "\" "/"
     ${StrRep} $1 "$INSTDIR\lib\cidfmap" "\" "/"
     ${StrRep} $2 "$INSTDIR\lib\mkcidfm.ps" "\" "/"
-    ExecWait '"$INSTDIR\bin\gswin${WINTYPE}c.exe" -q -dBATCH "-sFONTDIR=$0" "-sCIDFMAP=$1" "$2"'
+    ExecWait '"$INSTDIR\bin\gswin${WINTYPE}c.exe" -q -dNOSAFER -dBATCH "-sFONTDIR=$0" "-sCIDFMAP=$1" "$2"'
 FunctionEnd
 
 Function .onInit
@@ -224,10 +259,11 @@ Function .onInit
         Abort
     ${EndIf}
 !endif
-    System::Call 'kernel32::CreateMutexA(i 0, i 0, t "GhostscriptInstaller") i .r1 ?e'
+
+    System::Call 'kernel32::CreateMutexA(i 0, i 0, t "Ghostscript${VERSION}Installer") i .r1 ?e'
     Pop $R0
     StrCmp $R0 0 +3
-    MessageBox MB_OK "The Ghostscript installer is already running." /SD IDOK
+    MessageBox MB_OK "The Ghostscript ${VERSION} installer is already running." /SD IDOK
     Abort
 FunctionEnd
 
@@ -251,18 +287,25 @@ Delete   "$INSTDIR\uninstgs.exe"
 !if "${WINTYPE}" == "64"
     SetRegView 64
 !endif
-DeleteRegKey HKEY_LOCAL_MACHINE "SOFTWARE\Artifex\GPL Ghostscript\${VERSION}"
+DeleteRegKey HKEY_LOCAL_MACHINE "Software\Artifex\GPL Ghostscript\${VERSION}"
 DeleteRegKey HKEY_LOCAL_MACHINE "Software\Microsoft\Windows\CurrentVersion\Uninstall\GPL Ghostscript ${VERSION}"
 DeleteRegKey HKEY_LOCAL_MACHINE "Software\GPL Ghostscript\${VERSION}"
 RMDir /r "$INSTDIR\doc"
 RMDir /r "$INSTDIR\examples"
 RMDir /r "$INSTDIR\lib"
+RMDir /r "$INSTDIR\Resource"
+RMDir /r "$INSTDIR\iccprofiles"
 Delete   "$INSTDIR\bin\gsdll${WINTYPE}.dll"
 Delete   "$INSTDIR\bin\gsdll${WINTYPE}.lib"
 Delete   "$INSTDIR\bin\gswin${WINTYPE}.exe"
 Delete   "$INSTDIR\bin\gswin${WINTYPE}c.exe"
 RMDir    "$INSTDIR\bin"
 RMDir    "$INSTDIR"
+!if "${WINTYPE}" == "64"
+RMDir "$PROGRAMFILES64\gs"
+!else
+RMDir "$PROGRAMFILES\gs"
+!endif
 SectionEnd ; end of uninstall section
 
 ; eof

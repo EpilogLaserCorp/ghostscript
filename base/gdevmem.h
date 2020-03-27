@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Private definitions for memory devices. */
@@ -19,6 +19,7 @@
 #  define gdevmem_INCLUDED
 
 #include "gxbitops.h"
+#include "gxdevcli.h"
 
 /*
    The representation for a "memory" device is simply a
@@ -91,7 +92,7 @@ dev_proc_draw_thin_line(mem_draw_thin_line);
 dev_proc_open_device(mem_open);
 dev_proc_get_bits_rectangle(mem_get_bits_rectangle);
 /* The following are for word-oriented devices. */
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
 #  define mem_word_get_bits_rectangle mem_get_bits_rectangle
 #else
 dev_proc_get_bits_rectangle(mem_word_get_bits_rectangle);
@@ -102,6 +103,7 @@ dev_proc_map_color_rgb(mem_mapped_map_color_rgb);
 /* Default implementations */
 dev_proc_strip_copy_rop(mem_default_strip_copy_rop);
 dev_proc_strip_copy_rop2(mem_default_strip_copy_rop2);
+dev_proc_transform_pixel_region(mem_transform_pixel_region);
 
 /*
  * Macro for generating the device descriptor.
@@ -182,7 +184,27 @@ dev_proc_strip_copy_rop2(mem_default_strip_copy_rop2);
                 NULL, /* encode_color */\
                 NULL, /* decode_color */\
                 NULL, /* pattern_manage */\
-                fill_rectangle_hl_color /* fill_rectangle_hl_color */\
+                fill_rectangle_hl_color, /* fill_rectangle_hl_color */\
+                NULL, /* include_color_space */\
+                NULL, /* fill_linear_color_scanline */\
+                NULL, /* fill_linear_color_trapezoid */\
+                NULL, /* fill_linear_color_triangle */\
+                NULL, /* update_spot_equivalent_colors */\
+                NULL, /* ret_devn_params */\
+                NULL, /* fillpage */\
+                NULL, /* push_transparency_state */\
+                NULL, /* pop_transparency_state */\
+                NULL, /* put_image */\
+                NULL, /* dev_spec_op */\
+                NULL, /* copy_planes */\
+                NULL, /* get_profile */\
+                NULL, /* set_graphics_type_tag */\
+                NULL, /* strip_copy_rop2 */\
+                NULL, /* strip_tile_rect_devn */\
+                NULL, /* copy_alpha_hl_color */\
+                NULL, /* process_page */\
+                mem_transform_pixel_region,\
+                NULL, /* fill_stroke_path */\
         },\
         0,			/* target */\
         mem_device_init_private	/* see gxdevmem.h */\
@@ -248,7 +270,7 @@ dev_proc_strip_copy_rop(mem_mono_strip_copy_rop_dev);
 dev_proc_strip_copy_rop(mem_gray_strip_copy_rop);
 dev_proc_strip_copy_rop(mem_gray8_rgb24_strip_copy_rop);
 
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
 #  define mem_mono_word_device mem_mono_device
 #  define mem_mapped2_word_device mem_mapped2_device
 #  define mem_mapped4_word_device mem_mapped4_device

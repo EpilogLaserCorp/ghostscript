@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -187,9 +187,7 @@ pack_scanline_ge8(
 int
 gx_overprint_generic_fill_rectangle(
     gx_device *             tdev,
-    bool                    blendspot,
     gx_color_index          drawn_comps,
-    ushort                  k_value,
     int                     x,
     int                     y,
     int                     w,
@@ -232,7 +230,7 @@ gx_overprint_generic_fill_rectangle(
     /* allocate space for a scanline of color indices */
     pcolor_buff = (gx_color_index *)
                       gs_alloc_bytes( mem,
-                                      w *  arch_sizeof_color_index,
+                                      w *  ARCH_SIZEOF_COLOR_INDEX,
                                       "overprint generic fill rectangle" );
     if (pcolor_buff == 0)
         return gs_note_error(gs_error_VMerror);
@@ -322,21 +320,9 @@ gx_overprint_generic_fill_rectangle(
 
             if ((code = dev_proc(tdev, decode_color)(tdev, *cp, dest_cvals)) < 0)
                 break;
-            if (k_value > 0) {
-                /* Have to run through all 3 components */
-                for (j = 0, comps = drawn_comps; j < 3; j++, comps >>= 1) {
+            for (j = 0, comps = drawn_comps; comps != 0; ++j, comps >>= 1) {
                     if ((comps & 0x1) != 0)
                         dest_cvals[j] = src_cvals[j];
-                    else {
-                        int temp = (dest_cvals[j] * (256 - k_value));
-                        dest_cvals[j] = temp >> 8;
-                    }
-                }
-            } else {
-                for (j = 0, comps = drawn_comps; comps != 0; ++j, comps >>= 1) {
-                    if ((comps & 0x1) != 0)
-                        dest_cvals[j] = src_cvals[j];
-                }
             }
             *cp = dev_proc(tdev, encode_color)(tdev, dest_cvals);
         }
@@ -539,7 +525,6 @@ gx_overprint_sep_fill_rectangle_1(
 int
 gx_overprint_sep_fill_rectangle_2(
     gx_device *             tdev,
-    bool                    blendspot,
     gx_color_index          retain_mask,    /* already swapped */
     int                     x,
     int                     y,
@@ -562,9 +547,9 @@ gx_overprint_sep_fill_rectangle_2(
     /* set up color and retain mask pointers */
     pcolor = (byte *)&color;
     pmask = (byte *)&retain_mask;
-#if arch_is_big_endian
-    pcolor += arch_sizeof_color_index - byte_depth;
-    pmask += arch_sizeof_color_index - byte_depth;
+#if ARCH_IS_BIG_ENDIAN
+    pcolor += ARCH_SIZEOF_COLOR_INDEX - byte_depth;
+    pmask += ARCH_SIZEOF_COLOR_INDEX - byte_depth;
 #endif
 
     /* allocate a buffer for the returned data */

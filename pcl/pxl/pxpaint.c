@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -30,7 +30,7 @@
 #include "gsrop.h"
 #include "gxfarith.h"
 #include "gxfixed.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gxmatrix.h"
 #include "gxpath.h"
 #include "pxptable.h"
@@ -61,7 +61,7 @@ px_operator_proc(pxNewPath);
 /* Attributes: pxaEndPoint, pxaNumberOfPoints, pxaPointType. */
 static int
 add_lines(px_args_t * par, px_state_t * pxs,
-          int (*line_proc) (gs_state *, double, double))
+          int (*line_proc) (gs_gstate *, double, double))
 {
     int code = 0;
 
@@ -122,7 +122,7 @@ add_lines(px_args_t * par, px_state_t * pxs,
 /* pxaControlPoint2, pxaEndPoint. */
 static int
 add_curves(px_args_t * par, px_state_t * pxs,
-           int (*curve_proc) (gs_state *, double, double, double, double,
+           int (*curve_proc) (gs_gstate *, double, double, double, double,
                               double, double))
 {
     int code = 0;
@@ -325,7 +325,7 @@ setup_arc(px_arc_params_t * params, const px_value_t * pbox,
 /* per the nonsense in 5.7.3 (The ROP3 Operands) from the pxl
    reference manual the following rops are allowed for stroking. */
 static bool
-pxl_allow_rop_for_stroke(gs_state * pgs)
+pxl_allow_rop_for_stroke(gs_gstate * pgs)
 {
     gs_rop3_t rop = gs_currentrasterop(pgs);
 
@@ -339,7 +339,7 @@ pxl_allow_rop_for_stroke(gs_state * pgs)
 static int
 paint_path(px_state_t * pxs)
 {
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     gx_path *ppath = gx_current_path(pgs);
     px_gstate_t *pxgs = pxs->pxgs;
     bool will_stroke = pxgs->pen.type != pxpNull;
@@ -357,7 +357,7 @@ paint_path(px_state_t * pxs)
 
     if (will_fill) {
         gx_path *stroke_path = NULL;
-        int (*fill_proc) (gs_state *) =
+        int (*fill_proc) (gs_gstate *) =
             (pxgs->fill_mode == eEvenOdd ? gs_eofill : gs_fill);
 
         if ((code = px_set_paint(&pxgs->brush, pxs)) < 0)
@@ -371,10 +371,14 @@ paint_path(px_state_t * pxs)
             gx_path_assign_preserve(stroke_path, ppath);
         }
 
+        /* Make a reduced version of the path, and put that back. */
+        code = gx_path_elide_1d(ppath);
+        if (code < 0)
+            return code;
+
         /* exit here if no stroke or the fill failed. */
         code = (*fill_proc) (pgs);
         if (code < 0 || !will_stroke) {
-            /* if there is a stroke path free it */
             if (stroke_path)
                 gx_path_free(stroke_path, "paint_path(error_with_fill)");
             return code;
@@ -433,7 +437,7 @@ paint_shape(px_args_t * par, px_state_t * pxs, px_operator_proc((*path_op)))
 {
 
     int code;
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     gs_fixed_point fxp;
 
     /* build the path */
@@ -455,8 +459,7 @@ paint_shape(px_args_t * par, px_state_t * pxs, px_operator_proc((*path_op)))
     if (code < 0)
         return code;
 
-    return gx_setcurrentpoint_from_path((gs_imager_state *) pgs,
-                                        gx_current_path(pxs->pgs));
+    return gx_setcurrentpoint_from_path(pgs, gx_current_path(pxs->pgs));
 }
 
 /* ---------------- Operators ---------------- */
@@ -494,7 +497,7 @@ pxPaintPath(px_args_t * par, px_state_t * pxs)
     gx_path_assign_free(ppath, save_path);
 
     if (code >= 0)
-        code = gx_setcurrentpoint_from_path((gs_imager_state *)pxs->pgs, ppath);
+        code = gx_setcurrentpoint_from_path(pxs->pgs, ppath);
     
     return code;
 }
@@ -715,12 +718,12 @@ pxRectanglePath(px_args_t * par, px_state_t * pxs)
 {
     double x1, y1, x2, y2;
     gs_fixed_point p1;
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     gx_path *ppath = gx_current_path(pgs);
     gs_fixed_point lines[3];
 
 #define p2 lines[1]
-#define pctm (&((const gs_imager_state *)pgs)->ctm)
+#define pctm (&((const gs_gstate *)pgs)->ctm)
     int code;
 
     set_box_value(x1, y1, x2, y2, par->pv[0]);
@@ -784,7 +787,7 @@ pxRoundRectanglePath(px_args_t * par, px_state_t * pxs)
     real yr = real_value(par->pv[1], 1) * 0.5;
     real xd, yd;
     gs_matrix save_ctm;
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     int code;
 
     set_box_value(x1, y1, x2, y2, par->pv[0]);
@@ -830,15 +833,17 @@ const byte apxText[] = {
 };
 int
 pxText(px_args_t * par, px_state_t * pxs)
-{ {
-        int code = px_set_paint(&pxs->pxgs->brush, pxs);
+{
+  {
+      int code = px_set_paint(&pxs->pxgs->brush, pxs);
 
-        if (code < 0)
-            return code;
-}
-if (par->pv[0]->value.array.size != 0 && pxs->pxgs->brush.type != pxpNull)
+      if (code < 0)
+          return code;
+  }
+  if (par->pv[0]->value.array.size != 0 && pxs->pxgs->brush.type != pxpNull)
     pxs->have_page = true;
-    return px_text(par, pxs, false);
+
+  return px_text(par, pxs, false);
 }
 
 const byte apxTextPath[] = {

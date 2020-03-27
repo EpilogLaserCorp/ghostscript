@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -60,12 +60,12 @@ int hpgl_print_error(const gs_memory_t * mem,
 /* syntactically. */
 
 #define hpgl_call_and_check(mem, call, if_check_else)\
-do {						\
-  int code; 					\
-  if ((code = (call)) < 0)			\
-    { if_check_else()				\
-        return hpgl_call_note_error(mem, code);	\
-    }						\
+do {\
+  int hpgl_call_and_check_code;\
+  if ((hpgl_call_and_check_code = (call)) < 0)\
+    { if_check_else()\
+        return hpgl_call_note_error(mem, hpgl_call_and_check_code);\
+    }\
 } while (0)
 
 /* Ordinary function calls */

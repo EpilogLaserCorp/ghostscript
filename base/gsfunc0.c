@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -339,7 +339,7 @@ fn_Sd_encode(const gs_function_Sd_t *pfn, int i, double sample)
     if (pfn->params.Range)
         r0 = pfn->params.Range[2 * i], r1 = pfn->params.Range[2 * i + 1];
     else
-        r0 = 0, r1 = (float)((1 << bps) - 1);
+        r0 = 0, r1 = (float)max_samp;
     if (pfn->params.Decode)
         d0 = pfn->params.Decode[2 * i], d1 = pfn->params.Decode[2 * i + 1];
     else
@@ -477,17 +477,12 @@ fn_Sd_evaluate_cubic_cached_1d(const gs_function_Sd_t *pfn, const float *in, flo
 {
     float d0 = pfn->params.Domain[2 * 0];
     float d1 = pfn->params.Domain[2 * 0 + 1];
-    float x0 = in[0];
     const int pole_step_minor = pfn->params.n;
     const int pole_step = 3 * pole_step_minor;
     int i0; /* A cell index. */
     int ib, ie, i, k;
     double *p, t0, t1, tt;
 
-    if (x0 < d0)
-        x0 = d0;
-    if (x0 > d1)
-        x0 = d1;
     tt = (in[0] - d0) * (pfn->params.Size[0] - 1) / (d1 - d0);
     i0 = (int)floor(tt);
     ib = max(i0 - 1, 0);
@@ -740,6 +735,8 @@ make_interpolation_nodes(const gs_function_Sd_t *pfn, double *T0, double *T1,
         }
         if (pfn->params.Order == 3) {
             code = make_interpolation_tensor(pfn, I, T, 0, 0, pfn->params.m - 1);
+            if (code < 0)
+                return code;
         }
     } else {
         int i;
@@ -860,7 +857,7 @@ get_scaled_range(const gs_function_Sd_t *const pfn,
     const float small_noise = (float)1e-6;
 
     if (v0 < d0 || v0 > d1)
-        return gs_error_rangecheck;
+        return_error(gs_error_rangecheck);
     if (pfn->params.Encode)
         e0 = pfn->params.Encode[i * 2 + 0], e1 = pfn->params.Encode[i * 2 + 1];
     else
@@ -1070,7 +1067,7 @@ is_tensor_monotonic_by_dimension(const gs_function_Sd_t *pfn, int *I, double *T0
             TT1[i] = 0;
     }
     *mask = tensor_dimension_monotonity(TT0, TT1, ii, i0, pole, 0,
-                        count_of(pole) / 4, -1, pfn->params.Order);
+                        count_of(pole) / 4, 1, pfn->params.Order);
     return 0;
 }
 
@@ -1364,12 +1361,18 @@ void
 gs_function_Sd_free_params(gs_function_Sd_params_t * params, gs_memory_t * mem)
 {
     gs_free_const_object(mem, params->Size, "Size");
+    params->Size = NULL;
     gs_free_const_object(mem, params->Decode, "Decode");
+    params->Decode = NULL;
     gs_free_const_object(mem, params->Encode, "Encode");
+    params->Encode = NULL;
     fn_common_free_params((gs_function_params_t *) params, mem);
     gs_free_object(mem, params->pole, "gs_function_Sd_free_params");
+    params->pole = NULL;
     gs_free_object(mem, params->array_step, "gs_function_Sd_free_params");
+    params->array_step = NULL;
     gs_free_object(mem, params->stream_step, "gs_function_Sd_free_params");
+    params->stream_step = NULL;
 }
 
 /* aA helper for gs_function_Sd_serialize. */

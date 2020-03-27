@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /*
@@ -232,7 +232,7 @@ than the fact that there is at least one character.
 static int
 write_charset(gs_fapi_font * a_fapi_font, WRF_output * a_output, unsigned char *a_charset_offset_ptr)
 {
-    const int characters = 1;
+    const int characters = 2; /* .notdef + one other */
     int i = 0;
 
     /* Write the offset to the start of the charset to the top dictionary. */
@@ -304,9 +304,9 @@ write_gsubrs_index(gs_fapi_font * a_fapi_font, WRF_output * a_output)
         data_start = a_output->m_pos;
 
     for (i = 0; i < count; i++) {
-        long buffer_size = a_output->m_limit - a_output->m_count;
+        long buffer_size = a_output->m_limit - a_output->m_count < 0 ? 0 : a_output->m_limit - a_output->m_count;
         long length = a_fapi_font->get_gsubr(a_fapi_font, i, a_output->m_pos,
-                                             (ushort) buffer_size);
+                                             (ushort) (buffer_size > 65535 ? 65535 : buffer_size));
 
         if (a_output->m_pos)
             WRF_wtext(a_fapi_font->memory, a_output, a_output->m_pos, length);

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -24,7 +24,7 @@
 #include "gsstate.h"
 #include "gxdevice.h"
 #include "gxfixed.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gzpath.h"
 #include "gxpaint.h"
 #include "gzcpath.h"
@@ -36,6 +36,7 @@ static dev_proc_open_device(accum_open_device);
 static dev_proc_close_device(accum_close);
 static dev_proc_fill_rectangle(accum_fill_rectangle);
 static dev_proc_dev_spec_op(accum_dev_spec_op);
+static dev_proc_get_clipping_box(accum_get_clipping_box);
 
 /* GC information */
 extern_st(st_clip_list);
@@ -94,7 +95,7 @@ static const gx_device_cpath_accum gs_cpath_accum_device =
   gx_default_end_image,
   NULL,
   NULL,
-  gx_get_largest_clipping_box,
+  accum_get_clipping_box,
   gx_default_begin_typed_image,
   NULL,
   NULL,
@@ -132,7 +133,7 @@ static const gx_device_cpath_accum gs_cpath_accum_device =
 
 /* Start accumulating a clipping path. */
 void
-gx_cpath_accum_begin(gx_device_cpath_accum * padev, gs_memory_t * mem)
+gx_cpath_accum_begin(gx_device_cpath_accum * padev, gs_memory_t * mem, bool transpose)
 {
     gx_device_init_on_stack((gx_device *) padev,
                             (const gx_device *) & gs_cpath_accum_device, mem);
@@ -140,21 +141,48 @@ gx_cpath_accum_begin(gx_device_cpath_accum * padev, gs_memory_t * mem)
     set_dev_proc(padev, encode_color, gx_default_gray_encode);
     set_dev_proc(padev, decode_color, gx_default_decode_color);
     (*dev_proc(padev, open_device)) ((gx_device *) padev);
+    padev->list.transpose = transpose;
 }
 
 void
 gx_cpath_accum_set_cbox(gx_device_cpath_accum * padev,
                         const gs_fixed_rect * pbox)
 {
-    padev->clip_box.p.x = fixed2int_var(pbox->p.x);
-    padev->clip_box.p.y = fixed2int_var(pbox->p.y);
-    padev->clip_box.q.x = fixed2int_var_ceiling(pbox->q.x);
-    padev->clip_box.q.y = fixed2int_var_ceiling(pbox->q.y);
+    if (padev->list.transpose) {
+        padev->clip_box.p.x = fixed2int_var(pbox->p.y);
+        padev->clip_box.p.y = fixed2int_var(pbox->p.x);
+        padev->clip_box.q.x = fixed2int_var_ceiling(pbox->q.y);
+        padev->clip_box.q.y = fixed2int_var_ceiling(pbox->q.x);
+    } else {
+        padev->clip_box.p.x = fixed2int_var(pbox->p.x);
+        padev->clip_box.p.y = fixed2int_var(pbox->p.y);
+        padev->clip_box.q.x = fixed2int_var_ceiling(pbox->q.x);
+        padev->clip_box.q.y = fixed2int_var_ceiling(pbox->q.y);
+    }
+}
+
+static void
+accum_get_clipping_box(gx_device *dev, gs_fixed_rect *pbox)
+{
+    gx_device_cpath_accum * padev = (gx_device_cpath_accum *)dev;
+
+    if (padev->list.transpose) {
+        pbox->p.x = int2fixed(padev->clip_box.p.y);
+        pbox->p.y = int2fixed(padev->clip_box.p.x);
+        pbox->q.x = int2fixed(padev->clip_box.q.y+1)-1;
+        pbox->q.y = int2fixed(padev->clip_box.q.x+1)-1;
+    } else {
+        pbox->p.x = int2fixed(padev->clip_box.p.x);
+        pbox->p.y = int2fixed(padev->clip_box.p.y);
+        pbox->q.x = int2fixed(padev->clip_box.q.x+1)-1;
+        pbox->q.y = int2fixed(padev->clip_box.q.y+1)-1;
+    }
 }
 
 /* Finish accumulating a clipping path. */
+/* NB: After this the padev bbox will be restored to "normal" untransposed */
 int
-gx_cpath_accum_end(const gx_device_cpath_accum * padev, gx_clip_path * pcpath)
+gx_cpath_accum_end(gx_device_cpath_accum * padev, gx_clip_path * pcpath)
 {
     int code = (*dev_proc(padev, close_device)) ((gx_device *) padev);
     /* Make an entire clipping path so we can use cpath_assign. */
@@ -168,6 +196,16 @@ gx_cpath_accum_end(const gx_device_cpath_accum * padev, gx_clip_path * pcpath)
         apath.path.bbox.p.x = apath.path.bbox.p.y =
         apath.path.bbox.q.x = apath.path.bbox.q.y = 0;
     else {
+        if (padev->list.transpose) {
+            int tmp;
+
+            tmp = padev->bbox.p.x;
+            padev->bbox.p.x = padev->bbox.p.y;
+            padev->bbox.p.y = tmp;
+            tmp = padev->bbox.q.x;
+            padev->bbox.q.x = padev->bbox.q.y;
+            padev->bbox.q.y = tmp;
+        }
         apath.path.bbox.p.x = int2fixed(padev->bbox.p.x);
         apath.path.bbox.p.y = int2fixed(padev->bbox.p.y);
         apath.path.bbox.q.x = int2fixed(padev->bbox.q.x);
@@ -189,8 +227,9 @@ gx_cpath_accum_end(const gx_device_cpath_accum * padev, gx_clip_path * pcpath)
     gx_cpath_set_outer_box(&apath);
     apath.path_valid = false;
     apath.id = gs_next_ids(padev->list_memory, 1);	/* path changed => change id */
-    gx_cpath_assign_free(pcpath, &apath);
-    return 0;
+    apath.cached = NULL;
+    code = gx_cpath_assign_free(pcpath, &apath);
+    return code;
 }
 
 /* Discard an accumulator in case of error. */
@@ -203,33 +242,33 @@ gx_cpath_accum_discard(gx_device_cpath_accum * padev)
 /* Intersect two clipping paths using an accumulator. */
 int
 gx_cpath_intersect_path_slow(gx_clip_path * pcpath, gx_path * ppath,
-                             int rule, gs_imager_state *pis,
+                             int rule, gs_gstate *pgs,
                              const gx_fill_params * params0)
 {
-    gs_logical_operation_t save_lop = gs_current_logical_op_inline(pis);
+    gs_logical_operation_t save_lop = gs_current_logical_op_inline(pgs);
     gx_device_cpath_accum adev;
     gx_device_color devc;
     gx_fill_params params;
     int code;
 
-    gx_cpath_accum_begin(&adev, pcpath->path.memory);
+    gx_cpath_accum_begin(&adev, pcpath->path.memory, false);
     set_nonclient_dev_color(&devc, 0);	/* arbitrary, but not transparent */
-    gs_set_logical_op_inline(pis, lop_default);
+    gs_set_logical_op_inline(pgs, lop_default);
     if (params0 != 0)
         params = *params0;
     else {
         gs_point fadjust;
         params.rule = rule;
-        gs_currentfilladjust((gs_state *)pis, &fadjust);
+        gs_currentfilladjust(pgs, &fadjust);
         params.adjust.x = float2fixed(fadjust.x);
         params.adjust.y = float2fixed(fadjust.y);
-        params.flatness = gs_currentflat_inline(pis);
+        params.flatness = gs_currentflat_inline(pgs);
     }
-    code = gx_fill_path_only(ppath, (gx_device *)&adev, pis,
+    code = gx_fill_path_only(ppath, (gx_device *)&adev, pgs,
                              &params, &devc, pcpath);
     if (code < 0 || (code = gx_cpath_accum_end(&adev, pcpath)) < 0)
         gx_cpath_accum_discard(&adev);
-    gs_set_logical_op_inline(pis, save_lop);
+    gs_set_logical_op_inline(pgs, save_lop);
     return code;
 }
 
@@ -286,17 +325,22 @@ accum_close(gx_device * dev)
 {
     gx_device_cpath_accum * const adev = (gx_device_cpath_accum *)dev;
 
-    adev->list.xmin = adev->bbox.p.x;
-    adev->list.xmax = adev->bbox.q.x;
+    if (adev->list.transpose) {
+        adev->list.xmin = adev->bbox.p.y;
+        adev->list.xmax = adev->bbox.q.y;
+    } else {
+        adev->list.xmin = adev->bbox.p.x;
+        adev->list.xmax = adev->bbox.q.x;
+    }
 #ifdef DEBUG
     if (gs_debug_c('q')) {
         gx_clip_rect *rp =
             (adev->list.count <= 1 ? &adev->list.single : adev->list.head);
 
         dmlprintf6(dev->memory,
-                   "[q]list at 0x%lx, count=%d, head=0x%lx, tail=0x%lx, xrange=(%d,%d):\n",
-                   (ulong) & adev->list, adev->list.count,
-                   (ulong) adev->list.head, (ulong) adev->list.tail,
+                   "[q]list at "PRI_INTPTR", count=%d, head="PRI_INTPTR", tail="PRI_INTPTR", xrange=(%d,%d):\n",
+                   (intptr_t)&adev->list, adev->list.count,
+                   (intptr_t)adev->list.head, (intptr_t)adev->list.tail,
                    adev->list.xmin, adev->list.xmax);
         while (rp != 0) {
             clip_rect_print('q', "   ", rp);
@@ -304,7 +348,7 @@ accum_close(gx_device * dev)
         }
     }
     if (!clip_list_validate(&adev->list)) {
-        mlprintf1(dev->memory, "[q]Bad clip list 0x%lx!\n", (ulong) & adev->list);
+        mlprintf1(dev->memory, "[q]Bad clip list "PRI_INTPTR"!\n", (intptr_t)&adev->list);
         return_error(gs_error_Fatal);
     }
 #endif
@@ -423,15 +467,23 @@ accum_alloc_rect(gx_device_cpath_accum * adev)
  * this is possible.
  */
 static int
-accum_fill_rectangle(gx_device * dev, int x, int y, int w, int h,
+accum_fill_rectangle(gx_device * dev, int xi, int yi, int w, int h,
                      gx_color_index color)
 {
     gx_device_cpath_accum * const adev = (gx_device_cpath_accum *)dev;
-    int xe = x + w, ye = y + h;
+    int x, y, xe, ye;
     gx_clip_rect *nr;
     gx_clip_rect *ar;
     register gx_clip_rect *rptr;
     int ymin, ymax;
+
+    if (adev->list.transpose) {
+        x = yi, xe = yi + h;
+        y = xi, ye = xi + w;
+    } else {
+        x = xi, xe = x + w;
+        y = yi, ye = y + h;
+    }
 
     /* Clip the rectangle being added. */
     if (y < adev->clip_box.p.y)
@@ -544,7 +596,6 @@ top:
             rsplit->ymax = ye;
             rsplit = rsplit->prev;
         }
-        ymax = ye;
     }
     /* Now ye = ymax.  If necessary, split off the part of the */
     /* existing band that is below the new band. */

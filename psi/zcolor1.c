@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -94,6 +94,7 @@ static int
 zsetcolortransfer(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
+    os_ptr ep = esp;
     int code;
 
     check_proc(op[-3]);
@@ -130,8 +131,14 @@ zsetcolortransfer(i_ctx_t *i_ctx_p)
         (code = zcolor_remap_one(i_ctx_p, &istate->transfer_procs.gray,
                                  igs->set_transfer.gray, igs,
                                  zcolor_remap_one_finish)) < 0
-        )
+                                 )
+    {
+        /* Return the exec stack to the state it was in before we started the setup
+         * for the transfer function evaluation.
+         */
+        esp = ep;
         return code;
+    }
     return o_push_estack;
 }
 

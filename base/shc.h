@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -74,7 +74,7 @@ typedef struct stream_hc_state_s {
     stream_hc_state_common;
 } stream_hc_state;
 
-#define hc_bits_size (arch_sizeof_int * 8)
+#define hc_bits_size (ARCH_SIZEOF_INT * 8)
 #define s_hce_init_inline(ss)\
   ((ss)->bits = 0, (ss)->bits_left = hc_bits_size)
 #define s_hcd_init_inline(ss)\

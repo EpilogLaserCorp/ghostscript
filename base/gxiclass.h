@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,13 +19,11 @@
 #ifndef gxiclass_INCLUDED
 #  define gxiclass_INCLUDED
 
+#include "stdpre.h"
+#include "gsdevice.h"
+
 /* Define the abstract type for the image enumerator state. */
 typedef struct gx_image_enum_s gx_image_enum;
-
-#ifndef gx_device_DEFINED
-#  define gx_device_DEFINED
-typedef struct gx_device_s gx_device;
-#endif
 
 /*
  * Define the interface for routines used to render a (source) scan line.
@@ -58,7 +56,7 @@ typedef irender_proc((*irender_proc_t));
  * structure as well as returning the rendering procedure.
  */
 #define iclass_proc(proc)\
-  irender_proc_t proc(gx_image_enum *penum)
+  int proc(gx_image_enum *penum, irender_proc_t *render_fn)
 typedef iclass_proc((*gx_image_class_t));
 
 #endif /* gxiclass_INCLUDED */

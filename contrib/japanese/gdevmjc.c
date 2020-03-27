@@ -113,9 +113,9 @@ copies.  */
 
 /* Margins are left, bottom, right, top. */
 /* left bottom right top */
-#define MJ700V2C_MARGINS_A4      0.118, 0.52, 0.118, 0.33465
-#define MJ6000C_MARGINS_A2      0.948, 0.52, 1.969, 0.33465
-#define MJ8000C_MARGINS_A2      0.194, 0.52, 0.194, 0.33465
+#define MJ700V2C_MARGINS_A4     0.118f, 0.52f, 0.118f, 0.33465f
+#define MJ6000C_MARGINS_A2      0.948f, 0.52f, 1.969f, 0.33465f
+#define MJ8000C_MARGINS_A2      0.194f, 0.52f, 0.194f, 0.33465f
 
 /* Define bits-per-pixel for generic drivers - default is 24-bit mode */
 #ifndef BITSPERPIXEL
@@ -141,6 +141,8 @@ copies.  */
 /* Colour mapping procedures */
 static dev_proc_map_rgb_color (gdev_mjc_map_rgb_color);
 static dev_proc_map_color_rgb (gdev_mjc_map_color_rgb);
+static dev_proc_encode_color(gdev_mjc_encode_color);
+static dev_proc_decode_color(gdev_mjc_decode_color);
 
 /* Print-page, properties and miscellaneous procedures */
 static dev_proc_open_device(mj700v2c_open);
@@ -158,7 +160,7 @@ static dev_proc_put_params(mj500c_put_params);
 
 static int mj_open(gx_device * pdev, int ptype);
 static int mj_put_params(gx_device * pdev, gs_param_list * plist, int ptype);
-static int mj_print_page(gx_device_printer * pdev, FILE * prn_stream, int ptype);
+static int mj_print_page(gx_device_printer * pdev, gp_file * prn_stream, int ptype);
 static void expand_line(word *, int, int, int);
 static int put_param_int(gs_param_list *, gs_param_name, int *, int, int, int);
 static void set_bpp(gx_device *, int);
@@ -221,7 +223,45 @@ typedef struct gx_device_mj_s gx_device_mj;
         NULL,	/* draw_line */\
         gx_default_get_bits,\
         proc_get_params,\
-        proc_put_params\
+        proc_put_params,\
+        NULL,	/* map_cmyk_color */\
+        NULL,	/* get_xfont_procs */\
+        NULL,	/* get_xfont_device */\
+        NULL,	/* map_rgb_alpha_color */\
+        NULL,   /* get_page_device */\
+        NULL,	/* get_alpha_bits */\
+        NULL,   /* copy_alpha */\
+        NULL,	/* get_band */\
+        NULL,	/* copy_rop */\
+        NULL,	/* fill_path */\
+        NULL,	/* stroke_path */\
+        NULL,	/* fill_mask */\
+        NULL,	/* fill_trapezoid */\
+        NULL,	/* fill_parallelogram */\
+        NULL,	/* fill_triangle */\
+        NULL,	/* draw_thin_line */\
+        NULL,	/* begin_image */\
+        NULL,	/* image_data */\
+        NULL,	/* end_image */\
+        NULL,	/* strip_tile_rectangle */\
+        NULL,	/* strip_copy_rop, */\
+        NULL,	/* get_clipping_box */\
+        NULL,	/* begin_typed_image */\
+        NULL,	/* get_bits_rectangle */\
+        NULL,	/* map_color_rgb_alpha */\
+        NULL,	/* create_compositor */\
+        NULL,	/* get_hardware_params */\
+        NULL,	/* text_begin */\
+        NULL,	/* finish_copydevice */\
+        NULL, 	/* begin_transparency_group */\
+        NULL, 	/* end_transparency_group */\
+        NULL, 	/* begin_transparency_mask */\
+        NULL, 	/* end_transparency_mask */\
+        NULL, 	/* discard_transparency_layer */\
+        NULL,   /* get_color_mapping_procs */\
+        NULL,   /* get_color_comp_index */\
+        gdev_mjc_encode_color,\
+        gdev_mjc_decode_color\
 }
 
 static gx_device_procs mj700v2c_procs =
@@ -256,8 +296,8 @@ mjcmyk_device(mj8000c_procs, "mj8000c", 360, 360, BITSPERPIXEL,
 static int
 gdev_mjc_paper_size(gx_device *dev)
 {
-  int width = dev->MediaSize[0];
-  int height = dev->MediaSize[1];
+  int width = (int)dev->MediaSize[0];
+  int height = (int)dev->MediaSize[1];
 
   if (width == 1190 && height == 1684)
     return PAPER_SIZE_A2;
@@ -293,8 +333,8 @@ mj8000c_open(gx_device * pdev)
 static int
 mj_open(gx_device *pdev, int ptype)
 {       /* Change the margins if necessary. */
-  int xdpi = pdev->x_pixels_per_inch;
-  int ydpi = pdev->y_pixels_per_inch;
+  int xdpi = (int)pdev->x_pixels_per_inch;
+  int ydpi = (int)pdev->y_pixels_per_inch;
 
   static const float mj_margin[4] = { MJ700V2C_MARGINS_A4 };
   static const float mj6000c_a2[4] = { MJ6000C_MARGINS_A2 };
@@ -325,7 +365,7 @@ mj_open(gx_device *pdev, int ptype)
   gx_device_set_margins(pdev, m, true);
 
   if (mj->colorcomp == 3)
-    mj->density = mj->density * 720 / ydpi * 1.5;
+    mj->density = (int)(mj->density * 720 / ydpi) * 1.5;
   else
     mj->density = mj->density * 720 / ydpi;
 
@@ -400,6 +440,7 @@ mj_put_params(gx_device *pdev,  gs_param_list *plist, int ptype)
         code = put_param_int(plist, "Magenta", &magenta, 0, INT_MAX, code);
         code = put_param_int(plist, "Yellow", &yellow, 0, INT_MAX, code);
         code = put_param_int(plist, "Black", &black, 0, INT_MAX, code);
+        (void) code;
 
         if ((code = param_read_bool(plist,
                                      (param_name = "Unidirectional"),
@@ -503,8 +544,9 @@ mj_put_params(gx_device *pdev,  gs_param_list *plist, int ptype)
 
 #define FSDline(scan, i, j, plane_size, cErr, mErr, yErr, kErr, cP, mP, yP, kP, n)\
 {\
-        unsigned short *mat = matrix2 + (lnum & 127)*128;\
-        int x;\
+    unsigned short *mat = matrix2 + (lnum & 127)*128;\
+    int x;\
+    (void)cErr; /* Stop compiler warning */\
     if (scan == 0) {       /* going_up */\
       x = 0;\
       for (i = 0; i < plane_size; i++) {\
@@ -574,7 +616,7 @@ mj_put_params(gx_device *pdev,  gs_param_list *plist, int ptype)
 /*
  * Miscellaneous functions for Canon BJC-600J printers in raster command mode.
  */
-#define fputshort(n, f) fputc((n)%256,f);fputc((n)/256,f)
+#define fputshort(n, f) gp_fputc((n)%256,f);gp_fputc((n)/256,f)
 
 #define row_bytes (img_rows / 8)
 #define row_words (row_bytes / sizeof(word))
@@ -582,7 +624,7 @@ mj_put_params(gx_device *pdev,  gs_param_list *plist, int ptype)
 
 static int
 mj_raster_cmd(int c_id, int in_size, byte* in, byte* buf2,
-              gx_device_printer* pdev, FILE* prn_stream)
+              gx_device_printer* pdev, gp_file* prn_stream)
 {
   int band_size = 1;	/* 1, 8, or 24 */
 
@@ -601,8 +643,8 @@ mj_raster_cmd(int c_id, int in_size, byte* in, byte* buf2,
 
   /* specifying a colour */
 
-  fputs("\033r",prn_stream); /* secape sequence to specify a color */
-  fputc(colour_number[c_id], prn_stream);
+  gp_fputs("\033r",prn_stream); /* secape sequence to specify a color */
+  gp_fputc(colour_number[c_id], prn_stream);
 
   /* end of specifying a colour */
 
@@ -626,7 +668,7 @@ mj_raster_cmd(int c_id, int in_size, byte* in, byte* buf2,
        ** walk forward, looking for matches:
        */
 
-      for( q++ ; *q == *p && q < in_end ; q++ ) {
+      for( q++ ; q < in_end && *q == *p ; q++ ) {
         if( (q-p) >= 128 ) {
           if( p > inp ) {
             count = p - inp;
@@ -704,53 +746,53 @@ mj_raster_cmd(int c_id, int in_size, byte* in, byte* buf2,
    ** Output data:
    */
 
-  fwrite("\033.\001", 1, 3, prn_stream);
+  gp_fwrite("\033.\001", 1, 3, prn_stream);
 
   if(pdev->y_pixels_per_inch == 720)
-       fputc('\005', prn_stream);
+       gp_fputc('\005', prn_stream);
   else if(pdev->y_pixels_per_inch == 180)
-       fputc('\024', prn_stream);
+       gp_fputc('\024', prn_stream);
   else /* pdev->y_pixels_per_inch == 360 */
-       fputc('\012', prn_stream);
+       gp_fputc('\012', prn_stream);
 
   if(pdev->x_pixels_per_inch == 720)
-       fputc('\005', prn_stream);
+       gp_fputc('\005', prn_stream);
   else if(pdev->x_pixels_per_inch == 180)
-       fputc('\024', prn_stream);
+       gp_fputc('\024', prn_stream);
   else /* pdev->x_pixels_per_inch == 360 */
-       fputc('\012', prn_stream);
+       gp_fputc('\012', prn_stream);
 
-  fputc(band_size, prn_stream);
+  gp_fputc(band_size, prn_stream);
 
-  fputc((width << 3) & 0xff, prn_stream);
-  fputc( width >> 5,	   prn_stream);
+  gp_fputc((width << 3) & 0xff, prn_stream);
+  gp_fputc( width >> 5,	   prn_stream);
 
-  fwrite(out, 1, (outp - out), prn_stream);
+  gp_fwrite(out, 1, (outp - out), prn_stream);
 
-  fputc('\r', prn_stream);
+  gp_fputc('\r', prn_stream);
 
   return 0;
 }
 
 static int
-mj_v_skip(int n, gx_device_printer *pdev, FILE *stream)
+mj_v_skip(int n, gx_device_printer *pdev, gp_file *stream)
 {
         /* This is a kind of magic number. */
   static const int max_y_step = (256 * 15 + 255);
 
   int l = n - max_y_step;
   for (; l > 0; l -= max_y_step) {    /* move 256 * 15 + 255 dots at once*/
-    fwrite("\033(v\2\0\xff\x0f", sizeof(byte), 7, stream);
+    gp_fwrite("\033(v\2\0\xff\x0f", sizeof(byte), 7, stream);
   }
   l += max_y_step;
   /* move to the end. */
   {
     int n2 = l / 256;
     int n1 = l - n2 * 256;
-    fwrite("\033(v\2\0", sizeof(byte) ,5 ,stream);
-    fputc(n1, stream);
-    fputc(n2, stream);
-    fputc('\r', stream);
+    gp_fwrite("\033(v\2\0", sizeof(byte) ,5 ,stream);
+    gp_fputc(n1, stream);
+    gp_fputc(n2, stream);
+    gp_fputc('\r', stream);
   }
   return 0;
 }
@@ -892,32 +934,32 @@ xtal_plane( byte *dp , short *buf[] , byte *oP , short **bar , int plane_size , 
 }
 
 static int
-mj700v2c_print_page(gx_device_printer * pdev, FILE * prn_stream)
+mj700v2c_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
   return mj_print_page(pdev, prn_stream, MJ700V2C);
 }
 
 static int
-mj500c_print_page(gx_device_printer * pdev, FILE * prn_stream)
+mj500c_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
   return mj_print_page(pdev, prn_stream, MJ500C);
 }
 
 static int
-mj6000c_print_page(gx_device_printer * pdev, FILE * prn_stream)
+mj6000c_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
   return mj_print_page(pdev, prn_stream, MJ6000C);
 }
 
 static int
-mj8000c_print_page(gx_device_printer * pdev, FILE * prn_stream)
+mj8000c_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
   return mj_print_page(pdev, prn_stream, MJ8000C);
 }
 
 /* Send the page to the printer.  Compress each scan line. */
 static int
-mj_print_page(gx_device_printer * pdev, FILE * prn_stream, int ptype)
+mj_print_page(gx_device_printer * pdev, gp_file * prn_stream, int ptype)
 {
 /*  int line_size = gdev_prn_rasterwidth(pdev, 0); */
   int line_size = gdev_prn_raster(pdev);
@@ -932,7 +974,7 @@ mj_print_page(gx_device_printer * pdev, FILE * prn_stream, int ptype)
   int scan = 0;
   int *errors[2];
   byte *data[4], *plane_data[4][4], *out_data;
-  byte *out_row, *out_row_alt;
+  byte *out_row;
   word *storage;
   uint storage_size_words;
   uint mj_tmp_buf_size;
@@ -957,7 +999,6 @@ mj_print_page(gx_device_printer * pdev, FILE * prn_stream, int ptype)
   plane_size = calc_buffsize(line_size, storage_bpp);
 
   if (bits_per_pixel == 1) {            /* Data printed direct from i/p */
-    databuff_size = 0;                  /* so no data buffer required, */
     outbuff_size = plane_size * 4;      /* but need separate output buffers */
   }
 
@@ -1012,6 +1053,7 @@ mj_print_page(gx_device_printer * pdev, FILE * prn_stream, int ptype)
         p += xtalbuff_size;
         Kbuf[1] = p;
         p += xtalbuff_size;
+        (void) p;
   }
 
   storage = (word *) gs_malloc(pdev->memory->non_gc_memory, storage_size_words, W, "mj_colour_print_page");
@@ -1046,7 +1088,6 @@ mj_print_page(gx_device_printer * pdev, FILE * prn_stream, int ptype)
     byte *p = out_data = out_row = (byte *)storage;
     data[0] = data[1] = data[2] = p;
     data[3] = p + databuff_size;
-    out_row_alt = out_row + plane_size * 2;
     if (bits_per_pixel > 1) {
       p += databuff_size;
     }
@@ -1065,8 +1106,6 @@ mj_print_page(gx_device_printer * pdev, FILE * prn_stream, int ptype)
       p += plane_size;
     }
     if (bits_per_pixel == 1) {
-      out_data = out_row = p;	  /* size is outbuff_size * 4 */
-      out_row_alt = out_row + plane_size * 2;
       data[1] += databuff_size;   /* coincides with plane_data pointers */
       data[3] += databuff_size;
     }
@@ -1079,27 +1118,27 @@ mj_print_page(gx_device_printer * pdev, FILE * prn_stream, int ptype)
   {
     /** Reset printer, enter graphics mode: */
 
-    fwrite("\033@\033(G\001\000\001", sizeof(byte), 8, prn_stream);
+    gp_fwrite("\033@\033(G\001\000\001", sizeof(byte), 8, prn_stream);
 
     /** Micro-weave-Mode */
     if (mj->microweave) {
-      fwrite("\033(i\001\000\001", sizeof(byte), 6, prn_stream);
+      gp_fwrite("\033(i\001\000\001", sizeof(byte), 6, prn_stream);
     }
     /** Dot-Size define */
     if (mj->dotsize) {
-      fwrite("\033(e\002\000\000\001", sizeof(byte), 7, prn_stream);
+      gp_fwrite("\033(e\002\000\000\001", sizeof(byte), 7, prn_stream);
     }
 
     if (ptype == MJ6000C || ptype == MJ8000C) {
       /* Select Monochrome/Color Printing Mode Command */
       if (pdev->color_info.depth == 8)
-        fwrite("\033(K\002\000\000\001", sizeof(byte), 7, prn_stream);
+        gp_fwrite("\033(K\002\000\000\001", sizeof(byte), 7, prn_stream);
     }
 
     if (mj->direction) /* set the direction of the head */
-      fwrite("\033U\1", 1, 3, prn_stream); /* Unidirectional Printing */
+      gp_fwrite("\033U\1", 1, 3, prn_stream); /* Unidirectional Printing */
     else
-      fwrite("\033U\0", 1, 3, prn_stream);
+      gp_fwrite("\033U\0", 1, 3, prn_stream);
 
 #if 0
 #ifdef A4
@@ -1110,7 +1149,7 @@ mj_print_page(gx_device_printer * pdev, FILE * prn_stream, int ptype)
         ** margin measured from the *top* of the page:
         */
 
-        fwrite("\033(U\001\0\n\033(C\002\0t\020\033(c\004\0\0\0t\020",
+        gp_fwrite("\033(U\001\0\n\033(C\002\0t\020\033(c\004\0\0\0t\020",
                                                         1, 22, prn_stream);
 #endif
 #endif
@@ -1119,34 +1158,30 @@ mj_print_page(gx_device_printer * pdev, FILE * prn_stream, int ptype)
         ** Set the line spacing to match the band height:
         */
 
-        if( pdev->y_pixels_per_inch >= 720 ) {
-          fwrite("\033(U\001\0\005\033+\001", sizeof(byte), 9, prn_stream);
-         }
+        if( pdev->y_pixels_per_inch >= 720 )
+          gp_fwrite("\033(U\001\0\005\033+\001", sizeof(byte), 9, prn_stream);
         else if( pdev->y_pixels_per_inch >= 360 )
-           fwrite("\033(U\001\0\012\033+\001", sizeof(byte), 9, prn_stream);
+           gp_fwrite("\033(U\001\0\012\033+\001", sizeof(byte), 9, prn_stream);
         else /* 180 dpi */
-           fwrite("\033(U\001\0\024\033+\002", sizeof(byte), 9, prn_stream);
+           gp_fwrite("\033(U\001\0\024\033+\002", sizeof(byte), 9, prn_stream);
 
     /* set the length of the page */
-        fwrite("\033(C\2\0", sizeof(byte), 5, prn_stream);
-        fputc(((pdev->height) % 256), prn_stream);
-        fputc(((pdev->height) / 256), prn_stream);
+        gp_fwrite("\033(C\2\0", sizeof(byte), 5, prn_stream);
+        gp_fputc(((pdev->height) % 256), prn_stream);
+        gp_fputc(((pdev->height) / 256), prn_stream);
   }
 
 #define MOFFSET (pdev->t_margin - MJ700V2C_PRINT_LIMIT) /* Print position */
 
   {
-    int MJ_MARGIN_MM = 55;
-    uint top_skip = ( MJ_MARGIN_MM  * pdev->y_pixels_per_inch ) / 254;
-    top_skip = (top_skip ^ (-1)) & 65536;
-    fwrite("\033(V\2\0\0\0",sizeof(byte), 7, prn_stream);
-    fwrite("\033(v\2\0\0\xff",sizeof(byte), 7, prn_stream);
+    gp_fwrite("\033(V\2\0\0\0",sizeof(byte), 7, prn_stream);
+    gp_fwrite("\033(v\2\0\0\xff",sizeof(byte), 7, prn_stream);
   }
 
   /* Send each scan line in turn */
   {
-    long int lend = pdev->height -
-      (dev_t_margin_points(pdev) + dev_b_margin_points(pdev));
+    long int lend = (int)(pdev->height -
+      (dev_t_margin_points(pdev) + dev_b_margin_points(pdev)));
     int cErr, mErr, yErr, kErr;
     int this_pass, i;
     long int lnum;
@@ -1209,7 +1244,6 @@ mj_print_page(gx_device_printer * pdev, FILE * prn_stream, int ptype)
         register byte *mP = plane_data[scan + 2][1];
         register byte *yP = plane_data[scan + 2][0];
         register byte *dp = data[scan + 2];
-        int zero_row_count;
         int i, j;
         byte *odp;
 
@@ -1340,19 +1374,18 @@ mj_print_page(gx_device_printer * pdev, FILE * prn_stream, int ptype)
          * in the order (K), C, M, Y. */
         switch (mj->colorcomp) {
         case 1:
-          zero_row_count = 0;
           out_data = (byte*) plane_data[scan][0];
           /* 3 for balck */
           mj_raster_cmd(3, plane_size, out_data, mj_tmp_buf, pdev, prn_stream);
           break;
         case 3:
-          for (zero_row_count = 0, i = 3 - 1; i >= 0; i--) {
+          for (i = 3 - 1; i >= 0; i--) {
             out_data = (byte*) plane_data[scan][i];
             mj_raster_cmd(i, plane_size, out_data, mj_tmp_buf, pdev, prn_stream);
           }
           break;
         default:
-          for (zero_row_count = 0, i = num_comps - 1; i >= 0; i--) {
+          for (i = num_comps - 1; i >= 0; i--) {
             out_data = (byte*) plane_data[scan][i];
             mj_raster_cmd(i, plane_size, out_data, mj_tmp_buf, pdev, prn_stream);
           }
@@ -1361,9 +1394,9 @@ mj_print_page(gx_device_printer * pdev, FILE * prn_stream, int ptype)
 
         {
           if ( pdev->y_pixels_per_inch > 360 ) {
-             fwrite("\033(v\2\0\1\0",sizeof(byte),7, prn_stream);
+             gp_fwrite("\033(v\2\0\1\0",sizeof(byte),7, prn_stream);
            } else {
-             fputc('\n', prn_stream);
+             gp_fputc('\n', prn_stream);
            }
         }
         scan = 1 - scan;          /* toggle scan direction */
@@ -1375,8 +1408,8 @@ mj_print_page(gx_device_printer * pdev, FILE * prn_stream, int ptype)
 
   /* eject page */
   {
-    fputs("\f\033@", prn_stream);
-    fflush(prn_stream);
+    gp_fputs("\f\033@", prn_stream);
+    gp_fflush(prn_stream);
   }
   /* free temporary storage */
   gs_free(pdev->memory->non_gc_memory, (char *) storage, storage_size_words, W, "mj_colour_print_page");
@@ -1405,14 +1438,6 @@ mj_color_correct(gx_color_value *Rptr ,gx_color_value *Gptr , gx_color_value *Bp
                         *Gptr = M;
                         *Bptr = Y;
                         return;
-                } else if (G>B) {				/* R=G>B */
-                        D = G-B;
-                        Wa  = R;
-                        H  = 256;
-                } else {						/* B>R=G */
-                        D = G-B;
-                        Wa = R;
-                        H = 1024;
                 }
         }
 
@@ -1468,7 +1493,10 @@ mj_color_correct(gx_color_value *Rptr ,gx_color_value *Gptr , gx_color_value *Bp
         if (Y<0)
                 Y=0;
 
-        if(H>256 && H<1024){		/* green correct */
+        /* 2019-10-29 this used to be 'if(H>256 && H<1024)', which can then go
+        beyond bounds of the 512-element grnsep2[]. So have patched up to avoid
+        this, but without any proper idea about what's going on. */
+        if(H>256 && H<768){		/* green correct */
                 short	work;
                 work=(((long)grnsep[M]*(long)grnsep2[H-256])>>16);
                 C+=work;
@@ -1577,12 +1605,12 @@ gdev_mjc_map_color_rgb(gx_device *pdev, gx_color_index color,
           prgb[2] = -(c >> 2);
         }
       else
-        { gx_color_value value = (gx_color_value)color ^ 0xff;
+        { gx_color_index value = (gx_color_index)color ^ 0xff;
           prgb[0] = prgb[1] = prgb[2] = (value << 8) + value;
         }
     break;
   case 16:
-    { gx_color_value c = (gx_color_value)color ^ 0xffff;
+    { gx_color_index c = (gx_color_index)color ^ 0xffff;
       ushort value = c >> 11;
       prgb[0] = ((value << 11) + (value << 6) + (value << 1) +
                  (value >> 4)) >> (16 - gx_color_value_bits);
@@ -1595,7 +1623,7 @@ gdev_mjc_map_color_rgb(gx_device *pdev, gx_color_index color,
     }
     break;
   case 24:
-    { gx_color_value c = (gx_color_value)color ^ 0xffffff;
+    { gx_color_index c = (gx_color_index)color ^ 0xffffff;
       prgb[0] = gx_color_value_from_byte(c >> 16);
       prgb[1] = gx_color_value_from_byte((c >> 8) & 0xff);
       prgb[2] = gx_color_value_from_byte(c & 0xff);
@@ -1611,6 +1639,24 @@ gdev_mjc_map_color_rgb(gx_device *pdev, gx_color_index color,
     break;
   }
   return 0;
+}
+
+/*
+* Encode a list of colorant values into a gx_color_index_value.
+*/
+static gx_color_index
+gdev_mjc_encode_color(gx_device *dev, const gx_color_value colors[])
+{
+    return gdev_mjc_map_rgb_color(dev, colors);
+}
+
+/*
+* Decode a gx_color_index value back to a list of colorant values.
+*/
+static int
+gdev_mjc_decode_color(gx_device * dev, gx_color_index color, gx_color_value * out)
+{
+    return gdev_mjc_map_color_rgb(dev, color, out);
 }
 
 /*

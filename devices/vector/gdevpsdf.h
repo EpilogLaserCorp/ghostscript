@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -116,7 +116,6 @@ typedef struct psdf_distiller_params_s {
     gs_const_string sRGBProfile;
     enum psdf_color_conversion_strategy {
         ccs_LeaveColorUnchanged,
-        ccs_UseDeviceDependentColor, /* not in Acrobat Distiller 4.0 */
         ccs_UseDeviceIndependentColor,
         ccs_UseDeviceIndependentColorForImages,
         ccs_sRGB,
@@ -126,7 +125,7 @@ typedef struct psdf_distiller_params_s {
         ccs_ByObjectType
     } ColorConversionStrategy;
 #define psdf_ccs_names\
-        "LeaveColorUnchanged", "UseDeviceDependentColor",\
+        "LeaveColorUnchanged", \
         "UseDeviceIndependentColor", "UseDeviceIndependentColorForImages",\
         "sRGB", "CMYK", "Gray", "RGB", "ByObjectType"
 
@@ -174,6 +173,7 @@ typedef struct psdf_distiller_params_s {
     bool EmbedAllFonts;
     int MaxSubsetPct;
     bool SubsetFonts;
+    bool PassThroughJPEGImages;
     gs_param_string PSDocOptions;
     gs_param_string_array PSPageOptions;
 } psdf_distiller_params;
@@ -263,7 +263,10 @@ extern const stream_template s_zlibE_template;
     cefp_Warning,   /* CannotEmbedFontPolicy */ \
     1,		    /* EmbedAllFonts (true) */ \
     100,	    /* Max Subset Percent */ \
-    1		    /* Subset Fonts (true) */\
+    1		    /* Subset Fonts (true) */
+
+#define psdf_JPEGPassThrough_param_defaults\
+    1           /* PassThroughJPEGImages */
 
 #define psdf_PSOption_param_defaults\
     {0},        /* PSDocOptions */\
@@ -288,6 +291,7 @@ typedef enum {
         bool HaveTrueTypes;\
         bool HaveCIDSystem;\
         double ParamCompatibilityLevel;\
+        bool JPEG_PassThrough;\
         psdf_distiller_params params
 
 typedef struct gx_device_psdf_s {
@@ -302,11 +306,13 @@ typedef struct gx_device_psdf_s {
         true,\
         false,\
         1.3,\
+        0,\
          { psdf_general_param_defaults(ascii),\
            psdf_color_image_param_defaults,\
            psdf_gray_image_param_defaults,\
            psdf_mono_image_param_defaults,\
            psdf_font_param_defaults,\
+           psdf_JPEGPassThrough_param_defaults,\
            psdf_PSOption_param_defaults\
          }
 /* st_device_psdf is never instantiated per se, but we still need to */
@@ -342,7 +348,7 @@ dev_proc_put_params(gdev_psdf_put_params);
 dev_proc_dev_spec_op(gdev_psdf_dev_spec_op);
 /* ---------------- Vector implementation procedures ---------------- */
 
-        /* Imager state */
+        /* gs_gstate */
 int psdf_setlinewidth(gx_device_vector * vdev, double width);
 int psdf_setlinecap(gx_device_vector * vdev, gs_line_cap cap);
 int psdf_setlinejoin(gx_device_vector * vdev, gs_line_join join);
@@ -414,20 +420,20 @@ int psdf_DCT_filter(gs_param_list *plist /* may be NULL */,
 
 /* Decive whether to convert an image to RGB. */
 bool psdf_is_converting_image_to_RGB(const gx_device_psdf * pdev,
-                const gs_imager_state * pis, const gs_pixel_image_t * pim);
+                const gs_gstate * pgs, const gs_pixel_image_t * pim);
 
 /* Set up compression and downsampling filters for an image. */
 /* Note that this may modify the image parameters. */
 /* If pctm is NULL, downsampling is not used. */
-/* pis only provides UCR and BG information for CMYK => RGB conversion. */
+/* pgs only provides UCR and BG information for CMYK => RGB conversion. */
 int psdf_setup_image_filters(gx_device_psdf *pdev, psdf_binary_writer *pbw,
                              gs_pixel_image_t *pim, const gs_matrix *pctm,
-                             const gs_imager_state * pis, bool lossless,
+                             const gs_gstate * pgs, bool lossless,
                              bool in_line);
 
 int new_setup_image_filters(gx_device_psdf *pdev, psdf_binary_writer *pbw,
                              gs_pixel_image_t *pim, const gs_matrix *pctm,
-                             const gs_imager_state * pis, bool lossless,
+                             const gs_gstate * pgs, bool lossless,
                              bool in_line, bool colour_conversion);
 
 /* Set up compression filters for a lossless image, with no downsampling, */
@@ -437,7 +443,7 @@ int psdf_setup_lossless_filters(gx_device_psdf *pdev, psdf_binary_writer *pbw,
                                 gs_pixel_image_t *pim, bool in_line);
 
 int new_setup_lossless_filters(gx_device_psdf *pdev, psdf_binary_writer *pbw,
-                                gs_pixel_image_t *pim, bool in_line, bool colour_conversion);
+                                gs_pixel_image_t *pim, bool in_line, bool colour_conversion, const gs_matrix *pctm, gs_gstate * pgs);
 
 
 int new_resize_input(psdf_binary_writer *pbw, int width, int num_comps, int bpc_in, int bpc_out);
@@ -453,12 +459,15 @@ int psdf_setup_compression_chooser(psdf_binary_writer *pbw,
 
 /* Set up an "image to mask" filter. */
 int psdf_setup_image_to_mask_filter(psdf_binary_writer *pbw, gx_device_psdf *pdev,
-            int width, int height, int depth, int bits_per_sample, uint *MaskColor);
+                                    int width, int height, int input_width,
+                                    int depth, int bits_per_sample, uint *MaskColor);
 
 /* Set up an image colors filter. */
 int psdf_setup_image_colors_filter(psdf_binary_writer *pbw,
-        gx_device_psdf *pdev, gs_pixel_image_t * pim,
-        const gs_imager_state *pis);
+                                   gx_device_psdf *pdev,
+                                   const gs_pixel_image_t *input_pim,
+                                   gs_pixel_image_t * pim,
+        const gs_gstate *pgs);
 
 /* ---------------- Symbolic data printing ---------------- */
 
@@ -496,7 +505,7 @@ gx_color_index psdf_adjust_color_index(gx_device_vector *vdev,
 
 /* Set the fill or stroke color. */
 int psdf_set_color(gx_device_vector *vdev, const gx_drawing_color *pdc,
-                   const psdf_set_color_commands_t *ppscc, bool UseOldColor);
+                   const psdf_set_color_commands_t *ppscc);
 /* Round a double value to a specified precision. */
 double psdf_round(double v, int precision, int radix);
 

@@ -7,7 +7,7 @@ use Data::Dumper;
 
 my $verbose=0;
 
-# bmpcmp usage: [gs] [pcl] [xps] [mupdf] [mujstest] [bmpcmp] [lowres] [highres] [32] [pdfwrite] [ps2write] [xpswrite] [relaxtimeout] [$user] | abort
+# bmpcmp usage: [gs] [pcl] [xps] [mupdf] [mujstest] [murun] [bmpcmp] [arm] [lowres] [highres] [32] [pdfwrite] [ps2write] [xpswrite] [nopdfwrite] [relaxtimeout] [extended] [smoke] [cull] [avx2] [$user] | abort
 
 
 
@@ -19,8 +19,11 @@ my %products=('abort' =>1,
               'svg'=>1,
               'xps'=>1,
               'ls'=>1,
+              'gpdf'=>1,
+              'gpdl'=>1,
               'mupdf'=>1,
-              'mujstest'=>1);
+              'mujstest'=>1,
+              'murun'=>1);
 
 my $user;
 my $product="";
@@ -29,12 +32,20 @@ my $extras="";
 my $command="";
 my $res="";
 my $w32="";
+my $win32="";
 my $nr="";
 my $pdfwrite="";
+my $nopdfwrite="";
 my $ps2write="";
 my $xpswrite="";
 my $singlePagePDF="";
 my $relaxTimeout="";
+my $extended="";
+my $cal="";
+my $smoke="";
+my $cull="";
+my $avx2="";
+my $arm="";
 my $t1;
 while ($t1=shift) {
   if ($t1 eq "lowres") {
@@ -44,16 +55,34 @@ while ($t1=shift) {
   } elsif ($t1 eq "singlePagePDF") {
     $singlePagePDF="singlePagePDF";
     $pdfwrite="pdfwrite";
+  } elsif ($t1 eq "arm") {
+    $arm="arm";
   } elsif ($t1 eq "32") {
     $w32="32";
+  } elsif ($t1 eq "win32") {
+    $win32="win32";
+  } elsif ($t1 eq "extended") {
+    $extended="extended";
+  } elsif ($t1 eq "cal") {
+    $extended="cal";
+  } elsif ($t1 eq "smoke") {
+    $smoke="smoke";
+  } elsif ($t1 eq "cull") {
+    $cull="cull";
+  } elsif ($t1 eq "avx2") {
+    $avx2="avx2";
   } elsif ($t1 eq "nr" || $t1 eq "nonredundnat") {
     $nr="nonredundant";
   } elsif ($t1 eq "pdfwrite" || $t1 eq "ps2write" || $t1 eq "xpswrite") {
     $pdfwrite="pdfwrite";
+  } elsif ($t1 eq "nopdfwrite") {
+    $nopdfwrite="nopdfwrite";
   } elsif ($t1 eq "timeout" || $t1 eq "relaxtimeout") {
     $relaxTimeout="relaxTimeout";
   } elsif ($t1=~m/^-/ || $t1=~m/^\d/) {
     $command.=$t1.' ';
+  } elsif ($t1 =~ m/ifilter=.*/) {
+    $filters.=$t1.' ';
   } elsif ($t1 =~ m/filter=.*/) {
     $filters.=$t1.' ';
   } elsif ($t1 =~ m/extras=.*/) {
@@ -115,7 +144,7 @@ if ($directory ne 'gs' && $directory ne 'ghostpdl' && $directory ne 'mupdf' && $
   if (-d "pxl" && -d "pcl") {
     $directory='ghostpdl';
   }
-  if (-d "source/fitz" && -d "source/draw" && -d "source/pdf") {
+  if (-d "source/fitz" && -d "source/pdf") {
     $directory='mupdf';
   }
 }
@@ -129,7 +158,7 @@ if (!$product) {
   if ($directory eq 'mupdf') {
     $product='mupdf';
   } else {
-    $product='gs pcl xps'
+    $product='gs pcl xps gpdl'
   }
 }
 
@@ -168,23 +197,26 @@ if ($msys) {
 }
 
 my $cmd="rsync -avxcz ".
-" --max-size=10000000".
+" --max-size=30000000".
 " --delete --delete-excluded".
 " --exclude .svn --exclude .git".
 " --exclude _darcs --exclude .bzr --exclude .hg".
 " --exclude .deps --exclude .libs --exclude autom4te.cache".
 " --exclude bin --exclude obj --exclude debugobj --exclude pgobj".
 " --exclude bin64 --exclude obj64 --exclude debugobj64 --exclude pgobj64".
+" --exclude luratechbin --exclude luratechobj --exclude luratechbin64 --exclude luratechobj64".
 " --exclude membin --exclude memobj --exclude membin64 --exclude memobj64".
 " --exclude profbin --exclude profobj --exclude profbin64 --exclude profobj64".
+" --exclude sanbin --exclude sanobj --exclude sanbin64 --exclude sanobj64".
 " --exclude sobin --exclude soobj --exclude debugbin".
 " --exclude ufst --exclude ufst-obj --exclude ufst-debugobj".
+" --exclude '*-bin' --exclude '*-obj'".
 " --exclude config.log --exclude .png".
 " --exclude .ppm --exclude .pkm --exclude .pgm --exclude .pbm".
 " --exclude .tif --exclude .bmp".
-" --exclude debug --exclude release --exclude generated".  # we cannot just exclude build, since tiff/build/Makefile.in, etc. is needed
-" --exclude tiff-config".  # we cannot just exclude build, since tiff/build/Makefile.in, etc. is needed
-# " --exclude Makefile". We can't just exclude Makefile, since the GhostPDL top Makefile is not a derived file.
+" --exclude debug --exclude release --exclude generated --exclude sanitize".  # we cannot just exclude build, since tiff/build/Makefile.in, etc. is needed
+" --exclude tiff-config".
+# " --exclude Makefile". We can't just exclude Makefile, since the MuPDF Makefile is not a derived file.
 " -e \"$ssh\" ".
 " .".
 " $hostpath";
@@ -204,7 +236,7 @@ if ($product ne "abort" ) { #&& $product ne "bmpcmp") {
 }
 
 open(F,">cluster_command.run");
-print F "$user $product $res $w32 $nr $pdfwrite $relaxTimeout $singlePagePDF\n";
+print F "$user $product $arm $res $w32 $win32 $nr $pdfwrite $nopdfwrite $relaxTimeout $singlePagePDF $extended $smoke $cull $avx2 $cal\n";
 print F "$command\n";
 print F "$filters\n";
 print F "$extras\n";

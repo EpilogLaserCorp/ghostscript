@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Definitions and interface for PDF 1.4 rendering device */
@@ -24,6 +24,7 @@
 #include "gxdcolor.h"
 #include "gxpcolor.h"
 #include "gdevdevn.h"
+#include "gsgstate.h"
 
 typedef enum {
     PDF14_DeviceGray = 0,
@@ -33,10 +34,11 @@ typedef enum {
     PDF14_DeviceCustom = 4
 } pdf14_default_colorspace_t;
 
-#ifndef pdf14_buf_DEFINED
-#  define pdf14_buf_DEFINED
-typedef struct pdf14_buf_s pdf14_buf;
-#endif
+typedef enum {
+    PDF14_OP_STATE_NONE = 0,
+    PDF14_OP_STATE_FILL = 1,
+    PDF14_OP_STATE_STROKE = 2,
+} PDF14_OP_FS_STATE;
 
 /*
  * This structure contains procedures for processing routine which differ
@@ -58,7 +60,11 @@ typedef struct {
      * output device as an image.
      */
     int (* put_image)(gx_device * dev,
-                    gs_imager_state * pis, gx_device * target);
+                      gs_gstate * pgs, gx_device * target);
+
+    /* And a 16 bit variant */
+    void (* unpack_color16)(int num_comp, gx_color_index color,
+                            pdf14_device * p14dev, uint16_t * out);
 } pdf14_procs_s;
 
 typedef pdf14_procs_s pdf14_procs_t;
@@ -111,7 +117,7 @@ struct pdf14_parent_color_s {
     byte depth;  /* used in clist writer cmd_put_color */
     uint max_gray;  /* Used to determine if device halftones */
     uint max_color; /* Causes issues if these are not maintained */
-    const gx_color_map_procs *(*get_cmap_procs)(const gs_imager_state *,
+    const gx_color_map_procs *(*get_cmap_procs)(const gs_gstate *,
                                                      const gx_device *);
     const gx_cm_color_map_procs *(*parent_color_mapping_procs)(const gx_device *);
     gx_color_index (*encode)(gx_device *, const gx_color_value value[]);
@@ -130,13 +136,15 @@ struct pdf14_buf_s {
     byte *backdrop;  /* This is needed for proper non-isolated knockout support */
     bool isolated;
     bool knockout;
-    byte alpha;
-    byte shape;
+    uint16_t alpha;
+    uint16_t shape;
     gs_blend_mode_t blend_mode;
-
+    int num_spots;  /* helpful when going between Gray+spots, RGB+spots, CMYK+spots */
     bool has_alpha_g;
     bool has_shape;
     bool has_tags;
+    bool deep; /* false => 8 bits, true => 16 bits */
+    bool page_group;
 
     gs_int_rect rect;
     /* Note: the traditional GS name for rowstride is "raster" */
@@ -146,10 +154,13 @@ struct pdf14_buf_s {
 
     int rowstride;
     int planestride;
-    int n_chan; /* number of pixel planes including alpha */
+    int n_chan;   /* number of pixel planes including alpha */
     int n_planes; /* total number of planes including alpha, shape, alpha_g */
     byte *data;
     byte *transfer_fn;
+    bool is_ident;
+    int matte_num_comps;
+    uint16_t *matte;
     gs_int_rect dirty;
     pdf14_mask_t *mask_stack;
     bool idle;
@@ -157,9 +168,10 @@ struct pdf14_buf_s {
     gs_transparency_mask_subtype_t SMask_SubType;
 
     uint mask_id;
-    pdf14_parent_color_t *parent_color_info_procs;
+    pdf14_parent_color_t *parent_color_info;
 
     gs_transparency_color_t color_space;  /* Different groups can have different spaces for blending */
+    gs_memory_t *memory;
 };
 
 typedef struct pdf14_smaskcolor_s {
@@ -176,32 +188,10 @@ struct pdf14_ctx_s {
     int n_chan;
     int smask_depth;  /* used to catch smasks embedded in smasks.  bug691803 */
     bool smask_blend;
+    bool deep; /* If true, 16 bit data, false, 8 bit data. */
 };
 
-#ifndef gs_devn_params_DEFINED
-#  define gs_devn_params_DEFINED
-typedef struct gs_devn_params_s gs_devn_params;
-#endif
-
-#ifndef gs_imager_state_DEFINED
-#  define gs_imager_state_DEFINED
-typedef struct gs_imager_state_s gs_imager_state;
-#endif
-
-#ifndef gx_device_DEFINED
-#  define gx_device_DEFINED
-typedef struct gx_device_s gx_device;
-#endif
-
-#ifndef gs_pdf14trans_params_DEFINED
-#  define gs_pdf14trans_params_DEFINED
 typedef struct gs_pdf14trans_params_s gs_pdf14trans_params_t;
-#endif
-
-#ifndef pdf14_device_DEFINED
-#  define pdf14_device_DEFINED
-typedef struct pdf14_device_s pdf14_device;
-#endif
 
 /*
  * Define the default post-clist (clist reader) PDF 1.4 compositing device.
@@ -214,21 +204,57 @@ typedef struct pdf14_device_s {
     gs_devn_params devn_params;    /* Must follow gx_device_forward_common */
     const pdf14_procs_t * pdf14_procs;	   /* Must follow devn_params. */
     const pdf14_nonseparable_blending_procs_t * blend_procs; /* Must follow pdf14_procs */
+    int num_std_colorants;
 
     pdf14_ctx *ctx;
     pdf14_smaskcolor_t *smaskcolor;
     float opacity;
     float shape;
     float alpha; /* alpha = opacity * shape */
+    float fillconstantalpha;
+    float strokeconstantalpha;
     gs_blend_mode_t blend_mode;
     bool text_knockout;
     bool overprint;
-    bool overprint_mode;
-    bool blendspot;
+    bool effective_overprint_mode;
+    bool stroke_effective_op_mode;
+    bool stroke_overprint;
+    int text_group;
     gx_color_index drawn_comps;		/* Used for overprinting.  Passed from overprint compositor */
+    gx_color_index drawn_comps_fill;		/* selected by color_is_fill */
+    gx_color_index drawn_comps_stroke;
+    PDF14_OP_FS_STATE op_state;
     gx_device * pclist_device;
-    bool free_devicen;                  /* Used to avoid freeing a deviceN parameter from target clist device */
-    const gx_color_map_procs *(*save_get_cmap_procs)(const gs_imager_state *,
+    bool free_devicen;              /* Used to avoid freeing a deviceN parameter from target clist device */
+    bool sep_device;
+    bool using_blend_cs;
+
+    /* We now have some variables to help us determine whether
+     * we are in an SMask or not. Firstly, we have in_smask_construction,
+     * initially 0, incremented whenever we begin smask in the compositor,
+     * and decremented whenever we finish one. Thus this being non-zero
+     * implies we are in the 'construction' phase of at least one smask.
+     */
+    int in_smask_construction;
+    /* Next, we have smask_constructed. Again, initially 0. This is set
+     * to 1 whenever in_smask_construction returns to 0. It is reset to
+     * 0 on the next transparency group push (which takes possession of
+     * the smask that was just created. Thus this being 1 implies
+     * we have just constructed an smask, but not used it yet. */
+    int smask_constructed;
+    /* Finally, then we have depth_within_smask. This is used to keep the
+     * count of how many times we need to pop a transparency group to
+     * finish being governed by an smask. To keep this figure, we watch
+     * pushes of new transparency groups. On each such push, if
+     * smask_constructed is true, or depth_within_smask is already non-zero,
+     * we increment depth_within_smask. (i.e. whenever we start a group
+     * that will be governed by (and take possession of) an smask, or whenever
+     * we are already being governed by an smask, we know that we've just
+     * increased our nested depth by 1). Whenever we pop a group and it is
+     * non zero, we decrement it.
+     */
+    int depth_within_smask;
+    const gx_color_map_procs *(*save_get_cmap_procs)(const gs_gstate *,
                                                      const gx_device *);
     gx_device_color_info saved_target_color_info;
     dev_proc_encode_color(*saved_target_encode_color);
@@ -255,7 +281,7 @@ typedef	struct pdf14_device_s pdf14_clist_device;
 /*
  * Send a PDF 1.4 transparency compositor action to the specified device.
  */
-int send_pdf14trans(gs_imager_state * pis, gx_device * dev,
+int send_pdf14trans(gs_gstate * pgs, gx_device * dev,
     gx_device * * pcdev, gs_pdf14trans_params_t * pparams, gs_memory_t * mem);
 
 /*

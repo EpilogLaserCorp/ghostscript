@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -21,7 +21,7 @@
 #include <expat.h>
 
 xps_part_t *
-xps_new_part(xps_context_t *ctx, char *name, int size)
+xps_new_part(xps_context_t *ctx, const char *name, int size)
 {
     xps_part_t *part;
 
@@ -190,6 +190,7 @@ xps_parse_metadata_imp(void *zp, char *name, char **atts)
         char tgtbuf[1024];
         char *target = NULL;
         char *type = NULL;
+        char *id = NULL;
 
         for (i = 0; atts[i]; i += 2)
         {
@@ -197,13 +198,18 @@ xps_parse_metadata_imp(void *zp, char *name, char **atts)
                 target = atts[i + 1];
             if (!strcmp(atts[i], "Type"))
                 type = atts[i + 1];
+            if (!strcmp(atts[i], "Id"))
+                id = atts[i + 1];
         }
 
         if (target && type)
         {
             xps_absolute_path(tgtbuf, ctx->base_uri, target, sizeof tgtbuf);
-            if (!strcmp(type, REL_START_PART))
+            if (!strcmp(type, REL_START_PART) ||
+                !strcmp(type, REL_START_PART_OXPS))
                 ctx->start_part = xps_strdup(ctx, tgtbuf);
+            if (!id)
+                gs_warn1("missing relationship Id for %s", target);
         }
     }
 
@@ -259,7 +265,7 @@ xps_parse_metadata(xps_context_t *ctx, xps_part_t *part)
     char *s;
 
     /* Save directory name part */
-    xps_strlcpy(buf, part->name, sizeof buf);
+    gs_strlcpy(buf, part->name, sizeof buf);
     s = strrchr(buf, '/');
     if (s)
         s[0] = 0;

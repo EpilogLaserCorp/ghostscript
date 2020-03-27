@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,6 +20,7 @@
 #  define idict_INCLUDED
 
 #include "iddstack.h"
+#include "gsalloc.h"
 
 /*
  * Contrary to our usual practice, we expose the (first-level)
@@ -56,10 +57,6 @@ extern bool dict_auto_expand;
 /*
  * Create a dictionary.
  */
-#ifndef gs_ref_memory_DEFINED
-#  define gs_ref_memory_DEFINED
-typedef struct gs_ref_memory_s gs_ref_memory_t;
-#endif
 int dict_alloc(gs_ref_memory_t *, uint maxlength, ref * pdref);
 
 #define dict_create(maxlen, pdref)\
@@ -123,6 +120,12 @@ int dict_put(ref * pdref, const ref * key, const ref * pvalue,
  */
 int dict_put_string(ref * pdref, const char *kstr, const ref * pvalue,
                     dict_stack_t *pds);
+
+/*
+ * Enter a key-value pair where the key is a (transient) C string.
+ */
+int dict_put_string_copy(ref * pdref, const char *kstr, const ref * pvalue,
+                         dict_stack_t *pds);
 
 /*
  * Remove a key-value pair from a dictionary.
@@ -247,7 +250,7 @@ uint dict_round_size_small(uint rsize);
 uint dict_round_size_large(uint rsize);
 
 /* Choose the algorithms depending on the size of memory. */
-#if arch_small_memory
+#if ARCH_SMALL_MEMORY
 #  define dict_hash_mod(h, s) dict_hash_mod_small(h, s)
 #  define dict_hash_mod_inline(h, s) dict_hash_mod_inline_small(h, s)
 #  define dict_round_size(s) dict_round_size_small(s)

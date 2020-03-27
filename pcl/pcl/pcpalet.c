@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -408,7 +408,7 @@ int
 pcl_palette_set_lookup_tbl(pcl_state_t * pcs, pcl_lookup_tbl_t * plktbl)
 {
     int code = unshare_palette(pcs);
-    pcl_cspace_type_t lktype;
+    pcl_cspace_type_t lktype = pcl_cspace_White;
 
     if ((code == 0) && (pcs->ppalet->pindexed == 0))
         code = pcl_cs_indexed_build_default_cspace(pcs,
@@ -452,6 +452,8 @@ pcl_palette_set_color(pcl_state_t * pcs, int indx, const float comps[3]
     if (code == 0)
         code = pcl_cs_indexed_set_palette_entry(&(pcs->ppalet->pindexed),
                                                 indx, comps);
+    if (code < 0)
+        return code;
 
     /* Check if the device requires that the palette must not change */
     if (dev_proc(pcs->pgs->device, dev_spec_op)(pcs->pgs->device,
@@ -712,7 +714,7 @@ set_ctrl_palette_id(pcl_args_t * pargs, pcl_state_t * pcs)
  * bother removing it. This is helpful when working with memory leak detection
  * tools.
  */
-static void
+static int
 clear_palette_store(pcl_state_t * pcs)
 {
     pl_dict_enum_t denum;
@@ -725,11 +727,15 @@ clear_palette_store(pcl_state_t * pcs)
         int id = (((int)plkey.data[0]) << 8) + plkey.data[1];
 
         if (id == sel_id) {
-            if (pvalue != pcs->pdflt_palette)
-                build_default_palette(pcs);     /* will redefine sel_id */
+            if (pvalue != pcs->pdflt_palette) {
+                int code = build_default_palette(pcs);     /* will redefine sel_id */
+                if (code < 0)
+                    return code;
+            }
         } else
             pl_dict_undef(&pcs->palette_store, plkey.data, plkey.size);
     }
+    return 0;
 }
 
 /*
@@ -741,6 +747,7 @@ static int
 palette_control(pcl_args_t * pargs, pcl_state_t * pcs)
 {
     uint action = uint_arg(pargs);
+    int code = 0;
 
     if (pcs->personality == pcl5e || pcs->raster_state.graphics_mode)
         return 0;
@@ -748,7 +755,7 @@ palette_control(pcl_args_t * pargs, pcl_state_t * pcs)
     switch (action) {
 
         case 0:
-            clear_palette_store(pcs);
+            code = clear_palette_store(pcs);
             break;
 
         case 1:
@@ -758,7 +765,7 @@ palette_control(pcl_args_t * pargs, pcl_state_t * pcs)
         case 2:
             if (pcs->ctrl_palette_id == pcs->sel_palette_id) {
                 if ((pcs->ppalet == 0) || (pcs->ppalet != pcs->pdflt_palette))
-                    build_default_palette(pcs);
+                    code = build_default_palette(pcs);
             } else {
                 pcl_id_t key;
 
@@ -770,9 +777,8 @@ palette_control(pcl_args_t * pargs, pcl_state_t * pcs)
         case 6:
             if (pcs->ctrl_palette_id != pcs->sel_palette_id) {
                 pcl_id_t key;
-                int code = 0;
 
-                /* NB: definitions don't incremente refernece counts */
+                /* NB: definitions don't increment reference counts */
                 id_set_value(key, pcs->ctrl_palette_id);
                 code =
                     pl_dict_put(&pcs->palette_store, id_key(key), 2,
@@ -788,7 +794,7 @@ palette_control(pcl_args_t * pargs, pcl_state_t * pcs)
             return e_Range;
     }
 
-    return 0;
+    return code;
 }
 
 /*
@@ -918,16 +924,17 @@ palette_do_registration(pcl_parser_state_t * pcl_parser_state,
 /*
  * Reset routine for palettes.
  */
-static void
+static int
 palette_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
+    int code;
     static const uint mask = (pcl_reset_initial
                               | pcl_reset_cold
                               | pcl_reset_printer
                               | pcl_reset_overlay | pcl_reset_permanent);
 
     if ((type & mask) == 0)
-        return;
+        return 0;
 
     /* for initial reset, set up the palette store */
     if ((type & pcl_reset_initial) != 0) {
@@ -943,14 +950,18 @@ palette_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
              (pcl_reset_cold | pcl_reset_printer | pcl_reset_permanent)) !=
             0) {
         pcs->monochrome_mode = 0;
-        pcl_update_mono(pcs);
+        code = pcl_update_mono(pcs);
+        if (code < 0)
+            return code;
         /* clear the palette stack and store */
         clear_palette_stack(pcs, pcs->memory);
-        clear_palette_store(pcs);
+        code = clear_palette_store(pcs);
+        if (code < 0)
+            return code;
     }
     if (type & pcl_reset_permanent) {
         pl_dict_release(&pcs->palette_store);
-        if (pcs->ppalet != pcs->pdflt_palette) {
+        if ((pcs->ppalet != NULL) && (pcs->ppalet != pcs->pdflt_palette)) {
             /* stefan foo: free or decrement reference counts? */
             gs_free_object(pcs->memory, pcs->ppalet->pindexed,
                            "palette cs indexed released permanent reset");
@@ -965,9 +976,14 @@ palette_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
     pcs->ctrl_palette_id = 0;
 
     if (!(type & pcl_reset_permanent)) {
-        (void)build_default_palette(pcs);
-        (void)pcl_frgrnd_set_default_foreground(pcs);
+        code = build_default_palette(pcs);
+        if (code < 0)
+            return code;
+        code = pcl_frgrnd_set_default_foreground(pcs);
+        if (code < 0)
+            return code;
     }
+    return 0;
 }
 
 /*
@@ -999,13 +1015,16 @@ palette_do_copy(pcl_state_t * psaved,
     if ((operation & (pcl_copy_before_call | pcl_copy_before_overlay)) != 0)
         pcl_palette_init_from(psaved->ppalet, pcs->ppalet);
     else if ((operation & pcl_copy_after) != 0) {
+        int code = 0;
         pcl_id_t key;
 
         /* fix the compiler warning resulting from overuse of const */
         pcl_state_t *pcs2 = (pcl_state_t *) pcs;
 
         id_set_value(key, psaved->sel_palette_id);
-        pl_dict_put(&pcs2->palette_store, id_key(key), 2, psaved->ppalet);
+        code = pl_dict_put(&pcs2->palette_store, id_key(key), 2, psaved->ppalet);
+        if (code < 0)
+            return code;
         psaved->palette_stack = pcs2->palette_stack;
         psaved->palette_store = pcs2->palette_store;
     }

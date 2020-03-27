@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -70,6 +70,7 @@ gs_pixel_image_t_init(gs_pixel_image_t * pim,
     pim->format = gs_image_format_chunky;
     pim->ColorSpace = color_space;
     pim->CombineWithColor = false;
+    pim->override_in_smask = 0;
 }
 
 /* Initialize the common part of an image-processing enumerator. */
@@ -113,7 +114,7 @@ gx_image_enum_common_init(gx_image_enum_common_t * piec,
 
 /* Compute the source size of an ordinary image with explicit data. */
 int
-gx_data_image_source_size(const gs_imager_state * pis,
+gx_data_image_source_size(const gs_gstate * pgs,
                           const gs_image_common_t * pim, gs_int_point * psize)
 {
     const gs_data_image_t *pdi = (const gs_data_image_t *)pim;

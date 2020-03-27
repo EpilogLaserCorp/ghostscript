@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -51,7 +51,7 @@ gp_set_file_binary(int prnfno, bool binary)
 
 /* Set a file into binary or text mode. */
 int
-gp_setmode_binary(FILE * pfile, bool binary)
+gp_setmode_binary_impl(FILE * pfile, bool binary)
 {
     gp_set_file_binary(fileno(pfile), binary);
     return 0;			/* Fake out dos return status */
@@ -64,7 +64,7 @@ const char gp_file_name_list_separator = ';';
 
 /* Define the string to be concatenated with the file mode */
 /* for opening files without end-of-line conversion. */
-const char gp_fmode_binary_suffix[] = "b";
+const char* gp_fmode_binary_suffix = "b";
 
 /* Define the file modes for binary reading or writing. */
 const char gp_fmode_rb[] = "rb";

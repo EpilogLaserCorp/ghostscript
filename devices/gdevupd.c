@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -590,7 +590,7 @@ since gdevprn.c does (currently) support only 32-Bit Rasterdata.
 #undef INT32_MAX
 #undef UINT32_MAX
 
-#if     arch_log2_sizeof_int < 2  /* int is too small */
+#if     ARCH_LOG2_SIZEOF_INT < 2  /* int is too small */
 #define                   INT32_MIN  LONG_MIN
 #define                   INT32_MAX  LONG_MAX
 #define                  UINT32_MAX ULONG_MAX
@@ -647,7 +647,7 @@ typedef struct updscan_s { /* Single Scanline (1 Bit/Pixel) */
 
 #define upd_proc_pxlget(name) uint32_t name(upd_p upd)
 #define upd_proc_render(name) int name(upd_p upd)
-#define upd_proc_writer(name) int name(upd_p upd,FILE *out)
+#define upd_proc_writer(name) int name(upd_p upd, gp_file *out)
 
 struct upd_s { /* All upd-specific data */
 
@@ -815,8 +815,8 @@ sequence (the Rasterfile header) since it would be a nuisance to provide
 this code within each (test-)personalization in PostScript.
 */
 static int             upd_open_rascomp(   upd_device *udev);
-static int             upd_start_rascomp(  upd_p upd, FILE *out);
-static int             upd_rascomp(        upd_p upd, FILE *out);
+static int             upd_start_rascomp(  upd_p upd, gp_file *out);
+static int             upd_rascomp(        upd_p upd, gp_file *out);
 
 /**
 The second format is ESC/P, the format introduced with the first Epson
@@ -827,7 +827,7 @@ which makes it the most sophisticated one inside this driver.
 
 static void            upd_limits(        upd_p upd, bool check);
 static int             upd_open_wrtescp(  upd_device *udev);
-static int             upd_wrtescp(       upd_p upd, FILE *out);
+static int             upd_wrtescp(       upd_p upd, gp_file *out);
 
 /**
 The third format is ESC/P2, the format use by the newer Epson-Printers.
@@ -838,28 +838,28 @@ The fourth writer is a ESC/P2-Writer, that supports X-Weaving
 */
 static int             upd_rle(byte *out,const byte *in,int nbytes);
 static int             upd_open_wrtescp2( upd_device *udev);
-static int             upd_wrtescp2(      upd_p upd, FILE *out);
-static int             upd_wrtescp2x(     upd_p upd, FILE *out);
+static int             upd_wrtescp2(      upd_p upd, gp_file *out);
+static int             upd_wrtescp2x(     upd_p upd, gp_file *out);
 
 /**
 The fifth writer is a HP-RTL/PCL-Writer
 */
 
 static int             upd_open_wrtrtl(   upd_device *udev);
-static int             upd_wrtrtl(        upd_p upd, FILE *out);
+static int             upd_wrtrtl(        upd_p upd, gp_file *out);
 
 /**
 The sixth writer is for Canon Extended Mode (currently BJC610) (hr)
 */
 
 static int             upd_open_wrtcanon( upd_device *udev);
-static int             upd_wrtcanon(      upd_p upd, FILE *out);
+static int             upd_wrtcanon(      upd_p upd, gp_file *out);
 
 /**
 The seventh writer is for ESC P/2 Nozzle Map Mode (currently Stylus Color 300) (GR)
 */
 
-static int             upd_wrtescnm(      upd_p upd, FILE *out);
+static int             upd_wrtescnm(      upd_p upd, gp_file *out);
 
 /**
 Generalized Pixel Get & Read
@@ -970,10 +970,6 @@ Here are several Macros, named "UPD_MM_*" to deal with that.
 
 static const char rcsid[] = "$Revision: 5215 $";
 
-/** Default-Transfer-curve */
-
-static const float upd_data_xfer[2] = { 0.0, 1.0 };
-
 /*@ > */
 
 /* ------------------------------------------------------------------- */
@@ -1033,7 +1029,7 @@ usually opened several times, before obtaining a valid state.
 */
 
 static int
-upd_print_page(gx_device_printer *pdev, FILE *out)
+upd_print_page(gx_device_printer *pdev, gp_file *out)
 {
    upd_device *const udev  = (upd_device *) pdev;
    const upd_p       upd   = udev->upd;
@@ -1055,7 +1051,7 @@ upd_print_page(gx_device_printer *pdev, FILE *out)
          errprintf(pdev->memory, "CALL-REJECTED upd_print_page(0x%05lx,0x%05lx)\n",
              (long) udev,(long) out);
 #endif
-      return gs_error_undefined;
+	 return_error(gs_error_undefined);
    }
 
 #if UPD_MESSAGES & UPD_M_TOPCALLS
@@ -1075,14 +1071,14 @@ upd_print_page(gx_device_printer *pdev, FILE *out)
    if(!(upd->flags & B_OPEN)) {
 
       if(0   <  upd->strings[S_OPEN].size)
-         fwrite(upd->strings[S_OPEN].data,1,upd->strings[S_OPEN].size,out);
+         gp_fwrite(upd->strings[S_OPEN].data,1,upd->strings[S_OPEN].size,out);
       upd->flags |= B_OPEN;
    }
 /*
  * Always write the the Page-begin-sequence
  */
    if(0  <   upd->strings[S_BEGIN].size)
-      fwrite(upd->strings[S_BEGIN].data,1,upd->strings[S_BEGIN].size,out);
+      gp_fwrite(upd->strings[S_BEGIN].data,1,upd->strings[S_BEGIN].size,out);
 /*
  * Establish page-variables
  */
@@ -1179,7 +1175,7 @@ upd_print_page(gx_device_printer *pdev, FILE *out)
 
    if((upd->pheight > upd->yscan) &&
       (0  <  upd->strings[S_ABORT].size)) { /* Only This! */
-      fwrite(upd->strings[S_ABORT].data,1,upd->strings[S_ABORT].size,out);
+      gp_fwrite(upd->strings[S_ABORT].data,1,upd->strings[S_ABORT].size,out);
 
       upd->flags &= ~B_OPEN; /* Inhibit Close-Sequence ! */
 /*
@@ -1188,7 +1184,7 @@ upd_print_page(gx_device_printer *pdev, FILE *out)
  */
 
    } else if(0  <   upd->strings[S_END].size) {
-      fwrite(upd->strings[S_END].data,1,upd->strings[S_END].size,out);
+      gp_fwrite(upd->strings[S_END].data,1,upd->strings[S_END].size,out);
    }
 /*
  * If necessary, write the close-sequence
@@ -1197,13 +1193,12 @@ upd_print_page(gx_device_printer *pdev, FILE *out)
         gs_parsed_file_name_t parsed;
         const char *fmt;
 
-        if (NULL != udev->fname &&
-            0 <= gx_parse_output_file_name(&parsed, &fmt, udev->fname,
+        if (0 <= gx_parse_output_file_name(&parsed, &fmt, udev->fname,
                                            strlen(udev->fname), udev->memory) &&
             fmt
             ) {
             if (0 < upd->strings[S_CLOSE].size)
-                fwrite(upd->strings[S_CLOSE].data,1,upd->strings[S_CLOSE].size,out);
+                gp_fwrite(upd->strings[S_CLOSE].data,1,upd->strings[S_CLOSE].size,out);
             upd->flags &= ~B_OPEN;
         }
     }
@@ -1212,10 +1207,10 @@ upd_print_page(gx_device_printer *pdev, FILE *out)
  * clean up, and return status
  */
 
-   fflush(out); /* just to prepare for ferror */
+   gp_fflush(out); /* just to prepare for ferror */
 
    if(upd->pheight > upd->yscan) error = gs_error_interrupt;
-   else if(ferror(out))          error = gs_error_ioerror;
+   else if(gp_ferror(out))          error = gs_error_ioerror;
    else                          error = 0;
 
 #if UPD_MESSAGES & UPD_M_TOPCALLS
@@ -1238,7 +1233,7 @@ upd_print_page(gx_device_printer *pdev, FILE *out)
 /**
 "upd_open" is -through the specified table of procedures- called instead
 of the normal open-procedures for printer-devices, that performs quite
-a complex job. Thus it is necessary to call this  `superclass-open´
+a complex job. Thus it is necessary to call this  `superclass-open?
 here.
 
 Besides that, this routine does quite a complex job too, in initializes
@@ -1484,8 +1479,8 @@ upd_close(gx_device *pdev)
                ((B_OPEN | B_OK4GO | B_ERROR) & upd->flags))) {
 
       if(udev->file && upd->strings && 0 < upd->strings[S_CLOSE].size)
-         fwrite(upd->strings[S_CLOSE].data,1,
-                upd->strings[S_CLOSE].size,udev->file);
+         gp_fwrite(upd->strings[S_CLOSE].data,1,
+                   upd->strings[S_CLOSE].size,udev->file);
 
       upd->flags &= ~B_OPEN;
    }
@@ -1674,7 +1669,7 @@ upd_put_params(gx_device *pdev, gs_param_list *plist)
    upd_p                  upd        = udev->upd;
    int                    error      = 0, code,i;
 
-   float                  MarginsHWResolution[2],Margins[2];
+   float                  Margins[2];
    gx_device_color_info   color_info;
    uint32_t                 flags      = 0;
    int                   *choice     = NULL;
@@ -1731,7 +1726,7 @@ i am writing bad-nasty-hack-hack, visit http://www.zark.com )
       if((0 == code) &&
          strncmp((const char *)fname.data,udev->fname,fname.size)) {
          if(upd->strings && 0 < udev->upd->strings[S_CLOSE].size)
-            fwrite(upd->strings[S_CLOSE].data,1,
+            gp_fwrite(upd->strings[S_CLOSE].data,1,
                    upd->strings[S_CLOSE].size,udev->file);
 
          upd->flags &= ~B_OPEN;
@@ -1788,8 +1783,6 @@ the data, that it might change, except for color_info that might
 be changed in the device-structure, all manipulations are carried
 out on this copies.
 */
-   MarginsHWResolution[0] = udev->MarginsHWResolution[0];
-   MarginsHWResolution[1] = udev->MarginsHWResolution[1];
                Margins[0] = udev->Margins[0];
                Margins[1] = udev->Margins[1];
 
@@ -1954,8 +1947,8 @@ In addition to that, Resolution & Margin-Parameters are tested & adjusted.
             case MAP_GRAY:     ip[0] = 1; break;
             case MAP_RGBW:     ip[0] = 3; break;
             case MAP_RGB:      ip[0] = 3; break;
-            case MAP_CMYK:     ip[0] = 4; break;
-            case MAP_CMYKGEN:  ip[0] = 4; break;
+            case MAP_CMYK:
+            case MAP_CMYKGEN:  ip[0] = 4; color_info.polarity = GX_CINFO_POLARITY_SUBTRACTIVE; break;
             case MAP_RGBOV:    ip[0] = 3; break;
             case MAP_RGBNOV:   ip[0] = 3; break;
             default:           ip[0] = color_info.num_components; break;
@@ -1966,14 +1959,15 @@ In addition to that, Resolution & Margin-Parameters are tested & adjusted.
          case MAP_GRAY:     ncomp = 1; break;
          case MAP_RGBW:     ncomp = 4; break;
          case MAP_RGB:      ncomp = 3; break;
-         case MAP_CMYK:     ncomp = 4; break;
-         case MAP_CMYKGEN:  ncomp = 4; break;
+         case MAP_CMYK:
+         case MAP_CMYKGEN:  ncomp = 4; color_info.polarity = GX_CINFO_POLARITY_SUBTRACTIVE; break;
          case MAP_RGBOV:    ncomp = 4; break;
          case MAP_RGBNOV:   ncomp = 4; break;
          default:           ncomp = ip[0]; break;
       }
       if(UPD_CMAP_MAX < ncomp) ncomp = UPD_CMAP_MAX;
 
+      color_info.max_components = ncomp;
       if(ncomp > int_a[IA_COMPBITS].size) { /* Default ComponentBits */
          UPD_MM_GET_ARRAY(udev->memory, ip2,ncomp);
          nbits = 32 / ncomp;
@@ -2049,6 +2043,8 @@ In addition to that, Resolution & Margin-Parameters are tested & adjusted.
       }                             /* Color-Ramp */
 
       udev->color_info.num_components = ip[0];
+      udev->color_info.max_components = ip[0];
+      udev->color_info.polarity       = color_info.polarity;
       udev->color_info.depth          = ip[1];
       udev->color_info.max_gray       = (gx_color_value) ip[2];
       udev->color_info.max_color      = (gx_color_value) ip[3];
@@ -2061,17 +2057,14 @@ In addition to that, Resolution & Margin-Parameters are tested & adjusted.
  */
       if((0 == param_read_float_array(plist,"HWResolution",&mfa)) &&
          (2 == mfa.size) && (0 != mfa.data)) {
-         udev->MarginsHWResolution[0] = mfa.data[0];
-         udev->MarginsHWResolution[1] = mfa.data[1];
-      } else {
-         udev->MarginsHWResolution[0] = udev->HWResolution[0];
-         udev->MarginsHWResolution[1] = udev->HWResolution[1];
+         udev->HWResolution[0] = mfa.data[0];
+         udev->HWResolution[1] = mfa.data[1];
       }
 
       if((0 == param_read_float_array(plist,".HWMargins",&mfa)) &&
          (4 == mfa.size) && (0 != mfa.data)) {
-         udev->Margins[0] = -mfa.data[0] * udev->MarginsHWResolution[0] / 72.0;
-         udev->Margins[1] = -mfa.data[3] * udev->MarginsHWResolution[1] / 72.0;
+         udev->Margins[0] = -mfa.data[0] * udev->HWResolution[0] / 72.0;
+         udev->Margins[1] = -mfa.data[3] * udev->HWResolution[1] / 72.0;
       }
    }                                       /* Change the color-Info */
 
@@ -2127,8 +2120,6 @@ transferred into the device-structure. In the case of "uniprint", this may
 
                   udev->Margins[0] =             Margins[0];
                   udev->Margins[1] =             Margins[1];
-      udev->MarginsHWResolution[0] = MarginsHWResolution[0];
-      udev->MarginsHWResolution[1] = MarginsHWResolution[1];
 
       udev->color_info = color_info;
       UPD_MM_DEL_ARRAY(udev->memory, choice,  countof(upd_choice),  UPD_MM_DEL_VALUE);
@@ -3598,8 +3589,10 @@ upd_fscomp(upd_p upd)
  */
    switch(upd->ncomp) {
      case 4:  memset(scan[3].bytes,0,upd->nbytes);
+         /* fall through */
      case 3:  memset(scan[2].bytes,0,upd->nbytes);
               memset(scan[1].bytes,0,upd->nbytes);
+         /* fall through */
      default: memset(scan[0].bytes,0,upd->nbytes);
    }
 /*
@@ -3693,6 +3686,7 @@ upd_fscomp(upd_p upd)
                       pxlset  |= 8;
                   }                                    /* "Fire" */
                   FS_DIST(3)
+                /* fall through */
 
          case 3:  FS_M_ROWERR(2)
                   FS_GOAL(comp[2]->bitmsk & (ci >> comp[2]->bitshf),2)
@@ -3711,6 +3705,7 @@ upd_fscomp(upd_p upd)
                       pxlset  |= 2;
                   }                                    /* "Fire" */
                   FS_DIST(1)
+                /* fall through */
 
          default: FS_M_ROWERR(0)
                   FS_GOAL(comp[0]->bitmsk & (ci >> comp[0]->bitshf),0)
@@ -4399,8 +4394,7 @@ upd_open_writer(upd_device *udev)
 
       for(use = 1; 0 < use; use <<= 1) if(use > want) break;
 
-      if(use <= INT_MAX) upd->nscnbuf = upd->ints[I_NSCNBUF] = use;
-      else               success      = false;
+      upd->nscnbuf = upd->ints[I_NSCNBUF] = use;
 
    }                /* Compute nscnbuf */
 
@@ -4642,7 +4636,7 @@ upd_open_rascomp(upd_device *udev)
 
    noutbuf = ((noutbuf+15)>>4)<<1;
 
-   if(INT_MAX >= noutbuf) {
+   if(noutbuf > 0) {
       upd->noutbuf = noutbuf;
       upd->start_writer = upd_start_rascomp;
       upd->writer       = upd_rascomp;
@@ -4656,19 +4650,19 @@ upd_open_rascomp(upd_device *udev)
 /* ------------------------------------------------------------------- */
 /* upd_start_rascomp: write appropiate raster-header                   */
 /* ------------------------------------------------------------------- */
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
 #define put32(I32,Out)       \
-   fwrite(&I32,1,4,Out)
+   gp_fwrite(&I32,1,4,Out)
 #else
 #define put32(I32,Out)       \
-   putc(((I32)>>24)&255,Out),\
-   putc(((I32)>>16)&255,Out),\
-   putc(((I32)>> 8)&255,Out),\
-   putc( (I32)     &255,Out)
+   gp_fputc(((I32)>>24)&255,Out),\
+   gp_fputc(((I32)>>16)&255,Out),\
+   gp_fputc(((I32)>> 8)&255,Out),\
+   gp_fputc( (I32)     &255,Out)
 #endif
 
 static int
-upd_start_rascomp(upd_p upd, FILE *out) {
+upd_start_rascomp(upd_p upd, gp_file *out) {
 
 /** if no begin-sequence externally set */
    if(0 == upd->strings[S_BEGIN].size) {
@@ -4714,13 +4708,13 @@ upd_start_rascomp(upd_p upd, FILE *out) {
          const updcomp_p comp = upd->valptr[0];
 
          if(upd->cmap[comp->cmap].rise) {
-            putc((char) 0x00,out); putc((char) 0xff,out);
-            putc((char) 0x00,out); putc((char) 0xff,out);
-            putc((char) 0x00,out); putc((char) 0xff,out);
+            gp_fputc((char) 0x00,out); gp_fputc((char) 0xff,out);
+            gp_fputc((char) 0x00,out); gp_fputc((char) 0xff,out);
+            gp_fputc((char) 0x00,out); gp_fputc((char) 0xff,out);
          } else {
-            putc((char) 0xff,out); putc((char) 0x00,out);
-            putc((char) 0xff,out); putc((char) 0x00,out);
-            putc((char) 0xff,out); putc((char) 0x00,out);
+            gp_fputc((char) 0xff,out); gp_fputc((char) 0x00,out);
+            gp_fputc((char) 0xff,out); gp_fputc((char) 0x00,out);
+            gp_fputc((char) 0xff,out); gp_fputc((char) 0x00,out);
          }
 
       } else if(3 == upd->ncomp) { /* ??? upd->ocomp */
@@ -4731,7 +4725,7 @@ upd_start_rascomp(upd_p upd, FILE *out) {
             for(entry = 0; entry < 8; ++entry) {
                byte xval = upd->cmap[rgb].rise ? 0x00 : 0xff;
                if(entry & (1<<upd->cmap[rgb].comp)) xval ^= 0xff;
-               putc(xval,out);
+               gp_fputc(xval,out);
             }
          }
       } else { /* we have 4 components */
@@ -4759,7 +4753,7 @@ upd_start_rascomp(upd_p upd, FILE *out) {
 
                if(!(upd->choice[C_MAPPER] == MAP_RGBW)) rgbval ^= 0xffffff;
 
-               putc((rgbval>>rgb)&255,out);
+               gp_fputc((rgbval>>rgb)&255,out);
             }
          }
       }
@@ -4773,7 +4767,7 @@ upd_start_rascomp(upd_p upd, FILE *out) {
 /* upd_rascomp: assemble & write a scanline                            */
 /* ------------------------------------------------------------------- */
 static int
-upd_rascomp(upd_p upd, FILE *out) {
+upd_rascomp(upd_p upd, gp_file *out) {
    updscan_p scan = upd->scnbuf[upd->yscan & upd->scnmsk];
    uint bits = upd->pwidth;
 
@@ -4793,8 +4787,10 @@ upd_rascomp(upd_p upd, FILE *out) {
          byte val = 0;
          switch(upd->ncomp) { /* ??? upd->ocomp */
             case 4:  if(scan[3].bytes[ibyte] & bit) val |= 8;
+                    /* fall through */
             case 3:  if(scan[2].bytes[ibyte] & bit) val |= 4;
                      if(scan[1].bytes[ibyte] & bit) val |= 2;
+                    /* fall through */
             case 1:  if(scan[0].bytes[ibyte] & bit) val |= 1;
          }
          *buf++ = val;
@@ -4805,7 +4801,7 @@ upd_rascomp(upd_p upd, FILE *out) {
       }
    }
 
-   fwrite(upd->outbuf,1,upd->noutbuf,out);
+   gp_fwrite(upd->outbuf,1,upd->noutbuf,out);
    upd->yscan += 1;
 
    return 0;
@@ -4937,7 +4933,7 @@ It must hold:
       noutbuf += ((upd->ints[I_PINS2WRITE] + 7) / 8)
                * ((upd->pwidth + upd->ints[I_NXPASS] - 1)/upd->ints[I_NXPASS]);
 
-      if((0 < noutbuf) && (noutbuf <= INT_MAX)) {
+      if(noutbuf > 0) {
          upd->noutbuf      = noutbuf;
          upd->writer       = upd_wrtescp;
          upd->nlimits      = upd->ints[I_NXPASS];
@@ -4960,7 +4956,7 @@ It must hold:
 /* ------------------------------------------------------------------- */
 
 static int
-upd_wrtescp(upd_p upd, FILE *out)
+upd_wrtescp(upd_p upd, gp_file *out)
 {
    int  pinbot,pin,pintop,xbegin,x,xend,icomp,ybegin,yend,y,ioutbuf,n,ixpass;
    byte *obytes,bit;
@@ -5191,7 +5187,7 @@ upd_wrtescp(upd_p upd, FILE *out)
 /*
  *       Send this Component to the Printer
  */
-         fwrite(upd->outbuf,1,ioutbuf,out);
+         gp_fwrite(upd->outbuf,1,ioutbuf,out);
          ioutbuf = 0;
       }                                             /* Component-Print */
    }                    /* Some data to write */
@@ -5602,7 +5598,7 @@ It must hold:
 /* ------------------------------------------------------------------- */
 
 static int
-upd_wrtescp2(upd_p upd, FILE *out)
+upd_wrtescp2(upd_p upd, gp_file *out)
 {
    int  pinbot,pin,pintop,xbegin,x,xend,icomp,ybegin,yend,y,ioutbuf,n;
    byte *obytes;
@@ -5793,26 +5789,26 @@ upd_wrtescp2(upd_p upd, FILE *out)
  */
          for(pin = 0; pin < pintop; ++pin) {
             ioutbuf += upd_rle(upd->outbuf+ioutbuf,NULL,n);
-            fwrite(upd->outbuf,1,ioutbuf,out);
+            gp_fwrite(upd->outbuf,1,ioutbuf,out);
             ioutbuf = 0;
          }
 
          for(y = ybegin; 0 > y;    y += upd->ints[I_NYPASS]) {
             ioutbuf += upd_rle(upd->outbuf+ioutbuf,NULL,n);
-            fwrite(upd->outbuf,1,ioutbuf,out);
+            gp_fwrite(upd->outbuf,1,ioutbuf,out);
             ioutbuf = 0;
          }
 
          for(; y < yend; y += upd->ints[I_NYPASS]) {
             ioutbuf += upd_rle(upd->outbuf+ioutbuf,
                upd->scnbuf[y & upd->scnmsk][icomp].bytes+xbegin,n);
-            fwrite(upd->outbuf,1,ioutbuf,out);
+            gp_fwrite(upd->outbuf,1,ioutbuf,out);
             ioutbuf = 0;
          }
 
          for(pin = pinbot; pin < upd->ints[I_PINS2WRITE]; ++pin) {
             ioutbuf += upd_rle(upd->outbuf+ioutbuf,NULL,n);
-            fwrite(upd->outbuf,1,ioutbuf,out);
+            gp_fwrite(upd->outbuf,1,ioutbuf,out);
             ioutbuf = 0;
          }
       }                                             /* Component-Print */
@@ -5842,7 +5838,7 @@ upd_wrtescp2(upd_p upd, FILE *out)
 /*GR copied from upd_wrtescp2 and modified */
 
 static int
-upd_wrtescnm(upd_p upd, FILE *out)
+upd_wrtescnm(upd_p upd, gp_file *out)
 {
    int  pinbot,pin,pintop,xbegin,x,xend,icomp,ybegin,yend,y,ioutbuf,n;
    int  irow,imask,iyofs;
@@ -6033,7 +6029,7 @@ upd_wrtescnm(upd_p upd, FILE *out)
          for(i=0 ; i < upd->ints[I_PATRPT]; i++){
             if(irow >= upd->ints[I_ROWS]) break;
             ioutbuf += upd_rle(upd->outbuf+ioutbuf,NULL,n);
-            fwrite(upd->outbuf,1,ioutbuf,out);
+            gp_fwrite(upd->outbuf,1,ioutbuf,out);
             irow++;
             ioutbuf = 0;
          }
@@ -6047,7 +6043,7 @@ upd_wrtescnm(upd_p upd, FILE *out)
          for(i=0 ; i < upd->ints[I_PATRPT]; i++){
             if(irow >= upd->ints[I_ROWS]) break;
             ioutbuf += upd_rle(upd->outbuf+ioutbuf,NULL,n);
-            fwrite(upd->outbuf,1,ioutbuf,out);
+            gp_fwrite(upd->outbuf,1,ioutbuf,out);
             ioutbuf = 0;
             irow++;
          }
@@ -6070,7 +6066,7 @@ upd_wrtescnm(upd_p upd, FILE *out)
                upd->scnbuf[(y+iyofs) & upd->scnmsk][icomp].bytes+xbegin,n);
                yinc+=upd->ints[I_NYPASS];
             }
-            fwrite(upd->outbuf,1,ioutbuf,out);
+            gp_fwrite(upd->outbuf,1,ioutbuf,out);
             ioutbuf = 0;
             irow++;
          }
@@ -6088,7 +6084,7 @@ upd_wrtescnm(upd_p upd, FILE *out)
          for(i=0 ; i < upd->ints[I_PATRPT]; i++){
             if(irow >= upd->ints[I_ROWS]) break;
             ioutbuf += upd_rle(upd->outbuf+ioutbuf,NULL,n);
-            fwrite(upd->outbuf,1,ioutbuf,out);
+            gp_fwrite(upd->outbuf,1,ioutbuf,out);
             ioutbuf = 0;
             irow++;
          }
@@ -6098,7 +6094,7 @@ upd_wrtescnm(upd_p upd, FILE *out)
        if (irow < upd->ints[I_ROWS]) {
          for( ; irow < upd->ints[I_ROWS]; irow++){
             ioutbuf += upd_rle(upd->outbuf+ioutbuf,NULL,n);
-            fwrite(upd->outbuf,1,ioutbuf,out);
+            gp_fwrite(upd->outbuf,1,ioutbuf,out);
             ioutbuf = 0;
          }
       }
@@ -6127,7 +6123,7 @@ upd_wrtescnm(upd_p upd, FILE *out)
 /* ------------------------------------------------------------------- */
 
 static int
-upd_wrtescp2x(upd_p upd, FILE *out)
+upd_wrtescp2x(upd_p upd, gp_file *out)
 {
    int  pinbot,pin,pintop,xbegin,x,xend,icomp,ybegin,yend,y,ioutbuf,n,ixpass;
    byte *obytes,bit;
@@ -6317,13 +6313,13 @@ upd_wrtescp2x(upd_p upd, FILE *out)
  */
          for(pin = 0; pin < pintop; ++pin) {
             ioutbuf += upd_rle(upd->outbuf+ioutbuf,NULL,n);
-            fwrite(upd->outbuf+upd->nbytes,1,ioutbuf-upd->nbytes,out);
+            gp_fwrite(upd->outbuf+upd->nbytes,1,ioutbuf-upd->nbytes,out);
             ioutbuf = upd->nbytes;
          }
 
          for(y = ybegin; 0 > y;    y += upd->ints[I_NYPASS]) {
             ioutbuf += upd_rle(upd->outbuf+ioutbuf,NULL,n);
-            fwrite(upd->outbuf+upd->nbytes,1,ioutbuf-upd->nbytes,out);
+            gp_fwrite(upd->outbuf+upd->nbytes,1,ioutbuf-upd->nbytes,out);
             ioutbuf = upd->nbytes;
          }
 
@@ -6337,13 +6333,13 @@ upd_wrtescp2x(upd_p upd, FILE *out)
                if(!(bit >>= 1)) { obytes++; bit = 0x80; }
             }
             ioutbuf += upd_rle(upd->outbuf+ioutbuf,upd->outbuf,n);
-            fwrite(upd->outbuf+upd->nbytes,1,ioutbuf-upd->nbytes,out);
+            gp_fwrite(upd->outbuf+upd->nbytes,1,ioutbuf-upd->nbytes,out);
             ioutbuf = upd->nbytes;
          }
 
          for(pin = pinbot; pin < upd->ints[I_PINS2WRITE]; ++pin) {
             ioutbuf += upd_rle(upd->outbuf+ioutbuf,NULL,n);
-            fwrite(upd->outbuf+upd->nbytes,1,ioutbuf-upd->nbytes,out);
+            gp_fwrite(upd->outbuf+upd->nbytes,1,ioutbuf-upd->nbytes,out);
             ioutbuf = upd->nbytes;
          }
       }                                             /* Component-Print */
@@ -6962,7 +6958,7 @@ It must hold:
       if(ny > noutbuf) noutbuf = ny;
       noutbuf += 16;
 
-      if((0 < noutbuf) && (noutbuf <= INT_MAX)) {
+      if(noutbuf > 0) {
          upd->noutbuf      = noutbuf;
          upd->writer       = upd_wrtrtl;
          error             = 1;
@@ -6984,7 +6980,7 @@ It must hold:
 /* ------------------------------------------------------------------- */
 
 static int
-upd_wrtrtl(upd_p upd, FILE *out)
+upd_wrtrtl(upd_p upd, gp_file *out)
 {
    const updscan_p scan = upd->scnbuf[upd->yscan & upd->scnmsk];
 
@@ -7022,13 +7018,13 @@ upd_wrtrtl(upd_p upd, FILE *out)
                  (const char *) upd->string_a[SA_WRITECOMP].data[icomp].data,0);
                ioutbuf += strlen((char *)upd->outbuf+ioutbuf);
              }
-             fwrite(upd->outbuf,1,ioutbuf,out);
+             gp_fwrite(upd->outbuf,1,ioutbuf,out);
              ioutbuf = 0;
              upd->yprinter += 1;
            }
          }
          upd->yprinter = upd->yscan;
-         fwrite(upd->outbuf,1,ioutbuf,out);
+         gp_fwrite(upd->outbuf,1,ioutbuf,out);
          ioutbuf = 0;
       }                                 /* Adjust Y-Position */
 /*
@@ -7039,11 +7035,11 @@ upd_wrtrtl(upd_p upd, FILE *out)
          for(x = 0; x <= xend; ++x) if(data[x]) break;
          if(x <= xend) {
            ioutbuf = upd_rle(upd->outbuf,scan[icomp].bytes,xend);
-           fprintf(out,
+           gp_fprintf(out,
             (const char *)upd->string_a[SA_WRITECOMP].data[icomp].data,ioutbuf);
-            fwrite(upd->outbuf,1,ioutbuf,out);
+           gp_fwrite(upd->outbuf,1,ioutbuf,out);
          } else {
-           fprintf(out,
+           gp_fprintf(out,
              (const char *)upd->string_a[SA_WRITECOMP].data[icomp].data,0);
          }
       }
@@ -7087,7 +7083,7 @@ upd_open_wrtcanon(upd_device *udev)
 #define CR  0x0D
 
 static int
-upd_wrtcanon(upd_p upd, FILE *out)
+upd_wrtcanon(upd_p upd, gp_file *out)
 {
   const updscan_p scan = upd->scnbuf[upd->yscan & upd->scnmsk];
 
@@ -7113,13 +7109,13 @@ upd_wrtcanon(upd_p upd, FILE *out)
     if(upd->yscan != upd->yprinter) {
       step = upd->yscan - upd->yprinter;
 
-      fputc(ESC,        out);
-      fputc('(',        out);
-      fputc('e',        out);
-      fputc(2,          out);
-      fputc(0,          out);
-      fputc(HIGH(step), out);
-      fputc(LOW(step),  out);
+      gp_fputc(ESC,        out);
+      gp_fputc('(',        out);
+      gp_fputc('e',        out);
+      gp_fputc(2,          out);
+      gp_fputc(0,          out);
+      gp_fputc(HIGH(step), out);
+      gp_fputc(LOW(step),  out);
 
       upd->yprinter = upd->yscan;
     }
@@ -7140,37 +7136,37 @@ upd_wrtcanon(upd_p upd, FILE *out)
       ioutbuf1 = ioutbuf + 1;
 
       /* prints the scan line */
-      fputc(ESC,            out);
-      fputc('(',            out);
-      fputc('A',            out);
-      fputc(LOW(ioutbuf1),  out);
-      fputc(HIGH(ioutbuf1), out);
+      gp_fputc(ESC,            out);
+      gp_fputc('(',            out);
+      gp_fputc('A',            out);
+      gp_fputc(LOW(ioutbuf1),  out);
+      gp_fputc(HIGH(ioutbuf1), out);
       switch(upd->ocomp) {
-        case 1:  fputc('K',out); break;
+        case 1:  gp_fputc('K',out); break;
         case 3:
-        case 4:  fputc("YMCK"[icomp],out); break;
+        case 4:  gp_fputc("YMCK"[icomp],out); break;
 /*
  *      Please Note:
  *         the validity of the NCOMP-setting should be checked
  *         in the put_params-routine, thus the default-case is
  *         just a matter of coding-style.
  */
-        default: fputc('K',out); break;
+        default: gp_fputc('K',out); break;
       }
 
-      fwrite(upd->outbuf, 1, ioutbuf, out);
+      gp_fwrite(upd->outbuf, 1, ioutbuf, out);
 
-      fputc(CR,             out);
+      gp_fputc(CR,             out);
     }
 
     /* Printer advances one raster line */
-    fputc(ESC,        out);
-    fputc('(',        out);
-    fputc('e',        out);
-    fputc(2,          out);
-    fputc(0,          out);
-    fputc(HIGH(1),    out);
-    fputc(LOW(1),     out);
+    gp_fputc(ESC,        out);
+    gp_fputc('(',        out);
+    gp_fputc('e',        out);
+    gp_fputc(2,          out);
+    gp_fputc(0,          out);
+    gp_fputc(HIGH(1),    out);
+    gp_fputc(LOW(1),     out);
 
     upd->yprinter += 1;
 

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -177,13 +177,24 @@ hpgl_EP(hpgl_args_t * pargs, hpgl_state_t * pgls)
 {
     /* preserve the current path and copy the polygon buffer to
        the current path */
-    hpgl_call(hpgl_gsave(pgls));
-    hpgl_call(hpgl_copy_polygon_buffer_to_current_path(pgls));
+    int code = hpgl_gsave(pgls);
+    if (code < 0)
+        return code;
+
+    code = hpgl_copy_polygon_buffer_to_current_path(pgls);
+    if (code < 0)
+        goto fail;
+
     hpgl_set_hpgl_path_mode(pgls, true);
-    hpgl_call(hpgl_draw_current_path(pgls, hpgl_rm_vector_no_close));
+    code = hpgl_draw_current_path(pgls, hpgl_rm_vector_no_close);
+    if (code < 0)
+        goto fail;
     hpgl_set_hpgl_path_mode(pgls, false);
-    hpgl_call(hpgl_grestore(pgls));
-    return 0;
+    return hpgl_grestore(pgls);
+
+fail:
+    (void)hpgl_grestore(pgls);
+    return code;
 }
 
 /* ER dx,dy; */
@@ -253,6 +264,7 @@ hpgl_close_subpolygon(hpgl_state_t * pgls)
 int
 hpgl_PM(hpgl_args_t * pargs, hpgl_state_t * pgls)
 {
+    int code = 0;
     int op;
 
     if (hpgl_arg_c_int(pgls->memory, pargs, &op) == 0)
@@ -263,7 +275,9 @@ hpgl_PM(hpgl_args_t * pargs, hpgl_state_t * pgls)
             /* draw the current path if there is one */
             hpgl_call(hpgl_draw_current_path(pgls, hpgl_rm_vector));
             /* clear the polygon buffer as well */
-            gx_path_new(&pgls->g.polygon.buffer.path);
+            code = gx_path_new(&pgls->g.polygon.buffer.path);
+            if (code < 0)
+                return code;
             /* global flag to indicate that we are in polygon mode */
             pgls->g.polygon_mode = true;
             /* save the pen state, to be restored by PM2 */
@@ -301,6 +315,7 @@ hpgl_PM(hpgl_args_t * pargs, hpgl_state_t * pgls)
                                        &pgls->g.polygon.pen_state,
                                        hpgl_pen_down | hpgl_pen_pos);
             }
+            pgls->g.subpolygon_started = false;
             hpgl_set_hpgl_path_mode(pgls, false);
             break;
         default:

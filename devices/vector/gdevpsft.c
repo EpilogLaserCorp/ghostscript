@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -136,7 +136,7 @@ write_range(stream *s, gs_font_type42 *pfont, ulong start, uint length)
 {
     ulong base = start, size = length;
 
-    if_debug3m('l', s->memory, "[l]write_range pos = %"PRId64", start = %"PRIu32", length = %"PRIu32"\n",
+    if_debug3m('l', s->memory, "[l]write_range pos = %"PRId64", start = %lu, length = %u\n",
                stell(s), start, length);
     while (size > 0) {
         const byte *ptr;
@@ -165,14 +165,14 @@ mac_glyph_index(gs_font *font, int ch, gs_const_string *pstr, int *index)
                                              GLYPH_SPACE_NAME);
     int code;
 
-    if (glyph == gs_no_glyph) {
+    if (glyph == GS_NO_GLYPH) {
         *index = 0;
         return 0;		/* .notdef */
     }
     code = font->procs.glyph_name(font, glyph, pstr);
     if (code < 0)
         return code;
-    if (glyph < gs_min_cid_glyph) {
+    if (glyph < GS_MIN_CID_GLYPH) {
         gs_char mac_char;
         gs_glyph mac_glyph;
         gs_const_string mstr;
@@ -187,7 +187,7 @@ mac_glyph_index(gs_font *font, int ch, gs_const_string *pstr, int *index)
             return 0;
         }
         mac_glyph = gs_c_known_encode(mac_char, ENCODING_INDEX_MACGLYPH);
-        if (mac_glyph == gs_no_glyph) {
+        if (mac_glyph == GS_NO_GLYPH) {
             *index = -1;
             return 0;
         }
@@ -366,7 +366,7 @@ write_cmap(stream *s, gs_font *font, uint first_code, int num_glyphs,
             font->procs.encode_char(font, (gs_char)i, GLYPH_SPACE_INDEX);
         uint glyph_index;
 
-        if (glyph == gs_no_glyph || glyph < GS_MIN_GLYPH_INDEX ||
+        if (glyph == GS_NO_GLYPH || glyph < GS_MIN_GLYPH_INDEX ||
             glyph > max_glyph
             )
             glyph = GS_MIN_GLYPH_INDEX;
@@ -449,6 +449,15 @@ size_cmap(gs_font *font, uint first_code, int num_glyphs, gs_glyph max_glyph,
 
 /* ------ hmtx/vmtx ------ */
 
+/* We must include mtx data for every single glyph, even if we don't
+ * actually write the glyph data. If we don't, the font will be invalid (cf bug 697376)
+ * We also must not simply copy the table from the original font, because its possible
+ * that we are combining two different fonts, and the metrics in each font may not
+ * be the same (or at least, not in the same position) cf bug 700099.
+ * Originally we only wrote the metrics for the glyphs we copy, then we disabled
+ * generat_mtx so that we copied the table. This solution; generating all the metrics
+ * we need and dummies for the glyphs we don't actually embed, works best so far.
+ */
 static void
 write_mtx(stream *s, gs_font_type42 *pfont, const gs_type42_mtx_t *pmtx,
           int wmode)
@@ -480,7 +489,7 @@ write_mtx(stream *s, gs_font_type42 *pfont, const gs_type42_mtx_t *pmtx,
 
 /* Compute the metrics from the glyph_info. */
 static uint
-size_mtx(gs_font_type42 *pfont, gs_type42_mtx_t *pmtx, uint max_glyph,
+size_mtx(gs_font_type42 *pfont, gs_type42_mtx_t *pmtx, uint max_glyph, uint numGlyphs,
          int wmode)
 {
     int prev_width = min_int;
@@ -501,6 +510,7 @@ size_mtx(gs_font_type42 *pfont, gs_type42_mtx_t *pmtx, uint max_glyph,
     }
     pmtx->numMetrics = last_width + 1;
     pmtx->length = pmtx->numMetrics * 4 + (max_glyph - last_width) * 2;
+    pmtx->length += (numGlyphs - pmtx->numMetrics) * 2;
     return pmtx->length;
 }
 
@@ -918,7 +928,7 @@ psf_write_truetype_data(stream *s, gs_font_type42 *pfont, int options,
         uint glyph_index;
         gs_glyph_data_t glyph_data;
 
-        if (glyph < gs_min_cid_glyph)
+        if (glyph < GS_MIN_CID_GLYPH)
             return_error(gs_error_invalidfont);
         glyph_index = glyph  & ~GS_GLYPH_TAG;
         if_debug1m('L', s->memory, "[L]glyph_index %u\n", glyph_index);
@@ -1065,7 +1075,7 @@ psf_write_truetype_data(stream *s, gs_font_type42 *pfont, int options,
                     offset = put_table(tab, (i ? "vmtx" : "hmtx"),
                                        0L /****** NO CHECKSUM ******/,
                                        offset,
-                                       size_mtx(pfont, &mtx[i], max_glyph, i));
+                                       size_mtx(pfont, &mtx[i], max_glyph, numGlyphs, i));
                     tab += 16;
                 }
 
@@ -1081,8 +1091,7 @@ psf_write_truetype_data(stream *s, gs_font_type42 *pfont, int options,
          * it occupies 56 bytes on the file.
          */
         subtable_positions.head = offset;
-        offset = put_table(tab, "head", head_checksum, offset, 54);
-        tab += 16;
+        (void)put_table(tab, "head", head_checksum, offset, 54);
     }
     numTables = numTables_out;
 

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -21,9 +21,7 @@
 #include "gxclmem.h"
 #include "gssprintf.h"
 
-#ifdef PACIFY_VALGRIND
 #include "valgrind.h"
-#endif
 
 /*
  * Based on: memfile.c        Version: 1.4 3/21/95 14:59:33 by Ray Johnston.
@@ -159,8 +157,8 @@ static const int64_t COMPRESSION_THRESHOLD =
 #define MALLOC(f, siz, cname)\
   (void *)gs_alloc_bytes((f)->data_memory, siz, cname)
 #define FREE(f, obj, cname)\
-  (gs_free_object((f)->data_memory, obj, cname),\
-   (f)->total_space -= sizeof(*(obj)))
+  do {gs_free_object((f)->data_memory, obj, cname);\
+    (f)->total_space -= sizeof(*(obj));} while (0)
 
 /* Structure descriptor for GC */
 private_st_MEMFILE();
@@ -493,8 +491,8 @@ memfile_fclose(clist_file_ptr cf, const char *fname, bool delete)
     if (f->openlist != NULL || ((f->base_memfile != NULL) && f->base_memfile->is_open)) {
         /* TODO: do the cleanup rather than just giving an error */
         emprintf1(f->memory,
-                  "Attempt to delete a memfile still open for read: %p\n",
-                  f);
+                  "Attempt to delete a memfile still open for read: "PRI_INTPTR"\n",
+                  (intptr_t)f);
         return_error(gs_error_invalidfileaccess);
     } else {
         /* Free the memory used by this memfile */
@@ -1049,7 +1047,7 @@ memfile_ftell(clist_file_ptr cf)
     return (((MEMFILE *) cf)->log_curr_pos);
 }
 
-static void
+static int
 memfile_rewind(clist_file_ptr cf, bool discard_data, const char *ignore_fname)
 {
     MEMFILE *f = (MEMFILE *) cf;
@@ -1060,10 +1058,10 @@ memfile_rewind(clist_file_ptr cf, bool discard_data, const char *ignore_fname)
         if (f->openlist != NULL || f->base_memfile != NULL) {
             /* TODO: Move the data so it is still connected to other open files */
             emprintf1(f->memory,
-                      "memfile_rewind(%p) with discard_data=true failed: ",
-                      f);
+                      "memfile_rewind("PRI_INTPTR") with discard_data=true failed: ",
+                      (intptr_t)f);
             f->error_code = gs_note_error(gs_error_ioerror);
-            return;
+            return f->error_code;
         }
         memfile_free_mem(f);
         /* We have to call memfile_init_empty to preserve invariants. */
@@ -1073,6 +1071,7 @@ memfile_rewind(clist_file_ptr cf, bool discard_data, const char *ignore_fname)
         f->log_curr_pos = 0;
         memfile_get_pdata(f);
     }
+    return 0;
 }
 
 static int

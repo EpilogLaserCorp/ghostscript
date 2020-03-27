@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -26,6 +26,7 @@
 #include "igstate.h"
 #include "iname.h"
 #include "iutil.h"
+#include "isave.h"
 #include "store.h"
 #include "gxdevice.h"
 #include "gsstate.h"
@@ -195,7 +196,7 @@ zcallendpage(i_ctx_t *i_ctx_p)
 
 /* Check whether we need to call out to create the page device dictionary. */
 static bool
-save_page_device(gs_state *pgs)
+save_page_device(gs_gstate *pgs)
 {
     return
         (r_has_type(&gs_int_gstate(pgs)->pagedevice, t_null) &&
@@ -250,8 +251,8 @@ z2currentgstate(i_ctx_t *i_ctx_p)
 /* ------ Wrappers for operators that reset the graphics state. ------ */
 
 /* Check whether we need to call out to restore the page device. */
-static bool
-restore_page_device(const gs_state * pgs_old, const gs_state * pgs_new)
+static int
+restore_page_device(i_ctx_t *i_ctx_p, const gs_gstate * pgs_old, const gs_gstate * pgs_new)
 {
     gx_device *dev_old = gs_currentdevice(pgs_old);
     gx_device *dev_new;
@@ -259,9 +260,10 @@ restore_page_device(const gs_state * pgs_old, const gs_state * pgs_new)
     gx_device *dev_t2;
     bool samepagedevice = obj_eq(dev_old->memory, &gs_int_gstate(pgs_old)->pagedevice,
         &gs_int_gstate(pgs_new)->pagedevice);
+    bool LockSafetyParams = dev_old->LockSafetyParams;
 
     if ((dev_t1 = (*dev_proc(dev_old, get_page_device)) (dev_old)) == 0)
-        return false;
+        return 0;
     /* If we are going to putdeviceparams in a callout, we need to */
     /* unlock temporarily.  The device will be re-locked as needed */
     /* by putdeviceparams from the pgs_old->pagedevice dict state. */
@@ -270,23 +272,51 @@ restore_page_device(const gs_state * pgs_old, const gs_state * pgs_new)
     dev_new = gs_currentdevice(pgs_new);
     if (dev_old != dev_new) {
         if ((dev_t2 = (*dev_proc(dev_new, get_page_device)) (dev_new)) == 0)
-            return false;
-        if (dev_t1 != dev_t2)
-            return true;
+            samepagedevice = true;
+        else if (dev_t1 != dev_t2)
+            samepagedevice = false;
+    }
+
+    if (LockSafetyParams) {
+        const int required_ops = 512;
+        const int required_es = 32;
+
+        /* The %grestorepagedevice must complete: the biggest danger
+           is operand stack overflow. As we use get/putdeviceparams
+           that means pushing all the device params onto the stack,
+           pdfwrite having by far the largest number of parameters
+           at (currently) 212 key/value pairs - thus needing (currently)
+           424 entries on the op stack. Allowing for working stack
+           space, and safety margin.....
+         */
+        if (required_ops + ref_stack_count(&o_stack) >= ref_stack_max_count(&o_stack)) {
+           gs_currentdevice(pgs_old)->LockSafetyParams = LockSafetyParams;
+           return_error(gs_error_stackoverflow);
+        }
+        /* We also want enough exec stack space - 32 is an overestimate of
+           what we need to complete the Postscript call out.
+         */
+        if (required_es + ref_stack_count(&e_stack) >= ref_stack_max_count(&e_stack)) {
+           gs_currentdevice(pgs_old)->LockSafetyParams = LockSafetyParams;
+           return_error(gs_error_execstackoverflow);
+        }
     }
     /*
      * The current implementation of setpagedevice just sets new
      * parameters in the same device object, so we have to check
      * whether the page device dictionaries are the same.
      */
-    return !samepagedevice;
+    return samepagedevice ? 0 : 1;
 }
 
 /* - grestore - */
 static int
 z2grestore(i_ctx_t *i_ctx_p)
 {
-    if (!restore_page_device(igs, gs_state_saved(igs)))
+    int code = restore_page_device(i_ctx_p, igs, gs_gstate_saved(igs));
+    if (code < 0) return code;
+
+    if (code == 0)
         return gs_grestore(igs);
     return push_callout(i_ctx_p, "%grestorepagedevice");
 }
@@ -296,8 +326,10 @@ static int
 z2grestoreall(i_ctx_t *i_ctx_p)
 {
     for (;;) {
-        if (!restore_page_device(igs, gs_state_saved(igs))) {
-            bool done = !gs_state_saved(gs_state_saved(igs));
+        int code = restore_page_device(i_ctx_p, igs, gs_gstate_saved(igs));
+        if (code < 0) return code;
+        if (code == 0) {
+            bool done = !gs_gstate_saved(gs_gstate_saved(igs));
 
             gs_grestore(igs);
             if (done)
@@ -307,19 +339,50 @@ z2grestoreall(i_ctx_t *i_ctx_p)
     }
     return 0;
 }
-
+/* This is the Level 2+ variant of restore - which adds restoring
+   of the page device to the Level 1 variant in zvmem.c.
+   Previous this restored the device state before calling zrestore.c
+   which validated operands etc, meaning a restore could error out
+   partially complete.
+   The operand checking, and actual VM restore are now in two functions
+   so they can called separately thus, here, we can do as much
+   checking as possible, before embarking on actual changes
+ */
 /* <save> restore - */
 static int
 z2restore(i_ctx_t *i_ctx_p)
 {
-    while (gs_state_saved(gs_state_saved(igs))) {
-        if (restore_page_device(igs, gs_state_saved(igs)))
+    alloc_save_t *asave;
+    bool saveLockSafety = gs_currentdevice_inline(igs)->LockSafetyParams;
+    int code = restore_check_save(i_ctx_p, &asave);
+
+    if (code < 0) return code;
+
+    while (gs_gstate_saved(gs_gstate_saved(igs))) {
+        code = restore_page_device(i_ctx_p, igs, gs_gstate_saved(igs));
+        if (code < 0) return code;
+        if (code > 0)
             return push_callout(i_ctx_p, "%restore1pagedevice");
         gs_grestore(igs);
     }
-    if (restore_page_device(igs, gs_state_saved(igs)))
+    code = restore_page_device(i_ctx_p, igs, gs_gstate_saved(igs));
+    if (code < 0) return code;
+    if (code > 0)
         return push_callout(i_ctx_p, "%restorepagedevice");
-    return zrestore(i_ctx_p);
+
+    code = dorestore(i_ctx_p, asave);
+
+    if (code < 0) {
+        /* An error here is basically fatal, but....
+           restore_page_device() has to set LockSafetyParams false so it can
+           configure the restored device correctly - in normal operation, that
+           gets reset by that configuration. If we hit an error, though, that
+           may not happen -  at least ensure we keep the setting through the
+           error.
+         */
+        gs_currentdevice_inline(igs)->LockSafetyParams = saveLockSafety;
+    }
+    return code;
 }
 
 /* <gstate> setgstate - */
@@ -327,9 +390,12 @@ static int
 z2setgstate(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
+    int code;
 
     check_stype(*op, st_igstate_obj);
-    if (!restore_page_device(igs, igstate_ptr(op)))
+    code = restore_page_device(i_ctx_p, igs, igstate_ptr(op));
+    if (code < 0) return code;
+    if (code == 0)
         return zsetgstate(i_ctx_p);
     return push_callout(i_ctx_p, "%setgstatepagedevice");
 }

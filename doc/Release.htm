@@ -1,22 +1,59 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<!doctype html>
 <html>
 <head>
-<meta http-equiv="content-type" content="text/html; charset=us-ascii">
-<title>How to prepare a Ghostscript release</title>
-<!-- Originally: make.txt -->
-<link rel="stylesheet" type="text/css" href="gs.css" title="Ghostscript Style">
+  gtag('config', 'UA-54391264-2');
+</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link href="https://fonts.googleapis.com/css?family=Source+Sans+Pro" rel="stylesheet">
+<link rel="shortcut icon" type="image/png" href="../../images/favicon.png">
+<title>How to Prepare a Ghostscript Release</title>
+    <!-- Originally: make.txt -->
+<link href="style.css" rel="stylesheet" type="text/css">
+<link href="gs-style.css" rel="stylesheet" type="text/css">
 </head>
 
 <body>
-<!-- [1.0 begin visible header] ============================================ -->
 
-<!-- [1.1 begin headline] ================================================== -->
+    <div class="header">
+    <div class="row">
+        <div class="col-lt-6 logo"><a href="https://www.ghostscript.com/"><img src="images/ghostscript_logo.png" width="108" height="119" alt=""></a></div>
+        <div class="col-6"><div class="row"><div class="artifexlogo"><a href="https://artifex.com" target="_blank"><img src="images/Artifex_logo.png" width="194" height="40" alt=""></a></div>
+        <div class="col-12"><div class="button button1"><a href="https://artifex.com/contact-us/" title="Contact Us" target="_blank">Contact Us</a></div>
+        <div class="button button2 hidden-xs"><a href="https://www.ghostscript.com/download.html" title="Download">Download</a></div></div></div>
+    </div>
+    </div>
+    </div>
 
-<h1>How to prepare a Ghostscript release</h1>
+    <div class="banner">
+    <div class="row">
+        <div class="col-12">How to Prepare a Ghostscript Release</div>
+    </div>
+    </div>
 
-<!-- [1.1 end headline] ==================================================== -->
+    <div class="main">
+    <div class="row">
+    <div id="sidebar">
+    <div class="sidebar-item"></div>
+    <div class="col-2 leftnav">
+<ul>
+            <li><a href="https://www.ghostscript.com/">Home</a></li>
+            <li><a href="https://www.ghostscript.com/license.html">Licensing</a></li>
+            <li><a href="https://www.ghostscript.com/releases.html">Releases</a></li>
+            <li><a href="https://www.ghostscript.com/release_history.html">Release History</a></li>
+            <li><a href="https://www.ghostscript.com/documentation.html" title="Documentation">Documentation</a></li>
+            <li><a href="https://www.ghostscript.com/download.html" title="Download">Download</a></li>
+            <li><a href="https://www.ghostscript.com/performance.html" title="Performance">Performance</a></li>
+            <li><a href="http://jbig2dec.com/" title="jbig2dec">jbig2dec</a></li>
+            <li><a href="http://git.ghostscript.com/?p=ghostpdl.git;a=summary">Source</a></li>
+            <li><a href="http://bugs.ghostscript.com/">Bugs</a></li>
+            <li><a href="https://www.ghostscript.com/faq.html" title="FAQ">FAQ</a></li>
+        </ul>
+    </div>
+    </div>
+    <div class="col-10 page">
 
-<!-- [1.2 begin table of contents] ========================================= -->
+<!--START EDITING HERE-->
 
 <h2>Table of contents</h2>
 
@@ -43,8 +80,8 @@
 <li><a href="#After_releasing">After releasing</a>
 <li><a href="#GPL_releases">GPL Ghostscript releases</a>
 <ul>
-<li><a href="#GPL_code">GPL code</a>
-<li><a href="#GPL_after_releasing">After releasing (GPL)</a>
+<li><a href="#GPL_code">AGPL code</a>
+<li><a href="#GPL_after_releasing">After releasing (AGPL)</a>
 </ul>
 <li><a href="#Fonts">Fonts</a>
 </ul></blockquote>
@@ -88,7 +125,7 @@ you will want to change.
 <ul>
 
 <li>If you make any significant changes, please edit
-<code>base/gscdef.c</code> to change <code>GS_PRODUCTFAMILY</code> 
+<code>base/gscdef.c</code> to change <code>GS_PRODUCTFAMILY</code>
 and <code>GS_PRODUCT</code> from "GPL Ghostscript" to something else,
 in order to avoid confusion with Artifex releases.
 
@@ -104,7 +141,7 @@ places listed under <a href="#Release_numbering">"Release numbering"</a>
 below.
 
 </ul>
-
+<hr>
 <h2><a name="Servers"></a>Servers</h2>
 
 <p>
@@ -130,7 +167,7 @@ class="offsite">svn.ghostscript.com</a>.
 <p>
 It may also be helpful to
 read the SourceForge Ghostscript home page (<a
-href="http://sourceforge.net/projects/ghostscript/" 
+href="http://sourceforge.net/projects/ghostscript/"
 class="offsite">http://sourceforge.net/projects/ghostscript/</a>).
 
 <h3><a name="Distribution"></a>Distribution</h3>
@@ -138,22 +175,11 @@ class="offsite">http://sourceforge.net/projects/ghostscript/</a>).
 <p>
 Stable, beta, and development releases are all available from
 <blockquote>
-<a
-href="http://sourceforge.net/project/showfiles.php?group_id=1897" 
-class="offsite">http://sourceforge.net/project/showfiles.php?group_id=1897</a>
+<br>
+<a href="http://ghostscript.com/download/"
+class="offsite">http://ghostscript.com/download/</a>
 </blockquote>
-
-<p>
-Releases are also distributed from
-
-<blockquote>
-<a
-href="ftp://mirror.cs.wisc.edu/pub/mirrors/ghost/GPL/" 
-class="offsite">ftp://mirror.cs.wisc.edu/pub/mirrors/ghost/GPL/</a> and
-<br><a href="http://ghostscript.com/releases/" 
-class="offsite">http://ghostscript.com/releases/</a>
-</blockquote>
-
+<hr>
 <h2><a name="Release_numbering"></a>Release numbering</h2>
 
 <p>
@@ -164,7 +190,7 @@ of the release number is a 2-digit decimal fraction: it counts 00,
 <ul>
 
 <li>Release numbers N.0x and N.5x indicate stable versions.
-<li>Successive increments generally indicate bug fixes and minor enhancements. 
+<li>Successive increments generally indicate bug fixes and minor enhancements.
 <li>Development, testing and beta releases generally begin with a minor release number that is
 a multiple of ten and increment from there.
 </ul>
@@ -174,7 +200,7 @@ Release numbers appear in the following places in the Ghostscript files:
 
 <ul>
 
-<li>In <code>Resource/Init/gs_init.ps</code>, as an integer (release 
+<li>In <code>Resource/Init/gs_init.ps</code>, as an integer (release
 number x100) at the beginning of the
 file just after the initial comment blocks.
 
@@ -199,12 +225,12 @@ as the first step of preparing a new release.
 <h3>After a release</h3>
 
 <p>
-After making a release the release number in the repository is 
-incremented. Thus versions built from svn are always marked with a 
+After making a release the release number in the repository is
+incremented. Thus versions built from svn are always marked with a
 future (or unused) release number to avoid confusion.
 
 <p>
-Additionally, After an N.00 or N.50 stable release, a branch is made in svn so that development 
+Additionally, After an N.00 or N.50 stable release, a branch is made in svn so that development
 can continue independently of changes to the stable series. When this happens, the minor release
 number is incremented by 10 (or 20) on the development branch (and by 1 on the new stable branch,
 as above) to avoid collisions.
@@ -214,7 +240,7 @@ While incrementing the release number after making a release may seem
 counter-intuitive, it ensures that, at any given time, the version
 number alone is sufficient to distinguish between the current SVN
 state and a numbered release.
-
+<hr>
 <h2><a name="Making_distributions"></a>Making distributions</h2>
 
 <p>
@@ -222,17 +248,17 @@ This document only discusses source distributions.  Source distributions
 currently can only be made on Linux systems (but it probably wouldn't take
 much work to support other Unix systems).  Ghostscript as distributed also
 often includes executables or other packages for the Windows and MacOS
-environments, but upstream does not always produce these, and this 
-document does not discuss them.  
+environments, but upstream does not always produce these, and this
+document does not discuss them.
 
 <p>
 To make a source distribution, you will need the scripts and data files in
 the <code>toolbin/</code> directory. The instructions below generally
-assume that you're invoking the relative to the top level of the source 
+assume that you're invoking the relative to the top level of the source
 tree.
 
 To run the scripts, you will need reasonably current versions of Tcl,
-freely available from Scriptics 
+freely available from Scriptics
 (<a class="offsite" href="http://www.scriptics.com"><tt>http://www.scriptics.com</tt></a>), and
 Python, freely available from <a class="offsite"
 href="http://www.python.org"><tt>http://www.python.org</tt></a>.
@@ -419,12 +445,12 @@ Create a new changelog by running
 svn log -rHEAD:<i>rev</i> --xml --verbose &gt; doc/changelog.xml
 </pre></blockquote>
 
-where <i>rev</i> is the revision number of the branch point for the 
+where <i>rev</i> is the revision number of the branch point for the
 previous release.
 
 <p>
-This consolidates all the commit logs since the previous release in a 
-readable format. You may also wish to remap user names in the 
+This consolidates all the commit logs since the previous release in a
+readable format. You may also wish to remap user names in the
 &lt;author/&gt; tags of the output to the real names of the developers.
 
 <p>
@@ -441,17 +467,17 @@ The xml changelog file can now be deleted.
 
 <p>
 [Deprecated]<br>
-Copy the contents of News.htm and Changes.htm into a new section in 
-History8.htm, and News.htm and Details.htm into Details8.htm. Then 
-update the hyperlinks in History8.htm to point to Details8.htm instead  
+Copy the contents of News.htm and Changes.htm into a new section in
+History8.htm, and News.htm and Details.htm into Details8.htm. Then
+update the hyperlinks in History8.htm to point to Details8.htm instead
 of Details.htm so these remain valid after the next release.<br>
 [/Deprecated]<br>
 <br>
 As of Ghostscript 9.02, to reduce the pointless duplication of information,
-Changes.htm and Details#.htm have been deprecated. 
+Changes.htm and Details#.htm have been deprecated.
 
 Copy the contents of Changes.htm into a new section in History9.htm, and ensure
-the links in News.htm are updated to reference the new section in History9.htm. 
+the links in News.htm are updated to reference the new section in History9.htm.
 
 <p>
 Then run
@@ -476,7 +502,7 @@ number.
 
 If you've already tagged this release (e.g. in making an earlier
 release candidate) you'll need to svn rm the old tree first. We
-recommend just appending 'rc<i>n</i>' to the end of release candidate 
+recommend just appending 'rc<i>n</i>' to the end of release candidate
 tag names, or a '.<i>n</i>' tiny release number to post-release fixes.
 
 <p>
@@ -502,7 +528,7 @@ is only needed when doing special feature releases.
 
 <p>
 For the unix source distributions only, generate the configure
-scripts. From the top level directory, run 
+scripts. From the top level directory, run
 
 <blockquote><pre>
 ./autogen.sh
@@ -517,9 +543,9 @@ invoke autoconf to create the <tt>configure</tt> script.
 Also run <tt>make distclean</tt> in the <tt>jasper</tt> subdir to
 clean up any incidental config there. If you get a warning,
 for example if the build files think they need updating
-and not all the tools are available, be sure to run <tt>autoreconf &amp;&amp; 
+and not all the tools are available, be sure to run <tt>autoreconf &amp;&amp;
 make distclean</tt> to avoid version skew issues.
-You may also need to manually remove the <tt>autom4te.cache</tt> directory. 
+You may also need to manually remove the <tt>autom4te.cache</tt> directory.
 
 <p>
 Move back to directory containing the distribution code and make the
@@ -634,9 +660,9 @@ href="#Preparing_source">"Preparing the source code."</a>
 Extract the sources from <code>ghostscript-N.NN.tar.gz</code>
 then repackage in a zip file as follows:
 <blockquote>
-<code>zip -r temp.zip gsN.NN/LICENSE gsN.NN/doc gsN.NN/examples 
+<code>zip -r temp.zip gsN.NN/LICENSE gsN.NN/doc gsN.NN/examples
   gsN.NN/icclib gsN.NN/ijs gsN.NN/jasper gsN.NN/jbig2dec gsN.NN/jpeg
-  gsN.NN/lib gsN.NN/libpng gsN.NN/base gsN.NN/psi gsN.NN/Resource 
+  gsN.NN/lib gsN.NN/libpng gsN.NN/base gsN.NN/psi gsN.NN/Resource
   gsN.NN/zlib</code>
 </blockquote>
 Unzip converting the line endings to CRLF:
@@ -652,27 +678,27 @@ This method is reasonably portable, and does not convert binary
 files such as
 <code><a href="../examples/annots.pdf">examples/annots.pdf</a></code>.
 <p>
-Unzip <code>gsNNNsrc.zip</code>.  
+Unzip <code>gsNNNsrc.zip</code>.
 The directory must be named <code>gsN.NN</code>.
 <p>
 Extract the fonts <code>ghostscript-fonts-std-#.##.tar.gz</code>
-into a directory <code>fonts</code> adjacent to the 
-<code>gsN.NN</code> directory.  
-The fonts are needed in this location for building 
+into a directory <code>fonts</code> adjacent to the
+<code>gsN.NN</code> directory.
+The fonts are needed in this location for building
 the distribution archive later.
 <p>
 You will need the command line Info-Zip zip program available from
 <a href="http://www.info-zip.org/pub/infozip/">
-http://www.info-zip.org/pub/infozip/</a> 
-Alternatively, the command line version of WinZip 
-(<code>wzzip.exe</code>) can be used by replacing the 
+http://www.info-zip.org/pub/infozip/</a>
+Alternatively, the command line version of WinZip
+(<code>wzzip.exe</code>) can be used by replacing the
 Info-Zip command line options <code>-9 -r</code>
 with <code>-ex -P</code> in
 <code><a href="../psi/winint.mak">winint.mak</a></code>.
 <p>
 You will need WinZip Self-Extractor for building the
 self extracting archive.  This is commercial software.
-You may need to update the path <code>WINZIPSE_XE</code> in 
+You may need to update the path <code>WINZIPSE_XE</code> in
 <code><a href="../psi/winint.mak">winint.mak</a></code>.
 <p>
 Unzip the jpeg, libpng and zlib libraries, then make ghostscript
@@ -682,7 +708,7 @@ Run the command <code>nmake archive</code>.  This builds the distribution
 archive <code>gsNNNw32.exe</code> and an ordinary zip file
 <code>gsNNNw32.zip</code> in the parent directory.
 If you do not have WinZip Self-Extractor, you can use
-<code>nmake zip</code> to make <code>gsNNNw32.zip</code> only. 
+<code>nmake zip</code> to make <code>gsNNNw32.zip</code> only.
 
 <p>Starting with Ghostscript 9.x (Summer 2010), <code>nmake nsis</code> (msvc)
 or <code>make nsis</code> (Borland) builds an nsis-based installer
@@ -697,7 +723,7 @@ You may need to update the path <code>MAKENSIS_XE</code> in
 Upload <code>ghostscript-#.##.tar.*</code> to SourceForge (by anonymous
 FTP to <code>upload.sourceforge.net</code>, directory
 <code>/incoming</code>), and then post it using the "File Release"
-facility in the Ghostscript project. Put the release in the appropriate 
+facility in the Ghostscript project. Put the release in the appropriate
 package, usually "GPL Ghostscript".
 If you are adding executable builds or source archives for other
 platforms to an existing source release, please use the same release
@@ -710,41 +736,29 @@ Do the steps for distributions in general.
 
 <p>
 Upload <code>ghostscript-#.##.tar.*</code> to
-<code>ftp://mirror.cs.wisc.edu/pub/mirrors/ghost/GPL/test</code>.
+<code><a href="http://ghostscript.com/download/"
+class="offsite">http://ghostscript.com/download/</a>
+</code>.
 
 <h3><a name="Public_releases"></a>Public releases</h3>
 
 <p>
 Do the steps for distributions in general.
 
-<p>
-Create a directory at
-<code>ftp://mirror.cs.wisc.edu/pub/mirrors/ghost/GPL/gs###/</code>.  
-In that directory, store the following files:
-
 <ul>
-
-<li>Standard distribution files:
-
-<blockquote><pre>
-<code>ghostscript-#.##.tar.gz</code>
-<code>ghostscript-#.##.tar.bz2</code>
-</pre></blockquote>
-
-<li>MS Windows source and executables:
+    <li>MS Windows source and executables:</li>
 
 <blockquote><pre>
-<code>gs###src.zip</code>
 <code>gs###w32.exe</code>
-<code>gs###w32.zip</code>
+<code>gs###w64.exe</code>
 </pre></blockquote>
 
 <li>Third-party libraries, as links (upload these if not installed), where
 <code>&#36;&#36;&#36;</code> et al. refer to the version number of the library, which
-should be the latest compatible release of the library and should be 
+should be the latest compatible release of the library and should be
 consistent with the values of and version numbers specifically listed in
-the makefiles.
-
+    the makefiles.</li>
+</ul>
 <blockquote><pre>
 <code>jpegsrc.v&#36;&#36;.tar.gz</code> -&gt; <code>../../3rdparty/jpegsrc.v&#36;&#36;.tar.gz</code>
 <code>libpng-&#36;.&#36;.&#36;.tar.gz</code> -&gt; <code>../../3rdparty/libpng-&#36;.&#36;.&#36;.tar.gz</code>
@@ -754,11 +768,12 @@ the makefiles.
 <code>zlib&#36;&#36;&#36;.zip</code> -&gt; <code>../../3rdparty/zlib&#36;&#36;&#36;.zip</code>
 </pre></blockquote>
 
-In any case, the names of the links in the distribution directory should reflect
-the original name of the upstream file.
+<p>In any case, the names of the links in the distribution directory should reflect
+the original name of the upstream file.</p>
 
+<ul>
 <li>Fonts, where <code>&#36;.&#36;&#36;</code> refers to the most recent version
-number of the fonts:
+number of the fonts:</li>
 
 <blockquote><pre>
 <code>ghostscript-fonts-other-&#36;.&#36;.tar.gz</code> -&gt; <code>../fonts/ghostscript-fonts-other-&#36;.&#36;.tar.gz</code>
@@ -780,12 +795,8 @@ To: gs-announce
 </pre></blockquote>
 
 <p>
-Edit the Web pages in svn and commit to reflect the new release.
-The Wisconsin server should update automatically.
-
-<p>
 Also update the documentation snapshots on the website.
-
+<hr>
 <h2><a name="After_releasing"></a>After releasing</h2>
 
 <p>
@@ -799,31 +810,14 @@ In <code>gscdef.c</code>, edit the definition of
 <p>
 Edit <code>doc/News.htm</code> to remove all the content.
 
-
+<hr>
 <h2><a name="Fonts"></a>Fonts</h2>
 
 <p>
-Artifex Software, Inc. distributes a package of the base 35 PostScript 
+Artifex Software, Inc. distributes a package of the base 35 PostScript
 fonts, and a package of other miscellaneous fonts.
-
 <p>
-To make the font packages, run the command
-
-<blockquote><pre>
-toolbin/makefonts #.##
-</pre></blockquote>
-
-<p>
-This creates the following files:
-
-<blockquote><pre>
-ghostscript-fonts-std-#.##.tar.gz
-ghostscript-fonts-other-#.##.tar.gz
-</pre></blockquote>
-
-<p>
-The first two of these use the GPL, and should be uploaded to
-<code>ftp://mirror.cs.wisc.edu/pub/mirrors/ghost/fonts/</code>.  
+These are included in the Ghostscript release archive.
 
 <!-- [2.0 end contents] ==================================================== -->
 
@@ -831,7 +825,7 @@ The first two of these use the GPL, and should be uploaded to
 <hr>
 
 <p>
-<small>Copyright &copy; 2000-2006 Artifex Software, Inc.  All rights reserved.</small>
+<small>Copyright &copy; 2000-2019 Artifex Software, Inc.  All rights reserved.</small>
 
 <p>
 This software is provided AS-IS with no warranty, either express or
@@ -839,14 +833,45 @@ implied.
 
 This software is distributed under license and may not be copied, modified
 or distributed except as expressly authorized under the terms of that
-license.  Refer to licensing information at http://www.artifex.com/
-or contact Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134,
-San Rafael, CA  94903, U.S.A., +1(415)492-9861, for further information.
+license.  Refer to licensing information at <a href="https://www.artifex.com">https://www.artifex.com</a>
+or contact Artifex Software, Inc.,  1305 Grant Avenue - Suite 200,
+Novato, CA 94945, U.S.A., +1(415)492-9861, for further information.
 
 <p>
-<small>Ghostscript version 9.16, 30 March 2015
+<small>Ghostscript version 9.52, 19 March 2020
 
 <!-- [3.0 end visible trailer] ============================================= -->
 
+<!--FINISH EDITING HERE-->
+
+    </div>
+    </div>
+    </div>
+
+    <div class="footer">
+    <div class="row">
+        <div class="col-7 footleft">
+        <ul>
+            <li><a href="https://artifex.com/contact-us/" target="blank">CONTACT US</a></li>
+            <li><a href="https://artifex.com/about-us/" target="blank">ABOUT</a></li>
+            <li><a href="https://ghostscript.com/security.html">SECURITY</a></li>
+        </ul>
+        </div>
+        <div class="col-1 footcenter">
+         <ul>
+           <li><a href="https://artifex.com/support/" target="blank">SUPPORT</a></li>
+           <li><a href="https://artifex.com/blog/artifex/" target="blank">BLOG</a></li>
+           <li><a href="https://artifex.com/privacy-policy/" target="blank">PRIVACY</a></li>
+           </ul>
+        </div>
+        <div class="col-ft-3 footright"><img src="images/Artifex_logo.png" width="194" height="40" alt=""/> <br>
+              © Copyright 2019 Artifex Software, Inc. <br>
+            All rights reserved.
+        </div>
+          </div>
+    </div>
+
+    <script src="http://cdnjs.cloudflare.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
+    <script src="index.js"></script>
 </body>
 </html>

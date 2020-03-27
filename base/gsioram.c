@@ -1,4 +1,18 @@
-/* $Id$ */
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
+   All Rights Reserved.
+
+   This software is provided AS-IS with no warranty, either express or
+   implied.
+
+   This software is distributed under license and may not be copied,
+   modified or distributed except as expressly authorized under the terms
+   of the license contained in the file LICENSE in this distribution.
+
+   Refer to licensing information at http://www.artifex.com or contact
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
+*/
+
 /* %ram% file device implementation */
 
 /*
@@ -34,6 +48,7 @@
 
 /* Function prototypes */
 static iodev_proc_init(iodev_ram_init);
+static iodev_proc_finit(iodev_ram_finit);
 static iodev_proc_open_file(ram_open_file);
 static iodev_proc_delete_file(ram_delete);
 static iodev_proc_rename_file(ram_rename);
@@ -46,12 +61,14 @@ static void ram_finalize(const gs_memory_t *memory, void * vptr);
 
 const gx_io_device gs_iodev_ram = {
     "%ram%", "FileSystem", {
-        iodev_ram_init, iodev_no_open_device,
+        iodev_ram_init, iodev_ram_finit, iodev_no_open_device,
         ram_open_file, iodev_no_fopen, iodev_no_fclose,
         ram_delete, ram_rename, ram_status,
         ram_enumerate_init, ram_enumerate_next, ram_enumerate_close,
         ram_get_params, iodev_no_put_params
-    }
+    },
+    NULL,
+    NULL
 };
 
 typedef struct ramfs_state_s {
@@ -61,8 +78,7 @@ typedef struct ramfs_state_s {
 
 #define GETRAMFS(state) (((ramfs_state*)(state))->fs)
 
-gs_private_st_ptrs2_final(st_ramfs_state, struct ramfs_state_s,
-    "ramfs_state", ramfs_state_enum_ptrs, ramfs_state_reloc_ptrs, ram_finalize, memory, fs);
+gs_private_st_simple_final(st_ramfs_state, struct ramfs_state_s, "ramfs_state", ram_finalize);
 
 typedef struct gsram_enum_s {
     char *pattern;
@@ -97,8 +113,8 @@ static int
 s_ram_switch(stream *, bool);
 
 static int
-ramfs_errno_to_code(int errno) {
-    switch (errno) {
+ramfs_errno_to_code(int error_number) {
+    switch (error_number) {
     case RAMFS_NOTFOUND:
         return_error(gs_error_undefinedfilename);
     case RAMFS_NOACCESS:
@@ -124,7 +140,7 @@ ram_open_file(gx_io_device * iodev, const char *fname, uint len,
     ramhandle * file;
     char fmode[4];  /* r/w/a, [+], [b], null */
     int openmode=RAMFS_READ;
-    ramfs * fs = GETRAMFS(iodev->state);
+    ramfs * fs;
     char * namestr = NULL;
 
     /* Is there a more efficient way to do this? */
@@ -138,6 +154,7 @@ ram_open_file(gx_io_device * iodev, const char *fname, uint len,
         gs_free_object(mem, namestr, "free temporary filename string");
         return gs_note_error(gs_error_invalidaccess);
     }
+    fs = GETRAMFS(iodev->state);
     code = file_prepare_stream(fname, len, file_access, DEFAULT_BUFFER_SIZE,
     ps, fmode, mem
     );
@@ -147,8 +164,20 @@ ram_open_file(gx_io_device * iodev, const char *fname, uint len,
         return 0;
     }
 
-    if (fmode[0] != 'r' || fmode[1] == '+') openmode |= RAMFS_WRITE;
-    if (fmode[0] != 'r') openmode |= RAMFS_CREATE;
+    switch (fmode[0]) {
+        case 'a':
+          openmode = RAMFS_WRITE | RAMFS_APPEND;
+          break;
+        case 'r':
+          openmode = RAMFS_READ;
+          if (fmode[1] == '+')
+            openmode |= RAMFS_WRITE;
+          break;
+        case 'w':
+          openmode |= RAMFS_WRITE | RAMFS_TRUNC | RAMFS_CREATE;
+          if (fmode[1] == '+')
+             openmode |= RAMFS_READ;
+    }
 
     /* For now, we cheat here in the same way that sfxstdio.c et al cheat -
        append mode is faked by opening in write mode and seeking to EOF just
@@ -169,6 +198,9 @@ ram_open_file(gx_io_device * iodev, const char *fname, uint len,
     case 'w':
     swrite_ram(*ps, file, (*ps)->cbuf, (*ps)->bsize);
     }
+    if (fmode[1] == '+') {
+      (*ps)->modes = (*ps)->file_modes |= s_mode_read | s_mode_write;
+    }
     (*ps)->save_close = (*ps)->procs.close;
     (*ps)->procs.close = file_close_file;
  error:
@@ -188,11 +220,12 @@ sread_ram(register stream * s, ramhandle * file, byte * buf, uint len)
     };
 
     s_std_init(s, buf, len, &p,s_mode_read + s_mode_seek);
-    s->file = (FILE*)file;
+    s->file = (gp_file *)file;
     s->file_modes = s->modes;
     s->file_offset = 0;
-    /* XXX get a more sensible number from the fs? */
-    s->file_limit = max_long;
+    ramfile_seek(file, 0, RAMFS_SEEK_END);
+    s->file_limit = ramfile_tell(file);
+    ramfile_seek(file, 0, RAMFS_SEEK_SET);
 }
 
 /* Procedures for reading from a file */
@@ -200,9 +233,8 @@ static int
 s_ram_available(register stream * s, gs_offset_t *pl)
 {
     long max_avail = s->file_limit - stell(s);
-    long buf_avail = sbufavailable(s);
 
-    *pl = min(max_avail, buf_avail);
+    *pl = max_avail;
     if(*pl == 0 && ramfile_eof((ramhandle*)s->file))
     *pl = -1;        /* EOF */
     return 0;
@@ -211,18 +243,18 @@ s_ram_available(register stream * s, gs_offset_t *pl)
 static int
 s_ram_read_seek(register stream * s, gs_offset_t pos)
 {
-    uint end = s->srlimit - s->cbuf + 1;
+    uint end = s->cursor.r.limit - s->cbuf + 1;
     long offset = pos - s->position;
 
     if (offset >= 0 && offset <= end) {  /* Staying within the same buffer */
-    s->srptr = s->cbuf + offset - 1;
-    return 0;
+        s->cursor.r.ptr = s->cbuf + offset - 1;
+        return 0;
     }
     if (pos < 0 || pos > s->file_limit ||
-    ramfile_seek((ramhandle*)s->file, s->file_offset + pos, RAMFS_SEEK_SET) != 0
+        ramfile_seek((ramhandle*)s->file, s->file_offset + pos, RAMFS_SEEK_SET) != 0
     )
     return ERRC;
-    s->srptr = s->srlimit = s->cbuf - 1;
+    s->cursor.r.ptr = s->cursor.r.limit = s->cbuf - 1;
     s->end_status = 0;
     s->position = pos;
     return 0;
@@ -253,7 +285,7 @@ s_ram_read_process(stream_state * st, stream_cursor_read * ignore_pr,
     int status = 1;
     int count;
 
-    if (s->file_limit < max_long) {
+    if (s->file_limit < S_FILE_LIMIT_MAX) {
     long limit_count = s->file_offset + s->file_limit -
     ramfile_tell(file);
 
@@ -280,10 +312,10 @@ swrite_ram(register stream * s, ramhandle * file, byte * buf, uint len)
     };
 
     s_std_init(s, buf, len, &p, s_mode_write + s_mode_seek);
-    s->file = (FILE*)file;
+    s->file = (gp_file *)file;
     s->file_modes = s->modes;
     s->file_offset = 0;        /* in case we switch to reading later */
-    s->file_limit = max_long;    /* ibid. */
+    s->file_limit = S_FILE_LIMIT_MAX;
 }
 
 /* Initialize for appending to a file. */
@@ -391,7 +423,19 @@ iodev_ram_init(gx_io_device * iodev, gs_memory_t * mem)
     }
     if(fs) ramfs_destroy(mem, fs);
     if(state) gs_free_object(mem,state,"iodev_ram_init(state)");
-    return gs_error_VMerror;
+    return_error(gs_error_VMerror);
+}
+
+static void
+iodev_ram_finit(gx_io_device * iodev, gs_memory_t * mem)
+{
+    ramfs_state *state = (ramfs_state *)iodev->state;
+    if (state != NULL)
+    {
+        iodev->state = NULL;
+        gs_free_object(state->memory, state, "iodev_ram_finit");
+    }
+    return;
 }
 
 static void
@@ -399,6 +443,7 @@ ram_finalize(const gs_memory_t *memory, void * vptr)
 {
     ramfs* fs = GETRAMFS((ramfs_state*)vptr);
     ramfs_destroy((gs_memory_t *)memory, fs);
+    GETRAMFS((ramfs_state*)vptr) = NULL;
 }
 
 static int
@@ -442,8 +487,8 @@ ram_status(gx_io_device * iodev, const char *fname, struct stat *pstat)
 }
 
 static file_enum *
-ram_enumerate_init(gx_io_device *iodev, const char *pat, uint patlen,
-    gs_memory_t *mem)
+ram_enumerate_init(gs_memory_t * mem, gx_io_device *iodev, const char *pat,
+                   uint patlen)
 {
     gsram_enum * penum = gs_alloc_struct(
     mem, gsram_enum, &st_gsram_enum,
@@ -452,6 +497,7 @@ ram_enumerate_init(gx_io_device *iodev, const char *pat, uint patlen,
     char *pattern = (char *)gs_alloc_bytes(
     mem, patlen+1, "ram_enumerate_file_init(pattern)"
     );
+
     ramfs_enum * e = ramfs_enum_new(GETRAMFS(iodev->state));
     if(penum && pattern && e) {
     memcpy(pattern, pat, patlen);
@@ -470,18 +516,19 @@ ram_enumerate_init(gx_io_device *iodev, const char *pat, uint patlen,
 }
 
 static void
-ram_enumerate_close(file_enum *pfen)
+ram_enumerate_close(gs_memory_t * mem, file_enum *pfen)
 {
     gsram_enum *penum = (gsram_enum *)pfen;
-    gs_memory_t *mem = penum->memory;
+    gs_memory_t *mem2 = penum->memory;
+    (void)mem;
 
     ramfs_enum_end(penum->e);
-    gs_free_object(mem, penum->pattern, "ramfs_enum_init(pattern)");
-    gs_free_object(mem, penum, "ramfs_enum_init(ramfs_enum)");
+    gs_free_object(mem2, penum->pattern, "ramfs_enum_init(pattern)");
+    gs_free_object(mem2, penum, "ramfs_enum_init(ramfs_enum)");
 }
 
 static uint
-ram_enumerate_next(file_enum *pfen, char *ptr, uint maxlen)
+ram_enumerate_next(gs_memory_t * mem, file_enum *pfen, char *ptr, uint maxlen)
 {
     gsram_enum *penum = (gsram_enum *)pfen;
 
@@ -496,7 +543,7 @@ ram_enumerate_next(file_enum *pfen, char *ptr, uint maxlen)
     }
     }
     /* ran off end of list, close the enum */
-    ram_enumerate_close(pfen);
+    ram_enumerate_close(mem, pfen);
     return ~(uint)0;
 }
 

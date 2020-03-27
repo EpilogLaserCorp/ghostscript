@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -32,7 +32,6 @@
 #include "plmain.h"             /* for finish page */
 #include "plvalue.h"
 #include "gsmatrix.h"           /* for gsdevice.h */
-#include "gsnogc.h"
 #include "gscoord.h"
 #include "gsdevice.h"
 #include "gspaint.h"
@@ -72,8 +71,7 @@ preserve_cap_and_margins(const pcl_state_t * pcs,
     ptext_rect->p.y = (double)pcs->margins.top;
     ptext_rect->q.x = (double)pcs->margins.right;
     ptext_rect->q.y = (double)(pcs->margins.top + pcs->margins.length);
-    pcl_transform_rect(pcs->memory, ptext_rect, ptext_rect,
-                       &(pcs->xfm_state.pd2lp_mtx));
+    pcl_transform_rect(ptext_rect, ptext_rect, &(pcs->xfm_state.pd2lp_mtx));
 }
 
 /*
@@ -92,7 +90,7 @@ restore_cap_and_margins(pcl_state_t * pcs,
     gs_point_transform(pcur_pt->x, pcur_pt->y, &lp2pd, &tmp_pt);
     pcs->cap.x = (coord) tmp_pt.x;
     pcs->cap.y = (coord) tmp_pt.y;
-    pcl_transform_rect(pcs->memory, ptext_rect, &tmp_rect, &lp2pd);
+    pcl_transform_rect(ptext_rect, &tmp_rect, &lp2pd);
     pcs->margins.left = (coord) tmp_rect.p.x;
     pcs->margins.top = (coord) tmp_rect.p.y;
     pcs->margins.right = (coord) tmp_rect.q.x;
@@ -265,11 +263,10 @@ update_xfm_state(pcl_state_t * pcs, bool reset_initial)
                 psize->height - max(PRINTABLE_MARGIN_CP,
                                     inch2coord(pdev->HWMargins[3] / 72.0));
         }
-        pcl_transform_rect(pcs->memory, &print_rect, &dev_rect, &pg2dev);
+        pcl_transform_rect(&print_rect, &dev_rect, &pg2dev);
     }
     pcl_invert_mtx(&(pxfmst->lp2pg_mtx), &pg2lp);
-    pcl_transform_rect(pcs->memory, &print_rect, &(pxfmst->lp_print_rect),
-                       &pg2lp);
+    pcl_transform_rect(&print_rect, &(pxfmst->lp_print_rect), &pg2lp);
 
     /* restablish the current point and text region */
     if (!reset_initial)
@@ -346,7 +343,7 @@ reset_margins(pcl_state_t * pcs, bool for_passthrough)
  * an initial reset. In that case, done't call HPGL's reset - the reset
  * will do that later.
  */
-static void
+static int
 new_page_size(pcl_state_t * pcs,
               const pcl_paper_size_t * psize,
               bool reset_initial, bool for_passthrough)
@@ -355,9 +352,10 @@ new_page_size(pcl_state_t * pcs,
     double height_pts = psize->height * 0.01;
     float page_size[2];
     float old_page_size[2];
-    gs_state *pgs = pcs->pgs;
+    gs_gstate *pgs = pcs->pgs;
     gs_matrix mat;
     bool changed_page_size;
+    int code = 0;
 
     page_size[0] = width_pts;
     page_size[1] = height_pts;
@@ -365,7 +363,8 @@ new_page_size(pcl_state_t * pcs,
     old_page_size[0] = gs_currentdevice(pcs->pgs)->MediaSize[0];
     old_page_size[1] = gs_currentdevice(pcs->pgs)->MediaSize[1];
 
-    put_param1_float_array(pcs, "PageSize", page_size);
+    code = put_param1_float_array(pcs, "PageSize", page_size);
+    if (code < 0) return code;
 
     /*
      * Reset the default transformation.
@@ -402,7 +401,8 @@ new_page_size(pcl_state_t * pcs,
      * an underline to be put out.
      */
     pcs->underline_enabled = false;
-    pcl_home_cursor(pcs);
+    code = pcl_home_cursor(pcs);
+    if (code < 0) return code;
     /*
      * this is were we initialized the cursor position
      */
@@ -411,14 +411,17 @@ new_page_size(pcl_state_t * pcs,
     pcl_xfm_reset_pcl_pat_ref_pt(pcs);
 
     if (!reset_initial)
-        hpgl_do_reset(pcs, pcl_reset_page_params);
+        code = hpgl_do_reset(pcs, pcl_reset_page_params);
+    if (code < 0) return code;
 
     if (pcs->end_page == pcl_end_page_top) {    /* don't erase in snippet mode */
         if (pcs->page_marked || changed_page_size) {
-            gs_erasepage(pcs->pgs);
+            code = gs_erasepage(pcs->pgs);
             pcs->page_marked = false;
         }
     }
+
+    return code;
 }
 
 /*
@@ -457,7 +460,7 @@ const int pcl_paper_type_count = countof(paper_types_proto);
  * The last operand indicates if this routine is being called as part of
  * an initial resete.
  */
-void
+int
 new_logical_page(pcl_state_t * pcs,
                  int lp_orient,
                  const pcl_paper_size_t * psize,
@@ -467,7 +470,7 @@ new_logical_page(pcl_state_t * pcs,
 
     pxfmst->lp_orient = lp_orient;
     pxfmst->print_dir = 0;
-    new_page_size(pcs, psize, reset_initial, for_passthrough);
+    return new_page_size(pcs, psize, reset_initial, for_passthrough);
 }
 
 
@@ -494,19 +497,53 @@ pcl_new_logical_page_for_passthrough(pcl_state_t * pcs, int orient,
 
     if (!found)
         return -1;
-    new_logical_page(pcs, orient, psize, false, true);
-    return 0;
+    return new_logical_page(pcs, orient, psize, false, true);
 }
 
 /* page marking routines */
 
 
-void
+int
 pcl_mark_page_for_current_pos(pcl_state_t * pcs)
+{
+	int code = 0;
+
+    /* nothing to do */
+    if (pcs->page_marked)
+        return code;
+
+    /* convert current point to device space and check if it is inside
+       device rectangle for the page */
+    {
+        gs_fixed_rect page_box;
+        gs_fixed_point pt;
+
+        code = gx_default_clip_box(pcs->pgs, &page_box);
+        if (code < 0)
+            /* shouldn't happen. */
+            return code;
+        
+        code = gx_path_current_point(gx_current_path(pcs->pgs), &pt);
+        if (code < 0)
+            /* shouldn't happen */
+            return code;
+        
+
+        /* half-open lower - not sure this is correct */
+        if (pt.x >= page_box.p.x && pt.y >= page_box.p.y &&
+            pt.x < page_box.q.x && pt.y < page_box.q.y)
+            pcs->page_marked = true;
+    }
+    return code;
+}
+
+
+int
+pcl_mark_page_for_character(pcl_state_t * pcs, gs_fixed_point *org)
 {
     /* nothing to do */
     if (pcs->page_marked)
-        return;
+        return 0;
 
     /* convert current point to device space and check if it is inside
        device rectangle for the page */
@@ -518,19 +555,20 @@ pcl_mark_page_for_current_pos(pcl_state_t * pcs)
         code = gx_default_clip_box(pcs->pgs, &page_box);
         if (code < 0)
             /* shouldn't happen. */
-            return;
-        
+            return code;
+
         code = gx_path_current_point(gx_current_path(pcs->pgs), &pt);
         if (code < 0)
             /* shouldn't happen */
-            return;
-        
+            return code;
+
 
         /* half-open lower - not sure this is correct */
         if (pt.x >= page_box.p.x && pt.y >= page_box.p.y &&
-            pt.x < page_box.q.x && pt.y < page_box.q.y)
+            org->x < page_box.q.x && org->y < page_box.q.y)
             pcs->page_marked = true;
     }
+    return 0;
 }
 
 /* 
@@ -538,12 +576,10 @@ pcl_mark_page_for_current_pos(pcl_state_t * pcs)
  *  could be improved by using the bounding box of the path object but
  *  for page marking that case does not seem to come up in practice.
  */
-void
+int
 pcl_mark_page_for_path(pcl_state_t * pcs)
 {
-
-    pcl_mark_page_for_current_pos(pcs);
-    return;
+    return pcl_mark_page_for_current_pos(pcs);
 }
 
 /* returns the bounding box coordinates for the current device and a
@@ -567,9 +603,9 @@ pcl_cursor_moved(pcl_state_t * pcs)
 int
 pcl_end_page(pcl_state_t * pcs, pcl_print_condition_t condition)
 {
-    int code = 0;
-
-    pcl_break_underline(pcs);   /* (could mark page) */
+    int code = pcl_break_underline(pcs);   /* (could mark page) */
+    if (code < 0)
+        return code;
 
     /* If we are conditionally printing (normal case) check if the
        page is marked */
@@ -581,7 +617,9 @@ pcl_end_page(pcl_state_t * pcs, pcl_print_condition_t condition)
     /* finish up graphics mode in case we finished the page in the
        middle of a raster stream */
     if (pcs->raster_state.graphics_mode)
-        pcl_end_graphics_mode(pcs);
+        code = pcl_end_graphics_mode(pcs);
+    if (code < 0)
+        return code;
 
     /* If there's an overlay macro, execute it now. */
     if (pcs->overlay_enabled) {
@@ -608,6 +646,8 @@ pcl_end_page(pcl_state_t * pcs, pcl_print_condition_t condition)
 
     if (pcs->end_page == pcl_end_page_top)
         code = gs_erasepage(pcs->pgs);
+    if (code < 0)
+        return code;
 
     pcs->page_marked = false;
 
@@ -623,7 +663,7 @@ pcl_end_page(pcl_state_t * pcs, pcl_print_condition_t condition)
     } else {
         pcs->back_side = false;
     }
-    put_param1_bool(pcs,"FirstSide", !pcs->back_side);
+    code = put_param1_bool(pcs,"FirstSide", !pcs->back_side);
     update_xfm_state(pcs, 0);
 
     pcl_continue_underline(pcs);
@@ -655,7 +695,9 @@ set_page_size(pcl_args_t * pargs, pcl_state_t * pcs)
     code = pcl_end_page_if_marked(pcs);
     if (code < 0)
         return code;
-    pcl_home_cursor(pcs);
+    code = pcl_home_cursor(pcs);
+    if (code < 0)
+        return code;
 
     for (i = 0; i < pcl_paper_type_count; i++) {
         if (tag == PAPER_SIZES[i].tag) {
@@ -665,7 +707,7 @@ set_page_size(pcl_args_t * pargs, pcl_state_t * pcs)
     }
     if ((psize != 0) && ((code = pcl_end_page_if_marked(pcs)) >= 0)) {
         pcs->xfm_state.print_dir = 0;
-        new_page_size(pcs, psize, false, false);
+        code = new_page_size(pcs, psize, false, false);
     }
     return code;
 }
@@ -685,11 +727,15 @@ set_paper_source(pcl_args_t * pargs, pcl_state_t * pcs)
 
     if (code < 0)
         return code;
-    pcl_home_cursor(pcs);
+    code = pcl_home_cursor(pcs);
+    if (code < 0)
+        return code;
     /* Do not change the page side if the wanted paper source is the same as the actual one */
     if (pcs->paper_source != i) {
         pcs->back_side = false;
-        put_param1_bool(pcs, "FirstSide", !pcs->back_side);
+        code = put_param1_bool(pcs, "FirstSide", !pcs->back_side);
+        if (code < 0)
+            return code;
     }
     pcs->paper_source = i;
     /* Note: not all printers support all possible values. */
@@ -759,7 +805,11 @@ set_logical_page_orientation(pcl_args_t * pargs, pcl_state_t * pcs)
        set the flag disabling the orientation command for this page. */
     code = pcl_end_page_if_marked(pcs);
     if (code >= 0) {
-        new_logical_page(pcs, i, pcs->xfm_state.paper_size, false, false);
+        /* a page_orientation change is not the same as a new page.
+           If a cursor has moved this should be remembered */
+        bool cursor_moved = pcs->cursor_moved;
+        code = new_logical_page(pcs, i, pcs->xfm_state.paper_size, false, false);
+        pcs->cursor_moved = cursor_moved;
         pcs->hmi_cp = HMI_DEFAULT;
         pcs->vmi_cp = VMI_DEFAULT;
     }
@@ -777,7 +827,9 @@ set_print_direction(pcl_args_t * pargs, pcl_state_t * pcs)
     if ((i <= 270) && (i % 90 == 0)) {
         i /= 90;
         if (i != pcs->xfm_state.print_dir) {
-            pcl_break_underline(pcs);
+            int code = pcl_break_underline(pcs);
+            if (code < 0)
+                return code;
             pcs->xfm_state.print_dir = i;
             update_xfm_state(pcs, 0);
             pcl_continue_underline(pcs);
@@ -797,7 +849,11 @@ set_print_direction(pcl_args_t * pargs, pcl_state_t * pcs)
 static int
 set_left_margin(pcl_args_t * pargs, pcl_state_t * pcs)
 {
-    coord lmarg = uint_arg(pargs) * pcl_hmi(pcs);
+    int code = pcl_update_hmi_cp(pcs);
+    coord lmarg = uint_arg(pargs) * pcs->hmi_cp;
+
+    if (code < 0)
+        return code;
 
     /* adjust underlining if the left margin passes to the right of
        the underline start position */
@@ -807,9 +863,9 @@ set_left_margin(pcl_args_t * pargs, pcl_state_t * pcs)
     if (lmarg < pcs->margins.right) {
         pcs->margins.left = lmarg;
         if (pcs->cap.x < lmarg)
-            pcl_set_cap_x(pcs, lmarg, false, false);
+            code = pcl_set_cap_x(pcs, lmarg, false, false);
     }
-    return 0;
+    return code;
 }
 
 /*
@@ -821,17 +877,21 @@ set_left_margin(pcl_args_t * pargs, pcl_state_t * pcs)
 static int
 set_right_margin(pcl_args_t * pargs, pcl_state_t * pcs)
 {
-    coord rmarg = (uint_arg(pargs) + 1) * pcl_hmi(pcs);
+    int code = pcl_update_hmi_cp(pcs);
+    coord rmarg = (uint_arg(pargs) + 1) * pcs->hmi_cp;
+
+    if (code < 0)
+        return code;
 
     if (rmarg > pcs->xfm_state.pd_size.x)
         rmarg = pcs->xfm_state.pd_size.x;
     if (rmarg > pcs->margins.left) {
         pcs->margins.right = rmarg;
         if (pcs->cap.x > rmarg)
-            pcl_set_cap_x(pcs, rmarg, false, false);
+            code = pcl_set_cap_x(pcs, rmarg, false, false);
     }
 
-    return 0;
+    return code;
 }
 
 /*
@@ -927,7 +987,7 @@ pcl_media_type(pcl_args_t * pargs, pcl_state_t * pcs)
         int code = pcl_end_page_if_marked(pcs);
 
         if (code >= 0)
-            pcl_home_cursor(pcs);
+            code = pcl_home_cursor(pcs);
         return (code < 0 ? code : e_Unimplemented);
     } else
         return e_Range;
@@ -957,6 +1017,7 @@ static int
 set_logical_page(pcl_args_t * pargs, pcl_state_t * pcs)
 {
     uint count = uint_arg(pargs);
+    int code = 0;
 
     const pcl_logical_page_t *plogpage =
         (pcl_logical_page_t *) arg_data(pargs);
@@ -986,10 +1047,12 @@ set_logical_page(pcl_args_t * pargs, pcl_state_t * pcs)
     pcur_paper->offset_portrait = pl_get_int16(plogpage->LeftOffset) * 10;
     pcur_paper->offset_landscape = pl_get_int16(plogpage->TopOffset) * 10;
 
-    new_page_size(pcs, pcur_paper, false, false);
-    gs_erasepage(pcs->pgs);
+    code = new_page_size(pcs, pcur_paper, false, false);
+    if (code < 0) return code;
+
+    code = gs_erasepage(pcs->pgs);
     pcs->page_marked = false;
-    return 0;
+    return code;
 }
 
 /* 
@@ -1041,13 +1104,11 @@ pcl_set_custom_paper_size(pcl_state_t *pcs, pcl_paper_size_t *p)
     if (found)
         *psize = *p;
     else
-        /* this should never happen - the customer paper size is
+        /* this should never happen - the custom paper size is
            always in the table */
         return -1;
     
-    new_logical_page(pcs, 0, psize, false, false);
-
-    return 0;
+    return new_logical_page(pcs, 0, psize, false, false);
 }
 /*
  * ESC & f <decipoints> J
@@ -1057,16 +1118,23 @@ static int
 set_paper_length(pcl_args_t * pargs, pcl_state_t * pcs)
 {
     uint decipoints = uint_arg(pargs);
+    bool found = false;
     int i;
     pcl_paper_size_t *psize;
 
     for (i = 0; i < pcl_paper_type_count; i++) {
         if (101 == PAPER_SIZES[i].tag) {
             psize = &(PAPER_SIZES[i].psize);
+            found = true;
             break;
         }
     }
-    psize->height = decipoints * 10L;
+    if (found)
+        psize->height = decipoints * 10L;
+    else
+        /* never happens the, custom paper size is always in the
+           table */
+        return -1;
     return 0;
 }
 
@@ -1086,7 +1154,7 @@ pcl_print_quality(pcl_args_t * pargs, pcl_state_t * pcs)
         int code = pcl_end_page_if_marked(pcs);
 
         if (code >= 0)
-            pcl_home_cursor(pcs);
+            code = pcl_home_cursor(pcs);
         return (code < 0 ? code : 0);
     } else
         return e_Range;
@@ -1203,9 +1271,9 @@ pcl_get_default_paper(pcl_state_t * pcs)
             if (!pjl_proc_compare(pcs->pjls, "custom", PAPER_SIZES[i].pname)) {
                 if (pcs->page_set_on_command_line) {
                     PAPER_SIZES[i].psize.width =
-                        gs_currentdevice(pcs->pgs)->MediaSize[0] * 100;
+                        (coord)(gs_currentdevice(pcs->pgs)->MediaSize[0] * 100);
                     PAPER_SIZES[i].psize.height =
-                        gs_currentdevice(pcs->pgs)->MediaSize[1] * 100;
+                        (coord)(gs_currentdevice(pcs->pgs)->MediaSize[1] * 100);
                 } else {
                     PAPER_SIZES[i].psize.width = atol(pwidth) * 10L;
                     PAPER_SIZES[i].psize.height = atol(plength) * 10L;
@@ -1232,9 +1300,10 @@ pcl_get_default_paper(pcl_state_t * pcs)
     return &(PAPER_SIZES[1].psize);
 }
 
-static void
+static int
 pcpage_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
+	int code = 0;
 
     /* NB hack for snippet mode */
     if (pcs->end_page != pcl_end_page_top) {
@@ -1250,33 +1319,41 @@ pcpage_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
             reset_margins(pcs, false);
         else
             reset_margins(pcs, true);
-        return;
+        return 0;
     }
 
     if ((type & (pcl_reset_initial | pcl_reset_printer)) != 0) {
+        pcl_paper_size_t *psize = pcl_get_default_paper(pcs);
+        if (psize == NULL) return_error(gs_error_VMerror);
+
         pcs->paper_source = 0;  /* ??? */
         pcs->xfm_state.left_offset_cp = 0.0;
         pcs->xfm_state.top_offset_cp = 0.0;
         pcs->perforation_skip = 1;
-        new_logical_page(pcs,
+        code = new_logical_page(pcs,
                          !pjl_proc_compare(pcs->pjls,
                                            pjl_proc_get_envvar(pcs->pjls,
                                                                "orientation"),
                                            "portrait") ? 0 : 1,
-                         pcl_get_default_paper(pcs),
+                         psize,
                          (type & pcl_reset_initial) != 0, false);
+        if (code < 0) goto cleanup;
     } else if ((type & pcl_reset_overlay) != 0) {
         pcs->perforation_skip = 1;
         update_xfm_state(pcs, 0);
         reset_margins(pcs, false);
         pcl_xfm_reset_pcl_pat_ref_pt(pcs);
     } else if ((type & pcl_reset_permanent) != 0) {
-        if (pcs->ppaper_type_table) {
-            gs_free_object(pcs->memory, pcs->ppaper_type_table,
-                           "Paper Table");
-            pcs->ppaper_type_table = 0;
-        }
+        goto cleanup;
     }
+    return 0;
+
+cleanup:
+    if (pcs->ppaper_type_table) {
+        gs_free_object(pcs->memory, pcs->ppaper_type_table, "Paper Table");
+        pcs->ppaper_type_table = 0;
+    }
+    return code;
 }
 
 const pcl_init_t pcpage_init = { pcpage_do_registration, pcpage_do_reset, 0 };

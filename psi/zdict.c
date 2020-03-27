@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -212,8 +212,7 @@ zundef(i_ctx_t *i_ctx_p)
     int code;
 
     check_type(*op1, t_dictionary);
-    if (i_ctx_p->in_superexec == 0)
-        check_dict_write(*op1);
+    check_dict_write(*op1);
     code = idict_undef(op1, op);
     if (code < 0 && code != gs_error_undefined) /* ignore undefined error */
         return code;
@@ -504,8 +503,7 @@ zsetmaxlength(i_ctx_t *i_ctx_p)
     int code;
 
     check_type(*op1, t_dictionary);
-    if (i_ctx_p->in_superexec == 0)
-        check_dict_write(*op1);
+    check_dict_write(*op1);
     check_type(*op, t_integer);
     if (op->value.intval < 0)
         return_error(gs_error_rangecheck);

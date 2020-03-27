@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -73,7 +73,7 @@ gx_ht_write_tf(
         req_size += sizeof(pmap->values);
     if (req_size > *psize) {
         *psize = req_size;
-        return gs_error_rangecheck;
+        return_error(gs_error_rangecheck);
     }
 
     if (req_size == 1)
@@ -221,7 +221,7 @@ gx_ht_write_component(
     req_size += tmp_size;
     if (req_size > *psize) {
         *psize = req_size;
-        return gs_error_rangecheck;
+        return_error(gs_error_rangecheck);
     }
 
     /* write out the dimensional data */
@@ -297,6 +297,7 @@ gx_ht_read_component(
     if (data >= data_lim)
         return_error(gs_error_rangecheck);
     new_order.procs = &ht_order_procs_table[*data++];
+    new_order.threshold_inverted = 0;
 
     /* calculate the space required for levels and bit data */
     levels_size = new_order.num_levels * sizeof(new_order.levels[0]);
@@ -537,7 +538,7 @@ gx_ht_write(
  */
 int
 gx_ht_read_and_install(
-    gs_imager_state *       pis,
+    gs_gstate        *       pgs,
     const gx_device *       dev,
     const byte *            data,
     uint                    size,
@@ -583,9 +584,11 @@ gx_ht_read_and_install(
         /* save since the 'install' copies the order, but then clears the source order	*/
         for (i = 0; i < num_dev_comps; i++)
             components_save[i] = components[i];
-        code = gx_imager_dev_ht_install(pis, &dht, dht.type, dev);
-        for (i = 0; i < num_dev_comps; i++)
-            gx_ht_order_release(&components_save[i].corder, mem, false);
+        code = gx_gstate_dev_ht_install(pgs, &dht, dht.type, dev);
+        if (code >= 0) {
+            for (i = 0; i < num_dev_comps; i++)
+                gx_ht_order_release(&components_save[i].corder, mem, false);
+        }
     }
 
     /*

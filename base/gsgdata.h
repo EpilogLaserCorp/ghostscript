@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,6 +20,9 @@
 #  define gsgdata_INCLUDED
 
 #include "gsstype.h"		/* for extern_st */
+#include "gsfont.h"
+#include "gsgcache.h"
+#include "memento.h" /* Because of "free" used below */
 
 /*
  * Define the structure used to return the data for a glyph upon
@@ -53,10 +56,6 @@
 /* ------ Structure declaration ------ */
 
 typedef struct gs_glyph_data_procs_s gs_glyph_data_procs_t;
-#ifndef gs_glyph_data_DEFINED
-#   define gs_glyph_data_DEFINED
-typedef struct gs_glyph_data_s gs_glyph_data_t;
-#endif
 struct gs_glyph_data_s {
     gs_const_bytestring bits;	/* pointer to actual data returned here */
     const gs_glyph_data_procs_t *procs;
@@ -118,10 +117,6 @@ void gs_glyph_data_free(gs_glyph_data_t *pgd, client_name_t cname);
 /*
  * Initialize glyph data from a string or from bytes.
  */
-#ifndef gs_font_DEFINED
-#  define gs_font_DEFINED
-typedef struct gs_font_s gs_font;
-#endif
 void gs_glyph_data_from_string(gs_glyph_data_t *pgd, const byte *data,
                                uint size, gs_font *font);
 void gs_glyph_data_from_bytes(gs_glyph_data_t *pgd, const byte *bytes,

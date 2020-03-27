@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -31,6 +31,7 @@
 #include "iutil.h"
 #include "dstack.h"             /* for dict_set_top */
 #include "store.h"
+#include "gsstate.h"
 
 /*
  * Some of the procedures in this file are public only so they can be
@@ -76,6 +77,7 @@ ztype(i_ctx_t *i_ctx_p)
         /* Must be either a stack underflow or a t_[a]struct. */
         check_op(2);
         {                       /* Get the type name from the structure. */
+            if ((r_has_type(&op[-1], t_struct) || r_has_type(&op[-1], t_astruct)) && op[-1].value.pstruct != 0x00) {
             const char *sname =
                 gs_struct_type_name_string(gs_object_type(imemory,
                                                           op[-1].value.pstruct));
@@ -84,6 +86,8 @@ ztype(i_ctx_t *i_ctx_p)
 
             if (code < 0)
                 return code;
+            } else
+                return_error(gs_error_stackunderflow);
         }
         r_set_attrs(op - 1, a_executable);
     } else {
@@ -171,9 +175,10 @@ static int
 zexecuteonly(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
+    ref_type rtype = r_type(op);
 
     check_op(1);
-    if (r_has_type(op, t_dictionary))
+    if (rtype == t_dictionary || rtype == t_astruct || rtype == t_device)
         return_error(gs_error_typecheck);
     return access_check(i_ctx_p, a_execute, true);
 }
@@ -276,7 +281,18 @@ zcvi(i_ctx_t *i_ctx_p)
     }
     if (!REAL_CAN_BE_INT(fval))
         return_error(gs_error_rangecheck);
-    make_int(op, (long)fval);   /* truncates towards 0 */
+    if (sizeof(ps_int) != 4 && gs_currentcpsimode(imemory)) {
+        if ((double)fval > (double)MAX_PS_INT32)       /* (double)0x7fffffff */
+            return_error(gs_error_rangecheck);
+        else if ((double)fval < (double)MIN_PS_INT32) /* (double)(int)0x80000000 */
+            return_error(gs_error_rangecheck);
+        else {
+            make_int(op, (ps_int) fval);
+        }
+    }
+    else
+        make_int(op, (ps_int) fval);
+
     return 0;
 }
 
@@ -299,7 +315,14 @@ zcvr(i_ctx_t *i_ctx_p)
 
     switch (r_type(op)) {
         case t_integer:
-            make_real(op, (float)op->value.intval);
+        {
+            /* Strictly speaking assigning one element of union
+             * to another, overlapping element of a different size is
+             * undefined behavior, hence assign to an intermediate variable
+             */
+            float fl = (float)op->value.intval;
+            make_real(op, fl);
+        }
         case t_real:
             return 0;
         default:
@@ -359,14 +382,14 @@ zcvrs(i_ctx_t *i_ctx_p)
                 return_error(gs_error_rangecheck); /* CET 24-05 wants rangecheck */
         }
     } else {
-        uint ival;
+        ps_uint ival;
         byte digits[sizeof(ulong) * 8];
         byte *endp = &digits[countof(digits)];
         byte *dp = endp;
 
         switch (r_type(op - 2)) {
             case t_integer:
-                ival = (uint) op[-2].value.intval;
+                ival = (ps_uint) op[-2].value.intval;
                 break;
             case t_real:
                 {
@@ -374,20 +397,38 @@ zcvrs(i_ctx_t *i_ctx_p)
 
                     if (!REAL_CAN_BE_INT(fval))
                         return_error(gs_error_rangecheck);
-                    ival = (ulong) (long)fval;
+                    ival = (ps_uint)fval;
+                    if (sizeof(ps_int) != 4 && gs_currentcpsimode(imemory)) {
+                        if ((double)fval > (double)MAX_PS_INT32)       /* (double)0x7fffffff */
+                            return_error(gs_error_rangecheck);
+                        else if ((double)fval < (double)MIN_PS_INT32) /* (double)(int)0x80000000 */
+                            return_error(gs_error_rangecheck);
+                    }
                 } break;
             case t__invalid:
                 return_error(gs_error_stackunderflow);
             default:
                 return_error(gs_error_rangecheck); /* CET 24-05 wants rangecheck */
         }
-        do {
-            int dit = ival % radix;
+        if (gs_currentcpsimode(imemory)) {
+            uint val = (uint)ival;
+            do {
+                int dit = val % radix;
 
-            *--dp = dit + (dit < 10 ? '0' : ('A' - 10));
-            ival /= radix;
+                *--dp = dit + (dit < 10 ? '0' : ('A' - 10));
+                val /= radix;
+            }
+            while (val);
+
+        } else {
+            do {
+                int dit = ival % radix;
+
+                *--dp = dit + (dit < 10 ? '0' : ('A' - 10));
+                ival /= radix;
+            }
+            while (ival);
         }
-        while (ival);
         if (endp - dp > r_size(op))
             return_error(gs_error_rangecheck);
         memcpy(op->value.bytes, dp, (uint) (endp - dp));

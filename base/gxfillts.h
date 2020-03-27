@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -26,6 +26,8 @@
  *  TRY_TO_EXTEND_TRAP - whether we do some extra maths to see if we can
  *  extend a trapezoid to reduce the total number produced.
  */
+
+#if defined(LOOP_FILL_RECTANGLE_DIRECT) && defined(TEMPLATE_slant_into_trapezoids) && defined(TRY_TO_EXTEND_TRAP)
 
 static inline int
 TEMPLATE_slant_into_trapezoids (const line_list *ll,
@@ -142,8 +144,6 @@ TEMPLATE_slant_into_trapezoids (const line_list *ll,
             code = LOOP_FILL_RECTANGLE_DIRECT(fo,
                      xli, fixed2int_pixround(y1 - fo->adjust_below),
                      xri - xli, 1);
-            vd_rect(flp->x_next - fo->adjust_left, y1 - fo->adjust_below,
-                    alp->x_next + fo->adjust_right, y1, 1, VD_TRAP_COLOR);
             if (code < 0)
                 return code;
         }
@@ -208,8 +208,6 @@ TEMPLATE_slant_into_trapezoids (const line_list *ll,
             code = LOOP_FILL_RECTANGLE_DIRECT(fo,
                      xli, fixed2int_pixround(y - fo->adjust_below),
                      xri - xli, 1);
-            vd_rect(flp->x_current - fo->adjust_left, y - fo->adjust_below,
-                    alp->x_current + fo->adjust_right, y, 1, VD_TRAP_COLOR);
             if (code < 0)
                 return code;
         }
@@ -218,3 +216,7 @@ TEMPLATE_slant_into_trapezoids (const line_list *ll,
     /* Otherwise, handle it as a slanted trapezoid. */
     return fill_slant_adjust(ll, flp, alp, y, y1);
 }
+
+#else
+int dummy;
+#endif

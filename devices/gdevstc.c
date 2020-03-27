@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -210,9 +210,9 @@ static stc_proc_iconvert(stc_cmyk10_dlong); /* CMYK10 direct longs */
 /***
  *** Print-functions
  ***/
-static void stc_print_weave(stcolor_device *sd,FILE *prn_stream);
-static void stc_print_bands(stcolor_device *sd,FILE *prn_stream);
-static void stc_print_delta(stcolor_device *sd,FILE *prn_stream);
+static void stc_print_weave(stcolor_device *sd, gp_file *prn_stream);
+static void stc_print_bands(stcolor_device *sd, gp_file *prn_stream);
+static void stc_print_delta(stcolor_device *sd, gp_file *prn_stream);
 static int  stc_print_setup(stcolor_device *sd);
 
 /***
@@ -345,7 +345,7 @@ stc_print_setup(stcolor_device *sd)
  ***/
 
 static int
-stc_print_page(gx_device_printer * pdev, FILE * prn_stream)
+stc_print_page(gx_device_printer * pdev, gp_file *prn_stream)
 {
    stcolor_device *sd    = (stcolor_device *) pdev;
    long            flags = sd == NULL ? 0 : sd->stc.flags;
@@ -362,9 +362,13 @@ stc_print_page(gx_device_printer * pdev, FILE * prn_stream)
 
    int    prt_pixels;    /* Number of pixels printed */
    byte  *col_line;      /* A Line with a byte per pixel */
+   int   code = 0;
 
 #define OK4GO        ((flags &   STCOK4GO)              != 0)
 #define SORRY        ( flags &= ~STCOK4GO)
+
+   if (sd == NULL)
+        return gs_error_undefined;
 
    if(0 > (npass = stc_print_setup(sd))) return_error(npass);
 
@@ -588,7 +592,11 @@ stc_print_page(gx_device_printer * pdev, FILE * prn_stream)
 
                   if(sd->stc.buf_y < sd->stc.prt_scans) {  /* Test for White */
 
-                     gdev_prn_get_bits(pdev,sd->stc.buf_y,ext_line,&ext_data);
+                     code = gdev_prn_get_bits(pdev,sd->stc.buf_y,ext_line,&ext_data);
+                     if (code < 0) {
+                         SORRY;
+                         goto xit;
+                    }
 
                      color = stc_iswhite(sd,prt_pixels,ext_data) ? ext_size : 0;
 
@@ -729,9 +737,9 @@ stc_print_page(gx_device_printer * pdev, FILE * prn_stream)
          }                           /* Until all scans are processed */
 
          if(sd->stc.flags & STCPRINT) {
-            if((flags & STCCOMP) == STCDELTA) fputc(0xe3,prn_stream);
-            fwrite(sd->stc.escp_release.data,1,sd->stc.escp_release.size,prn_stream);
-            fflush(prn_stream);
+            if((flags & STCCOMP) == STCDELTA) gp_fputc(0xe3,prn_stream);
+            gp_fwrite(sd->stc.escp_release.data,1,sd->stc.escp_release.size,prn_stream);
+            gp_fflush(prn_stream);
          }
 #ifdef    STC_SIGNAL
          sigprocmask(SIG_SETMASK,&stc_int_save,NULL);
@@ -744,6 +752,7 @@ stc_print_page(gx_device_printer * pdev, FILE * prn_stream)
  *** Release the dynamic memory
  ***/
 
+xit:
    if(ext_line != NULL)
       gs_free(sd->memory, ext_line,ext_size,1,"stc_print_page/ext_line");
 
@@ -796,7 +805,7 @@ stc_print_page(gx_device_printer * pdev, FILE * prn_stream)
 static bool
 stc_iswhite(stcolor_device *sd, int prt_pixels,byte *ext_data)
 {
-   long  b2do = (prt_pixels*sd->color_info.depth+7)>>3;
+   long  b2do = ((long)prt_pixels*sd->color_info.depth+7)>>3;
    int   bcmp = 4 * countof(sd->stc.white_run);
    byte *wht  = (byte *) sd->stc.white_run;
 
@@ -1106,7 +1115,7 @@ stc_rle(byte *out,const byte *in,int width)
  * Horizontal & vertical positioning, color-selection, "ESC ."
  */
 static int
-stc_print_escpcmd(stcolor_device *sd, FILE *prn_stream,
+stc_print_escpcmd(stcolor_device *sd, gp_file *prn_stream,
    int escp_used, int color,int m,int wbytes)
 {
 
@@ -1121,12 +1130,12 @@ stc_print_escpcmd(stcolor_device *sd, FILE *prn_stream,
  */
    if(0 == (sd->stc.flags & STCPRINT)) {
 
-      fwrite(sd->stc.escp_init.data,1,sd->stc.escp_init.size,prn_stream);
+      gp_fwrite(sd->stc.escp_init.data,1,sd->stc.escp_init.size,prn_stream);
 
       if(0 < sd->stc.escp_lf) { /* Adjust Linefeed */
-         fputc('\033',        prn_stream);
-         fputc('+',           prn_stream);
-         fputc(((sd->stc.escp_m*sd->stc.escp_u) / 10),prn_stream);
+         gp_fputc('\033',        prn_stream);
+         gp_fputc('+',           prn_stream);
+         gp_fputc(((sd->stc.escp_m*sd->stc.escp_u) / 10),prn_stream);
       }                         /* Adjust Linefeed */
       sd->stc.flags |= STCPRINT;
    }
@@ -1199,7 +1208,7 @@ stc_bandwidth(stcolor_device *sd,int color,int m,int npass)
  * Multi-Pass Printing-Routine
  */
 static void
-stc_print_weave(stcolor_device *sd, FILE *prn_stream)
+stc_print_weave(stcolor_device *sd, gp_file *prn_stream)
 {
 
    int escp_used,nprint,nspace,color,buf_a,iprint,w;
@@ -1244,7 +1253,7 @@ stc_print_weave(stcolor_device *sd, FILE *prn_stream)
                                     sd->stc.prt_data[buf_a],w);
             }
 
-            fwrite(sd->stc.escp_data,1,escp_used,prn_stream);
+            gp_fwrite(sd->stc.escp_data,1,escp_used,prn_stream);
             escp_used = 0;
 
             buf_a = (sd->stc.prt_buf-1) & (buf_a + ncolor * npass);
@@ -1260,7 +1269,7 @@ stc_print_weave(stcolor_device *sd, FILE *prn_stream)
                escp_used += stc_rle(sd->stc.escp_data+escp_used,NULL,w);
             }
 
-            fwrite(sd->stc.escp_data,1,escp_used,prn_stream);
+            gp_fwrite(sd->stc.escp_data,1,escp_used,prn_stream);
             escp_used = 0;
          }                               /* add empty rows */
       }                                             /* print the colors */
@@ -1273,7 +1282,7 @@ stc_print_weave(stcolor_device *sd, FILE *prn_stream)
  * Single-Pass printing-Routine
  */
 static void
-stc_print_bands(stcolor_device *sd, FILE *prn_stream)
+stc_print_bands(stcolor_device *sd, gp_file *prn_stream)
 {
 
    int escp_used,color,buf_a,iprint,w,m;
@@ -1325,7 +1334,7 @@ stc_print_bands(stcolor_device *sd, FILE *prn_stream)
                                     sd->stc.prt_data[buf_a],w);
             }
 
-            fwrite(sd->stc.escp_data,1,escp_used,prn_stream);
+            gp_fwrite(sd->stc.escp_data,1,escp_used,prn_stream);
             escp_used = 0;
 
             buf_a = (sd->stc.prt_buf-1) & (buf_a + ncolor);
@@ -1422,7 +1431,7 @@ stc_deltarow(byte *out,const byte *in,int width,byte *seed)
  * Slightly different single-pass printing
  */
 static void
-stc_print_delta(stcolor_device *sd, FILE *prn_stream)
+stc_print_delta(stcolor_device *sd, gp_file *prn_stream)
 {
 
    int color,buf_a,w;
@@ -1453,7 +1462,7 @@ stc_print_delta(stcolor_device *sd, FILE *prn_stream)
 
          sd->stc.flags |= STCPRINT;
 
-         fwrite(sd->stc.escp_init.data,1,sd->stc.escp_init.size,prn_stream);
+         gp_fwrite(sd->stc.escp_init.data,1,sd->stc.escp_init.size,prn_stream);
 
          sd->stc.escp_data[escp_used++] = '\033';
          sd->stc.escp_data[escp_used++] = '.';
@@ -1504,7 +1513,7 @@ stc_print_delta(stcolor_device *sd, FILE *prn_stream)
          if(w == 0) escp_used -= 1;
          else       escp_used += w;
 
-         if(escp_used > 0) fwrite(sd->stc.escp_data,1,escp_used,prn_stream);
+         if(escp_used > 0) gp_fwrite(sd->stc.escp_data,1,escp_used,prn_stream);
          escp_used = 0;
 
       }                                             /* print the colors */
@@ -1983,7 +1992,7 @@ stc_expand(stcolor_device *sd,int i,gx_color_index col)
 {
 
    gx_color_index cv;
-   gx_color_index l = (1<<sd->stc.bits)-1;
+   gx_color_index l = ((gx_color_index)1<<sd->stc.bits)-1;
 
    if(sd->stc.code[i] != NULL) {
 
@@ -2377,7 +2386,7 @@ stc_map_cmyk10_color(gx_device *pdev, const gx_color_value cv[])
 /*
  * We may need some swapping
  */
-#if !arch_is_big_endian
+#if !ARCH_IS_BIG_ENDIAN
    {
       union { stc_pixel cv; byte bv[4]; } ui,uo;
       ui.cv = rv;
@@ -2402,7 +2411,7 @@ stc_map_color_cmyk10(gx_device *pdev, gx_color_index color,
 /*
  * We may need some swapping
  */
-#if !arch_is_big_endian
+#if !ARCH_IS_BIG_ENDIAN
    union { stc_pixel cv; byte bv[4]; } ui,uo;
    ui.cv = color;
    uo.bv[0] = ui.bv[3];
@@ -2825,7 +2834,7 @@ stc_put_params(gx_device *pdev, gs_param_list *plist)
                i = 8; /* arbitrary */
             }
 
-            if((i*sd->color_info.num_components) > (sizeof(stc_pixel)*8)) {
+            if((i * (unsigned long)sd->color_info.num_components) > (sizeof(stc_pixel)*8)) {
 
                sd->stc.bits         = (sizeof(stc_pixel)*8) /
                                        sd->color_info.num_components;
@@ -3552,7 +3561,7 @@ stc_hscmyk(stcolor_device *sdev,int npixel,byte *in,byte *buf,byte *out)
             v = kv;
             if(pixel == (CYAN|MAGENTA|YELLOW)) {
                pixel = BLACK;
-               v     = v > 511 ? v-1023 : -511;
+               v     = -511;
             }
             errv[3-(step<<2)] += ((3*v+8)>>4);        /* 3/16 */
             errv[3]            = ((5*v+errc[3]+8)>>4);/* 5/16 +1/16 (rest) */

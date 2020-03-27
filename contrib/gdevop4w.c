@@ -81,8 +81,8 @@
  * inexact paperlength which is set to 117 10ths.
  * Somebody should check for letter sized paper. I left it at 0.07".
  */
-#define OKI4W_MARGINS_LETTER	0.125, 0.25, 0.125, 0.07
-#define OKI4W_MARGINS_A4	0.125, 0.25, 0.125, 0.07
+#define OKI4W_MARGINS_LETTER	0.125f, 0.25f, 0.125f, 0.07f
+#define OKI4W_MARGINS_A4	0.125f, 0.25f, 0.125f, 0.07f
 
 /* We round up the LINE_SIZE to a multiple of a ulong for faster scanning. */
 #define word ulong
@@ -137,11 +137,13 @@ oki4w_open(gx_device *pdev)
 static int
 oki4w_close(gx_device *pdev)
 {
+        /* RJW: We must call the close entry point for the class. */
+        return gdev_prn_close(pdev);
 /*
         if ( pdev->Duplex_set >= 0 && pdev->Duplex )
           {	gdev_prn_open_printer(pdev, 1);
-                fputs("\033$B\033\177", ppdev->file);
-                fputc(0, ppdev->file);
+                gp_fputs("\033$B\033\177", ppdev->file);
+                gp_fputc(0, ppdev->file);
                 return gdev_prn_close_printer(pdev);
           }
 */
@@ -152,83 +154,10 @@ oki4w_close(gx_device *pdev)
 
 /* ------ Internal routines ------ */
 
-static int
-oki_compress(byte *src, byte *dst, int count)
-{
-        int dcnt = 0;
-        byte lastval = *src;
-        int run = 1;
-        src++;
-        count--;
-        while (count-- > 0) {
-                byte newval = *src++;
-                if (newval == lastval) {
-                        run++;
-                } else {
-                        /* end of run, flush data */
-                        if (run == 1) {
-                                byte *backptr = dst++;
-                                *dst++ = lastval;
-                                dcnt++;
-                                lastval = newval;
-                                while (run < 128 && count > 0) {
-                                        run++;
-                                        newval = *src++;
-                                        *dst++ = newval;
-                                        dcnt++;
-                                        count--;
-                                        if (newval == lastval) {
-                                                break;
-                                        }
-                                }
-                                if (newval == lastval) {
-                                        run--;
-                                        dst--;
-                                        dcnt--;
-                                }
-                                *backptr = dst - backptr - 2;
-                                if (newval == lastval) {
-                                        run = 2;
-                                } else {
-                                        run = 1;
-                                }
-                                continue;
-                        }
-                        while (run > 128) {
-                                *dst++ = 0x81;
-                                *dst++ = lastval;
-                                run -= 128;
-                                dcnt += 2;
-                        }
-                        if (run > 0) {
-                                *dst++ = (0x101 - run) & 0xff;
-                                *dst++ = lastval;
-                                dcnt += 2;
-                        }
-                        lastval = newval;
-                        run = 1;
-                }
-        }
-        /* end of run, flush data */
-        while (run > 128) {
-                *dst++ = 0x81;
-                *dst++ = lastval;
-                run -= 128;
-                dcnt += 2;
-        }
-        if (run > 0) {
-                *dst++ = (0x101 - run) & 0xff;
-                *dst++ = lastval;
-                dcnt += 2;
-        }
-
-        return dcnt;
-}
-
 /* Send the page to the printer.  For speed, compress each scan line, */
 /* since computer-to-printer communication time is often a bottleneck. */
 static int
-oki4w_print_page(gx_device_printer *pdev, FILE *prn_stream)
+oki4w_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
         int line_size = gdev_mem_bytes_per_scan_line((gx_device *)pdev);
         int line_size_words = (line_size + W - 1) / W;
@@ -237,16 +166,12 @@ oki4w_print_page(gx_device_printer *pdev, FILE *prn_stream)
                                            "oki4w_print_page");
         word
           *data_words,
-          *out_row_words,
-          *out_row_alt_words,
-          *prev_row_words;
+          *out_row_words;
 #define data ((byte *)data_words)
 #define out_row ((byte *)out_row_words)
-#define out_row_alt ((byte *)out_row_alt_words)
-#define prev_row ((byte *)prev_row_words)
         byte *out_data;
-        int x_dpi = pdev->x_pixels_per_inch;
-        int y_dpi = pdev->y_pixels_per_inch;
+        int x_dpi = (int)pdev->x_pixels_per_inch;
+        int y_dpi = (int)pdev->y_pixels_per_inch;
         int y_dots_per_pixel = x_dpi / y_dpi;
         int dpi_code, compress_code;
         int num_rows = dev_print_scan_lines(pdev);
@@ -261,8 +186,6 @@ oki4w_print_page(gx_device_printer *pdev, FILE *prn_stream)
                 return_error(gs_error_VMerror);
         data_words = storage;
         out_row_words = data_words + (line_size_words * 2);
-        out_row_alt_words = out_row_words + (line_size_words * 2);
-        prev_row_words = out_row_alt_words + (line_size_words * 2);
         /* Clear temp storage */
         memset(data, 0, storage_size_words * W);
 
@@ -270,19 +193,17 @@ oki4w_print_page(gx_device_printer *pdev, FILE *prn_stream)
 
         if (y_dpi == 150) {
                 dpi_code = 3;
-                compress_code = 2;
         } else if (y_dpi == 300) {
                 dpi_code = 5;
-                compress_code = 2;
         } else {
                 dpi_code = 7;
-                compress_code = 2;
         }
+        compress_code = 2;
 
         /* Initialize printer. */
 /*	if ( pdev->PageCount == 0 ) { */
                 /* Put out init string before page. */
-                fprintf(prn_stream, "\x1B%%-98765X\x1C\x14\x03\x41i\x10\x1C"
+                gp_fprintf(prn_stream, "\x1B%%-98765X\x1C\x14\x03\x41i\x10\x1C"
                         "\x14\x05\x41\x65%cf%c\x1C\x14\x09\x42\x61%cb\x02\x63"
                         "\x01\x65%c\x1C\x7F\x39\x1B&B\x1B&A\x07%c\x01%c"
                         "\x01%c%c%c%c\x1B$A",
@@ -323,42 +244,37 @@ oki4w_print_page(gx_device_printer *pdev, FILE *prn_stream)
                                 /* num_blank_lines += xxx */
                                 /* Skip blank lines if any */
                                 if (num_blank_lines > 0) {
-                                        fprintf(prn_stream, "\x1b*B%c%c",
-                                                num_blank_lines & 0xff,
-                                                num_blank_lines >> 8);
+                                        gp_fprintf(prn_stream, "\x1b*B%c%c",
+                                                   num_blank_lines & 0xff,
+                                                   num_blank_lines >> 8);
                                 }
                         }
                         else if ( num_blank_lines != 0 )
                         {
                                 /* Skip blank lines if any */
-                                fprintf(prn_stream, "\x1b*B%c%c",
-                                        num_blank_lines & 0xff,
-                                        num_blank_lines >> 8);
+                                gp_fprintf(prn_stream, "\x1b*B%c%c",
+                                           num_blank_lines & 0xff,
+                                           num_blank_lines >> 8);
                         }
                         num_blank_lines = 0;
 
                         /* Compress the data */
-                        if (compress_code == 6) {
-                                out_count = oki_compress(data, out_data,
-                                        (end_data - data_words) * W);
-                        } else {
-                                out_count = gdev_pcl_mode2compress(data_words,
-                                        end_data, out_data);
-                        }
+                        out_count = gdev_pcl_mode2compress(data_words,
+                                end_data, out_data);
 
                         /* Transfer the data */
                         for (i = 0; i < y_dots_per_pixel; ++i) {
-                                fprintf(prn_stream, "\033*A%c%c%c",
-                                        compress_code,
-                                        out_count & 0xff, out_count >> 8);
-                                fwrite(out_data, sizeof(byte), out_count,
-                                        prn_stream);
+                                gp_fprintf(prn_stream, "\033*A%c%c%c",
+                                           compress_code,
+                                           out_count & 0xff, out_count >> 8);
+                                gp_fwrite(out_data, sizeof(byte), out_count,
+                                           prn_stream);
                         }
                    }
         }
 
         /* end raster graphics and eject page */
-        fprintf(prn_stream, "\x1b$B\x1b\x7f%c", 0);
+        gp_fprintf(prn_stream, "\x1b$B\x1b\x7f%c", 0);
 
         /* free temporary storage */
         gs_free(pdev->memory->non_gc_memory, (char *)storage, storage_size_words, W, "oki4w_print_page");

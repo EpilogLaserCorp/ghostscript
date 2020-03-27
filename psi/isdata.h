@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,6 +19,9 @@
 
 #ifndef isdata_INCLUDED
 #  define isdata_INCLUDED
+
+#include "iref.h"
+#include "imemory.h"
 
 /*
  * In order to detect under- and overflow with minimum overhead, we put
@@ -49,21 +52,12 @@
 typedef ref *s_ptr;
 typedef const ref *const_s_ptr;
 
-/* Define an opaque allocator type. */
-#ifndef gs_ref_memory_DEFINED
-#  define gs_ref_memory_DEFINED
-typedef struct gs_ref_memory_s gs_ref_memory_t;
-#endif
-
 /*
  * Define the state of a stack, other than the data it holds.
  * Note that the total size of a stack cannot exceed max_uint,
  * because it has to be possible to copy a stack to a PostScript array.
  */
-#ifndef ref_stack_DEFINED
-typedef struct ref_stack_s ref_stack_t;	/* also defined in idebug.h */
-#  define ref_stack_DEFINED
-#endif
+
 /*
  * We divide the stack structure into two parts: ref_stack_params_t, which
  * is set when the stack is created and (almost) never changed after that,

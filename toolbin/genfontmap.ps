@@ -1,5 +1,5 @@
 %!PS
-% Copyright (C) 2001-2012 Artifex Software, Inc.
+% Copyright (C) 2001-2019 Artifex Software, Inc.
 % All Rights Reserved.
 %
 % This software is provided AS-IS with no warranty, either express or
@@ -10,16 +10,21 @@
 % of the license contained in the file LICENSE in this distribution.
 %
 % Refer to licensing information at http://www.artifex.com or contact
-% Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-% CA  94903, U.S.A., +1(415)492-9861, for further information.
+% Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+% CA 94945, U.S.A., +1(415)492-9861, for further information.
 %
 
 % Create a Fontmap format file after scanning the FONTPATH directories
 %
-% Example usage:
-%   windows:  gswin32c -q -sFONTPATH=c:/windows/fonts genfontmap.ps > myFontmap
+% From Ghostscript version 9.50 onwards the default operation is to run with
+% SAFER defined; this disables a number of PostScript operators, specifically
+% in this case the .sort operator, which is used by this program. In order
+% to use this program you must run with -dNOSAFER.
 %
-%   unix:     gs -q -sFONTPATH=/usr/local/fonts genfontmap.ps > myFontmap
+% Example usage:
+%   windows:  gswin32c -dNOSAFER -q -sFONTPATH=c:/windows/fonts genfontmap.ps > myFontmap
+%
+%   unix:     gs -dNOSAFER -q -sFONTPATH=/usr/local/fonts genfontmap.ps > myFontmap
 %
 % The myFontmap file created by the above can be renamed to Fontmap and
 % placed in the LIBPATH directory.
@@ -30,6 +35,13 @@
 FONTPATH length 0 eq {
   (\n  Specify a FONTPATH using -sFONTPATH or GS_FONTPATH in order to\n) =error
   (  generate a Fontmap file from the fonts found in those folders.\n\n) =error
+  flush quit
+} if
+
+% Since version 9.50, ensure we are running in NOSAFER so that .sort is available
+/NOSAFER where {/NOSAFER get not}{true} ifelse
+{
+  (\n  You must use the '-dNOSAFER' option in order to execute this program.\n\n) =error
   flush quit
 } if
 

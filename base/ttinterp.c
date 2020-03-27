@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -1782,7 +1782,8 @@ static int nInstrCount=0;
       CUR.step_ins = FALSE;
 
       /* See JMPR below */
-      if(CUR.code[CUR.IP] != 0x2D && CUR.code[CUR.IP - 1] == 0x2D)
+      if(CUR.IP > CUR.codeSize ||
+         (CUR.code[CUR.IP] != 0x2D && CUR.code[CUR.IP - 1] == 0x2D))
         CUR.IP -= 1;
     }
   }
@@ -1793,10 +1794,17 @@ static int nInstrCount=0;
 
   static void  Ins_JMPR( INS_ARG )
   {
+    if ( BOUNDS(CUR.IP + args[0], CUR.codeSize ) )
+    {
+      CUR.error = TT_Err_Invalid_Reference;
+      return;
+    }
+
     CUR.IP      += (Int)(args[0]);
     CUR.step_ins = FALSE;
 
-    if(CUR.code[CUR.IP] != 0x2D && CUR.code[CUR.IP - 1] == 0x2D)
+    if(CUR.IP > CUR.codeSize ||
+       (CUR.code[CUR.IP] != 0x2D && CUR.code[CUR.IP - 1] == 0x2D))
     /* The JPMR is meant to stop at the ENDF instruction to finish
      * the function. However the programmer made a mistake, and ended
      * up one byte too far. I suspect that some TT interpreters handle this
@@ -2457,7 +2465,9 @@ static int nInstrCount=0;
 
   static void  Ins_WCVTF( INS_ARG )
   {
+#ifdef DEBUG
     int ov;
+#endif
 
     if ( BOUNDS( args[0], CUR.cvtSize ) )
     {
@@ -2465,9 +2475,13 @@ static int nInstrCount=0;
       return;
     }
 
+#ifdef DEBUG
     ov = CUR.cvt[args[0]];
+#endif
     CUR.cvt[args[0]] = FUnits_To_Pixels( EXEC_ARGS args[1] );
+#ifdef DEBUG
     DBG_PRINT3(" cvt[%d]%d:=%d", args[0], ov, CUR.cvt[args[0]]);
+#endif
   }
 
 /*******************************************/
@@ -3414,18 +3428,25 @@ static int nInstrCount=0;
                                TT_F26Dot6  dy,
                                Bool        touch )
   {
-    if ( CUR.GS.freeVector.x != 0 )
+    if (point >= CUR.n_points)
     {
-      CUR.zp2.cur_x[point] += dx;
-      if ( touch )
-        CUR.zp2.touch[point] |= TT_Flag_Touched_X;
+      CUR.error = TT_Err_Invalid_Reference;
     }
-
-    if ( CUR.GS.freeVector.y != 0 )
+    else
     {
-      CUR.zp2.cur_y[point] += dy;
-      if ( touch )
-        CUR.zp2.touch[point] |= TT_Flag_Touched_Y;
+      if ( CUR.GS.freeVector.x != 0 )
+      {
+        CUR.zp2.cur_x[point] += dx;
+        if ( touch )
+          CUR.zp2.touch[point] |= TT_Flag_Touched_X;
+      }
+
+      if ( CUR.GS.freeVector.y != 0 )
+      {
+        CUR.zp2.cur_y[point] += dy;
+        if ( touch )
+          CUR.zp2.touch[point] |= TT_Flag_Touched_Y;
+      }
     }
   }
 
@@ -3762,7 +3783,8 @@ static int nInstrCount=0;
 
     point = (Int)args[0];
 
-    if ( BOUNDS( args[0], CUR.zp1.n_points ) )
+    if ( BOUNDS( args[0], CUR.zp1.n_points ) ||
+         BOUNDS( CUR.GS.rp0, CUR.zp0.n_points) )
     {
         /* Current version of FreeType silently ignores this out of bounds error
          * and drops the instruction, see bug #691121
@@ -3850,7 +3872,8 @@ static int nInstrCount=0;
     /* XXX: UNDOCUMENTED! cvt[-1] = 0 always */
 
     if ( BOUNDS( args[0],   CUR.zp1.n_points ) ||
-         BOUNDS( args[1]+1, CUR.cvtSize+1 )    )
+         BOUNDS( args[1]+1, CUR.cvtSize+1 )    ||
+         BOUNDS(CUR.GS.rp0,  CUR.zp0.n_points) )
     {
       CUR.error = TT_Err_Invalid_Reference;
       return;
@@ -4101,7 +4124,7 @@ static int nInstrCount=0;
     distance = CUR_Func_project( CUR.zp0.cur_x[p2] -
                                    CUR.zp1.cur_x[p1],
                                  CUR.zp0.cur_y[p2] -
-                                   CUR.zp1.cur_x[p1] ) / 2;
+                                   CUR.zp1.cur_y[p1] ) / 2;
 
     CUR_Func_move( &CUR.zp1, p1, distance );
 
@@ -4120,7 +4143,9 @@ static int nInstrCount=0;
     Int         point;
     (void)args;
 
-    if ( CUR.top < CUR.GS.loop )
+    if ( CUR.top < CUR.GS.loop ||
+         BOUNDS(CUR.GS.rp1, CUR.zp0.n_points) ||
+         BOUNDS(CUR.GS.rp2, CUR.zp1.n_points))
     {
       CUR.error = TT_Err_Invalid_Reference;
       return;
@@ -4340,56 +4365,62 @@ static int nInstrCount=0;
 
     contour = 0;
     point   = 0;
-
-    do
+    if (contour > CUR.n_contours - 1)
     {
-      end_point   = CUR.pts.contours[contour];
-      first_point = point;
-
-      while ( point <= end_point && (CUR.pts.touch[point] & mask) == 0 )
-        point++;
-
-      if ( point <= end_point )
+      CUR.error = TT_Err_Invalid_Reference;
+    }
+    else
+    {
+      do
       {
-        first_touched = point;
-        cur_touched   = point;
+        end_point   = CUR.pts.contours[contour];
+        first_point = point;
 
-        point++;
+        while ( point <= end_point && (CUR.pts.touch[point] & mask) == 0 )
+          point++;
 
-        while ( point <= end_point )
+        if ( point <= end_point )
         {
-          if ( (CUR.pts.touch[point] & mask) != 0 )
-          {
-            Interp( (Int)(cur_touched + 1),
-                    (Int)(point - 1),
-                    (Int)cur_touched,
-                    (Int)point,
-                    &V );
-            cur_touched = point;
-          }
+          first_touched = point;
+          cur_touched   = point;
 
           point++;
-        }
 
-        if ( cur_touched == first_touched )
-          Shift( (Int)first_point, (Int)end_point, (Int)cur_touched, &V );
-        else
-        {
-          Interp((Int)(cur_touched + 1),
-                 (Int)(end_point),
-                 (Int)(cur_touched),
-                 (Int)(first_touched),
-                 &V );
+          while ( point <= end_point )
+          {
+            if ( (CUR.pts.touch[point] & mask) != 0 )
+            {
+              Interp( (Int)(cur_touched + 1),
+                      (Int)(point - 1),
+                      (Int)cur_touched,
+                      (Int)point,
+                      &V );
+              cur_touched = point;
+            }
 
-          Interp((Int)(first_point),
-                 (Int)(first_touched - 1),
-                 (Int)(cur_touched),
-                 (Int)(first_touched),
-                 &V );
+            point++;
+          }
+
+          if ( cur_touched == first_touched )
+            Shift( (Int)first_point, (Int)end_point, (Int)cur_touched, &V );
+          else
+          {
+            Interp((Int)(cur_touched + 1),
+                   (Int)(end_point),
+                   (Int)(cur_touched),
+                   (Int)(first_touched),
+                   &V );
+
+            Interp((Int)(first_point),
+                   (Int)(first_touched - 1),
+                   (Int)(cur_touched),
+                   (Int)(first_touched),
+                   &V );
+          }
         }
-      }
-      contour++;
-    } while ( contour < CUR.pts.n_contours );
+        contour++;
+      } while ( contour < CUR.pts.n_contours );
+    }
   }
 
 /**********************************************/
@@ -4921,7 +4952,9 @@ static int nInstrCount=0;
     Int          A;
     PDefRecord   WITH;
     PCallRecord  WITH1;
+#if defined(DEBUG) && !defined(GS_THREADSAFE)
     bool bFirst;
+#endif
     bool dbg_prt = (DBG_PRT_FUN != NULL);
 #   ifdef DEBUG
         ttfMemory *mem = exc->current_face->font->tti->ttf_memory;
@@ -4969,8 +5002,9 @@ static int nInstrCount=0;
         CUR.error = Result;
         goto _LExit;
     }
+#if defined(DEBUG) && !defined(GS_THREADSAFE)
     bFirst = true;
-
+#endif
     do
     {
       CALC_Length();
@@ -5097,7 +5131,6 @@ static int nInstrCount=0;
           break;
 
         default:
-          CUR.error = CUR.error;
           goto _LErrorLabel;
           break;
         }

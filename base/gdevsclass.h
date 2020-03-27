@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2015 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -101,5 +101,9 @@ dev_proc_strip_copy_rop2(default_subclass_strip_copy_rop2);
 dev_proc_strip_tile_rect_devn(default_subclass_strip_tile_rect_devn);
 dev_proc_copy_alpha_hl_color(default_subclass_copy_alpha_hl_color);
 dev_proc_process_page(default_subclass_process_page);
+dev_proc_transform_pixel_region(default_subclass_transform_pixel_region);
+dev_proc_fill_stroke_path(default_subclass_fill_stroke_path);
 
+
+void default_subclass_finalize(const gs_memory_t *cmem, void *vptr);
 #endif /* gdev_obj_filter_INCLUDED */

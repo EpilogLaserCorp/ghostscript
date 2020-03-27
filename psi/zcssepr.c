@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -73,6 +73,52 @@ zsetoverprint(i_ctx_t *i_ctx_p)
     return 0;
 }
 
+/* - currentstrokeoverprint <bool> */
+static int
+zcurrentstrokeoverprint(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+
+    push(1);
+    make_bool(op, gs_currentstrokeoverprint(igs));
+    return 0;
+}
+
+/* <bool> setstrokeoverprint - */
+static int
+zsetstrokeoverprint(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+
+    check_type(*op, t_boolean);
+    gs_setstrokeoverprint(igs, op->value.boolval);
+    pop(1);
+    return 0;
+}
+
+/* - currentfilloverprint <bool> */
+static int
+zcurrentfilloverprint(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+
+    push(1);
+    make_bool(op, gs_currentfilloverprint(igs));
+    return 0;
+}
+
+/* <bool> setfilloverprint - */
+static int
+zsetfilloverprint(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+
+    check_type(*op, t_boolean);
+    gs_setfilloverprint(igs, op->value.boolval);
+    pop(1);
+    return 0;
+}
+
 /* - .currentoverprintmode <int> */
 static int
 zcurrentoverprintmode(i_ctx_t *i_ctx_p)
@@ -107,5 +153,9 @@ const op_def zcssepr_l2_op_defs[] =
     {"0.currentoverprintmode", zcurrentoverprintmode},
     {"1setoverprint", zsetoverprint},
     {"1.setoverprintmode", zsetoverprintmode},
+    {"0.currentstrokeoverprint", zcurrentstrokeoverprint},
+    {"1.setstrokeoverprint", zsetstrokeoverprint},
+    {"0.currentfilloverprint", zcurrentfilloverprint},
+    {"1.setfilloverprint", zsetfilloverprint},
     op_def_end(0)
 };

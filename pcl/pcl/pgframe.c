@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -54,18 +54,18 @@ pcl_set_picture_frame_side_effects(pcl_state_t * pcs)
 
     /* default P1 and P2 */
     hpgl_args_setup(&args);
-    hpgl_IP(&args, pcs);
+    hpgl_call_mem(pcs->memory, hpgl_IP(&args, pcs));
 
     /* default the clipping window */
     hpgl_args_setup(&args);
-    hpgl_IW(&args, pcs);
+    hpgl_call_mem(pcs->memory, hpgl_IW(&args, pcs));
 
     /* clear the polygon buffer */
     hpgl_args_set_int(&args, 0);
-    hpgl_PM(&args, pcs);
+    hpgl_call_mem(pcs->memory, hpgl_PM(&args, pcs));
 
     hpgl_args_set_int(&args, 2);
-    hpgl_PM(&args, pcs);
+    hpgl_call_mem(pcs->memory, hpgl_PM(&args, pcs));
 
     /* NB according to spec should move pen to P1. */
     return 0;
@@ -80,7 +80,7 @@ pcl_horiz_pic_frame_size_decipoints(pcl_args_t * pargs, pcl_state_t * pcs)
         size = pcs->xfm_state.lp_size.x;
     if (size != pcs->g.picture_frame_width) {
         pcs->g.picture_frame_width = size;
-        pcl_set_picture_frame_side_effects(pcs);
+        return pcl_set_picture_frame_side_effects(pcs);
     }
     return 0;
 }
@@ -98,7 +98,7 @@ pcl_vert_pic_frame_size_decipoints(pcl_args_t * pargs, pcl_state_t * pcs)
     }
     if (size != pcs->g.picture_frame_height) {
         pcs->g.picture_frame_height = size;
-        pcl_set_picture_frame_side_effects(pcs);
+        return pcl_set_picture_frame_side_effects(pcs);
     }
     return 0;
 }
@@ -123,7 +123,7 @@ pcl_set_pic_frame_anchor_point(pcl_args_t * pargs, pcl_state_t * pcs)
         (tmp_pt.y != pcs->g.picture_frame.anchor_point.y)) {
         pcs->g.picture_frame.anchor_point.x = (coord) tmp_pt.x;
         pcs->g.picture_frame.anchor_point.y = (coord) tmp_pt.y;
-        pcl_set_picture_frame_side_effects(pcs);
+        return pcl_set_picture_frame_side_effects(pcs);
     }
     return 0;
 }
@@ -141,8 +141,7 @@ pcl_hpgl_plot_horiz_size(pcl_args_t * pargs, pcl_state_t * pcs)
         pcs->g.plot_size_horizontal_specified = true;
 
     pcs->g.plot_width = (coord) size;
-    pcl_set_picture_frame_side_effects(pcs);
-    return 0;
+    return pcl_set_picture_frame_side_effects(pcs);
 }
 
 int                             /* ESC * c <h_in> L */
@@ -157,8 +156,7 @@ pcl_hpgl_plot_vert_size(pcl_args_t * pargs, pcl_state_t * pcs)
     } else
         pcs->g.plot_size_vertical_specified = true;
     pcs->g.plot_height = (coord) size;
-    pcl_set_picture_frame_side_effects(pcs);
-    return 0;
+    return pcl_set_picture_frame_side_effects(pcs);
 }
 
 /* We redefine this command so we can draw the current GL path */

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -29,6 +29,7 @@
 #include "gxiparam.h"
 #include "gxsample.h"
 #include "gscms.h"
+#include "gxcpath.h"
 
 /* Define the abstract type for the image enumerator state. */
 /*typedef struct gx_image_enum_s gx_image_enum;*/  /* in gxiclass.h */
@@ -91,11 +92,6 @@ struct sample_map_s {
 
 };
 
-#ifndef sample_map_DEFINED
-#define sample_map_DEFINED
-typedef struct sample_map_s sample_map;
-#endif
-
 /* Decode an 8-bit sample into a floating point color component. */
 /* penum points to the gx_image_enum structure. */
 #define decode_sample(sample_value, cc, i)\
@@ -123,19 +119,6 @@ typedef struct sample_map_s sample_map;
   frac_value_out =\
     gx_unit_frac(penum->map[i].decode_base + (frac_value) * penum->map[i].decode_factor)
 
-/*
- * Declare the pointer that holds the 12-bit unpacking procedure
- * if 12-bit samples are supported, 0 otherwise.
- */
-extern const sample_unpack_proc_t sample_unpack_12_proc;
-
-/*
- * Declare the pointer that holds the 16-bit unpacking procedure
- * if 16-bit samples are supported, 0 otherwise.
- */
-extern const sample_unpack_proc_t sample_unpack_16_proc;
-extern const sample_unpack_proc_t sample_unpackicc_16_proc;
-
 /* Define the distinct postures of an image. */
 /* Each posture includes its reflected variant. */
 typedef enum {
@@ -143,6 +126,13 @@ typedef enum {
     image_landscape,            /* 90 or 270 degrees */
     image_skewed                /* any other transformation */
 } image_posture;
+
+/* Interpolation request allows for off, on or forced */
+typedef enum {
+    interp_off = 0,             /* no interpolation */
+    interp_on,			/* interpolation requested, but not forced */
+    interp_force		/* force interpolation */
+} image_interp;
 
 /*
  * Define an entry in the image color table.  For single-source-plane
@@ -163,15 +153,7 @@ typedef struct gx_image_color_cache_s {
 
 /* Main state structure */
 
-#ifndef gx_device_clip_DEFINED
-#  define gx_device_clip_DEFINED
-typedef struct gx_device_clip_s gx_device_clip;
-#endif
-
-#ifndef gx_device_rop_texture_DEFINED
-#  define gx_device_rop_texture_DEFINED
 typedef struct gx_device_rop_texture_s gx_device_rop_texture;
-#endif
 
 typedef struct gx_image_icc_setup_s {
     bool need_decode; /* used in icc processing */
@@ -209,11 +191,15 @@ struct gx_image_enum_s {
     byte spread;                /* (spp if multi-plane, 1 if not) */
                                 /* << log2_xbytes */
     byte masked;                /* 0 = [color]image, 1 = imagemask */
-    byte interpolate;           /* true if Interpolate requested */
+    image_interp interpolate;	/* interpolation: off, on, forced */
     gs_matrix matrix;           /* image space -> device space */
+    /* We send 3 rectangles, rect >= drect >= rrect */
     struct r_ {
         int x, y, w, h;         /* subrectangle for which data is supplied */
     } rect;
+    struct {
+        int x, y, w, h;         /* subrectangle that actually needs to be decoded */
+    } drect;
     struct {
         int x, y, w, h;         /* subrectangle that actually needs to be rendered */
     } rrect;
@@ -228,7 +214,8 @@ struct gx_image_enum_s {
     gs_fixed_point x_extent, y_extent;  /* extent of one row of rect */
     SAMPLE_UNPACK_PROC((*unpack));
     irender_proc((*render));
-    const gs_imager_state *pis;
+    int (*skip_next_line)(gx_image_enum *penum, gx_device *dev);
+    const gs_gstate *pgs;
     const gs_color_space *pcs;  /* color space of image */
     byte *buffer;               /* for expanding samples to a */
                                 /* byte or frac */
@@ -306,11 +293,16 @@ struct gx_image_enum_s {
     ht_landscape_info_t ht_landscape;
     gx_image_icc_setup_t icc_setup;
     bool use_cie_range;   /* Needed potentially if CS was PS CIE based */
+    void *tpr_state;
+    /* The following pointer is only used if the CAL library is
+     * in place, but it's too much makefile upheaval to only have
+     * it here in CAL builds, so we live with it in all builds. */
+    void *cal_ht;   /* CAL halftone state pointer */
 };
 
 /* Enumerate the pointers in an image enumerator. */
 #define gx_image_enum_do_ptrs(m)\
-  m(0,pis) m(1,pcs) m(2,dev) m(3,buffer) m(4,line)\
+  m(0,pgs) m(1,pcs) m(2,dev) m(3,buffer) m(4,line)\
   m(5,clip_dev) m(6,rop_dev) m(7,scaler) m(8,icc_link)\
   m(9,color_cache) m(10,ht_buffer) m(11,thresh_buffer) \
   m(12,clues)
@@ -332,7 +324,12 @@ struct gx_image_enum_s {
 void gx_image_scale_mask_colors(gx_image_enum *penum,
                                 int component_index);
 /* Used by icc processing to detect decode cases */
-bool gx_has_transfer(const gs_imager_state *pis, int num_comps);
+bool gx_has_transfer(const gs_gstate *pgs, int num_comps);
+
+/* Compute the image matrix combining the ImageMatrix with either the pmat or the pgs ctm */
+/* Exported for use outside gx_image_enum_begin */
+int gx_image_compute_mat(const gs_gstate *pgs, const gs_matrix *pmat, const gs_matrix *ImageMatrix,
+                     gs_matrix_double *rmat);
 /*
  * Do common initialization for processing an ImageType 1 or 4 image.
  * Allocate the enumerator and fill in the following members:
@@ -351,7 +348,7 @@ gx_image_enum_alloc(const gs_image_common_t * pic,
  *      masked, adjust
  */
 int
-gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
+gx_image_enum_begin(gx_device * dev, const gs_gstate * pgs,
                     const gs_matrix *pmat, const gs_image_common_t * pic,
                     const gx_drawing_color * pdcolor,
                     const gx_clip_path * pcpath,

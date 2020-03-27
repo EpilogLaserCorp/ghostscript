@@ -3,7 +3,7 @@
  */
 
 /* Compile from inside ghostpdl with:
- * gcc -I./libpng -I./zlib -o bmpcmp -DHAVE_LIBPNG ./toolbin/bmpcmp.c ./libpng/png.c ./libpng/pngerror.c ./libpng/pngget.c ./libpng/pngmem.c ./libpng/pngpread.c ./libpng/pngread.c ./libpng/pngrio.c ./libpng/pngrtran.c ./libpng/pngrutil.c ./libpng/pngset.c ./libpng/pngtrans.c ./libpng/pngwio.c ./libpng/pngwrite.c ./libpng/pngwtran.c ./libpng/pngwutil.c ./zlib/adler32.c ./zlib/crc32.c ./zlib/infback.c ./zlib/inflate.c ./zlib/uncompr.c ./zlib/compress.c ./zlib/deflate.c ./zlib/gzio.c ./zlib/inffast.c ./zlib/inftrees.c ./zlib/trees.c ./zlib/zutil.c -lm
+ * gcc -I./obj -I./libpng -I./zlib -o bmpcmp -DHAVE_LIBPNG ./toolbin/bmpcmp.c ./libpng/png.c ./libpng/pngerror.c ./libpng/pngget.c ./libpng/pngmem.c ./libpng/pngpread.c ./libpng/pngread.c ./libpng/pngrio.c ./libpng/pngrtran.c ./libpng/pngrutil.c ./libpng/pngset.c ./libpng/pngtrans.c ./libpng/pngwio.c ./libpng/pngwrite.c ./libpng/pngwtran.c ./libpng/pngwutil.c ./zlib/adler32.c ./zlib/crc32.c ./zlib/infback.c ./zlib/inflate.c ./zlib/uncompr.c ./zlib/compress.c ./zlib/deflate.c ./zlib/inffast.c ./zlib/inftrees.c ./zlib/trees.c ./zlib/zutil.c -lm
  */
 
 #include <stdio.h>
@@ -14,6 +14,13 @@
 
 #ifdef HAVE_LIBPNG
 #include <png.h>
+#endif
+
+#ifndef BETTER_CMYK
+#define BETTER_CMYK 1
+#endif
+#if BETTER_CMYK
+#include "bmpcmptab.h"
 #endif
 
 #define DEBUG_BBOX(A) /* do {(A);} while(0==1) */
@@ -478,12 +485,13 @@ static void *cups_read(ImageReader *im,
     if (skip_bytes(im->file, 1796-424) == EOF)
         return NULL;
 
-    d = data = Malloc(*width * *height * 4);
+    data = Malloc(*width * *height * 4);
     *span = *width * 4;
     *bpp = 32;
     for (y = *height; y > 0; y--) {
         b = 0;
         c = 0;
+        d = data + (y - 1) * *span;
         for (x = *width; x > 0; x--) {
             b >>= 1;
             if (b == 0) {
@@ -905,11 +913,12 @@ static int skip_string(FILE *file, const char *string)
     return 1;
 }
 
-static void pam_header_read(FILE *file,
-                            int  *width,
-                            int  *height,
-                            int  *maxval)
+static int pam_header_read(FILE *file,
+                           int  *width,
+                           int  *height,
+                           int  *maxval)
 {
+    int cmyk = 0;
     while (1) {
         if        (skip_string(file, "WIDTH")) {
             *width = get_pnm_num(file);
@@ -923,13 +932,17 @@ static void pam_header_read(FILE *file,
         } else if (skip_string(file, "MAXVAL")) {
             *maxval = get_pnm_num(file);
         } else if (skip_string(file, "TUPLTYPE")) {
-            if (!skip_string(file, "CMYK")) {
-                fprintf(stderr, "bmpcmp: Only CMYK PAMs!\n");
+            if (skip_string(file, "RGB_TAG")) {
+                cmyk = 2;
+            } else if (!skip_string(file, "CMYK")) {
+                fprintf(stderr, "bmpcmp: Only CMYK or RGB_ALPHA PAMs!\n");
                 exit(1);
+            } else {
+                cmyk = 1;
             }
         } else if (skip_string(file, "ENDHDR")) {
           skip_to_eol(file);
-          return;
+          return cmyk;
         } else {
             /* Unknown header string. Just skip to the end of the line */
             skip_to_eol(file);
@@ -978,7 +991,6 @@ static void *pnm_read(ImageReader *im,
             break;
         case 7:
             read = pam_read;
-            *cmyk = 1;
             break;
         default:
             /* Eh? */
@@ -986,7 +998,7 @@ static void *pnm_read(ImageReader *im,
             return NULL;
     }
     if (read == pam_read) {
-        pam_header_read(im->file, width, height, &maxval);
+        *cmyk = pam_header_read(im->file, width, height, &maxval);
     } else {
         *width  = get_pnm_num(im->file);
         *height = get_pnm_num(im->file);
@@ -1090,8 +1102,9 @@ static void *psd_read(ImageReader *im,
                       int         *bpp,
                       int         *cmyk)
 {
-    int c, ir_start, ir_len, w, h, n, x, y, z, i, N;
+    int c, ir_len, w, h, n, x, y, z, N;
     unsigned char *bmp, *line, *ptr;
+    int bpc;
 
     if (feof(im->file))
         return NULL;
@@ -1112,9 +1125,9 @@ static void *psd_read(ImageReader *im,
 
     h = *height = get_int(im->file, 1);
     w = *width = get_int(im->file, 1);
-    c = get_short(im->file, 1);
-    if (c != 8) {
-        fprintf(stderr, "bmpcmp: We only support 8bpp psd files!\n");
+    bpc = get_short(im->file, 1);
+    if (bpc != 8 && bpc != 16) {
+        fprintf(stderr, "bmpcmp: We only support 8bpp or 16bpp psd files!\n");
         exit(1);
     }
     c = get_short(im->file, 1);
@@ -1154,16 +1167,16 @@ static void *psd_read(ImageReader *im,
     while (ir_len > 0)
     {
         int data_len, pad;
-        c  = fgetc(im->file);     if (--ir_len == 0) break;
-        c |= fgetc(im->file)<<8;  if (--ir_len == 0) break;
+        c  = fgetc(im->file)<<24; if (--ir_len == 0) break;
         c |= fgetc(im->file)<<16; if (--ir_len == 0) break;
-        c |= fgetc(im->file)<<24; if (--ir_len == 0) break;
-        /* c == 8BIM */
-        c  = fgetc(im->file);     if (--ir_len == 0) break;
         c |= fgetc(im->file)<<8;  if (--ir_len == 0) break;
+        c |= fgetc(im->file);     if (--ir_len == 0) break;
+        /* c == 8BIM */
+        c  = fgetc(im->file)<<8; if (--ir_len == 0) break;
+        c |= fgetc(im->file);    if (--ir_len == 0) break;
         /* Skip the padded id (which will always be 00 00) */
-        pad  = fgetc(im->file);     if (--ir_len == 0) break;
-        pad |= fgetc(im->file)<<8;  if (--ir_len == 0) break;
+        pad  = fgetc(im->file);    if (--ir_len == 0) break;
+        pad |= fgetc(im->file)<<8; if (--ir_len == 0) break;
         /* Get the data len */
         data_len  = fgetc(im->file)<<24; if (--ir_len == 0) break;
         data_len |= fgetc(im->file)<<16; if (--ir_len == 0) break;
@@ -1176,18 +1189,18 @@ static void *psd_read(ImageReader *im,
                 c |= fgetc(im->file);     if (--ir_len == 0) break;
                 /* We only support CMYK spots! */
                 if (c != 2) {
-                    fprintf(stderr, "bmpcmp: Spot color equivalent not CMYK!\n");
+                    fprintf(stderr, "bmpcmp: Spot color equivalent not CMYK! (%d)\n", c);
                     exit(EXIT_FAILURE);
                 }
                 /* c == 2 = COLORSPACE = CMYK */
                 /* 16 bits C, 16 bits M, 16 bits Y, 16 bits K */
-                spots[spotfill++] = fgetc(im->file);  if (--ir_len == 0) break;
+                spots[spotfill++] = 0xff - fgetc(im->file);  if (--ir_len == 0) break;
                 c = fgetc(im->file);  if (--ir_len == 0) break;
-                spots[spotfill++] = fgetc(im->file);  if (--ir_len == 0) break;
+                spots[spotfill++] = 0xff - fgetc(im->file);  if (--ir_len == 0) break;
                 c = fgetc(im->file);  if (--ir_len == 0) break;
-                spots[spotfill++] = fgetc(im->file);  if (--ir_len == 0) break;
+                spots[spotfill++] = 0xff - fgetc(im->file);  if (--ir_len == 0) break;
                 c = fgetc(im->file);  if (--ir_len == 0) break;
-                spots[spotfill++] = fgetc(im->file);  if (--ir_len == 0) break;
+                spots[spotfill++] = 0xff - fgetc(im->file);  if (--ir_len == 0) break;
                 c = fgetc(im->file);  if (--ir_len == 0) break;
                 /* 2 bytes opacity (always seems to be 0) */
                 c = fgetc(im->file);  if (--ir_len == 0) break;
@@ -1199,9 +1212,13 @@ static void *psd_read(ImageReader *im,
                 data_len -= 14;
             }
         }
-        while (data_len > 0)
+        if (ir_len > 0)
         {
-            c = fgetc(im->file); if (--ir_len == 0) break;
+            while (data_len > 0)
+            {
+                c = fgetc(im->file); if (--ir_len == 0) break;
+                data_len--;
+            }
         }
     }
 
@@ -1224,68 +1241,141 @@ static void *psd_read(ImageReader *im,
         N = 4;
     *span = (w * N + 3) & ~3;
     bmp = Malloc(*span * h);
-    line = Malloc(w);
+    line = Malloc(w * (bpc>>3));
     ptr = bmp + *span * (h-1);
-    if (n == 1) {
-        /* Greyscale */
-        for (y = 0; y < h; y++)
-        {
-            fread(line, 1, w, im->file);
-            for (x = 0; x < w; x++)
-            {
-                unsigned char val = 255 - *line++;
-                *ptr++ = val;
-                *ptr++ = val;
-                *ptr++ = val;
-                *ptr++ = 0;
-            }
-            ptr -= w*N + *span;
-            line -= w;
-        }
-        ptr += *span * h + 1;
-    } else if (n == 3) {
-        /* RGB */
-        for (z = 0; z < n; z++)
-        {
+    if (bpc == 8) {
+        if (n == 1) {
+            /* Greyscale */
             for (y = 0; y < h; y++)
             {
                 fread(line, 1, w, im->file);
                 for (x = 0; x < w; x++)
                 {
-                    *ptr = *line++;
-                    ptr += N;
+                    unsigned char val = 255 - *line++;
+                    *ptr++ = val;
+                    *ptr++ = val;
+                    *ptr++ = val;
+                    *ptr++ = 0;
                 }
                 ptr -= w*N + *span;
                 line -= w;
             }
             ptr += *span * h + 1;
-        }
-        for (y = 0; y < h; y++)
-        {
-            for (x = 0; x < w; x++)
+        } else if (n == 3) {
+            /* RGB (reverse to get BGR) */
+            ptr += 2;
+            for (z = 0; z < n; z++)
             {
-                *ptr = 0;
-                ptr += N;
+                for (y = 0; y < h; y++)
+                {
+                    fread(line, 1, w, im->file);
+                    for (x = 0; x < w; x++)
+                    {
+                        *ptr = *line++;
+                        ptr += N;
+                    }
+                    ptr -= w*N + *span;
+                    line -= w;
+                }
+                ptr += *span * h - 1;
             }
-            ptr -= w*N + *span;
-        }
-        ptr += *span * h + 1;
-    } else {
-        /* CMYK + (maybe) spots */
-        for (z = 0; z < n; z++)
-        {
+            ptr += 4;
             for (y = 0; y < h; y++)
             {
-                fread(line, 1, w, im->file);
                 for (x = 0; x < w; x++)
                 {
-                    *ptr = 255 - *line++;
-                    ptr += n;
+                    *ptr = 0;
+                    ptr += N;
                 }
-                ptr -= w*n + *span;
-                line -= w;
+                ptr -= w*N + *span;
             }
             ptr += *span * h + 1;
+        } else {
+            /* CMYK + (maybe) spots */
+            for (z = 0; z < n; z++)
+            {
+                for (y = 0; y < h; y++)
+                {
+                    fread(line, 1, w, im->file);
+                    for (x = 0; x < w; x++)
+                    {
+                        *ptr = 255 - *line++;
+                        ptr += n;
+                    }
+                    ptr -= w*n + *span;
+                    line -= w;
+                }
+                ptr += *span * h + 1;
+            }
+        }
+    } else {
+        /* 16 bit. Just load the top 8 bits */
+        if (n == 1) {
+            /* Greyscale */
+            for (y = 0; y < h; y++)
+            {
+                fread(line, 2, w, im->file);
+                for (x = 0; x < w; x++)
+                {
+                    unsigned char val = 255 - *line++;
+                    line++;
+                    *ptr++ = val;
+                    *ptr++ = val;
+                    *ptr++ = val;
+                    *ptr++ = 0;
+                }
+                ptr -= w*N + *span;
+                line -= w*2;
+            }
+            ptr += *span * h + 1;
+        } else if (n == 3) {
+            /* RGB (reverse to get BGR) */
+            ptr += 2;
+            for (z = 0; z < n; z++)
+            {
+                for (y = 0; y < h; y++)
+                {
+                    fread(line, 2, w, im->file);
+                    for (x = 0; x < w; x++)
+                    {
+                        *ptr = *line++;
+                        line++;
+                        ptr += N;
+                    }
+                    ptr -= w*N + *span;
+                    line -= w*2;
+                }
+                ptr += *span * h - 1;
+            }
+            ptr += 4;
+            for (y = 0; y < h; y++)
+            {
+                for (x = 0; x < w; x++)
+                {
+                    *ptr = 0;
+                    ptr += N;
+                }
+                ptr -= w*N + *span;
+            }
+            ptr += *span * h + 1;
+        } else {
+            /* CMYK + (maybe) spots */
+            for (z = 0; z < n; z++)
+            {
+                for (y = 0; y < h; y++)
+                {
+                    fread(line, 2, w, im->file);
+                    for (x = 0; x < w; x++)
+                    {
+                        *ptr = 255 - *line++;
+                        line++;
+                        ptr += n;
+                    }
+                    ptr -= w*n + *span;
+                    line -= 2*w;
+                }
+                ptr += *span * h + 1;
+            }
         }
     }
     free(line);
@@ -1651,8 +1741,8 @@ static int fuzzy_fast(FuzzyParams   *fuzzy_params,
 
     for (i = fuzzy_params->wTabLen; i > 0; i--)
     {
-        int o = *wTab++;
-        int v;
+        ptrdiff_t o = *wTab++;
+        int       v;
 
         v = isrc[0]-isrc2[o];
         if (v < 0)
@@ -1692,9 +1782,9 @@ static int fuzzy_fast_exhaustive(FuzzyParams   *fuzzy_params,
 
     for (i = fuzzy_params->wTabLen; i > 0; i--)
     {
-        int o = *wTab++;
-        int v;
-        int exact = 1;
+        ptrdiff_t o = *wTab++;
+        int       v;
+        int       exact = 1;
 
         v = isrc[0]-isrc2[o];
         if (v < 0)
@@ -2069,7 +2159,7 @@ static int fuzzy_fast_n(FuzzyParams   *fuzzy_params,
 
     for (i = fuzzy_params->wTabLen; i > 0; i--)
     {
-        int o = *wTab++;
+        ptrdiff_t o = *wTab++;
         for (z = 0; z < n; z++)
         {
             int v;
@@ -2102,8 +2192,8 @@ static int fuzzy_fast_exhaustive_n(FuzzyParams   *fuzzy_params,
 
     for (i = fuzzy_params->wTabLen; i > 0; i--)
     {
-        int o = *wTab++;
-        int exact = 1;
+        ptrdiff_t o = *wTab++;
+        int       exact = 1;
         for (z = 0; z < n; z++)
         {
             int v;
@@ -2380,6 +2470,207 @@ static void fuzzy_diff(unsigned char *bmp,
         fuzzy_diff_n(bmp, bmp2, map, bbox2, params);
 }
 
+#if BETTER_CMYK
+/* This lookup routine is stolen and horribly hacked about from lcms2 */
+static inline int toFixedDomain(int a)
+{
+  return a + ((a + 0x7fff) / 0xffff);
+}
+
+#define FIXED_TO_INT(x)         ((x)>>16)
+#define FIXED_REST_TO_INT(x)    ((x)&0xFFFFU)
+#define ROUND_FIXED_TO_INT(x)   (((x)+0x8000)>>16)
+
+static inline int LinearInterp(int a, int l, int h)
+{
+    int dif = (h - l) * a + 0x8000;
+    dif = (dif >> 16) + l;
+    return (dif);
+}
+
+#define DENS(i,j,k) (LutTable[(i)+(j)+(k)+OutChan])
+static inline void
+lookup(int c, int m, int y, int k,
+       int *r, int *g, int *b)
+{
+    const unsigned short* LutTable;
+    int fk;
+    int k0, rk;
+    int K0, K1;
+    int fx, fy, fz;
+    int rx, ry, rz;
+    int x0, y0, z0;
+    int X0, X1, Y0, Y1, Z0, Z1;
+    int i;
+    int c0, c1, c2, c3, Rest;
+    int OutChan;
+    int Tmp1[3], Tmp2[3];
+
+    c += (c<<8);
+    m += (m<<8);
+    y += (y<<8);
+    k += (k<<8);
+    fk  = toFixedDomain(c*22);
+    fx  = toFixedDomain(m*22);
+    fy  = toFixedDomain(y*22);
+    fz  = toFixedDomain(k*22);
+
+    k0  = FIXED_TO_INT(fk);
+    x0  = FIXED_TO_INT(fx);
+    y0  = FIXED_TO_INT(fy);
+    z0  = FIXED_TO_INT(fz);
+
+    rk  = FIXED_REST_TO_INT(fk);
+    rx  = FIXED_REST_TO_INT(fx);
+    ry  = FIXED_REST_TO_INT(fy);
+    rz  = FIXED_REST_TO_INT(fz);
+
+    K0 = 3 * 23 * 23 * 23 * k0;
+    K1 = K0 + (c == 0xFFFFU ? 0 : 3 * 23 * 23 * 23);
+
+    X0 = 3 * 23 * 23 * x0;
+    X1 = X0 + (m == 0xFFFFU ? 0 : 3 * 23 * 23);
+
+    Y0 = 3 * 23 * y0;
+    Y1 = Y0 + (y == 0xFFFFU ? 0 : 3 * 23);
+
+    Z0 = 3 * z0;
+    Z1 = Z0 + (k == 0xFFFFU ? 0 : 3);
+
+    LutTable = cmyk2rgb_lut;
+    LutTable += K0;
+
+    for (OutChan=0; OutChan < 3; OutChan++) {
+
+        c0 = DENS(X0, Y0, Z0);
+
+        if (rx >= ry && ry >= rz) {
+
+            c1 = DENS(X1, Y0, Z0) - c0;
+            c2 = DENS(X1, Y1, Z0) - DENS(X1, Y0, Z0);
+            c3 = DENS(X1, Y1, Z1) - DENS(X1, Y1, Z0);
+
+        }
+        else
+            if (rx >= rz && rz >= ry) {
+
+                c1 = DENS(X1, Y0, Z0) - c0;
+                c2 = DENS(X1, Y1, Z1) - DENS(X1, Y0, Z1);
+                c3 = DENS(X1, Y0, Z1) - DENS(X1, Y0, Z0);
+
+            }
+            else
+                if (rz >= rx && rx >= ry) {
+
+                    c1 = DENS(X1, Y0, Z1) - DENS(X0, Y0, Z1);
+                    c2 = DENS(X1, Y1, Z1) - DENS(X1, Y0, Z1);
+                    c3 = DENS(X0, Y0, Z1) - c0;
+
+                }
+                else
+                    if (ry >= rx && rx >= rz) {
+
+                        c1 = DENS(X1, Y1, Z0) - DENS(X0, Y1, Z0);
+                        c2 = DENS(X0, Y1, Z0) - c0;
+                        c3 = DENS(X1, Y1, Z1) - DENS(X1, Y1, Z0);
+
+                    }
+                    else
+                        if (ry >= rz && rz >= rx) {
+
+                            c1 = DENS(X1, Y1, Z1) - DENS(X0, Y1, Z1);
+                            c2 = DENS(X0, Y1, Z0) - c0;
+                            c3 = DENS(X0, Y1, Z1) - DENS(X0, Y1, Z0);
+
+                        }
+                        else
+                            if (rz >= ry && ry >= rx) {
+
+                                c1 = DENS(X1, Y1, Z1) - DENS(X0, Y1, Z1);
+                                c2 = DENS(X0, Y1, Z1) - DENS(X0, Y0, Z1);
+                                c3 = DENS(X0, Y0, Z1) - c0;
+
+                            }
+                            else {
+                                c1 = c2 = c3 = 0;
+                            }
+
+        Rest = c1 * rx + c2 * ry + c3 * rz;
+
+        Tmp1[OutChan] = (c0 + ROUND_FIXED_TO_INT(toFixedDomain(Rest)));
+    }
+
+
+    LutTable = cmyk2rgb_lut;
+    LutTable += K1;
+
+    for (OutChan=0; OutChan < 3; OutChan++) {
+
+        c0 = DENS(X0, Y0, Z0);
+
+        if (rx >= ry && ry >= rz) {
+
+            c1 = DENS(X1, Y0, Z0) - c0;
+            c2 = DENS(X1, Y1, Z0) - DENS(X1, Y0, Z0);
+            c3 = DENS(X1, Y1, Z1) - DENS(X1, Y1, Z0);
+
+        }
+        else
+            if (rx >= rz && rz >= ry) {
+
+                c1 = DENS(X1, Y0, Z0) - c0;
+                c2 = DENS(X1, Y1, Z1) - DENS(X1, Y0, Z1);
+                c3 = DENS(X1, Y0, Z1) - DENS(X1, Y0, Z0);
+
+            }
+            else
+                if (rz >= rx && rx >= ry) {
+
+                    c1 = DENS(X1, Y0, Z1) - DENS(X0, Y0, Z1);
+                    c2 = DENS(X1, Y1, Z1) - DENS(X1, Y0, Z1);
+                    c3 = DENS(X0, Y0, Z1) - c0;
+
+                }
+                else
+                    if (ry >= rx && rx >= rz) {
+
+                        c1 = DENS(X1, Y1, Z0) - DENS(X0, Y1, Z0);
+                        c2 = DENS(X0, Y1, Z0) - c0;
+                        c3 = DENS(X1, Y1, Z1) - DENS(X1, Y1, Z0);
+
+                    }
+                    else
+                        if (ry >= rz && rz >= rx) {
+
+                            c1 = DENS(X1, Y1, Z1) - DENS(X0, Y1, Z1);
+                            c2 = DENS(X0, Y1, Z0) - c0;
+                            c3 = DENS(X0, Y1, Z1) - DENS(X0, Y1, Z0);
+
+                        }
+                        else
+                            if (rz >= ry && ry >= rx) {
+
+                                c1 = DENS(X1, Y1, Z1) - DENS(X0, Y1, Z1);
+                                c2 = DENS(X0, Y1, Z1) - DENS(X0, Y0, Z1);
+                                c3 = DENS(X0, Y0, Z1) - c0;
+
+                            }
+                            else  {
+                                c1 = c2 = c3 = 0;
+                            }
+
+        Rest = c1 * rx + c2 * ry + c3 * rz;
+
+        Tmp2[OutChan] = (c0 + ROUND_FIXED_TO_INT(toFixedDomain(Rest)));
+    }
+
+    *r = LinearInterp(rk, Tmp1[0], Tmp2[0])>>8;
+    *g = LinearInterp(rk, Tmp1[1], Tmp2[1])>>8;
+    *b = LinearInterp(rk, Tmp1[2], Tmp2[2])>>8;
+}
+#undef DENS
+#endif
+
 static void uncmyk_bmp(unsigned char *bmp,
                        BBox          *bbox,
                        int            span)
@@ -2401,7 +2692,9 @@ static void uncmyk_bmp(unsigned char *bmp,
             m = *bmp++;
             y = *bmp++;
             k = *bmp++;
-
+#if BETTER_CMYK
+	    lookup(c,m,y,k,&r,&g,&b);
+#else
             r = (255-c-k);
             if (r < 0)
                 r = 0;
@@ -2411,6 +2704,57 @@ static void uncmyk_bmp(unsigned char *bmp,
             b = (255-y-k);
             if (b < 0)
                 b = 0;
+#endif
+            bmp[-1] = 0;
+            bmp[-2] = r;
+            bmp[-3] = g;
+            bmp[-4] = b;
+        }
+        bmp += span;
+    }
+}
+
+static void untag_bmp(unsigned char *bmp,
+                      BBox          *bbox,
+                      int            span)
+{
+    int w, h;
+    int x, y;
+
+    bmp  += span    *(bbox->ymin)+(bbox->xmin*4);
+    w     = bbox->xmax - bbox->xmin;
+    h     = bbox->ymax - bbox->ymin;
+    span -= 4*w;
+    for (y = 0; y < h; y++)
+    {
+        for (x = 0; x < w; x++)
+        {
+            int R, G, B, T, r, g, b;
+
+            T = *bmp++;
+            R = *bmp++;
+            G = *bmp++;
+            B = *bmp++;
+
+            r = (R>>2);
+            g = (G>>2);
+            b = (B>>2);
+            if (T & 1)
+              r |= 128;
+            if (T & 2)
+              g |= 128;
+            if (T & 4)
+              b |= 128;
+            if (T & 248)
+            {
+                r |= 64;
+                g |= 64;
+                b |= 64;
+                if ((x^y) & 1)
+                  r |= 128;
+                else
+                  g |= 128;
+            }
             bmp[-1] = 0;
             bmp[-2] = r;
             bmp[-3] = g;
@@ -3110,10 +3454,18 @@ int main(int argc, char *argv[])
                     DEBUG_BBOX(fprintf(stderr, "bmpcmp: Reduced bbox=%d %d %d %d\n",
                                        boxlist->xmin, boxlist->ymin,
                                        boxlist->xmax, boxlist->ymax));
-                    if (cmyk)
+                    switch(cmyk)
                     {
+                    case 1:
                         uncmyk_bmp(bmp,  boxlist, s);
                         uncmyk_bmp(bmp2, boxlist, s);
+                        break;
+                    case 2:
+                        untag_bmp(bmp,  boxlist, s);
+                        untag_bmp(bmp2, boxlist, s);
+                        break;
+                    default:
+                        break;
                     }
 #ifdef HAVE_LIBPNG
                     sprintf(str1, "%s.%05d.png", params.outroot, n);

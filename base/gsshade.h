@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,17 +19,15 @@
 #ifndef gsshade_INCLUDED
 #  define gsshade_INCLUDED
 
+#include "gsdevice.h"
 #include "gsccolor.h"
 #include "gscspace.h"
 #include "gsdsrc.h"
 #include "gsfunc.h"
-#include "gsmatrix.h"
-#include "gxfixed.h"
+#include "gxmatrix.h"
+#include "gspath.h"
+#include "gscie.h"
 
-#ifndef gx_cie_joint_caches_DEFINED
-#define gx_cie_joint_caches_DEFINED
-typedef struct gx_cie_joint_caches_s gx_cie_joint_caches;
-#endif
 
 /* ---------------- Types and structures ---------------- */
 
@@ -62,14 +60,7 @@ typedef struct gs_shading_params_s {
 } gs_shading_params_t;
 
 /* Define the type-specific procedures for shadings. */
-#ifndef gs_shading_t_DEFINED
-#  define gs_shading_t_DEFINED
 typedef struct gs_shading_s gs_shading_t;
-#endif
-#ifndef gx_device_DEFINED
-#  define gx_device_DEFINED
-typedef struct gx_device_s gx_device;
-#endif
 
 /*
  * Fill a user space rectangle.  This will paint every pixel that is in the
@@ -81,10 +72,10 @@ typedef struct gx_device_s gx_device;
 #define SHADING_FILL_RECTANGLE_PROC(proc)\
   int proc(const gs_shading_t *psh, const gs_rect *prect,\
            const gs_fixed_rect *prect_clip, gx_device *dev,\
-           gs_imager_state *pis)
+           gs_gstate *pgs)
 typedef SHADING_FILL_RECTANGLE_PROC((*shading_fill_rectangle_proc_t));
-#define gs_shading_fill_rectangle(psh, prect, prect_clip, dev, pis)\
-  ((psh)->head.procs.fill_rectangle(psh, prect, prect_clip, dev, pis))
+#define gs_shading_fill_rectangle(psh, prect, prect_clip, dev, pgs)\
+  ((psh)->head.procs.fill_rectangle(psh, prect, prect_clip, dev, pgs))
 
 /* Define the generic shading structures. */
 typedef struct gs_shading_procs_s {
@@ -163,10 +154,6 @@ typedef struct gs_shading_mesh_s {
     gs_shading_head_t head;
     gs_shading_mesh_params_t params;
 } gs_shading_mesh_t;
-
-#define private_st_shading_mesh()	/* in gsshade.c */\
-  gs_private_st_composite(st_shading_mesh, gs_shading_mesh_t,\
-    "gs_shading_mesh_t", shading_mesh_enum_ptrs, shading_mesh_reloc_ptrs)
 
 /* Define Free-form Gouraud triangle mesh shading. */
 typedef struct gs_shading_FfGt_params_s {
@@ -251,18 +238,10 @@ int gs_shading_Tpp_init(gs_shading_t ** ppsh,
  * the shading's geometry: it is true for filling with a pattern, false for
  * shfill.
  */
-#ifndef gx_path_DEFINED
-#  define gx_path_DEFINED
-typedef struct gx_path_s gx_path;
-#endif
-#ifndef gs_matrix_fixed_DEFINED
-#define gs_matrix_fixed_DEFINED
-typedef struct gs_matrix_fixed_s gs_matrix_fixed;
-#endif
 /* Fill a rectangle with a shading. */
 int gs_shading_do_fill_rectangle(const gs_shading_t *psh,
                          const gs_fixed_rect *prect, gx_device *dev,
-                         gs_imager_state *pis, bool fill_background);
+                         gs_gstate *pgs, bool fill_background);
 
 /* Add a shading bbox to a path. */
 int gs_shading_path_add_box(gx_path *ppath, const gs_rect *pbox,

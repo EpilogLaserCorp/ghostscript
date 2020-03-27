@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -42,7 +42,7 @@
 
 /* Write the file (if necessary) and page headers. */
 static void
-ps_image_write_headers(FILE *f, gx_device_printer *pdev,
+ps_image_write_headers(gp_file *f, gx_device_printer *pdev,
                        const char *const setup[],
                        gx_device_pswrite_common_t *pdpc)
 {
@@ -138,12 +138,12 @@ static const gx_device_pswrite_common_t psmono_values =
 #define max_repeat_run 255
 
 /* Send the page to the printer. */
-static void write_data_run(const byte *, int, FILE *, byte);
+static void write_data_run(const byte *, int, gp_file *, byte);
 static int
-psmono_print_page(gx_device_printer * pdev, FILE * prn_stream)
+psmono_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
     int line_size = gdev_mem_bytes_per_scan_line((gx_device *) pdev);
-    int lnum;
+    int lnum, code = 0;
     byte *line = gs_alloc_bytes(pdev->memory, line_size, "psmono_print_page");
     byte invert = (pdev->color_info.depth == 1 ? 0xff : 0);
     gx_device_pswrite_common_t pswrite_common;
@@ -167,7 +167,9 @@ psmono_print_page(gx_device_printer * pdev, FILE * prn_stream)
         int left = line_size;
         byte *data;
 
-        gdev_prn_get_bits(pdev, lnum, line, &data);
+        code = gdev_prn_get_bits(pdev, lnum, line, &data);
+        if (code < 0)
+            goto xit;
         p = data;
         /* Loop invariant: p + left = data + line_size. */
 #define min_repeat_run 10
@@ -216,10 +218,11 @@ psmono_print_page(gx_device_printer * pdev, FILE * prn_stream)
     /* Clean up and return. */
     fputs("\n", prn_stream);
     psw_write_page_trailer(prn_stream, 1, true);
+xit:
     gs_free_object(pdev->memory, line, "psmono_print_page");
     if (ferror(prn_stream))
         return_error(gs_error_ioerror);
-    return 0;
+    return code;
 }
 
 /* Close the file. */
@@ -236,7 +239,7 @@ psmono_close(gx_device *dev)
 
 /* Write a run of data on the file. */
 static void
-write_data_run(const byte * data, int count, FILE * f, byte invert)
+write_data_run(const byte * data, int count, gp_file * f, byte invert)
 {
     const byte *p = data;
     const char *const hex_digits = "0123456789abcdef";
@@ -301,13 +304,13 @@ static const gx_device_pswrite_common_t psrgb_values =
 
 /* Send the page to the printer. */
 static int
-psrgb_print_page(gx_device_printer * pdev, FILE * prn_stream)
+psrgb_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
     gs_memory_t *mem = pdev->memory;
     int width = pdev->width;
     byte *lbuf = gs_alloc_bytes(mem, width * 3,
                                 "psrgb_print_page(lbuf)");
-    int lnum;
+    int lnum, code = 0;
     stream fs, a85s, rls;
     stream_A85E_state a85state;
     stream_RLE_state rlstate;
@@ -354,7 +357,9 @@ psrgb_print_page(gx_device_printer * pdev, FILE * prn_stream)
         byte *data;
         int i, c;
 
-        gdev_prn_get_bits(pdev, lnum, lbuf, &data);
+        code = gdev_prn_get_bits(pdev, lnum, lbuf, &data);
+        if (code < 0)
+            goto xit;
         for (c = 0; c < 3; ++c) {
             const byte *p;
 
@@ -369,7 +374,10 @@ psrgb_print_page(gx_device_printer * pdev, FILE * prn_stream)
     sflush(&fs);
     fputs("\n", prn_stream);
     psw_write_page_trailer(prn_stream, 1, true);
+xit:
     gs_free_object(mem, lbuf, "psrgb_print_page(lbuf)");
+    if (code < 0)
+        return_error(code);
     if (ferror(prn_stream))
         return_error(gs_error_ioerror);
     return 0;

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -166,7 +166,7 @@ write_Encoding(stream *s, gs_font_type1 *pfont, int options,
                                                         subset_size, glyph))
                             continue;
                     }
-                    if (glyph != gs_no_glyph && glyph != notdef &&
+                    if (glyph != GS_NO_GLYPH && glyph != notdef &&
                         pfont->procs.glyph_name((gs_font *)pfont, glyph,
                                                 &namestr) >= 0
                         ) {
@@ -250,7 +250,7 @@ static int CheckSubrForMM (gs_glyph_data_t *gdata, gs_font_type1 *pfont)
                 case 12:
                     if (*(source + 1) == 16) {
                         if (CurrentNumberIndex < 1)
-                            return gs_error_rangecheck;
+			  return_error(gs_error_rangecheck);
                         switch(Stack[CurrentNumberIndex-1]) {
                             case 18:
                                 code = 6;
@@ -318,6 +318,7 @@ static int strip_othersubrs(gs_glyph_data_t *gdata, gs_font_type1 *pfont, byte *
     int OnlyCalcLength = 0;
     char Buffer[16];
 
+    memset(Stack, 0x00, 64 * sizeof(int));
     if (stripped == NULL) {
         OnlyCalcLength = 1;
         dest = (byte *)&Buffer;
@@ -443,7 +444,14 @@ static int strip_othersubrs(gs_glyph_data_t *gdata, gs_font_type1 *pfont, byte *
                                 dest += written;
                         }
                         for (i=0;i<SubrsWithMM[index];i++) {
-                            written = WriteNumber(dest, Stack[StackBase + i]);
+                            /* See above, it may be that we don't have enough numbers on the stack
+                             * (due to constructs such as x y div), if we don't have enough parameters
+                             * just write a 0 instead. We know this is incorrect.....
+                             */
+                            if (StackBase + i >= 0)
+                                written = WriteNumber(dest, Stack[StackBase + i]);
+                            else
+                                written = WriteNumber(dest, 0);
                             dest_length += written;
                             if (!OnlyCalcLength)
                                 dest += written;
@@ -680,7 +688,7 @@ write_Private(stream *s, gs_font_type1 *pfont,
         psf_enumerate_glyphs_begin(&genum, (gs_font *)pfont, subset_glyphs,
                                     (subset_glyphs ? subset_size : 0),
                                     GLYPH_SPACE_NAME);
-        for (glyph = gs_no_glyph;
+        for (glyph = GS_NO_GLYPH;
              (code = psf_enumerate_glyphs_next(&genum, &glyph)) != 1;
              )
             if (code == 0 &&
@@ -691,7 +699,7 @@ write_Private(stream *s, gs_font_type1 *pfont,
             }
         pprintd1(s, "2 index /CharStrings %d dict dup begin\n", num_chars);
         psf_enumerate_glyphs_reset(&genum);
-        for (glyph = gs_no_glyph;
+        for (glyph = GS_NO_GLYPH;
              (code = psf_enumerate_glyphs_next(&genum, &glyph)) != 1;
             )
             if (code == 0 &&

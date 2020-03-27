@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -23,6 +23,7 @@
 #include "inamestr.h"
 #include "inames.h"
 #include "gsstruct.h"		/* for gc_state_t */
+#include "isave.h"
 
 /*
  * The name table machinery has two slightly different configurations:
@@ -162,10 +163,6 @@ void names_trace_finish(name_table * nt, gc_state_t * gcst);
 /* ------ Save/restore ------ */
 
 /* Clean up the name table before a restore. */
-#ifndef alloc_save_t_DEFINED	/* also in isave.h */
-typedef struct alloc_save_s alloc_save_t;
-#  define alloc_save_t_DEFINED
-#endif
 void names_restore(name_table * nt, alloc_save_t * save);
 
 #endif /* inamedef_INCLUDED */

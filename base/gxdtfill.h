@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -129,6 +129,8 @@ It is computed with the macro 'rational_floor'.
 
 */
 
+#if defined(GX_FILL_TRAPEZOID) && defined(EDGE_TYPE)
+
 GX_FILL_TRAPEZOID (gx_device * dev, const EDGE_TYPE * left,
     const EDGE_TYPE * right, fixed ybot, fixed ytop, int flags,
     const gx_device_color * pdevc, FILL_ATTRS fa)
@@ -143,7 +145,9 @@ GX_FILL_TRAPEZOID (gx_device * dev, const EDGE_TYPE * left,
         const int iy1 = fixed2int_var(ymax);
         trap_line l, r;
         register int rxl, rxr;
+#if !LINEAR_COLOR
         int ry;
+#endif
         const fixed
             x0l = left->start.x, x1l = left->end.x, x0r = right->start.x,
             x1r = right->end.x, dxl = x1l - x0l, dxr = x1r - x0r;
@@ -178,10 +182,16 @@ GX_FILL_TRAPEZOID (gx_device * dev, const EDGE_TYPE * left,
         if_debug2m('z', dev->memory, "[z]y=[%d,%d]\n", iy, iy1);
 
         l.h = left->end.y - left->start.y;
+        if (l.h == 0)
+           return 0;
         r.h = right->end.y - right->start.y;
+        if (r.h == 0)
+           return 0;
         l.x = x0l + (fixed_half - fixed_epsilon);
         r.x = x0r + (fixed_half - fixed_epsilon);
+#if !LINEAR_COLOR
         ry = iy;
+#endif
 
 /*
  * Free variables of FILL_TRAP_RECT:
@@ -203,11 +213,6 @@ GX_FILL_TRAPEZOID (gx_device * dev, const EDGE_TYPE * left,
 #   define FILL_TRAP_RECT(x,y,w,h)\
         (FILL_DIRECT ? FILL_TRAP_RECT_DIRECT(x,y,w,h) : FILL_TRAP_RECT_INDIRECT(x,y,w,h))
 #endif
-
-#define VD_RECT_SWAPPED(rxl, ry, rxr, iy)\
-    vd_rect(int2fixed(SWAP_AXES ? ry : rxl), int2fixed(SWAP_AXES ? rxl : ry),\
-            int2fixed(SWAP_AXES ? iy : rxr), int2fixed(SWAP_AXES ? rxr : iy),\
-            1, VD_RECT_COLOR);
 
         /* Compute the dx/dy ratios. */
 
@@ -244,7 +249,6 @@ GX_FILL_TRAPEZOID (gx_device * dev, const EDGE_TYPE * left,
 #define CONNECT_RECTANGLES(ixl, ixr, rxl, rxr, iy, ry, adj1, adj2, fill)\
     if (adj1 < adj2) {\
         if (iy - ry > 1) {\
-            VD_RECT_SWAPPED(rxl, ry, rxr, iy - 1);\
             code = fill(rxl, ry, rxr - rxl, iy - ry - 1);\
             if (code < 0)\
                 goto xit;\
@@ -274,7 +278,6 @@ GX_FILL_TRAPEZOID (gx_device * dev, const EDGE_TYPE * left,
                     rxl = fixed2int_var(l.x);
                     rxr = fixed2int_var(r.x);
                     SET_MINIMAL_WIDTH(rxl, rxr, l, r);
-                    VD_RECT_SWAPPED(rxl, ry, rxr, iy1);
                     code = FILL_TRAP_RECT(rxl, ry, rxr - rxl, iy1 - ry);
                     goto xit;
                 }
@@ -307,7 +310,7 @@ GX_FILL_TRAPEZOID (gx_device * dev, const EDGE_TYPE * left,
         r.x += fixed_epsilon;
 #	if LINEAR_COLOR
 #	    ifdef DEBUG
-                if (check_gradient_overflow(left, right, num_components)) {
+                if (check_gradient_overflow(left, right)) {
                     /* The caller must care of.
                        Checking it here looses some performance with triangles. */
                     return_error(gs_error_unregistered);
@@ -347,7 +350,6 @@ GX_FILL_TRAPEZOID (gx_device * dev, const EDGE_TYPE * left,
                     code = set_x_gradient(&xg, &lg, &rg, &l, &r, rxl, rxr, num_components);
                     if (code < 0)
                         goto xit;
-                    /*VD_RECT_SWAPPED(rxl, iy, rxr, iy + 1);*/
                     code = FILL_TRAP_RECT(rxl, iy, rxr - rxl, 1);
                     if (code < 0)
                         goto xit;
@@ -367,7 +369,6 @@ GX_FILL_TRAPEZOID (gx_device * dev, const EDGE_TYPE * left,
                 if (ixl != rxl || ixr != rxr) {
                     CONNECT_RECTANGLES(ixl, ixr, rxl, rxr, iy, ry, rxr, ixl, FILL_TRAP_RECT);
                     CONNECT_RECTANGLES(ixl, ixr, rxl, rxr, iy, ry, ixr, rxl, FILL_TRAP_RECT);
-                    VD_RECT_SWAPPED(rxl, ry, rxr, iy);
                     code = FILL_TRAP_RECT(rxl, ry, rxr - rxl, iy - ry);
                     if (code < 0)
                         goto xit;
@@ -376,7 +377,6 @@ GX_FILL_TRAPEZOID (gx_device * dev, const EDGE_TYPE * left,
 #	    endif
         }
 #	if !LINEAR_COLOR
-            VD_RECT_SWAPPED(rxl, ry, rxr, iy);
             code = FILL_TRAP_RECT(rxl, ry, rxr - rxl, iy - ry);
 #	else
             code = 0;
@@ -388,7 +388,6 @@ GX_FILL_TRAPEZOID (gx_device * dev, const EDGE_TYPE * left,
 #undef FILL_TRAP_RECT_DIRECT
 #undef FILL_TRAP_RECT_INRECT
 #undef YMULT_QUO
-#undef VD_RECT_SWAPPED
 xit:	if (code < 0 && FILL_DIRECT)
             return_error(code);
         return_if_interrupt(dev->memory);
@@ -400,3 +399,7 @@ xit:	if (code < 0 && FILL_DIRECT)
 #undef CONTIGUOUS_FILL
 #undef SWAP_AXES
 #undef FLAGS_TYPE
+
+#else
+int dummy;
+#endif

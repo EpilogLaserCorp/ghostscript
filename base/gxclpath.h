@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,6 +19,9 @@
 
 #ifndef gxclpath_INCLUDED
 #  define gxclpath_INCLUDED
+
+#include "gxdevcli.h"
+#include "gxcldev.h"
 
 /*
  * Define the flags indicating whether a band knows the current values of
@@ -39,11 +42,12 @@
 #define alpha_known		(1<<9)
 #define misc2_all_known		((1<<10)-1)
 /* End of misc2 flags. */
+/* The following bits don't get passed in misc2, so are only limited by sizeof uint */
 #define fill_adjust_known	(1<<10)
 #define ctm_known		(1<<11)
 #define dash_known		(1<<12)
 #define clip_path_known		(1<<13)
-#define stroke_all_known	((1<<14)-1)
+#define STROKE_ALL_KNOWN	((1<<14)-1)
 #define color_space_known	(1<<14)
 /*#define all_known             ((1<<15)-1) */
 
@@ -58,10 +62,6 @@ typedef enum {
 /* Extend the command set.  See gxcldev.h for more information. */
 typedef enum {
     cmd_op_misc2 = 0xd0,	/* (see below) */
-    /* obsolete */
-    /* cmd_opv_set_color = 0xd0, */	/* Used if base values do not fit into 1 bit */
-                                /* #flags,#base[0],...#base[num_comp-1] if flags */
-                                /* colored halftone with base colors a,b,c,d */
     cmd_op_fill_rect_hl = 0xd1,  /* rect fill with devn color */
     cmd_opv_set_fill_adjust = 0xd2,	/* adjust_x/y(fixed) */
     cmd_opv_set_ctm = 0xd3,	/* [per sput/sget_matrix] */
@@ -80,7 +80,7 @@ typedef enum {
     /* op_bm_tk: blend mode(5)text knockout(1)o.p.mode(1)o.p.(1) */
     /* segment notes: (byte) */
     /* opacity/shape: alpha(float)mask(TBD) */
-    /* alpha: <<verbatim copy from imager state>> */
+    /* alpha: <<verbatim copy from gs_gstate>> */
     cmd_opv_set_misc2 = 0xd5,	/* mask#, selected parameters */
     cmd_opv_set_dash = 0xd6,	/* adapt(1)abs.dot(1)n(6), dot */
                                 /* length(float), offset(float), */
@@ -99,7 +99,16 @@ typedef enum {
                                 /* flags# (0 = same raster & data_x, */
                                 /* 1 = new raster & data_x, lsb first), */
                                 /* [raster#, [data_x#,]]* <data> */
-    cmd_opv_extend = 0xdf,	/* command, varies */
+    cmd_opv_extend = 0xdf,	/* command, varies (see gx_cmd_ext_op below) */
+
+
+#define cmd_misc2_op_name_strings\
+  "?d0?", "fill_hl_color", \
+  "set_fill_adjust", "set_ctm",\
+  "set_color_space", "set_misc2", "set_dash", "enable_clip",\
+  "disable_clip", "begin_clip", "end_clip", "begin_image_rect",\
+  "begin_image", "image_data", "image_plane_data", "extended"
+
     cmd_op_segment = 0xe0,	/* (see below) */
     cmd_opv_rmoveto = 0xe0,	/* dx%, dy% */
     cmd_opv_rlineto = 0xe1,	/* dx%, dy% */
@@ -110,7 +119,7 @@ typedef enum {
     cmd_opv_rm3lineto = 0xe6,	/* dx1%,dy1%, dx2%,dy2%, dx3%,dy3%, */
                                 /* [-dx2,-dy2 implicit] */
     cmd_opv_rrcurveto = 0xe7,	/* dx1%,dy1%, dx2%,dy2%, dx3%,dy3% */
-      cmd_opv_min_curveto = cmd_opv_rrcurveto,
+    cmd_opv_min_curveto = cmd_opv_rrcurveto,
     cmd_opv_hvcurveto = 0xe8,	/* dx1%, dx2%,dy2%, dy3% */
     cmd_opv_vhcurveto = 0xe9,	/* dy1%, dx2%,dy2%, dx3% */
     cmd_opv_nrcurveto = 0xea,	/* dx2%,dy2%, dx3%,dy3% */
@@ -124,59 +133,8 @@ typedef enum {
                                 /* *curveto with one or more of dx/y1/3 = 0. */
                                 /* If h*: -dx3,dy3, -dx2,dy2, -dx1,dy1. */
                                 /* If v*: dx3,-dy3, dx2,-dy2, dx1,-dy1. */
-      cmd_opv_max_curveto = cmd_opv_scurveto,
+    cmd_opv_max_curveto = cmd_opv_scurveto,
     cmd_opv_closepath = 0xef,	/* (nothing) */
-    cmd_op_path = 0xf0,		/* (see below) */
-    cmd_opv_fill = 0xf0,
-    cmd_opv_rgapto = 0xf1, 	/* dx%, dy% */ /* was cmd_opv_htfill */
-    cmd_opv_eofill = 0xf3,
-    /* cmd_opv_hteofill = 0xf4, */ /* obsolete */
-    /* cmd_opv_coloreofill = 0xf5, */ /* obsolete */
-    cmd_opv_stroke = 0xf6,
-    /* cmd_opv_htstroke = 0xf7, */ /* obsolete */
-    /* cmd_opv_colorstroke = 0xf8, */ /* obsolete */
-    cmd_opv_polyfill = 0xf9,
-    /* cmd_opv_htpolyfill = 0xfa, */ /* obsolete */
-    /* cmd_opv_colorpolyfill = 0xfb */ /* obsolete */
-    cmd_opv_fill_trapezoid = 0xfc
-} gx_cmd_xop;
-
-/* This is usd for cmd_opv_ext_put_drawing_color so that we know if it
-   is assocated with a tile or not */
-typedef enum {
-    devn_not_tile = 0x00,
-    devn_tile0 = 0x01,
-    devn_tile1 = 0x02
-} dc_devn_cl_type;
-/*
- * Further extended command set. This code always occupies a byte, which
- * is the second byte of a command whose first byte is cmd_opv_extend.
- */
-typedef enum {
-    cmd_opv_ext_put_params = 0x00,          /* serialized parameter list */
-    cmd_opv_ext_create_compositor = 0x01,   /* compositor id,
-                                             * serialized compositor */
-    cmd_opv_ext_put_halftone = 0x02,        /* length of entire halftone */
-    cmd_opv_ext_put_ht_seg = 0x03,          /* segment length,
-                                             * halftone segment data */
-    cmd_opv_ext_put_drawing_color = 0x04,    /* length, color type id,
-                                             * serialized color */
-    cmd_opv_ext_tile_rect_hl = 0x05,         /* Uses devn colors in tiling fill */
-    cmd_opv_ext_put_tile_devn_color0 = 0x6,  /* Devn color0 for tile filling */
-    cmd_opv_ext_put_tile_devn_color1 = 0x7,   /* Devn color1 for tile filling */
-    cmd_opv_ext_set_color_is_devn = 0x8,      /* Used for overload of copy_color_alpha */
-    cmd_opv_ext_unset_color_is_devn = 0x9     /* Used for overload of copy_color_alpha */
-} gx_cmd_ext_op;
-
-#define cmd_segment_op_num_operands_values\
-  2, 2, 1, 1, 4, 6, 6, 6, 4, 4, 4, 4, 2, 2, 0, 0
-
-#define cmd_misc2_op_name_strings\
-  "cmd_opv_set_color", "fill_hl_color", \
-  "set_fill_adjust", "set_ctm",\
-  "set_color_space", "set_misc2", "set_dash", "enable_clip",\
-  "disable_clip", "begin_clip", "end_clip", "begin_image_rect",\
-  "begin_image", "image_data", "image_plane_data", "put_params"
 
 #define cmd_segment_op_name_strings\
   "rmoveto", "rlineto", "hlineto", "vlineto",\
@@ -184,11 +142,57 @@ typedef enum {
   "hvcurveto", "vhcurveto", "nrcurveto", "rncurveto",\
   "vqcurveto", "hqcurveto", "scurveto", "closepath"
 
+    cmd_op_path = 0xf0,		/* (see below) */
+    cmd_opv_fill = 0xf0,
+    cmd_opv_rgapto = 0xf1, 	/* dx%, dy% */
+    cmd_opv_eofill = 0xf3,
+    cmd_opv_fill_stroke = 0xf4,
+    cmd_opv_eofill_stroke = 0xf5,
+    cmd_opv_stroke = 0xf6,
+    cmd_opv_polyfill = 0xf9,
+    cmd_opv_fill_trapezoid = 0xfc
+
 #define cmd_path_op_name_strings\
-  "fill", "htfill", "colorfill", "eofill",\
-  "hteofill", "coloreofill", "stroke", "htstroke",\
-  "colorstroke", "polyfill", "htpolyfill", "colorpolyfill",\
+  "fill", "rgapto", "?f2?", "eofill",\
+  "fill_stroke", "eofill_stroke", "stroke", "?f7?",\
+  "?f8?", "polyfill", "?fa?", "?fb?",\
   "fill_trapezoid", "?fd?", "?fe?", "?ff?"
+
+/* unused cmd_op values: 0xd0, 0xf2, 0xf7, 0xf8, 0xfa, 0xfb, 0xfd, 0xfe, 0xff */
+} gx_cmd_xop;
+
+/* This is usd for cmd_opv_ext_put_drawing_color so that we know if it
+   is assocated with a tile or not and for fill or stroke color */
+typedef enum {
+    devn_not_tile_fill = 0x00,
+    devn_not_tile_stroke = 0x01,
+    devn_tile0 = 0x02,
+    devn_tile1 = 0x03
+} dc_devn_cl_type;
+/*
+ * Further extended command set. This code always occupies a byte, which
+ * is the second byte of a command whose first byte is cmd_opv_extend.
+ */
+typedef enum {
+    cmd_opv_ext_put_params = 0x00,           /* serialized parameter list */
+    cmd_opv_ext_create_compositor = 0x01,    /* compositor id,
+                                              * serialized compositor */
+    cmd_opv_ext_put_halftone = 0x02,         /* length of entire halftone */
+    cmd_opv_ext_put_ht_seg = 0x03,           /* segment length,
+                                              * halftone segment data */
+    cmd_opv_ext_put_fill_dcolor = 0x04,      /* length, color type id,
+                                              * serialized color */
+    cmd_opv_ext_put_stroke_dcolor = 0x05,    /* length, color type id,
+                                              * serialized color */
+    cmd_opv_ext_tile_rect_hl = 0x06,         /* Uses devn colors in tiling fill */
+    cmd_opv_ext_put_tile_devn_color0 = 0x07, /* Devn color0 for tile filling */
+    cmd_opv_ext_put_tile_devn_color1 = 0x08, /* Devn color1 for tile filling */
+    cmd_opv_ext_set_color_is_devn = 0x09,    /* Used for overload of copy_color_alpha */
+    cmd_opv_ext_unset_color_is_devn = 0x0a   /* Used for overload of copy_color_alpha */
+} gx_cmd_ext_op;
+
+#define cmd_segment_op_num_operands_values\
+  2, 2, 1, 1, 4, 6, 6, 6, 4, 4, 4, 4, 2, 2, 0, 0
 
 /*
  * We represent path coordinates as 'fixed' values in a variable-length,
@@ -212,6 +216,7 @@ typedef enum {
 /* In gxclpath.c */
 dev_proc_fill_path(clist_fill_path);
 dev_proc_stroke_path(clist_stroke_path);
+dev_proc_fill_stroke_path(clist_fill_stroke_path);
 dev_proc_fill_parallelogram(clist_fill_parallelogram);
 dev_proc_fill_triangle(clist_fill_triangle);
 
@@ -220,11 +225,11 @@ dev_proc_fill_triangle(clist_fill_triangle);
 /* The procedures and macros defined here are used when writing */
 /* (gxclimag.c, gxclpath.c). */
 
-/* Compare and update members of the imager state. */
+/* Compare and update members of the gs_gstate. */
 #define state_neq(member)\
-  (cdev->imager_state.member != pis->member)
+  (cdev->gs_gstate.member != pgs->member)
 #define state_update(member)\
-  (cdev->imager_state.member = pis->member)
+  (cdev->gs_gstate.member = pgs->member)
 
 /* ------ Exported by gxclpath.c ------ */
 

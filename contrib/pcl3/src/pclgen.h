@@ -22,13 +22,10 @@
 #ifndef _pclgen_h	/* Inclusion protection */
 #define _pclgen_h
 
-/* Configuration management identification */
-#pragma ident "@(#)$Id: pclgen.h,v 1.25 2001/08/18 17:41:29 Martin Rel $"
-
 /*****************************************************************************/
 
 /* Standard headers */
-#include <stdio.h>
+#include "gp.h"
 
 /*****************************************************************************/
 
@@ -413,17 +410,17 @@ extern int pcl_compress(pcl_Compression method, const pcl_OctetString *in,
   const pcl_OctetString *prev, pcl_OctetString *out);
 
 /* File and page functions */
-extern int pcl3_init_file(FILE *out, pcl_FileData *global);
-extern int pcl3_begin_page(FILE *out, pcl_FileData *global);
-extern int pcl3_end_page(FILE *out, pcl_FileData *global);
-extern int pcl3_end_file(FILE *out, pcl_FileData *global);
+extern int pcl3_init_file(gs_memory_t *mem, gp_file *out, pcl_FileData *global);
+extern int pcl3_begin_page(gp_file *out, pcl_FileData *global);
+extern int pcl3_end_page(gp_file *out, pcl_FileData *global);
+extern int pcl3_end_file(gp_file *out, pcl_FileData *global);
 
 /* Raster functions */
-extern int pcl3_begin_raster(FILE *out, pcl_RasterData *data);
-extern int pcl3_skip_groups(FILE *out, pcl_RasterData *data,
+extern int pcl3_begin_raster(gp_file *out, pcl_RasterData *data);
+extern int pcl3_skip_groups(gp_file *out, pcl_RasterData *data,
   unsigned int count);
-extern int pcl3_transfer_group(FILE *out, pcl_RasterData *data);
-extern int pcl3_end_raster(FILE *out, pcl_RasterData *data);
+extern int pcl3_transfer_group(gp_file *out, pcl_RasterData *data);
+extern int pcl3_end_raster(gp_file *out, pcl_RasterData *data);
 
 /*****************************************************************************/
 

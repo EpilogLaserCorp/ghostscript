@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -41,6 +41,8 @@
 #include "gscindex.h"
 #include "gsicc_cache.h"
 #include "gsicc_cms.h"
+#include "gsicc_manage.h"
+#include "gxdevsop.h"
 
 /* Structure descriptors */
 private_st_gx_image_enum();
@@ -131,7 +133,7 @@ static int color_draws_b_w(gx_device * dev,
 static int image_init_colors(gx_image_enum * penum, int bps, int spp,
                                gs_image_format_t format,
                                const float *decode,
-                               const gs_imager_state * pis, gx_device * dev,
+                               const gs_gstate * pgs, gx_device * dev,
                                const gs_color_space * pcs, bool * pdcb);
 
 /* Procedures for unpacking the input data into bytes or fracs. */
@@ -173,10 +175,12 @@ gx_image_enum_alloc(const gs_image_common_t * pic,
             )
             return_error(gs_error_rangecheck);
     }
+    *ppenum = NULL;		/* in case alloc fails and caller doesn't check code */
     penum = gs_alloc_struct(mem, gx_image_enum, &st_gx_image_enum,
                             "gx_default_begin_image");
     if (penum == 0)
         return_error(gs_error_VMerror);
+    memset(penum, 0, sizeof(gx_image_enum));	/* in case of failure, no dangling pointers */
     if (prect) {
         penum->rect.x = prect->p.x;
         penum->rect.y = prect->p.y;
@@ -190,6 +194,10 @@ gx_image_enum_alloc(const gs_image_common_t * pic,
     penum->rrect.y = penum->rect.y;
     penum->rrect.w = penum->rect.w;
     penum->rrect.h = penum->rect.h;
+    penum->drect.x = penum->rect.x;
+    penum->drect.y = penum->rect.y;
+    penum->drect.w = penum->rect.w;
+    penum->drect.h = penum->rect.h;
 #ifdef DEBUG
     if (gs_debug_c('b')) {
         dmlprintf2(mem, "[b]Image: w=%d h=%d", width, height);
@@ -204,14 +212,40 @@ gx_image_enum_alloc(const gs_image_common_t * pic,
 
 /* Convert and restrict to a valid range. */
 static inline fixed float2fixed_rounded_boxed(double src) {
-	float v = floor(src*fixed_scale + 0.5);
+    float v = floor(src*fixed_scale + 0.5);
 
-	if (v <= min_fixed)
-		return min_fixed;
-	else if (v >= max_fixed)
-		return max_fixed;
-	else
-		return 	(fixed)v;
+    if (v <= min_fixed)
+        return min_fixed;
+    else if (v >= max_fixed)
+        return max_fixed;
+    else
+        return 	(fixed)v;
+}
+
+/* Compute the image matrix combining the ImageMatrix with either the pmat or the pgs ctm */
+int
+gx_image_compute_mat(const gs_gstate *pgs, const gs_matrix *pmat, const gs_matrix *ImageMatrix,
+                     gs_matrix_double *rmat)
+{
+    int code = 0;
+
+    if (pmat == 0)
+        pmat = &ctm_only(pgs);
+    if (ImageMatrix->xx == pmat->xx && ImageMatrix->xy == pmat->xy &&
+        ImageMatrix->yx == pmat->yx && ImageMatrix->yy == pmat->yy) {
+        /* Process common special case separately to accept singular matrix. */
+        rmat->xx = rmat->yy = 1.;
+        rmat->xy = rmat->yx = 0.;
+        rmat->tx = pmat->tx - ImageMatrix->tx;
+        rmat->ty = pmat->ty - ImageMatrix->ty;
+    } else {
+        if ((code = gs_matrix_invert_to_double(ImageMatrix, rmat)) < 0 ||
+            (code = gs_matrix_multiply_double(rmat, pmat, rmat)) < 0
+            ) {
+            return code;
+        }
+    }
+    return code;
 }
 
 /*
@@ -222,7 +256,7 @@ static inline fixed float2fixed_rounded_boxed(double src) {
  *      masked, adjust
  */
 int
-gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
+gx_image_enum_begin(gx_device * dev, const gs_gstate * pgs,
                     const gs_matrix *pmat, const gs_image_common_t * pic,
                 const gx_drawing_color * pdcolor, const gx_clip_path * pcpath,
                 gs_memory_t * mem, gx_image_enum *penum)
@@ -237,16 +271,21 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
     gs_matrix_double mat;
     int index_bps;
     const gs_color_space *pcs = pim->ColorSpace;
-    gs_logical_operation_t lop = (pis ? pis->log_op : lop_default);
+    gs_logical_operation_t lop = (pgs ? pgs->log_op : lop_default);
     int code;
     int log2_xbytes = (bps <= 8 ? 0 : arch_log2_sizeof_frac);
     int spp, nplanes, spread;
     uint bsize;
-    byte *buffer;
+    byte *buffer = NULL;
     fixed mtx, mty;
     gs_fixed_point row_extent, col_extent, x_extent, y_extent;
     bool device_color = true;
     gs_fixed_rect obox, cbox;
+    bool gridfitimages = 0;
+    bool in_pattern_accumulator;
+    bool in_smask;
+    int orthogonal;
+    int force_interpolation = 0;
 
     penum->clues = NULL;
     penum->icc_setup.has_transfer = false;
@@ -255,23 +294,11 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
     penum->icc_setup.need_decode = false;
     penum->Width = width;
     penum->Height = height;
-    if (pmat == 0)
-        pmat = &ctm_only(pis);
-    if (pim->ImageMatrix.xx == pmat->xx && pim->ImageMatrix.xy == pmat->xy &&
-        pim->ImageMatrix.yx == pmat->yx && pim->ImageMatrix.yy == pmat->yy) {
-        /* Process common special case separately to accept singular matrix. */
-        mat.xx = mat.yy = 1.;
-        mat.xy = mat.yx = 0.;
-        mat.tx = pmat->tx - pim->ImageMatrix.tx;
-        mat.ty = pmat->ty - pim->ImageMatrix.ty;
-    } else {
-        if ((code = gs_matrix_invert_to_double(&pim->ImageMatrix, &mat)) < 0 ||
-            (code = gs_matrix_multiply_double(&mat, pmat, &mat)) < 0
-            ) {
-            gs_free_object(mem, penum, "gx_default_begin_image");
-            return code;
-        }
+
+    if ((code = gx_image_compute_mat(pgs, pmat, &(pim->ImageMatrix), &mat)) < 0) {
+        return code;
     }
+    lop = lop_sanitize(lop);
     /* Grid fit: A common construction in postscript/PDF files is for images
      * to be constructed as a series of 'stacked' 1 pixel high images.
      * Furthermore, many of these are implemented as an imagemask plotted on
@@ -281,7 +308,7 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
      * covered. Bug 692666 is such a problem.
      *
      * As a workaround for this problem, the code below was introduced. The
-     * concept is that orthogonal images can be 'grid fitted' (or 'stretched')
+     * concept is that orthogonal images can be 'grid fitted' (or 'stretch')
      * to entirely cover pixels that they touch. Initially I had this working
      * for all images regardless of type, but as testing has proceeded, this
      * showed more and more regressions, so I've cut the cases back in which
@@ -289,15 +316,42 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
      * either 1 pixel high, or wide, and then not if we are rendering a
      * glyph (such as from a type3 font).
      */
-    if (pis != NULL && pis->is_gstate && ((gs_state *)pis)->show_gstate != NULL) {
+
+    /* Ask the device if we are in a pattern accumulator */
+    in_pattern_accumulator = (dev_proc(dev, dev_spec_op)(dev, gxdso_in_pattern_accumulator, NULL, 0));
+    if (in_pattern_accumulator < 0)
+        in_pattern_accumulator = 0;
+
+    /* Figure out if we are orthogonal */
+    if (mat.xy == 0 && mat.yx == 0)
+        orthogonal = 1;
+    else if (mat.xx == 0 && mat.yy == 0)
+        orthogonal = 2;
+    else
+        orthogonal = 0;
+
+    /* If we are in a pattern accumulator, we choose to always grid fit
+     * orthogonal images. We do this by asking the device whether we
+     * should grid fit. This allows us to avoid nasty blank lines around
+     * the edges of cells. Similarly, for smasks.
+     */
+    in_smask = (pim->override_in_smask ||
+                (dev_proc(dev, dev_spec_op)(dev, gxdso_in_smask, NULL, 0)) > 0);
+    gridfitimages = (in_smask || in_pattern_accumulator) && orthogonal;
+
+    if (pgs != NULL && pgs->show_gstate != NULL) {
         /* If we're a graphics state, and we're in a text object, then we
          * must be in a type3 font. Don't fiddle with it. */
-    } else if (!penum->masked || penum->image_parent_type != 0) {
-        /* We only grid fit for ImageMasks, currently */
-    } else if (pis != NULL && pis->fill_adjust.x == 0 && pis->fill_adjust.y == 0) {
+    } else if (!gridfitimages &&
+               (!penum->masked || penum->image_parent_type != 0)) {
+        /* Other than for images we are specifically looking to grid fit (such as
+         * ones in a pattern device), we only grid fit imagemasks */
+    } else if (gridfitimages && (penum->masked && penum->image_parent_type == 0)) {
+        /* We don't gridfit imagemasks in a pattern accumulator */
+    } else if (pgs != NULL && pgs->fill_adjust.x == 0 && pgs->fill_adjust.y == 0) {
         /* If fill adjust is disabled, so is grid fitting */
-    } else if (mat.xy == 0 && mat.yx == 0) {
-        if (width == 1) {
+    } else if (orthogonal == 1) {
+        if (width == 1 || gridfitimages) {
             if (mat.xx > 0) {
                 fixed ix0 = int2fixed(fixed2int(float2fixed(mat.tx)));
                 double x1 = mat.tx + mat.xx * width;
@@ -312,7 +366,7 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
                 mat.xx = (double)(fixed2float(ix1 - ix0)/width);
             }
         }
-        if (height == 1) {
+        if (height == 1 || gridfitimages) {
             if (mat.yy > 0) {
                 fixed iy0 = int2fixed(fixed2int(float2fixed(mat.ty)));
                 double y1 = mat.ty + mat.yy * height;
@@ -327,8 +381,8 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
                 mat.yy = ((double)fixed2float(iy1 - iy0)/height);
             }
         }
-    } else if (mat.xx == 0 && mat.yy == 0) {
-        if (height == 1) {
+    } else if (orthogonal == 2) {
+        if (height == 1 || gridfitimages) {
             if (mat.yx > 0) {
                 fixed ix0 = int2fixed(fixed2int(float2fixed(mat.tx)));
                 double x1 = mat.tx + mat.yx * height;
@@ -343,7 +397,7 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
                 mat.yx = (double)(fixed2float(ix1 - ix0)/height);
             }
         }
-        if (width == 1) {
+        if (width == 1 || gridfitimages) {
             if (mat.xy > 0) {
                 fixed iy0 = int2fixed(fixed2int(float2fixed(mat.ty)));
                 double y1 = mat.ty + mat.xy * width;
@@ -360,14 +414,32 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
         }
     }
 
+    /* When rendering to a pattern accumulator, if we are downscaling
+     * then enable interpolation, as otherwise dropouts can cause
+     * serious problems. */
+    if (in_pattern_accumulator) {
+        double ome = ((double)(fixed_1 - fixed_epsilon)) / (double)fixed_1; /* One Minus Epsilon */
+
+        if (orthogonal == 1) {
+            if ((mat.xx > -ome && mat.xx < ome) || (mat.yy > -ome && mat.yy < ome)) {
+                force_interpolation = true;
+            }
+        } else if (orthogonal == 2) {
+            if ((mat.xy > -ome && mat.xy < ome) || (mat.yx > -ome && mat.yx < ome)) {
+                force_interpolation = true;
+            }
+        }
+    }
+
     /* Can we restrict the amount of image we need? */
     while (pcpath) /* So we can break out of it */
     {
         gs_rect rect, rect_out;
         gs_matrix mi;
+        const gs_matrix *m = pgs != NULL ? &ctm_only(pgs) : NULL;
         gs_fixed_rect obox;
         gs_int_rect irect;
-        if ((code = gs_matrix_invert(&ctm_only(pis), &mi)) < 0 ||
+        if (m == NULL || (code = gs_matrix_invert(m, &mi)) < 0 ||
             (code = gs_matrix_multiply(&mi, &pic->ImageMatrix, &mi)) < 0) {
             /* Give up trying to shrink the render box, but continue processing */
             break;
@@ -379,37 +451,14 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
         rect.q.y = fixed2float(obox.q.y);
         code = gs_bbox_transform(&rect, &mi, &rect_out);
         if (code < 0) {
-            /* Give up trying to shrink the render box, but continue processing */
+            /* Give up trying to shrink the render/decode boxes, but continue processing */
             break;
         }
         irect.p.x = (int)(rect_out.p.x-1.0);
         irect.p.y = (int)(rect_out.p.y-1.0);
         irect.q.x = (int)(rect_out.q.x+1.0);
         irect.q.y = (int)(rect_out.q.y+1.0);
-        /* Need to expand the region to allow for the fact that the mitchell
-         * scaler reads multiple pixels in. This calculation can probably be
-         * improved. */
-        /* If mi.{xx,yy} > 1 then we are downscaling. During downscaling,
-         * the support increases to ensure that we don't lose pixels contributions
-         * entirely. */
-        /* I do not understand the need for the +/- 1 fudge factors,
-         * but they seem to be required. Increasing the render rectangle can
-         * never be bad at least... RJW */
-        {
-            float support = any_abs(mi.xx);
-            int isupport;
-            if (any_abs(mi.yy) > support)
-                support = any_abs(mi.yy);
-            if (any_abs(mi.xy) > support)
-                support = any_abs(mi.xy);
-            if (any_abs(mi.yx) > support)
-                support = any_abs(mi.yx);
-            isupport = (int)(MAX_ISCALE_SUPPORT * (support+1)) + 1;
-            irect.p.x -= isupport;
-            irect.p.y -= isupport;
-            irect.q.x += isupport;
-            irect.q.y += isupport;
-        }
+        /* We therefore only need to render within irect. Restrict rrect to this. */
         if (penum->rrect.x < irect.p.x) {
             penum->rrect.w -= irect.p.x - penum->rrect.x;
             if (penum->rrect.w < 0)
@@ -432,18 +481,75 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
             if (penum->rrect.h < 0)
                 penum->rrect.h = 0;
         }
+        /* Need to expand the region to allow for the fact that the mitchell
+         * scaler reads multiple pixels in. */
+        /* If mi.{xx,yy} > 1 then we are downscaling. During downscaling,
+         * the support increases to ensure that we don't lose pixels contributions
+         * entirely. */
+        /* I do not understand the need for the +/- 1 fudge factors,
+         * but they seem to be required. Increasing the decode rectangle can
+         * never be bad at least... RJW */
+        {
+            float support = any_abs(mi.xx);
+            int isupport;
+            if (any_abs(mi.yy) > support)
+                support = any_abs(mi.yy);
+            if (any_abs(mi.xy) > support)
+                support = any_abs(mi.xy);
+            if (any_abs(mi.yx) > support)
+                support = any_abs(mi.yx);
+            isupport = (int)(MAX_ISCALE_SUPPORT * (support+1)) + 1;
+            irect.p.x -= isupport;
+            irect.p.y -= isupport;
+            irect.q.x += isupport;
+            irect.q.y += isupport;
+        }
+        if (penum->drect.x < irect.p.x) {
+            penum->drect.w -= irect.p.x - penum->drect.x;
+            if (penum->drect.w < 0)
+               penum->drect.w = 0;
+            penum->drect.x = irect.p.x;
+        }
+        if (penum->drect.x + penum->drect.w > irect.q.x) {
+            penum->drect.w = irect.q.x - penum->drect.x;
+            if (penum->drect.w < 0)
+                penum->drect.w = 0;
+        }
+        if (penum->drect.y < irect.p.y) {
+            penum->drect.h -= irect.p.y - penum->drect.y;
+            if (penum->drect.h < 0)
+                penum->drect.h = 0;
+            penum->drect.y = irect.p.y;
+        }
+        if (penum->drect.y + penum->drect.h > irect.q.y) {
+            penum->drect.h = irect.q.y - penum->drect.y;
+            if (penum->drect.h < 0)
+                penum->drect.h = 0;
+        }
         break; /* Out of the while */
     }
     /* Check for the intersection being null */
-    if (penum->rrect.x + penum->rrect.w <= penum->rect.x  ||
-        penum->rect.x  + penum->rect.w  <= penum->rrect.x ||
-        penum->rrect.y + penum->rrect.h <= penum->rect.y  ||
-        penum->rect.y  + penum->rect.h  <= penum->rrect.y)
+    if (penum->drect.x + penum->drect.w <= penum->rect.x  ||
+        penum->rect.x  + penum->rect.w  <= penum->drect.x ||
+        penum->drect.y + penum->drect.h <= penum->rect.y  ||
+        penum->rect.y  + penum->rect.h  <= penum->drect.y)
     {
           /* Something may have gone wrong with the floating point above.
            * set the region to something sane. */
-        penum->rrect.x = penum->rect.x;
-        penum->rrect.y = penum->rect.y;
+        penum->drect.x = penum->rect.x;
+        penum->drect.y = penum->rect.y;
+        penum->drect.w = 0;
+        penum->drect.h = 0;
+    }
+    if (penum->rrect.x + penum->rrect.w <= penum->drect.x  ||
+        penum->drect.x + penum->drect.w  <= penum->rrect.x ||
+        penum->rrect.y + penum->rrect.h <= penum->drect.y  ||
+        penum->drect.y + penum->drect.h  <= penum->rrect.y)
+    {
+          /* Something may have gone wrong with the floating point above.
+           * set the region to something sane. */
+        penum->rrect.x = penum->drect.x;
+        penum->rrect.y = penum->drect.y;
         penum->rrect.w = 0;
         penum->rrect.h = 0;
     }
@@ -514,6 +620,10 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
            eliminate the 256 bytes for the >8bpp image enumerator */
         penum->clues = (gx_image_clue*) gs_alloc_bytes(mem, sizeof(gx_image_clue)*256,
                              "gx_image_enum_begin");
+        if (penum->clues == NULL) {
+            code = gs_error_VMerror;
+            goto fail;
+        }
         penum->icolor0 = &(penum->clues[0].dev_color);
         penum->icolor1 = &(penum->clues[255].dev_color);
     } else {
@@ -522,8 +632,8 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
     }
     if (masked) {       /* This is imagemask. */
         if (bps != 1 || pcs != NULL || penum->alpha || decode[0] == decode[1]) {
-            gs_free_object(mem, penum, "gx_default_begin_image");
-            return_error(gs_error_rangecheck);
+            code = gs_error_rangecheck;
+            goto fail;
         }
         /* Initialize color entries 0 and 255. */
         set_nonclient_dev_color(penum->icolor0, gx_no_color_index);
@@ -542,8 +652,8 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
 
         spp = cs_num_components(pcs);
         if (spp < 0) {          /* Pattern not allowed */
-            gs_free_object(mem, penum, "gx_default_begin_image");
-            return_error(gs_error_rangecheck);
+            code = gs_error_rangecheck;
+            goto fail;
         }
         if (penum->alpha)
             ++spp;
@@ -563,33 +673,38 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
         if (pcs->cmm_icc_profile_data != NULL) {
             device_color = false;
         } else {
-            device_color = (*pcst->concrete_space) (pcs, pis) == pcs;
+            device_color = (*pcst->concrete_space) (pcs, pgs) == pcs;
         }
 
-        code = image_init_colors(penum, bps, spp, format, decode, pis, dev,
+        code = image_init_colors(penum, bps, spp, format, decode, pgs, dev,
                           pcs, &device_color);
-        if (code < 0) 
+        if (code < 0) {
+            gs_free_object(mem, penum->clues, "gx_image_enum_begin");
+            gs_free_object(mem, penum, "gx_default_begin_image");
             return gs_throw(code, "Image colors initialization failed");
+        }
         /* If we have a CIE based color space and the icc equivalent profile
            is not yet set, go ahead and handle that now.  It may already
            be done due to the above init_colors which may go through remap. */
         if (gs_color_space_is_PSCIE(pcs) && pcs->icc_equivalent == NULL) {
-            gs_colorspace_set_icc_equivalent((gs_color_space *)pcs, &(penum->icc_setup.is_lab),
-                                                pis->memory);
+            code = gs_colorspace_set_icc_equivalent((gs_color_space *)pcs, &(penum->icc_setup.is_lab),
+                                                pgs->memory);
+            if (code < 0)
+                goto fail;
             if (penum->icc_setup.is_lab) {
                 /* Free what ever profile was created and use the icc manager's
                    cielab profile */
                 gs_color_space *curr_pcs = (gs_color_space *)pcs;
                 rc_decrement(curr_pcs->icc_equivalent,"gx_image_enum_begin");
-                rc_decrement(curr_pcs->cmm_icc_profile_data,"gx_image_enum_begin");
-                curr_pcs->cmm_icc_profile_data = pis->icc_manager->lab_profile;
-                rc_increment(curr_pcs->cmm_icc_profile_data);
+                gsicc_adjust_profile_rc(curr_pcs->cmm_icc_profile_data, -1,"gx_image_enum_begin");
+                curr_pcs->cmm_icc_profile_data = pgs->icc_manager->lab_profile;
+                gsicc_adjust_profile_rc(curr_pcs->cmm_icc_profile_data, 1,"gx_image_enum_begin");
             }
         }
         /* Try to transform non-default RasterOps to something */
         /* that we implement less expensively. */
         if (!pim->CombineWithColor)
-            lop = rop3_know_T_0(lop) & ~lop_T_transparent;
+            lop = rop3_know_T_0(lop);
         else if ((rop3_uses_T(lop) && color_draws_b_w(dev, pdcolor) == 0))
             lop = rop3_know_T_0(lop);
 
@@ -650,8 +765,8 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
     bsize = ((bps > 8 ? width * 2 : width) + 15) * spp;
     buffer = gs_alloc_bytes(mem, bsize, "image buffer");
     if (buffer == 0) {
-        gs_free_object(mem, penum, "gx_default_begin_image");
-        return_error(gs_error_VMerror);
+        code = gs_error_VMerror;
+        goto fail;
     }
     penum->bps = bps;
     penum->unpack_bps = bps;
@@ -682,19 +797,19 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
      * the given sub-image, or else is constructing output out of
      * overlapping pieces.
      */
-    penum->interpolate = pim->Interpolate;
+    penum->interpolate = force_interpolation ? interp_force : pim->Interpolate ? interp_on : interp_off;
     penum->x_extent = x_extent;
     penum->y_extent = y_extent;
     penum->posture =
         ((x_extent.y | y_extent.x) == 0 ? image_portrait :
          (x_extent.x | y_extent.y) == 0 ? image_landscape :
          image_skewed);
-    penum->pis = pis;
+    penum->pgs = pgs;
     penum->pcs = pcs;
     penum->memory = mem;
     penum->buffer = buffer;
     penum->buffer_size = bsize;
-    penum->line = 0;
+    penum->line = NULL;
     penum->icc_link = NULL;
     penum->color_cache = NULL;
     penum->ht_buffer = NULL;
@@ -839,22 +954,53 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
     penum->y = 0;
     penum->used.x = 0;
     penum->used.y = 0;
+    if (penum->clip_image && pcpath) {  /* Set up the clipping device. */
+        gx_device_clip *cdev =
+            gs_alloc_struct(mem, gx_device_clip,
+                            &st_device_clip, "image clipper");
+
+        if (cdev == NULL) {
+            code = gs_error_VMerror;
+            goto fail;
+        }
+        gx_make_clip_device_in_heap(cdev, pcpath, dev, mem);
+        penum->clip_dev = cdev;
+        penum->dev = (gx_device *)cdev; /* Will restore this in a mo. Hacky! */
+    }
+    if (penum->use_rop) {       /* Set up the RasterOp source device. */
+        gx_device_rop_texture *rtdev;
+
+        code = gx_alloc_rop_texture_device(&rtdev, mem,
+                                           "image RasterOp");
+        if (code < 0)
+            goto fail;
+        /* The 'target' must not be NULL for gx_make_rop_texture_device */
+        if (!penum->clip_dev && !dev)
+            return_error(gs_error_undefined);
+
+        gx_make_rop_texture_device(rtdev,
+                                   (penum->clip_dev != 0 ?
+                                    (gx_device *) penum->clip_dev :
+                                    dev), lop, pdcolor);
+        gx_device_retain((gx_device *)rtdev, true);
+        penum->rop_dev = rtdev;
+        penum->dev = (gx_device *)rtdev; /* Will restore this in a mo. Hacky! */
+    }
     {
         static sample_unpack_proc_t procs[2][6] = {
         {   sample_unpack_1, sample_unpack_2,
             sample_unpack_4, sample_unpack_8,
-            0, 0
+            sample_unpack_12, sample_unpack_16
         },
         {   sample_unpack_1_interleaved, sample_unpack_2_interleaved,
             sample_unpack_4_interleaved, sample_unpack_8_interleaved,
-            0, 0
+            sample_unpack_12, sample_unpack_16
         }};
         int num_planes = penum->num_planes;
         bool interleaved = (num_planes == 1 && penum->plane_depths[0] != penum->bps);
+        irender_proc_t render_fn = NULL;
         int i;
 
-        procs[0][4] = procs[1][4] = sample_unpack_12_proc;
-        procs[0][5] = procs[1][5] = sample_unpack_16_proc;
         if (interleaved) {
             int num_components = penum->plane_depths[0] / penum->bps;
 
@@ -866,61 +1012,36 @@ gx_image_enum_begin(gx_device * dev, const gs_imager_state * pis,
             if (i == num_components)
                 interleaved = false; /* Use single table. */
         }
-        if (index_bps >= 4) {
-            if ((penum->unpack = procs[interleaved][index_bps]) == 0) {         /* bps case not supported. */
-                gx_default_end_image(dev,
-                                     (gx_image_enum_common_t *) penum,
-                                     false);
-                return_error(gs_error_rangecheck);
-            }
-        } else {
-            penum->unpack = procs[interleaved][index_bps];
-        }
+        penum->unpack = procs[interleaved][index_bps];
+
         if_debug1m('b', mem, "[b]unpack=%d\n", bps);
         /* Set up pixel0 for image class procedures. */
         penum->dda.pixel0 = penum->dda.strip;
-        for (i = 0; i < gx_image_class_table_count; ++i)
-            if ((penum->render = gx_image_class_table[i](penum)) != 0)
+        penum->skip_next_line = NULL;
+        for (i = 0; i < gx_image_class_table_count; ++i) {
+            code = gx_image_class_table[i](penum, &render_fn);
+            if (code < 0)
+                goto fail;
+
+            if (render_fn != NULL) {
+                penum->render = render_fn;
                 break;
+            }
+        }
+        penum->dev = dev; /* Restore this (in case it was changed to cdev or rtdev) */
         if (i == gx_image_class_table_count) {
             /* No available class can handle this image. */
-            gx_default_end_image(dev, (gx_image_enum_common_t *) penum,
-                                 false);
             return_error(gs_error_rangecheck);
         }
     }
-    if (penum->clip_image && pcpath) {  /* Set up the clipping device. */
-        gx_device_clip *cdev =
-            gs_alloc_struct(mem, gx_device_clip,
-                            &st_device_clip, "image clipper");
-
-        if (cdev == 0) {
-            gx_default_end_image(dev,
-                                 (gx_image_enum_common_t *) penum,
-                                 false);
-            return_error(gs_error_VMerror);
-        }
-        gx_make_clip_device_in_heap(cdev, pcpath, dev, mem);
-        penum->clip_dev = cdev;
-    }
-    if (penum->use_rop) {       /* Set up the RasterOp source device. */
-        gx_device_rop_texture *rtdev;
-
-        code = gx_alloc_rop_texture_device(&rtdev, mem,
-                                           "image RasterOp");
-        if (code < 0) {
-            gx_default_end_image(dev, (gx_image_enum_common_t *) penum,
-                                 false);
-            return code;
-        }
-        gx_make_rop_texture_device(rtdev,
-                                   (penum->clip_dev != 0 ?
-                                    (gx_device *) penum->clip_dev :
-                                    dev), lop, pdcolor);
-        gx_device_retain((gx_device *)rtdev, true);
-        penum->rop_dev = rtdev;
-    }
     return 0;
+
+fail:
+    gs_free_object(mem, buffer, "image buffer");
+    gs_free_object(mem, penum->clues, "gx_image_enum_begin");
+    gs_free_object(mem, penum->clip_dev, "image clipper");
+    gs_free_object(mem, penum, "gx_begin_image1");
+    return code;
 }
 
 /* If a drawing color is black or white, return 0 or 1 respectively, */
@@ -1072,7 +1193,7 @@ image_init_color_cache(gx_image_enum * penum, int bps, int spp)
                     for (kk = 0; kk < num_des_comp; kk++) {
                         conc[kk] = gx_color_value_from_byte(psrc[kk]);
                     }
-                    cmap_transfer(&(conc[0]), penum->pis, penum->dev);
+                    cmap_transfer(&(conc[0]), penum->pgs, penum->dev);
                     for (kk = 0; kk < num_des_comp; kk++) {
                         psrc[kk] = gx_color_value_to_byte(conc[kk]);
                     }
@@ -1156,7 +1277,7 @@ image_init_color_cache(gx_image_enum * penum, int bps, int spp)
                 for (kk = 0; kk < num_des_comp; kk++) {
                     conc[kk] = gx_color_value_from_byte(byte_ptr[kk]);
                 }
-                cmap_transfer(&(conc[0]), penum->pis, penum->dev);
+                cmap_transfer(&(conc[0]), penum->pgs, penum->dev);
                 for (kk = 0; kk < num_des_comp; kk++) {
                     byte_ptr[kk] = gx_color_value_to_byte(conc[kk]);
                 }
@@ -1213,7 +1334,7 @@ image_init_clues(gx_image_enum * penum, int bps, int spp)
 static int
 image_init_colors(gx_image_enum * penum, int bps, int spp,
                   gs_image_format_t format, const float *decode /*[spp*2] */ ,
-                  const gs_imager_state * pis, gx_device * dev,
+                  const gs_gstate * pgs, gx_device * dev,
                   const gs_color_space * pcs, bool * pdcb)
 {
     int ci, decode_type, code;
@@ -1306,20 +1427,23 @@ image_init_colors(gx_image_enum * penum, int bps, int spp,
             for (i = 15 - step; i > 0; i -= step)
                 pmap->decode_lookup[i] = pmap->decode_base +
                     i * (255.0 / 15) * pmap->decode_factor;
-        } else
+            pmap->inverted = 0;
+        } else {
             pmap->decoding = sd_compute;
+            pmap->inverted = 0;
+        }
         if (spp == 1) {         /* and ci == 0 *//* Pre-map entries 0 and 255. */
             gs_client_color cc;
 
             /* Image clues are used in this case */
             cc.paint.values[0] = real_decode[0];
             code = (*pcs->type->remap_color) (&cc, pcs, penum->icolor0,
-                                       pis, dev, gs_color_select_source);
+                                       pgs, dev, gs_color_select_source);
             if (code < 0) 
                 return code;
             cc.paint.values[0] = real_decode[1];
             code = (*pcs->type->remap_color) (&cc, pcs, penum->icolor1,
-                                       pis, dev, gs_color_select_source);
+                                       pgs, dev, gs_color_select_source);
             if (code < 0) 
                 return code;
         }
@@ -1376,12 +1500,12 @@ gx_image_scale_mask_colors(gx_image_enum *penum, int component_index)
 
 /* Used to indicate for ICC procesing if we have decoding to do */
 bool
-gx_has_transfer(const gs_imager_state *pis, int num_comps)
+gx_has_transfer(const gs_gstate *pgs, int num_comps)
 {
     int k;
 
     for (k = 0; k < num_comps; k++) {
-        if (pis->effective_transfer[k]->proc != gs_identity_transfer) {
+        if (pgs->effective_transfer[k]->proc != gs_identity_transfer) {
             return(true);
         }
     }

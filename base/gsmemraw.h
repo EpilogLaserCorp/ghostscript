@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -55,15 +55,13 @@ typedef struct gs_memory_status_s {
      * plus overhead.
      */
     ulong used;
+    ulong max_used;
     /* used when wrapping if underlying allocator must be thread safe */
     bool is_thread_safe;
 } gs_memory_status_t;
 
 /* Define the abstract type for the memory manager. */
-#ifndef gs_raw_memory_t_DEFINED
-#define gs_raw_memory_t_DEFINED
 typedef struct gs_raw_memory_s gs_raw_memory_t;
-#endif
 
 /* Define the procedures for raw memory management.  Memory managers have no
  * standard constructor: each implementation defines its own, and is

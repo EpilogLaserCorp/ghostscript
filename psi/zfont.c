@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -41,7 +41,7 @@ static int setup_unicode_decoder(i_ctx_t *i_ctx_p, ref *Decoding);
 bool
 zfont_mark_glyph_name(const gs_memory_t *mem, gs_glyph glyph, void *ignore_data)
 {
-    return (glyph >= gs_c_min_std_encoding_glyph || glyph == gs_no_glyph ? false :
+    return (glyph >= gs_c_min_std_encoding_glyph || glyph == GS_NO_GLYPH ? false :
             name_mark_index(mem, (uint) glyph));
 }
 
@@ -67,8 +67,8 @@ zfont_init(i_ctx_t *i_ctx_p)
         return gs_error_VMerror;
     ifont_dir->ccache.mark_glyph = zfont_mark_glyph_name;
     ifont_dir->global_glyph_code = zfont_global_glyph_code;
-    return gs_register_struct_root(imemory, NULL, (void **)&ifont_dir,
-                                   "ifont_dir");
+    return gs_register_struct_root(imemory, &imemory->gs_lib_ctx->font_dir_root,
+        (void **)&ifont_dir, "ifont_dir");
 }
 
 /* <font> <scale> scalefont <new_font> */
@@ -454,7 +454,6 @@ font_restore(const alloc_save_t * save)
 
     gs_memory_t *smem = gs_save_any_memory(save);
     gs_font_dir *pdir = smem->gs_lib_ctx->font_dir;
-    const gs_memory_t *mem = 0;
     int code;
 
     if (pdir == 0)		/* not initialized yet */
@@ -469,7 +468,6 @@ otop:
         for (pfont = pdir->orig_fonts; pfont != 0;
              pfont = pfont->next
             ) {
-            mem = pfont->memory;
             if (alloc_is_since_save((char *)pfont, save)) {
                 code = gs_purge_font(pfont);
                 if (code < 0)
@@ -598,6 +596,9 @@ zfont_info(gs_font *font, const gs_point *pscale, int members,
         info->members |= FONT_INFO_FULL_NAME;
     if ((members & FONT_INFO_EMBEDDING_RIGHTS)
         && (dict_find_string(pfontinfo, "FSType", &pvalue) > 0)) {
+        if (r_type(pvalue) != t_integer)
+            return gs_note_error(gs_error_typecheck);
+
         info->EmbeddingRights = pvalue->value.intval;
         info->members |= FONT_INFO_EMBEDDING_RIGHTS;
     }

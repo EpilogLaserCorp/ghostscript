@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -21,6 +21,7 @@
 #  define gxmclip_INCLUDED
 
 #include "gxclip.h"
+#include "gxdevmem.h"
 
 /*
  * ImageType 3 images and Patterns that don't completely fill their
@@ -34,9 +35,9 @@
  * stack frame.
  */
 
-#define tile_clip_buffer_request 16384	/* enough for 2400 dpi up to 54" wide */
+#define tile_clip_buffer_request 32768	/* enough for 2400 dpi up to 109" wide */
 #define tile_clip_buffer_size\
-  ((tile_clip_buffer_request / arch_sizeof_long) * arch_sizeof_long)
+  ((tile_clip_buffer_request / ARCH_SIZEOF_LONG) * ARCH_SIZEOF_LONG)
 typedef struct gx_device_mask_clip_s {
     gx_device_forward_common;	/* target is set by client */
     gx_strip_bitmap tiles;
@@ -46,7 +47,7 @@ typedef struct gx_device_mask_clip_s {
     /* Ensure that the buffer is long-aligned. */
     union _b {
         byte bytes[tile_clip_buffer_size];
-        ulong longs[tile_clip_buffer_size / arch_sizeof_long];
+        ulong longs[tile_clip_buffer_size / ARCH_SIZEOF_LONG];
     } buffer;
 } gx_device_mask_clip;
 

@@ -22,12 +22,6 @@
 
 ******************************************************************************/
 
-/* Configuration management identification */
-#ifndef lint
-static const char
-  cm_id[] = "@(#)$Id: eprnfs.c,v 1.6 2001/05/01 07:02:01 Martin Rel $";
-#endif
-
 /*****************************************************************************/
 
 #ifndef _XOPEN_SOURCE
@@ -255,7 +249,7 @@ static void split_Gray(eprn_OctetString *line, eprn_OctetString *next_line,
 
     /* Distribute the approximation over the bit planes */
     for (plane = 0; plane < planes; plane++) {
-      *ptr[plane] = (*ptr[plane] << 1) | approx & 0x01;
+      *ptr[plane] = (*ptr[plane] << 1) | (approx & 0x01);
       approx >>= 1;
     }
 
@@ -527,7 +521,7 @@ static void split_colour(eprn_OctetString *line, eprn_OctetString *next_line,
     plane = 0;
     for (colorant = last_colorant; colorant >= 0; colorant--) {
       while (plane < next_plane[colorant]) {
-        *ptr[plane] = (*ptr[plane] << 1) | approx[colorant] & 0x01;
+        *ptr[plane] = (*ptr[plane] << 1) | (approx[colorant] & 0x01);
         approx[colorant] >>= 1;
         plane++;
       }

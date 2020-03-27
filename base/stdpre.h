@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -18,6 +18,15 @@
 
 #ifndef stdpre_INCLUDED
 #  define stdpre_INCLUDED
+
+/* We do not use FILE * as a rule. Instead we use gp_file * and
+ * gp_ prefixed versions of fgetc, fread, fwrite, fseek, ftell
+ * fclose, etc.
+ */
+#ifndef gp_file_DEFINED
+#  define gp_file_DEFINED
+typedef struct gp_file_s gp_file;
+#endif
 
 /* if we define _LARGEFILE64_SOURCE zlib tries to include unistd.h */
 #ifndef _MSC_VER
@@ -93,20 +102,54 @@
 #  define volatile		/* */
 #endif
 
-/* Disable 'inline' if the compiler can't handle it. */
-#ifdef __DECC
-#  undef inline
-#  define inline __inline
+/* restrict is standard in C99, but not in all C++ compilers. */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ == 199901L /* C99 */
+# if defined(HAVE_RESTRICT) && HAVE_RESTRICT==1
+#  define gs_restrict restrict
+# else /* defined(HAVE_RESTRICT) && HAVE_RESTRICT==1 */
+#  define gs_restrict
+# endif /* defined(HAVE_RESTRICT) && HAVE_RESTRICT==1 */
+#elif defined(_MSC_VER) && _MSC_VER >= 1500 /* MSVC 9 or newer */
+# define gs_restrict __restrict
+#elif __GNUC__ >= 3 /* GCC 3 or newer */
+# if defined(HAVE_RESTRICT) && HAVE_RESTRICT==1
+#  define gs_restrict __restrict
+# else /* defined(HAVE_RESTRICT) && HAVE_RESTRICT==1 */
+#  define gs_restrict
+# endif /* defined(HAVE_RESTRICT) && HAVE_RESTRICT==1 */
+#else /* Unknown or ancient */
+# define gs_restrict
+#endif
+
+
+
+/* Ensure we have a definition of 'inline', even if that means
+ * disabling it if the compiler can't handle it. */
+#ifdef __cplusplus
+ /* inline will already be defined within C++ */
+#elif defined (__STDC_VERSION_) && (__STDC_VERSION__ >= 199901L)
+ /* inline will already be defined within C99 */
+#elif defined(_MSC_VER) && (_MSC_VER >= 1500) /* MSVC 9 or newer */
+ #define inline __inline
+#elif defined(__GNUC__) && (__GNUC__ >= 3) /* GCC 3 or newer */
+ /* Define inline as __inline__ so -pedantic won't produce a warning. */
+ #undef inline
+ #define inline __inline__
+#elif defined(__DECC)
+ #undef inline
+ #define inline __inline
+#elif !(defined(__MWERKS__) || defined(inline))
+ /* Unknown or ancient - disable it */
+ #define inline
+#endif
+
+/* Define ourselves a 'forceinline' we can use to more forcefully
+ * tell the compiler to inline something. On all but MSVC this can
+ * drop back to inline. */
+#ifdef _MSC_VER
+#define forceinline __forceinline
 #else
-#  ifdef __GNUC__
-/* Define inline as __inline__ so -pedantic won't produce a warning. */
-#    undef inline
-#    define inline __inline__
-#  else
-#    if !(defined(__MWERKS__) || defined(inline))
-#      define inline		/* */
-#    endif
-#  endif
+#define forceinline inline
 #endif
 
 /*
@@ -259,6 +302,9 @@ typedef unsigned short ushort;
 typedef unsigned int uint;
 typedef unsigned long ulong;
 
+/* And for signed char */
+typedef signed char schar;
+
 /* Since sys/types.h may define one or more of these (depending on
  * the platform), we have to take steps to prevent name clashes.
  * Unfortunately this can clobber valid definitions for the size-
@@ -273,12 +319,14 @@ typedef unsigned long ulong;
 #define uint uint_
 #define ushort ushort_
 #define ulong ulong_
+#define schar schar_
 #include <sys/types.h>
 #undef bool
 #undef uchar
 #undef uint
 #undef ushort
 #undef ulong
+#undef schar
 
 /*
  * Define a Boolean type.  Even though we would like it to be
@@ -302,12 +350,21 @@ typedef int bool;
  * an enum in the (MacOS) Universal Interfaces. The only way around this is to escape
  * our own definitions wherever MacTypes.h is included.
  */
+#if defined(_MSC_VER) && _MSC_VER >= 1900
+/* VS 2014 defines bool already, but has it as _Bool (a 1 byte thing).
+ * We can't live with that. */
+#undef false
+#define false ((bool)0)
+#undef true
+#define true ((bool)1)
+#else
 #ifndef __MACOS__
 #undef false
 #define false ((bool)0)
 #undef true
 #define true ((bool)1)
 #endif /* __MACOS__ */
+#endif
 
 /*
  * Compilers disagree as to whether macros used in macro arguments
@@ -393,16 +450,6 @@ typedef const char *ptr_ord_t;
 typedef const char *client_name_t;
 /****** WHAT TO DO ABOUT client_name_string ? ******/
 #define client_name_string(cname) (cname)
-
-/*
- * Define the now-deprecated Pn macros for pre-ANSI compiler compatibility.
- * The double-inclusion check is replicated here because of the way that
- * jconfig.h is constructed.
- */
-#ifndef stdpn_INCLUDED
-#  define stdpn_INCLUDED
-#include "stdpn.h"
-#endif /* stdpn_INCLUDED */
 
 /*
  * Define success and failure codes for 'exit'.  The only system on which

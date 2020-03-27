@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -305,9 +305,9 @@ s_CFD_process(stream_state * st, stream_cursor_read * pr,
         (void)rlimit;
         if_debug8m('w', ss->memory,
                    "[w]CFD_process top: eol_count=%d, k_left=%d, rows_left=%d\n"
-                   "    bits=0x%lx, bits_left=%d, read %u, wrote %u%s\n",
+                   "    bits="PRI_INTPTR", bits_left=%d, read %u, wrote %u%s\n",
                    eol_count, k_left, rows_left,
-                   (ulong) bits, bits_left,
+                   (intptr_t) bits, bits_left,
                    (uint) (p - rstart), (uint) (pw->ptr - wstart),
                    (ss->skipping_damage ? ", skipping damage" : ""));
     }
@@ -469,6 +469,8 @@ ck_eol:
   out:ss->k_left = k_left;
     ss->rows_left = rows_left;
     ss->eol_count = eol_count;
+    if (ss->ErrsAsEOD && status < 0)
+        return EOFC;
     return status;
 }
 
@@ -801,7 +803,7 @@ rlen_lt_zero:
             /* Remember that count counts *down*. */
             prev_count += rlen - vertical_0;	/* a1 */
             if_debug2m('W', ss->memory, " vertical %d -> %d\n",
-                      rlen - vertical_0, prev_count);
+                       (int)(rlen - vertical_0), prev_count);
         }
         /* Now either invert or skip from count */
         /* to prev_count, and reset count. */

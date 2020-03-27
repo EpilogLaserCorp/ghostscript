@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -82,8 +82,7 @@ pcl_invert_mtx(const gs_matrix * pmtx1, gs_matrix * pmtx2)
  * prect1 and prect2 may point to the same rectangle.
  */
 void
-pcl_transform_rect(const gs_memory_t * mem,
-                   const gs_rect * prect1,
+pcl_transform_rect(const gs_rect * prect1,
                    gs_rect * prect2, const gs_matrix * pmtx)
 {
     gs_point_transform(prect1->p.x, prect1->p.y, pmtx, &(prect2->p));
@@ -283,17 +282,18 @@ pcl_xfm_gl_set_pat_ref_pt(pcl_state_t * pcs)
 static int
 set_pat_ref_pt(pcl_args_t * pargs, pcl_state_t * pcs)
 {
+    int code = 0;
     uint rotate = uint_arg(pargs);
 
     if (rotate <= 1) {
-        pcl_break_underline(pcs);
+        code = pcl_break_underline(pcs);
         gs_point_transform((double) pcs->cap.x,
                            (double) pcs->cap.y,
                            &(pcs->xfm_state.pd2lp_mtx), &(pcs->pcl_pat_ref_pt)
             );
         pcs->rotate_patterns = (rotate == 0);
     }
-    return 0;
+    return code;
 }
 
 /*

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -93,7 +93,7 @@ static int
 xps_true_callback_string_proc(gs_font_type42 *p42, ulong offset, uint length, const byte **pdata)
 {
     xps_font_t *font = p42->client_data;
-    if (offset < 0 || offset + length > font->length)
+    if (offset + length > font->length)
     {
         *pdata = NULL;
         return gs_throw2(-1, "font data access out of bounds (offset=%lu size=%u)", offset, length);
@@ -102,28 +102,34 @@ xps_true_callback_string_proc(gs_font_type42 *p42, ulong offset, uint length, co
     return 0;
 }
 
-static gs_char xps_last_char = GS_NO_CHAR; /* same hack as in PCL */
-
 static gs_glyph
 xps_true_callback_encode_char(gs_font *pfont, gs_char chr, gs_glyph_space_t spc)
 {
     xps_font_t *font = pfont->client_data;
     int value;
-    xps_last_char = chr; /* save the char we're encoding for the decode_glyph hack */
+
     value = xps_encode_font_char(font, chr);
     if (value == 0)
-        return gs_no_glyph;
+        return GS_NO_GLYPH;
     return value;
 }
 
-static gs_char
-xps_true_callback_decode_glyph(gs_font *pfont, gs_glyph glyph, int ch)
+static int
+xps_true_callback_decode_glyph(gs_font *pfont, gs_glyph glyph, int ch, ushort *unicode_return, unsigned int length)
 {
-    /* We should do a reverse cmap lookup here to match PS/PDF.
-     * However, a complete rearchitecture of our text and font processing
-     * would be necessary to match XPS unicode mapping with the
-     * cluster maps. Alas, we cheat similarly to PCL. */
-    return xps_last_char;
+    xps_font_t *font = pfont->client_data;
+    char *ur = (char *)unicode_return;
+    int u;
+
+    if (length == 0)
+        return 2;
+    u = xps_decode_font_char(font, glyph);
+    /* Unfortunate assumptions in the pdfwrite code mea that we have to return the
+     * value as a big-endian short, no matter what platform we are on
+     */
+    ur[1] = u & 0xff;
+    ur[0] = u >> 8;
+    return 2;
 }
 
 static int
@@ -135,15 +141,19 @@ xps_true_callback_glyph_name(gs_font *pfont, gs_glyph glyph, gs_const_string *ps
     int table_offset;
 
     ulong format;
-    uint numGlyphs;
+    int numGlyphs;
     uint glyph_name_index;
     const byte *postp; /* post table pointer */
+
+    if (glyph >= GS_MIN_GLYPH_INDEX) {
+        glyph -= GS_MIN_GLYPH_INDEX;
+    }
 
     /* guess if the font type is not truetype */
     if ( pfont->FontType != ft_TrueType )
     {
         glyph -= 29;
-        if ( glyph >= 0 && glyph < 258 )
+        if (glyph < 258 )
         {
             pstr->data = (byte*) pl_mac_names[glyph];
             pstr->size = strlen((char*)pstr->data);
@@ -181,14 +191,26 @@ xps_true_callback_glyph_name(gs_font *pfont, gs_glyph glyph, gs_const_string *ps
         /* Invent a name if we don't know the table format. */
         char buf[32];
         gs_sprintf(buf, "glyph%d", (int)glyph);
-        pstr->data = (byte*)buf;
-        pstr->size = strlen((char*)pstr->data);
+
+        /* Ugly hackery. see comment below, after 'not mac' this ends up as a memory leak.
+         * The PostScript interpreter adds the strings it creates to the PostScript name table
+         * which is cleared and freed at EOJ. Presumably because these functions were
+         * written with PostScript in mind, there is no provision for there not to be a
+         * persistent copy of the name data, so we have to make one, which means it leaks.
+         */
+        pstr->size = strlen(buf);
+        pstr->data = gs_alloc_bytes(pfont->memory, pstr->size + 1, "glyph to name");
+        if ( pstr->data == 0 )
+            return -1;
+
+        memset((byte *)pstr->data, 0x00, pstr->size + 1);
+        memcpy((byte *)pstr->data, buf, pstr->size);
         return 0;
     }
 
     /* skip over the post header */
-    numGlyphs = u16(postp + 32);
-    if ( glyph < 0 || glyph > numGlyphs - 1)
+    numGlyphs = (int)u16(postp + 32);
+    if ((int)glyph > numGlyphs - 1)
     {
         return gs_throw1(-1, "glyph index %lu out of range", (ulong)glyph);
     }
@@ -197,7 +219,7 @@ xps_true_callback_glyph_name(gs_font *pfont, gs_glyph glyph, gs_const_string *ps
     glyph_name_index = u16(postp + 34 + (glyph * 2));
 
     /* this shouldn't happen */
-    if ( glyph_name_index < 0 && glyph_name_index > 0x7fff )
+    if ( glyph_name_index > 0x7fff )
         return gs_throw(-1, "post table format error");
 
     /* mac easy */
@@ -254,7 +276,7 @@ xps_true_callback_glyph_name(gs_font *pfont, gs_glyph glyph, gs_const_string *ps
 }
 
 static int
-xps_true_callback_build_char(gs_show_enum *penum, gs_state *pgs, gs_font *pfont,
+xps_true_callback_build_char(gs_show_enum *penum, gs_gstate *pgs, gs_font *pfont,
         gs_char chr, gs_glyph glyph)
 {
     gs_font_type42 *p42 = (gs_font_type42*)pfont;
@@ -375,7 +397,7 @@ xps_init_truetype_font(xps_context_t *ctx, xps_font_t *font)
         p42->procs.build_char = xps_true_callback_build_char;
 
         memset(p42->font_name.chars, 0, sizeof(p42->font_name.chars));
-        xps_load_sfnt_name(font, (char*)p42->font_name.chars);
+        xps_load_sfnt_name(font, (char*)p42->font_name.chars, sizeof(p42->font_name.chars));
         p42->font_name.size = strlen((char*)p42->font_name.chars);
 
         memset(p42->key_name.chars, 0, sizeof(p42->key_name.chars));

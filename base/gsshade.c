@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -24,7 +24,7 @@
 #include "gxcpath.h"
 #include "gxcspace.h"
 #include "gxdcolor.h"		/* for filling background rectangle */
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gxpaint.h"
 #include "gxpath.h"
 #include "gxshade.h"
@@ -38,7 +38,6 @@
 
 /* GC descriptors */
 private_st_shading();
-private_st_shading_mesh();
 
 static
 ENUM_PTRS_WITH(shading_mesh_enum_ptrs, gs_shading_mesh_t *psm)
@@ -156,8 +155,7 @@ mesh_shading_params_init(gs_shading_mesh_params_t *params)
 }
 
 /* Allocate and initialize a shading. */
-/* Free variables: mem, params, ppsh, psh. */
-#define ALLOC_SHADING(sttype, stype, sprocs, cname)\
+#define ALLOC_SHADING(ppsh, psh, mem, sttype, stype, sprocs, cname, params)\
   BEGIN\
     psh = gs_alloc_struct(mem, void, sttype, cname);\
     if ( psh == 0 )\
@@ -200,8 +198,8 @@ gs_shading_Fb_init(gs_shading_t ** ppsh,
         (code = gs_matrix_invert(&params->Matrix, &imat)) < 0
         )
         return code;
-    ALLOC_SHADING(&st_shading_Fb, shading_type_Function_based,
-                  shading_Fb_procs, "gs_shading_Fb_init");
+    ALLOC_SHADING(ppsh, psh, mem, &st_shading_Fb, shading_type_Function_based,
+                  shading_Fb_procs, "gs_shading_Fb_init", params);
     return 0;
 }
 
@@ -235,8 +233,8 @@ gs_shading_A_init(gs_shading_t ** ppsh,
 
     if (code < 0)
         return code;
-    ALLOC_SHADING(&st_shading_A, shading_type_Axial,
-                  shading_A_procs, "gs_shading_A_init");
+    ALLOC_SHADING(ppsh, psh, mem, &st_shading_A, shading_type_Axial,
+                  shading_A_procs, "gs_shading_A_init", params);
     return 0;
 }
 
@@ -265,17 +263,18 @@ gs_shading_R_init(gs_shading_t ** ppsh,
                   const gs_shading_R_params_t * params, gs_memory_t * mem)
 {
     gs_shading_R_t *psh;
-    int code = check_CBFD((const gs_shading_params_t *)params,
+    int code;
+
+    if (params == NULL || params->Domain[0] == params->Domain[1] ||
+        params->Coords[2] < 0 || params->Coords[5] < 0)
+        return_error(gs_error_rangecheck);
+    code = check_CBFD((const gs_shading_params_t *)params,
                           params->Function, params->Domain, 1);
 
     if (code < 0)
         return code;
-    if ((params->Domain != 0 && params->Domain[0] == params->Domain[1]) ||
-        params->Coords[2] < 0 || params->Coords[5] < 0
-        )
-        return_error(gs_error_rangecheck);
-    ALLOC_SHADING(&st_shading_R, shading_type_Radial,
-                  shading_R_procs, "gs_shading_R_init");
+    ALLOC_SHADING(ppsh, psh, mem, &st_shading_R, shading_type_Radial,
+                  shading_R_procs, "gs_shading_R_init", params);
     return 0;
 }
 
@@ -308,8 +307,8 @@ gs_shading_FfGt_init(gs_shading_t ** ppsh,
         return code;
     if (bpf < 0)
         return bpf;
-    ALLOC_SHADING(&st_shading_FfGt, shading_type_Free_form_Gouraud_triangle,
-                  shading_FfGt_procs, "gs_shading_FfGt_init");
+    ALLOC_SHADING(ppsh, psh, mem, &st_shading_FfGt, shading_type_Free_form_Gouraud_triangle,
+                  shading_FfGt_procs, "gs_shading_FfGt_init", params);
     psh->params.BitsPerFlag = bpf;
     return 0;
 }
@@ -341,8 +340,8 @@ gs_shading_LfGt_init(gs_shading_t ** ppsh,
         return code;
     if (params->VerticesPerRow < 2)
         return_error(gs_error_rangecheck);
-    ALLOC_SHADING(&st_shading_LfGt, shading_type_Lattice_form_Gouraud_triangle,
-                  shading_LfGt_procs, "gs_shading_LfGt_init");
+    ALLOC_SHADING(ppsh, psh, mem, &st_shading_LfGt, shading_type_Lattice_form_Gouraud_triangle,
+                  shading_LfGt_procs, "gs_shading_LfGt_init", params);
     return 0;
 }
 
@@ -374,8 +373,8 @@ gs_shading_Cp_init(gs_shading_t ** ppsh,
         return code;
     if (bpf < 0)
         return bpf;
-    ALLOC_SHADING(&st_shading_Cp, shading_type_Coons_patch,
-                  shading_Cp_procs, "gs_shading_Cp_init");
+    ALLOC_SHADING(ppsh, psh, mem, &st_shading_Cp, shading_type_Coons_patch,
+                  shading_Cp_procs, "gs_shading_Cp_init", params);
     psh->params.BitsPerFlag = bpf;
     return 0;
 }
@@ -408,8 +407,8 @@ gs_shading_Tpp_init(gs_shading_t ** ppsh,
         return code;
     if (bpf < 0)
         return bpf;
-    ALLOC_SHADING(&st_shading_Tpp, shading_type_Tensor_product_patch,
-                  shading_Tpp_procs, "gs_shading_Tpp_init");
+    ALLOC_SHADING(ppsh, psh, mem, &st_shading_Tpp, shading_type_Tensor_product_patch,
+                  shading_Tpp_procs, "gs_shading_Tpp_init", params);
     psh->params.BitsPerFlag = bpf;
     return 0;
 }
@@ -444,9 +443,9 @@ gs_shading_path_add_box(gx_path *ppath, const gs_rect *pbox,
 int
 gs_shading_do_fill_rectangle(const gs_shading_t *psh,
                      const gs_fixed_rect *prect, gx_device *dev,
-                     gs_imager_state *pis, bool fill_background)
+                     gs_gstate *pgs, bool fill_background)
 {   /* If you need to fill a path, clip the output device before calling this function. */
-    const gs_matrix_fixed *pmat = &pis->ctm;
+    const gs_matrix_fixed *pmat = &pgs->ctm;
     gs_fixed_rect path_box;
     gs_rect path_rect;
     gs_rect rect;
@@ -462,20 +461,21 @@ gs_shading_do_fill_rectangle(const gs_shading_t *psh,
 
         cc = *psh->params.Background;
         (*pcs->type->restrict_color)(&cc, pcs);
-        code = (*pcs->type->remap_color)(&cc, pcs, &dev_color, pis,
+        code = (*pcs->type->remap_color)(&cc, pcs, &dev_color, pgs,
                                          dev, gs_color_select_texture);
 
         /****** WRONG IF NON-IDEMPOTENT RasterOp ******/
         if (code >= 0)
-            code = gx_shade_background(dev, &path_box, &dev_color, pis->log_op);
+            code = gx_shade_background(dev, &path_box, &dev_color, pgs->log_op);
     }
     if (code >= 0) {
         path_rect.p.x = fixed2float(path_box.p.x);
         path_rect.p.y = fixed2float(path_box.p.y);
         path_rect.q.x = fixed2float(path_box.q.x);
         path_rect.q.y = fixed2float(path_box.q.y);
-        gs_bbox_transform_inverse(&path_rect, (const gs_matrix *)pmat, &rect);
-        code = gs_shading_fill_rectangle(psh, &rect, &path_box, dev, pis);
+        code = gs_bbox_transform_inverse(&path_rect, (const gs_matrix *)pmat, &rect);
+        if (code >= 0)
+            code = gs_shading_fill_rectangle(psh, &rect, &path_box, dev, pgs);
     }
     return code;
 }

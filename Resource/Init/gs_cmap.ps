@@ -1,4 +1,4 @@
-% Copyright (C) 2001-2012 Artifex Software, Inc.
+% Copyright (C) 2001-2019 Artifex Software, Inc.
 % All Rights Reserved.
 %
 % This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 % of the license contained in the file LICENSE in this distribution.
 %
 % Refer to licensing information at http://www.artifex.com or contact
-% Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-% CA  94903, U.S.A., +1(415)492-9861, for further information.
+% Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+% CA 94945, U.S.A., +1(415)492-9861, for further information.
 %
 
 % ProcSet for implementing CMap resources.
@@ -74,7 +74,7 @@
     CMap /WMode .knownget { /WMode exch def } if
     /FontType 0 def
   pop pop currentdict end
-} bind odef
+} bind executeonly odef
 
 % composefont doesn't appear in CMap files -- it's documented in
 % the "PostScript Language Reference Manual Supplement".
@@ -118,7 +118,7 @@
 } bind def
 
 /endcmap {		% - endcmap -
-  .rewriteTempMapsNotDef
+  //.rewriteTempMapsNotDef exec
 
   CMAPDEBUG {
     2 (*** undefined charmap ***)
@@ -216,7 +216,7 @@
 } bind def
 /endrearrangedfont {	% - endrearrangedfont -
   (REARRANGED FONTS NOT IMPLEMENTED YET.) = flush
-  FontName .FontNames 0 get findfont end definefont pop
+  .FontName .FontNames 0 get findfont end definefont pop
 } bind def
 
 % ------ Character name/code selector operators ------ %
@@ -278,11 +278,12 @@
     3 -1 roll pop exch () exch
   } {
                         % Range.
-    dup 0 1 put dup 1 1 put
+    dup 0 4 index length put
+    dup 1 1 put
     4 2 roll
-    dup dup length 1 sub 0 exch getinterval 5 1 roll	% prefix
+    1 index dup length 1 sub 0 exch getinterval 5 1 roll	% prefix
                         % Stack: prefix value params code_lo code_hi
-    2 { exch dup length 1 sub 1 getinterval } repeat concatstrings
+    concatstrings
     3 -1 roll
   } ifelse
   .FontIndex
@@ -535,14 +536,16 @@ dup /DefineResource {
   } if
   dup /CodeMap .knownget { //null eq { .buildcmap } if } if
   /Generic /Category findresource /DefineResource get exec
-} bind put
+} bind executeonly put
 /Category defineresource pop
         % We might have loaded CID font support already.
-/CIDInit /ProcSet 2 copy { findresource } .internalstopped
+/CIDInit /ProcSet 2 copy { findresource } //.internalstopped exec
         % An interior `stopped' might have reset VM allocation to local.
 //true .setglobal
  { pop pop 3 -1 roll }
  { dup length 4 index length add dict .copydict 4 -1 roll exch .copydict }
 ifelse exch defineresource pop
+
+currentdict /.rewriteTempMapsNotDef .undef
 
 .setlanguagelevel

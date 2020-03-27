@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -23,6 +23,7 @@
 #include "gp.h"
 #include "gserrors.h"
 #include "stream.h"
+#include "assert_.h"
 
 #define DEFAULT_BUFFER_SIZE 2048
 const uint file_default_buffer_size = DEFAULT_BUFFER_SIZE;
@@ -63,8 +64,16 @@ file_open_stream(const char *fname, uint len, const char *file_access,
                  iodev_proc_fopen_t fopen_proc, gs_memory_t *mem)
 {
     int code;
-    FILE *file;
+    gp_file *file;
     char fmode[4];  /* r/w/a, [+], [b], null */
+
+#ifdef DEBUG
+    if (strlen(gp_fmode_binary_suffix) > 0) {
+        if (strchr(file_access, gp_fmode_binary_suffix[0]) != NULL)
+	    dmprintf(mem, "\nWarning: spurious 'b' character in file access mode\n");
+	assert(strchr(file_access, gp_fmode_binary_suffix[0]) == NULL);
+    }
+#endif
 
     if (!iodev)
         iodev = iodev_default(mem);
@@ -73,10 +82,17 @@ file_open_stream(const char *fname, uint len, const char *file_access,
         return code;
     if (fname == 0)
         return 0;
-    if (fname[0] == 0)		/* fopen_proc gets NUL terminated string, not len */
-        return 0;		/* so this is the same as len == 0, so return NULL */
+    if (fname[0] == 0) {        /* fopen_proc gets NUL terminated string, not len */
+                                /* so this is the same as len == 0, so return NULL */
+        /* discard the stuff we allocated to keep from accumulating stuff needing GC */
+        gs_free_object(mem, (*ps)->cbuf, "file_close(buffer)");
+        gs_free_object(mem, *ps, "file_prepare_stream(stream)");
+        *ps = NULL;
+
+        return 0;
+    }
     code = (*fopen_proc)(iodev, (char *)(*ps)->cbuf, fmode, &file,
-                         (char *)(*ps)->cbuf, (*ps)->bsize);
+                         (char *)(*ps)->cbuf, (*ps)->bsize, mem);
     if (code < 0) {
         /* discard the stuff we allocated to keep from accumulating stuff needing GC */
         gs_free_object(mem, (*ps)->cbuf, "file_close(buffer)");
@@ -84,7 +100,8 @@ file_open_stream(const char *fname, uint len, const char *file_access,
         *ps = NULL;
         return code;
     }
-    file_init_stream(*ps, file, fmode, (*ps)->cbuf, (*ps)->bsize);
+    if (file_init_stream(*ps, file, fmode, (*ps)->cbuf, (*ps)->bsize) != 0)
+        return_error(gs_error_ioerror);
     return 0;
 }
 
@@ -127,22 +144,22 @@ file_close_file(stream * s)
  * Set up a file stream on an OS file.  The caller has allocated the
  * stream and buffer.
  */
-void
-file_init_stream(stream *s, FILE *file, const char *fmode, byte *buffer,
+int
+file_init_stream(stream *s, gp_file *file, const char *fmode, byte *buffer,
                  uint buffer_size)
 {
     switch (fmode[0]) {
     case 'a':
-        sappend_file(s, file, buffer, buffer_size);
+        if (sappend_file(s, file, buffer, buffer_size) != 0)
+            return ERRC;
         break;
     case 'r':
         /* Defeat buffering for terminals. */
         {
-            struct stat rstat;
-
-            fstat(fileno(file), &rstat);
-            sread_file(s, file, buffer,
-                       (S_ISCHR(rstat.st_mode) ? 1 : buffer_size));
+            int char_buffered = gp_file_is_char_buffered(file);
+            if (char_buffered < 0)
+                return char_buffered;
+            sread_file(s, file, buffer, char_buffered ? 1 : buffer_size);
         }
         break;
     case 'w':
@@ -152,6 +169,7 @@ file_init_stream(stream *s, FILE *file, const char *fmode, byte *buffer,
         s->file_modes |= s_mode_read | s_mode_write;
     s->save_close = s->procs.close;
     s->procs.close = file_close_file;
+    return 0;
 }
 
 /* Prepare a stream with a file name. */
@@ -179,8 +197,10 @@ file_prepare_stream(const char *fname, uint len, const char *file_access,
         return_error(gs_error_VMerror);
     /* Allocate the buffer. */
     buffer = gs_alloc_bytes(mem, buffer_size, "file_prepare_stream(buffer)");
-    if (buffer == 0)
+    if (buffer == 0) {
+        gs_free_object(mem, s, "file_prepare_stream");
         return_error(gs_error_VMerror);
+    }
     if (fname != 0) {
         memcpy(buffer, fname, len);
         buffer[len] = 0;	/* terminate string */

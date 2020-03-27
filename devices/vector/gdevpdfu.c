@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -51,7 +51,7 @@
 #include "gs_mgl_e.h"
 #include "gs_mro_e.h"
 
-extern single_glyph_list_t *SingleGlyphList;
+extern single_glyph_list_t SingleGlyphList[];
 
     /* Define the size of internal stream buffers. */
 /* (This is not a limitation, it only affects performance.) */
@@ -168,7 +168,7 @@ copy_ps_file_stripping_all(stream *s, const char *fname, bool HaveTrueTypes)
     int n, l = 0, m = sizeof(buf) - 1, outl = 0;
     bool skipping = false;
 
-    f = sfopen(fname, "rb", s->memory);
+    f = sfopen(fname, "r", s->memory);
     if (f == NULL)
         return_error(gs_error_undefinedfilename);
     n = sfread(buf, 1, m, f);
@@ -244,7 +244,7 @@ copy_ps_file_strip_comments(stream *s, const char *fname, bool HaveTrueTypes)
     int n, l = 0, m = sizeof(buf) - 1, outl = 0;
     bool skipping = false;
 
-    f = sfopen(fname, "rb", s->memory);
+    f = sfopen(fname, "r", s->memory);
     if (f == NULL)
         return_error(gs_error_undefinedfilename);
     n = sfread(buf, 1, m, f);
@@ -339,7 +339,7 @@ static int write_tt_encodings(stream *s, bool HaveTrueTypes)
 
     if (HaveTrueTypes) {
         char Buffer[256];
-        single_glyph_list_t *entry = (single_glyph_list_t *)&SingleGlyphList;
+        single_glyph_list_t *entry = SingleGlyphList;
 
         gs_sprintf(Buffer, "/AdobeGlyphList mark\n");
         stream_write(s, Buffer, strlen(Buffer));
@@ -394,6 +394,105 @@ encode(stream **s, const stream_template *t, gs_memory_t *mem)
 
 /* ------ Document ------ */
 
+/* Write out the arguments used to invoke GS as a comment in the PDF/PS
+ * file. We don't write out paths, passwords, or any unrecognised string
+ * parameters (all sanitised by the arg code) for privacy/security
+ * reasons. This routine is only called by the PDF linearisation code.
+ */
+int
+pdfwrite_fwrite_args_comment(gx_device_pdf *pdev, gp_file *f)
+{
+    const char * const *argv = NULL;
+    const char *arg;
+    int towrite, length, i, j, argc;
+
+    argc = gs_lib_ctx_get_args(pdev->memory->gs_lib_ctx, &argv);
+
+    gp_fwrite("%%Invocation:", 13, 1, f);
+    length = 12;
+    for (i=0;i < argc; i++) {
+        arg = argv[i];
+
+        if ((strlen(arg) + length) > 255) {
+            gp_fwrite("\n%%+ ", 5, 1, f);
+            length = 5;
+        } else {
+            gp_fwrite(" ", 1, 1, f);
+            length++;
+        }
+
+        if (strlen(arg) > 250)
+            towrite = 250;
+        else
+            towrite = strlen(arg);
+
+        length += towrite;
+
+        for (j=0;j < towrite;j++) {
+            if (arg[j] == 0x0A) {
+                gp_fwrite("<0A>", 4, 1, f);
+            } else {
+                if (arg[j] == 0x0D) {
+                    gp_fwrite("<0D>", 4, 1, f);
+                } else {
+                    gp_fwrite(&arg[j], 1, 1, f);
+                }
+            }
+        }
+    }
+    gp_fwrite("\n", 1, 1, f);
+    return 0;
+}
+
+/* Exactly the same as pdfwrite_fwrite_args_comment() above, but uses a stream
+ * instead of a gp_file *, because of course we aren't consistent.... This
+ * routine is called by the regular PDF or PS file output code.
+ */
+int
+pdfwrite_write_args_comment(gx_device_pdf *pdev, stream *s)
+{
+    const char * const *argv = NULL;
+    const char *arg;
+    int towrite, length, i, j, argc;
+
+    argc = gs_lib_ctx_get_args(pdev->memory->gs_lib_ctx, &argv);
+
+    stream_write(s, (byte *)"%%Invocation:", 13);
+    length = 12;
+    for (i=0;i < argc; i++) {
+        arg = argv[i];
+
+        if ((strlen(arg) + length) > 255) {
+            stream_write(s, (byte *)"\n%%+ ", 5);
+            length = 5;
+        } else {
+            stream_write(s, (byte *)" ", 1);
+            length++;
+        }
+
+        if (strlen(arg) > 250)
+            towrite = 250;
+        else
+            towrite = strlen(arg);
+
+        length += towrite;
+
+        for (j=0;j < towrite;j++) {
+            if (arg[j] == 0x0A) {
+                stream_write(s, (byte *)"<0A>", 4);
+            } else {
+                if (arg[j] == 0x0D) {
+                    stream_write(s, (byte *)"<0D>", 4);
+                } else {
+                    stream_write(s, (byte *)&arg[j], 1);
+                }
+            }
+        }
+    }
+    stream_write(s, (byte *)"\n", 1);
+    return 0;
+}
+
 int ps2write_dsc_header(gx_device_pdf * pdev, int pages)
 {
     stream *s = pdev->strm;
@@ -407,6 +506,7 @@ int ps2write_dsc_header(gx_device_pdf * pdev, int pages)
             stream_write(s, (byte *)"%!PS-Adobe-3.0 EPSF-3.0\n", 24);
         else
             stream_write(s, (byte *)"%!PS-Adobe-3.0\n", 15);
+        pdfwrite_write_args_comment(pdev, s);
         /* We need to calculate the document BoundingBox which is a 'high water'
          * mark derived from the BoundingBox of all the individual pages.
          */
@@ -553,6 +653,7 @@ pdfwrite_pdf_open_document(gx_device_pdf * pdev)
             pprintd2(s, "%%PDF-%d.%d\n", level / 10, level % 10);
             if (pdev->binary_ok)
                 stream_puts(s, "%\307\354\217\242\n");
+            pdfwrite_write_args_comment(pdev, s);
         }
     }
     /*
@@ -617,7 +718,7 @@ long pdf_obj_forward_ref(gx_device_pdf * pdev)
     long id = pdf_next_id(pdev);
     gs_offset_t pos = 0;
 
-    fwrite(&pos, sizeof(pos), 1, pdev->xref.file);
+    gp_fwrite(&pos, sizeof(pos), 1, pdev->xref.file);
     return id;
 }
 
@@ -628,7 +729,7 @@ pdf_obj_ref(gx_device_pdf * pdev)
     long id = pdf_next_id(pdev);
     gs_offset_t pos = pdf_stell(pdev);
 
-    fwrite(&pos, sizeof(pos), 1, pdev->xref.file);
+    gp_fwrite(&pos, sizeof(pos), 1, pdev->xref.file);
     return id;
 }
 
@@ -644,16 +745,16 @@ pdf_obj_ref(gx_device_pdf * pdev)
 long
 pdf_obj_mark_unused(gx_device_pdf *pdev, long id)
 {
-    FILE *tfile = pdev->xref.file;
-    int64_t tpos = gp_ftell_64(tfile);
+    gp_file *tfile = pdev->xref.file;
+    int64_t tpos = gp_ftell(tfile);
     gs_offset_t pos = 0;
 
-    if (gp_fseek_64 (tfile, ((int64_t)(id - pdev->FirstObjectNumber)) * sizeof(pos),
+    if (gp_fseek(tfile, ((int64_t)(id - pdev->FirstObjectNumber)) * sizeof(pos),
           SEEK_SET) != 0)
-          return gs_error_ioerror;
-    fwrite(&pos, sizeof(pos), 1, tfile);
-    if (gp_fseek_64(tfile, tpos, SEEK_SET) != 0)
-        return gs_error_ioerror;
+      return_error(gs_error_ioerror);
+    gp_fwrite(&pos, sizeof(pos), 1, tfile);
+    if (gp_fseek(tfile, tpos, SEEK_SET) != 0)
+      return_error(gs_error_ioerror);
     return 0;
 }
 
@@ -667,15 +768,15 @@ pdf_open_obj(gx_device_pdf * pdev, long id, pdf_resource_type_t type)
         id = pdf_obj_ref(pdev);
     } else {
         gs_offset_t pos = pdf_stell(pdev);
-        FILE *tfile = pdev->xref.file;
-        int64_t tpos = gp_ftell_64(tfile);
+        gp_file *tfile = pdev->xref.file;
+        int64_t tpos = gp_ftell(tfile);
 
-        if (gp_fseek_64 (tfile, ((int64_t)(id - pdev->FirstObjectNumber)) * sizeof(pos),
+        if (gp_fseek(tfile, ((int64_t)(id - pdev->FirstObjectNumber)) * sizeof(pos),
               SEEK_SET) != 0)
-              return gs_error_ioerror;
-        fwrite(&pos, sizeof(pos), 1, tfile);
-        if (gp_fseek_64(tfile, tpos, SEEK_SET) != 0)
-              return gs_error_ioerror;
+	  return_error(gs_error_ioerror);
+        gp_fwrite(&pos, sizeof(pos), 1, tfile);
+        if (gp_fseek(tfile, tpos, SEEK_SET) != 0)
+	  return_error(gs_error_ioerror);
     }
     if (pdev->ForOPDFRead && pdev->ProduceDSC) {
         switch(type) {
@@ -702,7 +803,7 @@ pdf_open_obj(gx_device_pdf * pdev, long id, pdf_resource_type_t type)
             case resourceCIDFont:
             case resourceFont:
                 /* Ought to write the font name here */
-                pprintld1(s, "%%%%BeginResource: font (PDF Font obj_%ld)\n", id);
+                pprintld1(s, "%%%%BeginResource: procset (PDF Font obj_%ld)\n", id);
                 break;
             case resourceCharProc:
                 pprintld1(s, "%%%%BeginResource: file (PDF CharProc obj_%ld)\n", id);
@@ -1295,7 +1396,7 @@ pdf_find_resource_by_resource_id(gx_device_pdf * pdev, pdf_resource_type_t rtype
 
     for (i = 0; i < NUM_RESOURCE_CHAINS; i++) {
         for (pres = pchain[i]; pres != 0; pres = pres->next) {
-            if (pres->object->id == id)
+            if (pres->object && pres->object->id == id)
                 return pres;
         }
     }
@@ -1336,6 +1437,53 @@ pdf_find_same_resource(gx_device_pdf * pdev, pdf_resource_type_t rtype, pdf_reso
         }
     }
     return 0;
+}
+
+void
+pdf_drop_resource_from_chain(gx_device_pdf * pdev, pdf_resource_t *pres1, pdf_resource_type_t rtype)
+{
+    pdf_resource_t **pchain = pdev->resources[rtype].chains;
+    pdf_resource_t *pres;
+    pdf_resource_t **pprev = &pdev->last_resource;
+    int i;
+
+    /* since we're about to free the resource, we can just set
+       any of these references to null
+    */
+    for (i = 0; i < pdev->sbstack_size; i++) {
+        if (pres1 == pdev->sbstack[i].font3) {
+            pdev->sbstack[i].font3 = NULL;
+        }
+        else if (pres1 == pdev->sbstack[i].accumulating_substream_resource) {
+            pdev->sbstack[i].accumulating_substream_resource = NULL;
+        }
+        else if (pres1 == pdev->sbstack[i].pres_soft_mask_dict) {
+            pdev->sbstack[i].pres_soft_mask_dict = NULL;
+        }
+    }
+
+    for (; (pres = *pprev) != 0; pprev = &pres->prev)
+        if (pres == pres1) {
+            *pprev = pres->prev;
+            break;
+        }
+
+    for (i = (gs_id_hash(pres1->rid) % NUM_RESOURCE_CHAINS); i < NUM_RESOURCE_CHAINS; i++) {
+        pprev = pchain + i;
+        for (; (pres = *pprev) != 0; pprev = &pres->next)
+            if (pres == pres1) {
+                *pprev = pres->next;
+#if 0
+                if (pres->object) {
+                    COS_RELEASE(pres->object, "pdf_forget_resource");
+                    gs_free_object(pdev->pdf_memory, pres->object, "pdf_forget_resource");
+                    pres->object = 0;
+                }
+                gs_free_object(pdev->pdf_memory, pres, "pdf_forget_resource");
+#endif
+                return;
+            }
+    }
 }
 
 /* Drop resources by a condition. */
@@ -1696,8 +1844,8 @@ pdf_store_page_resources(gx_device_pdf *pdev, pdf_page_t *page, bool clear_usage
 }
 
 /* Copy data from a temporary file to a stream. */
-void
-pdf_copy_data(stream *s, FILE *file, gs_offset_t count, stream_arcfour_state *ss)
+int
+pdf_copy_data(stream *s, gp_file *file, gs_offset_t count, stream_arcfour_state *ss)
 {
     gs_offset_t r, left = count;
     byte buf[sbuf_size];
@@ -1705,47 +1853,45 @@ pdf_copy_data(stream *s, FILE *file, gs_offset_t count, stream_arcfour_state *ss
     while (left > 0) {
         uint copy = min(left, sbuf_size);
 
-        r = fread(buf, 1, copy, file);
+        r = gp_fread(buf, 1, copy, file);
         if (r < 1) {
-            gs_note_error(gs_error_ioerror);
-            return;
+            return gs_note_error(gs_error_ioerror);
         }
         if (ss)
             s_arcfour_process_buffer(ss, buf, copy);
         stream_write(s, buf, copy);
         left -= copy;
     }
+    return 0;
 }
 
 /* Copy data from a temporary file to a stream,
    which may be targetted to the same file. */
-void
-pdf_copy_data_safe(stream *s, FILE *file, gs_offset_t position, long count)
+int
+pdf_copy_data_safe(stream *s, gp_file *file, gs_offset_t position, long count)
 {
     long r, left = count;
 
     while (left > 0) {
         byte buf[sbuf_size];
         long copy = min(left, (long)sbuf_size);
-        int64_t end_pos = gp_ftell_64(file);
+        int64_t end_pos = gp_ftell(file);
 
-        if (gp_fseek_64(file, position + count - left, SEEK_SET) != 0) {
-            gs_note_error(gs_error_ioerror);
-            return;
+        if (gp_fseek(file, position + count - left, SEEK_SET) != 0) {
+            return_error(gs_error_ioerror);
         }
-        r = fread(buf, 1, copy, file);
+        r = gp_fread(buf, 1, copy, file);
         if (r < 1) {
-            gs_note_error(gs_error_ioerror);
-            return;
+            return_error(gs_error_ioerror);
         }
-        if (gp_fseek_64(file, end_pos, SEEK_SET) != 0) {
-            gs_note_error(gs_error_ioerror);
-            return;
+        if (gp_fseek(file, end_pos, SEEK_SET) != 0) {
+            return_error(gs_error_ioerror);
         }
         stream_write(s, buf, copy);
         sflush(s);
         left -= copy;
     }
+    return 0;
 }
 
 /* ------ Pages ------ */
@@ -1764,8 +1910,8 @@ pdf_page_id(gx_device_pdf * pdev, int page_num)
         pdf_page_t *new_pages;
 
         /* Maximum page in PDF is 2^31 - 1. Clamp to that limit here */
-        if (page_num > (1L << 31) - 11)
-            page_num = (1L << 31) - 11;
+        if (page_num > (1LU << 31) - 11)
+            page_num = (1LU << 31) - 11;
         new_num_pages = max(page_num + 10, pdev->num_pages << 1);
 
         new_pages = gs_resize_object(pdev->pdf_memory, pdev->pages, new_num_pages,
@@ -2127,19 +2273,26 @@ pdf_put_composite(const gx_device_pdf * pdev, const byte * vstr, uint size, gs_i
                             if (*p == '/' || *p == '[' || *p == '{' || *p == '(' || *p == ' ') {
                                 stream_write(pdev->strm, start, p - start);
                                 stream_putc(pdev->strm, (byte)'\n');
+                                width = 0;
                                 start = p;
+                                break;
                             }
                             else p--;
                         }
-                        if (p == start) {
+                        if (p == start && width != 0) {
                             stream_write(pdev->strm, start, save - start);
                             stream_putc(pdev->strm, (byte)'\n');
-                            start = save;
+                            p = start = save;
+                            width = 0;
                         }
                     } else {
                         width++;
                         p++;
                     }
+                }
+                if (width) {
+                    stream_write(pdev->strm, start, p - start);
+                    stream_putc(pdev->strm, (byte)'\n');
                 }
             } else {
                 stream_write(pdev->strm, vstr, size);
@@ -2622,6 +2775,42 @@ pdf_write_function(gx_device_pdf *pdev, const gs_function_t *pfn, long *pid)
     if (code < 0)
         return code;
     *pid = value.contents.object->id;
+    return 0;
+}
+
+int
+free_function_refs(gx_device_pdf *pdev, cos_object_t *pco)
+{
+    char key[] = "/Functions";
+    cos_value_t *v, v2;
+
+    if (cos_type(pco) == cos_type_dict) {
+        v = (cos_value_t *)cos_dict_find((const cos_dict_t *)pco, (const byte *)key, strlen(key));
+        if (v && v->value_type == COS_VALUE_OBJECT) {
+            if (cos_type(v->contents.object) == cos_type_array){
+                int code=0;
+                while (code == 0) {
+                    code = cos_array_unadd((cos_array_t *)v->contents.object, &v2);
+                }
+            }
+        }
+    }
+    if (cos_type(pco) == cos_type_array) {
+        long index;
+        cos_array_t *pca = (cos_array_t *)pco;
+        const cos_array_element_t *element = cos_array_element_first(pca);
+        cos_value_t *v;
+
+        while (element) {
+            element = cos_array_element_next(element, &index, (const cos_value_t **)&v);
+            if (v->value_type == COS_VALUE_OBJECT) {
+                if (pdf_find_resource_by_resource_id(pdev, resourceFunction, v->contents.object->id)){
+                    v->value_type = COS_VALUE_CONST;
+                    /* Need to remove the element from the array here */
+                }
+            }
+        }
+    }
     return 0;
 }
 

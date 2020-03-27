@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -92,23 +92,23 @@ struct stream_s {
     /*
      * The following invariants apply at all times for read streams:
      *
-     *    s->cbuf - 1 <= s->srptr <= s->srlimit.
+     *    s->cbuf - 1 <= s->cursor.r.ptr <= s->cursor.r.limit.
      *
-     *    The amount of data in the buffer is s->srlimit + 1 - s->cbuf.
+     *    The amount of data in the buffer is s->cursor.r.limit + 1 - s->cbuf.
      *
      *    s->position represents the stream position as of the beginning
      *      of the buffer, so the current position is s->position +
-     *      (s->srptr + 1 - s->cbuf).
+     *      (s->cursor.r.ptr + 1 - s->cbuf).
      *
      * Analogous invariants apply for write streams:
      *
-     *    s->cbuf - 1 <= s->swptr <= s->swlimit.
+     *    s->cbuf - 1 <= s->cursor.w.ptr <= s->cursor.w.limit.
      *
-     *    The amount of data in the buffer is s->swptr + 1 - s->cbuf.
+     *    The amount of data in the buffer is s->cursor.w.ptr + 1 - s->cbuf.
      *
      *    s->position represents the stream position as of the beginning
      *      of the buffer, so the current position is s->position +
-     *      (s->swptr + 1 - s->cbuf).
+     *      (s->cursor.w.ptr + 1 - s->cbuf).
      */
     stream_cursor cursor;	/* cursor for reading/writing data */
     byte *cbuf;			/* base of buffer */
@@ -173,7 +173,7 @@ struct stream_s {
      * file streams, which are the most heavily used stream type,
      * we put their state here.
      */
-    FILE *file;			/* file handle for C library */
+    gp_file *file;		/* file handle for C library */
     gs_const_string file_name;	/* file name (optional) -- clients must */
                                 /* access only through procedures */
     uint file_modes;		/* access modes for the file, */
@@ -190,6 +190,8 @@ extern_st(st_stream);
     stream_enum_ptrs, stream_reloc_ptrs, stream_finalize)
 #define STREAM_NUM_PTRS 6
 
+#define S_FILE_LIMIT_MAX (sizeof(gs_offset_t) > 4 ? max_int64_t : max_long)
+
 /* Initialize the checking IDs of a stream. */
 #define s_init_ids(s) ((s)->read_id = (s)->write_id = 1)
 #define s_init_read_id(s) ((s)->read_id = 1, (s)->write_id = 0)
@@ -198,16 +200,11 @@ extern_st(st_stream);
 
 /* ------ Stream functions ------ */
 
-#define srptr cursor.r.ptr
-#define srlimit cursor.r.limit
-#define swptr cursor.w.ptr
-#define swlimit cursor.w.limit
-
 /* Some of these are macros -- beware. */
 /* Note that unlike the C stream library, */
 /* ALL stream procedures take the stream as the first argument. */
-#define sendrp(s) ((s)->srptr >= (s)->srlimit)	/* NOT FOR CLIENTS */
-#define sendwp(s) ((s)->swptr >= (s)->swlimit)	/* NOT FOR CLIENTS */
+#define sendrp(s) ((s)->cursor.r.ptr >= (s)->cursor.r.limit)	/* NOT FOR CLIENTS */
+#define sendwp(s) ((s)->cursor.w.ptr >= (s)->cursor.w.limit)	/* NOT FOR CLIENTS */
 
 /*
  * Following are valid for all streams.
@@ -234,16 +231,16 @@ int spgetcc(stream *, bool);	/* bool indicates close at EOD */
  * ahead to detect EOD.
  *
  * In the definition of sgetc, the first alternative should read
- *      (int)(*++((s)->srptr))
+ *      (int)(*++((s)->cursor.r.ptr))
  * but the Borland compiler generates truly atrocious code for this.
  * The SCO ODT compiler requires the first, pointless cast to int.
  */
 #define sgetc(s)\
-  ((int)((s)->srlimit - (s)->srptr > 1 ? (++((s)->srptr), (int)*(s)->srptr) : spgetc(s)))
+  ((int)((s)->cursor.r.limit - (s)->cursor.r.ptr > 1 ? (++((s)->cursor.r.ptr), (int)*(s)->cursor.r.ptr) : spgetc(s)))
 int sgets(stream *, byte *, uint, uint *);
 int sungetc(stream *, byte);	/* ERRC on error, 0 if OK */
 
-#define sputback(s) ((s)->srptr--)	/* can only do this once! */
+#define sputback(s) ((s)->cursor.r.ptr--)	/* can only do this once! */
 #define seofp(s) (sendrp(s) && (s)->end_status == EOFC)
 #define serrorp(s) (sendrp(s) && (s)->end_status == ERRC)
 int spskip(stream *, gs_offset_t, gs_offset_t *);
@@ -263,11 +260,11 @@ int spputc(stream *, byte);	/* a procedure equivalent of sputc */
 
 /*
  * The first alternative should read
- *      ((int)(*++((s)->swptr)=(c)))
+ *      ((int)(*++((s)->cursor.w.ptr)=(c)))
  * but the Borland compiler generates truly atrocious code for this.
  */
 #define sputc(s,c)\
-  (!sendwp(s) ? (++((s)->swptr), *(s)->swptr=(c), 0) : spputc((s),(c)))
+  (!sendwp(s) ? (++((s)->cursor.w.ptr), *(s)->cursor.w.ptr=(c), 0) : spputc((s),(c)))
 int sputs(stream *, const byte *, uint, uint *);
 
 /*
@@ -284,9 +281,9 @@ int spseek(stream *, gs_offset_t);
 
 /* Following are for high-performance reading clients. */
 /* bufptr points to the next item. */
-#define sbufptr(s) ((s)->srptr + 1)
-#define sbufavailable(s) ((s)->srlimit - (s)->srptr)
-#define sbufskip(s, n) ((s)->srptr += (n), 0)
+#define sbufptr(s) ((s)->cursor.r.ptr + 1)
+#define sbufavailable(s) ((s)->cursor.r.limit - (s)->cursor.r.ptr)
+#define sbufskip(s, n) ((s)->cursor.r.ptr += (n), 0)
 /*
  * Define the minimum amount of data that must be left in an input buffer
  * after a read operation to handle filter read-ahead, either 0 or 1
@@ -310,9 +307,9 @@ int spseek(stream *, gs_offset_t);
   register const byte *cp;\
   const byte *ep
 #define s_begin_inline(s, cp, ep)\
-  cp = (s)->srptr, ep = (s)->srlimit
+  cp = (s)->cursor.r.ptr, ep = (s)->cursor.r.limit
 #define s_end_inline(s, cp, ep)\
-  (s)->srptr = cp
+  (s)->cursor.r.ptr = cp
 #define sbufavailable_inline(s, cp, ep)\
   (ep - cp)
 #define sendbufp_inline(s, cp, ep)\
@@ -340,10 +337,10 @@ void s_init_state(stream_state *, const stream_template *, gs_memory_t *);
 int file_prepare_stream(const char *, uint, const char *,
                  uint, stream **, char[4], gs_memory_t *);
 
-/* Set up a file stream on an OS file.  */
-void file_init_stream(stream *, FILE *, const char *, byte *, uint);
+/* Set up a file stream on a gp_file.  */
+int file_init_stream(stream *, gp_file *, const char *, byte *, uint);
 
-/* Open a file stream, optionally on an OS file. */
+/* Open a file stream, optionally on a gp_file. */
 int file_open_stream(const char *, uint, const char *,
                  uint, stream **, gx_io_device *,
                  iodev_proc_fopen_t, gs_memory_t *);
@@ -363,7 +360,7 @@ stream * file_alloc_stream(gs_memory_t *, client_name_t);
 #define check_file(svar,op)\
   BEGIN\
     check_type(*(op), t_file);\
-    if ( file_is_invalid(svar, op) ) return_error(gs_error_invalidaccess);\
+    if ( file_is_invalid(svar, op) ) return_error(gs_error_ioerror);\
   END
 
 /* Close a file stream. */
@@ -378,9 +375,9 @@ int file_close_disable(stream *);
 void sread_string(stream *, const byte *, uint),
     sread_string_reusable(stream *, const byte *, uint),
     swrite_string(stream *, byte *, uint);
-void sread_file(stream *, FILE *, byte *, uint),
-    swrite_file(stream *, FILE *, byte *, uint),
-    sappend_file(stream *, FILE *, byte *, uint);
+void sread_file(stream *, gp_file *, byte *, uint),
+    swrite_file(stream *, gp_file *, byte *, uint);
+int  sappend_file(stream *, gp_file *, byte *, uint);
 
 /* Confine reading to a subfile.  This is primarily for reusable streams. */
 int sread_subfile(stream *s, gs_offset_t start, gs_offset_t length);

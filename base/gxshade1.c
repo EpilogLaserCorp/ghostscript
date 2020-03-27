@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -27,17 +27,12 @@
 #include "gxdcolor.h"
 #include "gxfarith.h"
 #include "gxfixed.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gxpath.h"
 #include "gxshade.h"
 #include "gxdevcli.h"
 #include "gxshade4.h"
-#include "vdtrace.h"
 #include "gsicc_cache.h"
-
-#define VD_TRACE_AXIAL_PATCH 1
-#define VD_TRACE_RADIAL_PATCH 1
-#define VD_TRACE_FUNCTIONAL_PATCH 1
 
 /* ---------------- Function-based shading ---------------- */
 
@@ -90,12 +85,6 @@ Fb_fill_region(Fb_fill_state_t * pfs, const gs_fixed_rect *rect)
     Fb_frame_t * fp = &pfs->frame;
     int code;
 
-    if (VD_TRACE_FUNCTIONAL_PATCH && vd_allowed('s')) {
-        vd_get_dc('s');
-        vd_set_shift(0, 0);
-        vd_set_scale(0.01);
-        vd_set_origin(0, 0);
-    }
     memcpy(&pfs1, (shading_fill_state_t *)pfs, sizeof(shading_fill_state_t));
     pfs1.Function = pfs->psh->params.Function;
     code = init_patch_fill_state(&pfs1);
@@ -116,15 +105,13 @@ Fb_fill_region(Fb_fill_state_t * pfs, const gs_fixed_rect *rect)
     code = patch_fill(&pfs1, curve, NULL, NULL);
     if (term_patch_fill_state(&pfs1))
         return_error(gs_error_unregistered); /* Must not happen. */
-    if (VD_TRACE_FUNCTIONAL_PATCH && vd_allowed('s'))
-        vd_release_dc;
     return code;
 }
 
 int
 gs_shading_Fb_fill_rectangle(const gs_shading_t * psh0, const gs_rect * rect,
                              const gs_fixed_rect * rect_clip,
-                             gx_device * dev, gs_imager_state * pis)
+                             gx_device * dev, gs_gstate * pgs)
 {
     const gs_shading_Fb_t * const psh = (const gs_shading_Fb_t *)psh0;
     gs_matrix save_ctm;
@@ -132,20 +119,22 @@ gs_shading_Fb_fill_rectangle(const gs_shading_t * psh0, const gs_rect * rect,
     float x[2], y[2];
     Fb_fill_state_t state;
 
-    code = shade_init_fill_state((shading_fill_state_t *) & state, psh0, dev, pis);
+    code = shade_init_fill_state((shading_fill_state_t *) & state, psh0, dev, pgs);
     if (code < 0)
         return code;
     state.psh = psh;
     /****** HACK FOR FIXED-POINT MATRIX MULTIPLY ******/
-    gs_currentmatrix((gs_state *) pis, &save_ctm);
-    gs_concat((gs_state *) pis, &psh->params.Matrix);
-    state.ptm = pis->ctm;
-    gs_setmatrix((gs_state *) pis, &save_ctm);
+    gs_currentmatrix((gs_gstate *) pgs, &save_ctm);
+    gs_concat((gs_gstate *) pgs, &psh->params.Matrix);
+    state.ptm = pgs->ctm;
+    gs_setmatrix((gs_gstate *) pgs, &save_ctm);
     /* Compute the parameter X and Y ranges. */
     {
         gs_rect pbox;
 
-        gs_bbox_transform_inverse(rect, &psh->params.Matrix, &pbox);
+        code = gs_bbox_transform_inverse(rect, &psh->params.Matrix, &pbox);
+        if (code < 0)
+            return code;
         x[0] = max(pbox.p.x, psh->params.Domain[0]);
         x[1] = min(pbox.q.x, psh->params.Domain[1]);
         y[0] = max(pbox.p.y, psh->params.Domain[2]);
@@ -196,11 +185,20 @@ A_fill_region(A_fill_state_t * pfs, patch_fill_state_t *pfs1)
     double y1 = psh->params.Coords[1] + pfs->delta.y * pfs->v1;
     double h0 = pfs->u0, h1 = pfs->u1;
     patch_curve_t curve[4];
+    int code;
 
-    gs_point_transform2fixed(&pfs1->pis->ctm, x0 + pfs->delta.y * h0, y0 - pfs->delta.x * h0, &curve[0].vertex.p);
-    gs_point_transform2fixed(&pfs1->pis->ctm, x1 + pfs->delta.y * h0, y1 - pfs->delta.x * h0, &curve[1].vertex.p);
-    gs_point_transform2fixed(&pfs1->pis->ctm, x1 + pfs->delta.y * h1, y1 - pfs->delta.x * h1, &curve[2].vertex.p);
-    gs_point_transform2fixed(&pfs1->pis->ctm, x0 + pfs->delta.y * h1, y0 - pfs->delta.x * h1, &curve[3].vertex.p);
+    code = gs_point_transform2fixed(&pfs1->pgs->ctm, x0 + pfs->delta.y * h0, y0 - pfs->delta.x * h0, &curve[0].vertex.p);
+    if (code < 0)
+        return code;
+    code = gs_point_transform2fixed(&pfs1->pgs->ctm, x1 + pfs->delta.y * h0, y1 - pfs->delta.x * h0, &curve[1].vertex.p);
+    if (code < 0)
+        return code;
+    code = gs_point_transform2fixed(&pfs1->pgs->ctm, x1 + pfs->delta.y * h1, y1 - pfs->delta.x * h1, &curve[2].vertex.p);
+    if (code < 0)
+        return code;
+    code = gs_point_transform2fixed(&pfs1->pgs->ctm, x0 + pfs->delta.y * h1, y0 - pfs->delta.x * h1, &curve[3].vertex.p);
+    if (code < 0)
+        return code;
     curve[0].vertex.cc[0] = pfs->t0; /* The element cc[1] is set to a dummy value against */
     curve[1].vertex.cc[0] = pfs->t1; /* interrupts while an idle priocessing in gxshade.6.c .  */
     curve[2].vertex.cc[0] = pfs->t1;
@@ -216,7 +214,7 @@ A_fill_region(A_fill_state_t * pfs, patch_fill_state_t *pfs1)
 static inline int
 gs_shading_A_fill_rectangle_aux(const gs_shading_t * psh0, const gs_rect * rect,
                             const gs_fixed_rect *clip_rect,
-                            gx_device * dev, gs_imager_state * pis)
+                            gx_device * dev, gs_gstate * pgs)
 {
     const gs_shading_A_t *const psh = (const gs_shading_A_t *)psh0;
     gs_function_t * const pfn = psh->params.Function;
@@ -231,16 +229,14 @@ gs_shading_A_fill_rectangle_aux(const gs_shading_t * psh0, const gs_rect * rect,
     int code;
 
     state.psh = psh;
-    code = shade_init_fill_state((shading_fill_state_t *)&pfs1, psh0, dev, pis);
+    code = shade_init_fill_state((shading_fill_state_t *)&pfs1, psh0, dev, pgs);
     if (code < 0)
         return code;
     pfs1.Function = pfn;
     pfs1.rect = *clip_rect;
     code = init_patch_fill_state(&pfs1);
-    if (code < 0) {
-        if (pfs1.icclink != NULL) gsicc_release_link(pfs1.icclink);
-        return code;
-    }
+    if (code < 0)
+        goto fail;
     pfs1.maybe_self_intersecting = false;
     pfs1.function_arg_shift = 1;
     /*
@@ -256,7 +252,11 @@ gs_shading_A_fill_rectangle_aux(const gs_shading_t * psh0, const gs_rect * rect,
     cmat.yy = state.delta.y;
     cmat.xx = cmat.yy;
     cmat.xy = -cmat.yx;
-    gs_bbox_transform_inverse(rect, &cmat, &t_rect);
+    code = gs_bbox_transform_inverse(rect, &cmat, &t_rect);
+    if (code < 0) {
+        code = 0; /* Swallow this silently */
+        goto fail;
+    }
     t0 = min(max(t_rect.p.y, 0), 1);
     t1 = max(min(t_rect.q.y, 1), 0);
     state.v0 = t0;
@@ -265,15 +265,15 @@ gs_shading_A_fill_rectangle_aux(const gs_shading_t * psh0, const gs_rect * rect,
     state.u1 = t_rect.q.x;
     state.t0 = t0 * dd + d0;
     state.t1 = t1 * dd + d0;
-    gs_distance_transform(state.delta.x, state.delta.y, &ctm_only(pis),
+    code = gs_distance_transform(state.delta.x, state.delta.y, &ctm_only(pgs),
                           &dist);
+    if (code < 0)
+        goto fail;
     state.length = hypot(dist.x, dist.y);	/* device space line length */
     code = A_fill_region(&state, &pfs1);
     if (psh->params.Extend[0] && t0 > t_rect.p.y) {
-        if (code < 0) {
-            if (pfs1.icclink != NULL) gsicc_release_link(pfs1.icclink);
-            return code;
-        }
+        if (code < 0)
+            goto fail;
         /* Use the general algorithm, because we need the trapping. */
         state.v0 = t_rect.p.y;
         state.v1 = t0;
@@ -281,17 +281,16 @@ gs_shading_A_fill_rectangle_aux(const gs_shading_t * psh0, const gs_rect * rect,
         code = A_fill_region(&state, &pfs1);
     }
     if (psh->params.Extend[1] && t1 < t_rect.q.y) {
-        if (code < 0) {
-            if (pfs1.icclink != NULL) gsicc_release_link(pfs1.icclink);
-            return code;
-        }
+        if (code < 0)
+            goto fail;
         /* Use the general algorithm, because we need the trapping. */
         state.v0 = t1;
         state.v1 = t_rect.q.y;
         state.t0 = state.t1 = t1 * dd + d0;
         code = A_fill_region(&state, &pfs1);
     }
-    if (pfs1.icclink != NULL) gsicc_release_link(pfs1.icclink);
+fail:
+    gsicc_release_link(pfs1.icclink);
     if (term_patch_fill_state(&pfs1))
         return_error(gs_error_unregistered); /* Must not happen. */
     return code;
@@ -300,20 +299,9 @@ gs_shading_A_fill_rectangle_aux(const gs_shading_t * psh0, const gs_rect * rect,
 int
 gs_shading_A_fill_rectangle(const gs_shading_t * psh0, const gs_rect * rect,
                             const gs_fixed_rect * rect_clip,
-                            gx_device * dev, gs_imager_state * pis)
+                            gx_device * dev, gs_gstate * pgs)
 {
-    int code;
-
-    if (VD_TRACE_AXIAL_PATCH && vd_allowed('s')) {
-        vd_get_dc('s');
-        vd_set_shift(0, 0);
-        vd_set_scale(0.01);
-        vd_set_origin(0, 0);
-    }
-    code = gs_shading_A_fill_rectangle_aux(psh0, rect, rect_clip, dev, pis);
-    if (VD_TRACE_AXIAL_PATCH && vd_allowed('s'))
-        vd_release_dc;
-    return code;
+    return gs_shading_A_fill_rectangle_aux(psh0, rect, rect_clip, dev, pgs);
 }
 
 /* ---------------- Radial shading ---------------- */
@@ -352,7 +340,7 @@ gs_shading_A_fill_rectangle(const gs_shading_t * psh0, const gs_rect * rect,
  * quadrant and moving anticlockwise, we now draw the 'undermost' quadrant,
  * then the two adjacent quadrants, then the topmost quadrant.
  *
- * For the purposes of explaination, we shall label the octants as below:
+ * For the purposes of explanation, we shall label the octants as below:
  *
  *     \2|1/       and Quadrants as:       |
  *     3\|/0                            Q1 | Q0 
@@ -391,6 +379,7 @@ R_tensor_annulus(patch_fill_state_t *pfs,
         p0.x = 0, p0.y = -1, dirn = 0;
         /* Align stripes along radii for faster triangulation : */
         inside = 1;
+        pfs->function_arg_shift = 1;
     } else {
         /* Must generate canonic quadrangle arcs,
            because we approximate them with curves. */
@@ -405,6 +394,7 @@ R_tensor_annulus(patch_fill_state_t *pfs,
             else
                 p0.x = -1, p0.y = 0, dirn = (-dx >= -dy ? 0 : 1);
         }
+        pfs->function_arg_shift = 0;
     }
     /* fixme: wish: cut invisible parts off.
        Note : when r0 != r1 the invisible part is not a half circle. */
@@ -432,14 +422,14 @@ R_tensor_annulus(patch_fill_state_t *pfs,
         for (j = 0; j < 4; j++) {
             int jj = (j + inside) % 4;
 
-            if (gs_point_transform2fixed(&pfs->pis->ctm,         p[j*3 + 0].x, p[j*3 + 0].y, &curve[jj].vertex.p) < 0)
-                gs_point_transform2fixed_clamped(&pfs->pis->ctm, p[j*3 + 0].x, p[j*3 + 0].y, &curve[jj].vertex.p);
+            if (gs_point_transform2fixed(&pfs->pgs->ctm,         p[j*3 + 0].x, p[j*3 + 0].y, &curve[jj].vertex.p) < 0)
+                gs_point_transform2fixed_clamped(&pfs->pgs->ctm, p[j*3 + 0].x, p[j*3 + 0].y, &curve[jj].vertex.p);
 
-            if (gs_point_transform2fixed(&pfs->pis->ctm,         p[j*3 + 1].x, p[j*3 + 1].y, &curve[jj].control[0]) < 0)
-                gs_point_transform2fixed_clamped(&pfs->pis->ctm, p[j*3 + 1].x, p[j*3 + 1].y, &curve[jj].control[0]);
+            if (gs_point_transform2fixed(&pfs->pgs->ctm,         p[j*3 + 1].x, p[j*3 + 1].y, &curve[jj].control[0]) < 0)
+                gs_point_transform2fixed_clamped(&pfs->pgs->ctm, p[j*3 + 1].x, p[j*3 + 1].y, &curve[jj].control[0]);
 
-            if (gs_point_transform2fixed(&pfs->pis->ctm,         p[j*3 + 2].x, p[j*3 + 2].y, &curve[jj].control[1]) < 0)
-                gs_point_transform2fixed_clamped(&pfs->pis->ctm, p[j*3 + 2].x, p[j*3 + 2].y, &curve[jj].control[1]);
+            if (gs_point_transform2fixed(&pfs->pgs->ctm,         p[j*3 + 2].x, p[j*3 + 2].y, &curve[jj].control[1]) < 0)
+                gs_point_transform2fixed_clamped(&pfs->pgs->ctm, p[j*3 + 2].x, p[j*3 + 2].y, &curve[jj].control[1]);
             curve[j].straight = (((j + inside) & 1) != 0);
         }
         curve[(0 + inside) % 4].vertex.cc[0] = t0;
@@ -466,6 +456,915 @@ R_tensor_annulus(patch_fill_state_t *pfs,
             p1 = p0;
             p0.x = -p1.y; p0.y = p1.x;
             dirn = 0;
+        }
+    }
+    return 0;
+}
+
+/* Find the control points for two points on the arc of a circle
+ * the points must be within the same quadrant.
+ */
+static int find_arc_control_points(gs_point *from, gs_point *to, gs_point *from_control, gs_point *to_control, gs_point *centre)
+{
+    double from_tan_alpha, to_tan_alpha, from_alpha, to_alpha;
+    double half_inscribed_angle, intersect_x, intersect_y, intersect_dist;
+    double radius = sqrt(((from->x - centre->x) * (from->x - centre->x)) + ((from->y - centre->y) * (from->y - centre->y)));
+    double tangent_intersect_dist;
+    double F;
+    int quadrant;
+
+    /* Quadrant 0 is upper right, numbered anti-clockwise.
+     * If the direction of the from->to is atni-clockwise, add 4
+     */
+    if (from->x > to->x) {
+        if (from->y > to->y) {
+            if (to->y >= centre->y)
+                quadrant = 1 + 4;
+            else
+                quadrant = 3;
+        } else {
+            if (to->x >= centre->x)
+                quadrant = 0 + 4;
+            else
+                quadrant = 2;
+        }
+    } else {
+        if (from->y > to->y) {
+            if (from->x >= centre->x)
+                quadrant = 0;
+            else
+                quadrant = 2 + 4;
+        } else {
+            if (from->x >= centre->x)
+                quadrant = 3 + 4;
+            else
+                quadrant = 1;
+        }
+    }
+
+    switch(quadrant) {
+        /* quadrant 0, arc goes clockwise */
+        case 0:
+            if (from->x == centre->x) {
+                from_alpha = M_PI / 2;
+            } else {
+                from_tan_alpha = (from->y - centre->y) / (from->x - centre->x);
+                from_alpha = atan(from_tan_alpha);
+            }
+            to_tan_alpha = (to->y - centre->y) / (to->x - centre->x);
+            to_alpha = atan(to_tan_alpha);
+
+            half_inscribed_angle = (from_alpha - to_alpha) / 2;
+            intersect_dist = radius / cos(half_inscribed_angle);
+            tangent_intersect_dist = tan(half_inscribed_angle) * radius;
+
+            intersect_x = centre->x + cos(to_alpha + half_inscribed_angle) * intersect_dist;
+            intersect_y = centre->y + sin(to_alpha + half_inscribed_angle) * intersect_dist;
+            break;
+        /* quadrant 1, arc goes clockwise */
+        case 1:
+            from_tan_alpha = (from->y - centre->y) / (centre->x - from->x);
+            from_alpha = atan(from_tan_alpha);
+
+            if (to->x == centre->x) {
+                to_alpha = M_PI / 2;
+            } else {
+                to_tan_alpha = (to->y - centre->y) / (centre->x - to->x);
+                to_alpha = atan(to_tan_alpha);
+            }
+
+            half_inscribed_angle = (to_alpha - from_alpha) / 2;
+            intersect_dist = radius / cos(half_inscribed_angle);
+            tangent_intersect_dist = tan(half_inscribed_angle) * radius;
+
+            intersect_x = centre->x - cos(from_alpha + half_inscribed_angle) * intersect_dist;
+            intersect_y = centre->y + sin(from_alpha + half_inscribed_angle) * intersect_dist;
+            break;
+        /* quadrant 2, arc goes clockwise */
+        case 2:
+            if (from->x == centre->x) {
+                from_alpha = M_PI / 2;
+            } else {
+                from_tan_alpha = (centre->y - from->y) / (centre->x - from->x);
+                from_alpha = atan(from_tan_alpha);
+            }
+
+            to_tan_alpha = (centre->y - to->y) / (centre->x - to->x);
+            to_alpha = atan(to_tan_alpha);
+
+            half_inscribed_angle = (to_alpha - from_alpha) / 2;
+            intersect_dist = radius / cos(half_inscribed_angle);
+            tangent_intersect_dist = tan(half_inscribed_angle) * radius;
+
+            intersect_x = centre->x - cos(from_alpha + half_inscribed_angle) * intersect_dist;
+            intersect_y = centre->y - sin(from_alpha + half_inscribed_angle) * intersect_dist;
+            break;
+        /* quadrant 3, arc goes clockwise */
+        case 3:
+            from_tan_alpha = (centre->y - from->y) / (from->x - centre->x);
+            from_alpha = atan(from_tan_alpha);
+
+            if (to->x == centre->x) {
+                to_alpha = M_PI / 2;
+            } else {
+                to_tan_alpha = (centre->y - to->y) / (to->x - centre->x);
+                to_alpha = atan(to_tan_alpha);
+            }
+
+            half_inscribed_angle = (to_alpha - from_alpha) / 2;
+            intersect_dist = radius / cos(half_inscribed_angle);
+            tangent_intersect_dist = tan(half_inscribed_angle) * radius;
+
+            intersect_x = centre->x + cos(from_alpha + half_inscribed_angle) * intersect_dist;
+            intersect_y = centre->y - sin(from_alpha + half_inscribed_angle) * intersect_dist;
+            break;
+        /* quadrant 0, arc goes anti-clockwise */
+        case 4:
+            from_tan_alpha = (from->y - centre->y) / (from->x - centre->x);
+            from_alpha = atan(from_tan_alpha);
+
+            if (to->y == centre->y)
+                to_alpha = M_PI / 2;
+            else {
+                to_tan_alpha = (to->y - centre->y) / (to->x - centre->x);
+                to_alpha = atan(to_tan_alpha);
+            }
+
+            half_inscribed_angle = (to_alpha - from_alpha) / 2;
+            intersect_dist = radius / cos(half_inscribed_angle);
+            tangent_intersect_dist = tan(half_inscribed_angle) * radius;
+
+            intersect_x = centre->x + cos(from_alpha + half_inscribed_angle) * intersect_dist;
+            intersect_y = centre->y + sin(from_alpha + half_inscribed_angle) * intersect_dist;
+            break;
+        /* quadrant 1, arc goes anti-clockwise */
+        case 5:
+            from_tan_alpha = (centre->x - from->x) / (from->y - centre->y);
+            from_alpha = atan(from_tan_alpha);
+
+            if (to->y == centre->y) {
+                to_alpha = M_PI / 2;
+            }
+            else {
+                to_tan_alpha = (centre->x - to->x) / (to->y - centre->y);
+                to_alpha = atan(to_tan_alpha);
+            }
+
+            half_inscribed_angle = (to_alpha - from_alpha) / 2;
+            intersect_dist = radius / cos(half_inscribed_angle);
+            tangent_intersect_dist = tan(half_inscribed_angle) * radius;
+
+            intersect_x = centre->x - sin(from_alpha + half_inscribed_angle) * intersect_dist;
+            intersect_y = centre->y + cos(from_alpha + half_inscribed_angle) * intersect_dist;
+            break;
+        /* quadrant 2, arc goes anti-clockwise */
+        case 6:
+            from_tan_alpha = (from->y - centre->y) / (centre->x - from->x);
+            from_alpha = atan(from_tan_alpha);
+
+            if (to->x == centre->x) {
+                to_alpha = M_PI / 2;
+            } else {
+                to_tan_alpha = (centre->y - to->y) / (centre->x - to->x);
+                to_alpha = atan(to_tan_alpha);
+            }
+
+            half_inscribed_angle = (to_alpha - from_alpha) / 2;
+            intersect_dist = radius / cos(half_inscribed_angle);
+            tangent_intersect_dist = tan(half_inscribed_angle) * radius;
+
+            intersect_x = centre->x - cos(from_alpha + half_inscribed_angle) * intersect_dist;
+            intersect_y = centre->y - sin(from_alpha + half_inscribed_angle) * intersect_dist;
+            break;
+        /* quadrant 3, arc goes anti-clockwise */
+        case 7:
+            if (from->x == centre->x) {
+                from_alpha = M_PI / 2;
+            } else {
+                from_tan_alpha = (centre->y - from->y) / (from->x - centre->x);
+                from_alpha = atan(from_tan_alpha);
+            }
+            to_tan_alpha = (centre->y - to->y) / (to->x - centre->x);
+            to_alpha = atan(to_tan_alpha);
+
+            half_inscribed_angle = (from_alpha - to_alpha) / 2;
+            intersect_dist = radius / cos(half_inscribed_angle);
+            tangent_intersect_dist = tan(half_inscribed_angle) * radius;
+
+            intersect_x = centre->x + cos(to_alpha + half_inscribed_angle) * intersect_dist;
+            intersect_y = centre->y - sin(to_alpha + half_inscribed_angle) * intersect_dist;
+            break;
+    }
+
+    F = (4.0 / 3.0) / (1 + sqrt(1 + ((tangent_intersect_dist / radius) * (tangent_intersect_dist / radius))));
+
+    from_control->x = from->x - ((from->x - intersect_x) * F);
+    from_control->y = from->y - ((from->y - intersect_y) * F);
+    to_control->x = to->x - ((to->x - intersect_x) * F);
+    to_control->y = to->y - ((to->y - intersect_y) * F);
+
+    return 0;
+}
+
+/* Create a 'patch_curve' element whch is a straight line between two points */
+static int patch_lineto(gs_matrix_fixed *ctm, gs_point *from, gs_point *to, patch_curve_t *p, float t)
+{
+    double x_1third, x_2third, y_1third, y_2third;
+
+    x_1third = (to->x - from->x) / 3;
+    x_2third = x_1third * 2;
+    y_1third = (to->y - from->y) / 3;
+    y_2third = y_1third * 2;
+
+    gs_point_transform2fixed(ctm, from->x, from->y, &p->vertex.p);
+    gs_point_transform2fixed(ctm, from->x + x_1third, from->y + y_1third, &p->control[0]);
+    gs_point_transform2fixed(ctm, from->x + x_2third, from->y + y_2third, &p->control[1]);
+
+    p->vertex.cc[0] = t;
+    p->vertex.cc[1] = t;
+    p->straight = 1;
+
+    return 0;
+}
+
+static int patch_curveto(gs_matrix_fixed *ctm, gs_point *centre, gs_point *from, gs_point *to, patch_curve_t *p, float t)
+{
+    gs_point from_control, to_control;
+
+    find_arc_control_points(from, to, &from_control, &to_control, centre);
+
+    gs_point_transform2fixed(ctm, from->x, from->y, &p->vertex.p);
+    gs_point_transform2fixed(ctm, from_control.x, from_control.y, &p->control[0]);
+    gs_point_transform2fixed(ctm, to_control.x, to_control.y, &p->control[1]);
+    p->vertex.cc[0] = t;
+    p->vertex.cc[1] = t;
+    p->straight = 0;
+
+    return 0;
+}
+
+static int draw_quarter_annulus(patch_fill_state_t *pfs, gs_point *centre, double radius, gs_point *corner, float t)
+{
+    gs_point p0, p1, initial;
+    patch_curve_t p[4];
+    int code;
+
+    if (corner->x > centre->x) {
+        initial.x = centre->x + radius;
+    }
+    else {
+        initial.x = centre->x - radius;
+    }
+    initial.y = centre->y;
+
+    p1.x = initial.x;
+    p1.y = corner->y;
+    patch_lineto(&pfs->pgs->ctm, &initial, &p1, &p[0], t);
+    p0.x = centre->x;
+    p0.y = p1.y;
+    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &p[1], t);
+    p1.x = centre->x;
+    if (centre->y > corner->y) {
+        p1.y = centre->y - radius;
+    } else {
+        p1.y = centre->y + radius;
+    }
+    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &p[2], t);
+    patch_curveto(&pfs->pgs->ctm, centre, &p1, &initial, &p[3], t);
+    code = patch_fill(pfs, (const patch_curve_t *)&p, NULL, NULL);
+    if (code < 0)
+        return code;
+
+    if (corner->x > centre->x)
+        initial.x = corner->x - (corner->x - (centre->x + radius));
+    else
+        initial.x = centre->x - radius;
+    initial.y = corner->y;
+    patch_lineto(&pfs->pgs->ctm, corner, &initial, &p[0], t);
+
+    p0.x = initial.x;
+    p0.y = centre->y;
+    patch_lineto(&pfs->pgs->ctm, &initial, &p0, &p[1], t);
+
+    p1.y = p0.y;
+    p1.x = corner->x;
+    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &p[2], t);
+    patch_lineto(&pfs->pgs->ctm, &p1, corner, &p[3], t);
+
+    return (patch_fill(pfs, (const patch_curve_t *)&p, NULL, NULL));
+}
+
+static int R_tensor_annulus_extend_tangent(patch_fill_state_t *pfs,
+    double x0, double y0, double r0, double t0,
+    double x1, double y1, double r1, double t1, double r2)
+{
+    patch_curve_t curve[4];
+    gs_point p0, p1;
+    int code = 0, q = 0;
+
+    /* special case axis aligned circles. Its quicker to handle these specially as it
+     * avoid lots of trigonometry in the general case code, and avoids us
+     * having to watch out for infinity as the result of tan() operations.
+     */
+    if (x0 == x1 || y0 == y1) {
+        if (x0 == x1 && y0 > y1) {
+            /* tangent at top of circles */
+            p0.x = x1, p0.y = y1;
+            p1.x = x1 + r2, p1.y = y1 - r2;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+            p1.x = x1 - r2, p1.y = y1 - r2;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+            p1.x = x1 + r2, p1.y = y1 + r1;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+            p1.x = x1 - r2, p1.y = y1 + r1;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+        }
+        if (x0 == x1 && y0 < y1) {
+            /* tangent at bottom of circles */
+            p0.x = x1, p0.y = y1;
+            p1.x = x1 + r2, p1.y = y1 + r2;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+            p1.x = x1 - r2, p1.y = y1 + r2;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+            p1.x = x1 + r2, p1.y = y1 - r1;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+            p1.x = x1 - r2, p1.y = y1 - r1;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+        }
+        if (y0 == y1 && x0 > x1) {
+            /* tangent at right of circles */
+            p0.x = x1, p0.y = y1;
+            p1.x = x1 - r2, p1.y = y1 - r2;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+            p1.x = x1 - r2, p1.y = y1 + r2;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+            p1.x = x1 + r1, p1.y = y1 + r2;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+            p1.x = x1 + r1, p1.y = y1 - r2;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+        }
+        if (y0 == y1 && x0 < x1) {
+            /* tangent at left of circles */
+            p0.x = x1, p0.y = y1;
+            p1.x = x1 + r2, p1.y = y1 - r2;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+            p1.x = x1 + r2, p1.y = y1 + r2;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+            p1.x = x1 - r1, p1.y = y1 + r2;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+            p1.x = x1 - r1, p1.y = y1 - r2;
+            draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+        }
+    }
+    else {
+        double tx, ty, endx, endy, intersectx, intersecty, alpha, sinalpha, cosalpha, tanalpha;
+        gs_point centre;
+
+        /* First lets figure out which quadrant the smaller circle is in (we always
+         * get called to fill from the larger circle), x0, y0, r0 is the smaller circle.
+         */
+        if (x0 < x1) {
+            if (y0 < y1)
+                q = 2;
+            else
+                q = 1;
+        } else {
+            if (y0 < y1)
+                q = 3;
+            else
+                q = 0;
+        }
+        switch(q) {
+            case 0:
+                /* We have two four-sided elements, from the tangent point
+                 * each side, to the point where the tangent crosses an
+                 * axis of the larger circle. A line back to the edge
+                 * of the larger circle, a line to the point where an axis
+                 * crosses the smaller circle, then an arc back to the starting point.
+                 */
+                /* Figure out the tangent point */
+                /* sin (angle) = y1 - y0 / r1 - r0
+                 * ty = ((y1 - y0) / (r1 - r0)) * r1
+                 */
+                ty = y1 + ((y0 - y1) / (r1 - r0)) * r1;
+                tx = x1 + ((x0 - x1) / (r1 - r0)) * r1;
+                /* Now actually calculating the point where the tangent crosses the axis of the larger circle
+                 * So we need to know the angle the tangent makes with the axis of the smaller circle
+                 * as its the same angle where it crosses the axis of the larger circle.
+                 * We know the centres and the tangent are co-linear, so sin(a) = y0 - y1 / r1 - r0
+                 * We know the tangent is r1 from the centre of the larger circle, so the hypotenuse
+                 * is r0 / cos(a). That gives us 'x' and we already know y as its the centre of the larger
+                 * circle
+                 */
+                sinalpha = (y0 - y1) / (r1 - r0);
+                alpha = asin(sinalpha);
+                cosalpha = cos(alpha);
+                intersectx = x1 + (r1 / cosalpha);
+                intersecty = y1;
+
+                p0.x = tx, p0.y = ty;
+                p1.x = tx + (intersectx - tx) / 2, p1.y = ty - (ty - intersecty) / 2;
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                p0.x = intersectx, p0.y = intersecty;
+                patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                p1.x = x1 + r1, p1.y = y1;
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                p0.x = tx, p0.y = ty;
+                centre.x = x1, centre.y = y1;
+                patch_curveto(&pfs->pgs->ctm, &centre, &p1, &p0, &curve[3], t0);
+                code = patch_fill(pfs, curve, NULL, NULL);
+                if (code < 0)
+                    return code;
+
+                if (intersectx < x1 + r2) {
+                    /* didn't get all the way to the edge, quadrant 3 is composed of 2 quads :-(
+                     * An 'annulus' where the right edge is less than the normal extent and a
+                     * quad which is a rectangle with one corner chopped of at an angle.
+                     */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = intersectx, p1.y = y1 - r2;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                    endx = x1 + r2;
+                    endy = y1 - (tan ((M_PI / 2) - alpha)) * (endx - intersectx);
+                    p0.x = intersectx, p0.y = y1;
+                    p1.x = x1 + r2, p1.y = endy;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                    p0.x = x1 + r2, p0.y = y0 - r2;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                    p1.x = intersectx, p1.y = p0.y;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                    p0.x = intersectx, p0.y = y1;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[3], t0);
+                    code = patch_fill(pfs, curve, NULL, NULL);
+                    if (code < 0)
+                        return code;
+
+                } else {
+                    /* Quadrant 3 is a normal quarter annulua */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = x1 + r2, p1.y = y1 - r2;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                }
+
+                /* Q2 is always a full annulus... */
+                p0.x = x1, p0.y = y1;
+                p1.x = x1 - r2, p1.y = y1 - r2;
+                draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+
+                /* alpha is now the angle between the x axis and the tangent to the
+                 * circles.
+                 */
+                alpha = (M_PI / 2) - alpha;
+                cosalpha = cos(alpha);
+                endy = y1 + (r1 / cosalpha);
+                endx = x1;
+
+                p0.x = tx, p0.y = ty;
+                p1.x = endx - ((endx - tx) / 2), p1.y = endy - ((endy - ty) / 2);
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                p0.x = endx, p0.y = endy;
+                patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                p1.x = x1, p1.y = y1 + r1;
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                p0.x = tx, p0.y = ty;
+                centre.x = x1, centre.y = y1;
+                patch_curveto(&pfs->pgs->ctm, &centre, &p1, &p0, &curve[3], t0);
+                code = patch_fill(pfs, curve, NULL, NULL);
+                if (code < 0)
+                    return code;
+
+                /* Q1 is simimlar to Q3, either a full quarter annulus
+                 * or a partial one, depending on where the tangent crosses
+                 * the y axis
+                 */
+                tanalpha = tan(alpha);
+                intersecty = y1 + tanalpha * (r2 + (intersectx - x1));
+                intersectx = x1 - r2;
+
+                if (endy < y1 + r2) {
+                    /* didn't get all the way to the edge, quadrant 1 is composed of 2 quads :-(
+                     * An 'annulus' where the right edge is less than the normal extent and a
+                     * quad which is a rectangle with one corner chopped of at an angle.
+                     */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = x1 - r2, p1.y = endy;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                    p0.x = x1, p0.y = y1 + r1;
+                    p1.x = x1, p1.y = endy;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                    p0.x = x1 - r2, p0.y = intersecty;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                    p1.x = p0.x, p1.y = y1 + r1;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                    p0.x = x1, p0.y = y1 + r1;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[3], t0);
+                    code = patch_fill(pfs, curve, NULL, NULL);
+                    if (code < 0)
+                        return code;
+                } else {
+                    /* Quadrant 1 is a normal quarter annulua */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = x1 - r2, p1.y = y1 + r2;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                }
+                break;
+            case 1:
+                /* We have two four-sided elements, from the tangent point
+                 * each side, to the point where the tangent crosses an
+                 * axis of the larger circle. A line back to the edge
+                 * of the larger circle, a line to the point where an axis
+                 * crosses the smaller circle, then an arc back to the starting point.
+                 */
+                /* Figure out the tangent point */
+                /* sin (angle) = y1 - y0 / r1 - r0
+                 * ty = ((y1 - y0) / (r1 - r0)) * r1
+                 */
+                ty = y1 + ((y0 - y1) / (r1 - r0)) * r1;
+                tx = x1 - ((x1 - x0) / (r1 - r0)) * r1;
+                /* Now actually calculating the point where the tangent crosses the axis of the larger circle
+                 * So we need to know the angle the tangent makes with the axis of the smaller circle
+                 * as its the same angle where it crosses the axis of the larger circle.
+                 * We know the centres and the tangent are co-linear, so sin(a) = y0 - y1 / r1 - r0
+                 * We know the tangent is r1 from the centre of the larger circle, so the hypotenuse
+                 * is r0 / cos(a). That gives us 'x' and we already know y as its the centre of the larger
+                 * circle
+                 */
+                sinalpha = (y0 - y1) / (r1 - r0);
+                alpha = asin(sinalpha);
+                cosalpha = cos(alpha);
+                intersectx = x1 - (r1 / cosalpha);
+                intersecty = y1;
+
+                p0.x = tx, p0.y = ty;
+                p1.x = tx - (tx - intersectx) / 2, p1.y = ty - (ty - intersecty) / 2;
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                p0.x = intersectx, p0.y = intersecty;
+                patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                p1.x = x1 - r1, p1.y = y1;
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                p0.x = tx, p0.y = ty;
+                centre.x = x1, centre.y = y1;
+                patch_curveto(&pfs->pgs->ctm, &centre, &p1, &p0, &curve[3], t0);
+                code = patch_fill(pfs, curve, NULL, NULL);
+                if (code < 0)
+                    return code;
+
+                if (intersectx > x1 - r2) {
+                    /* didn't get all the way to the edge, quadrant 2 is composed of 2 quads :-(
+                     * An 'annulus' where the right edge is less than the normal extent and a
+                     * quad which is a rectangle with one corner chopped of at an angle.
+                     */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = intersectx, p1.y = y1 - r2;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                    endx = x1 - r2;
+                    endy = y1 - (tan ((M_PI / 2) - alpha)) * (intersectx - endx);
+                    p0.x = intersectx, p0.y = y1;
+                    p1.x = x1 - r2, p1.y = endy;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                    p0.x = x1 - r2, p0.y = y0 - r2;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                    p1.x = intersectx, p1.y = p0.y;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                    p0.x = intersectx, p0.y = y1;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[3], t0);
+                    code = patch_fill(pfs, curve, NULL, NULL);
+                    if (code < 0)
+                        return code;
+
+                } else {
+                    /* Quadrant 2 is a normal quarter annulua */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = x1 - r2, p1.y = y1 - r2;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                }
+
+                /* Q3 is always a full annulus... */
+                p0.x = x1, p0.y = y1;
+                p1.x = x1 + r2, p1.y = y1 - r2;
+                draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+
+                /* alpha is now the angle between the x axis and the tangent to the
+                 * circles.
+                 */
+                alpha = (M_PI / 2) - alpha;
+                cosalpha = cos(alpha);
+                endy = y1 + (r1 / cosalpha);
+                endx = x1;
+
+                p0.x = tx, p0.y = ty;
+                p1.x = endx + ((tx - endx) / 2), p1.y = endy - ((endy - ty) / 2);
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                p0.x = endx, p0.y = endy;
+                patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                p1.x = x1, p1.y = y1 + r1;
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                p0.x = tx, p0.y = ty;
+                centre.x = x1, centre.y = y1;
+                patch_curveto(&pfs->pgs->ctm, &centre, &p1, &p0, &curve[3], t0);
+                code = patch_fill(pfs, curve, NULL, NULL);
+                if (code < 0)
+                    return code;
+
+                /* Q0 is simimlar to Q2, either a full quarter annulus
+                 * or a partial one, depending on where the tangent crosses
+                 * the y axis
+                 */
+                tanalpha = tan(alpha);
+                intersecty = y1 + tanalpha * (r2 + (x1 - intersectx));
+                intersectx = x1 + r2;
+
+                if (endy < y1 + r2) {
+                    /* didn't get all the way to the edge, quadrant 0 is composed of 2 quads :-(
+                     * An 'annulus' where the right edge is less than the normal extent and a
+                     * quad which is a rectangle with one corner chopped of at an angle.
+                     */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = x1 + r2, p1.y = endy;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                    p0.x = x1, p0.y = y1 + r1;
+                    p1.x = x1, p1.y = endy;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                    p0.x = x1 + r2, p0.y = intersecty;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                    p1.x = p0.x, p1.y = y1 + r1;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                    p0.x = x1, p0.y = y1 + r1;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[3], t0);
+                    code = patch_fill(pfs, curve, NULL, NULL);
+                    if (code < 0)
+                        return code;
+                } else {
+                    /* Quadrant 0 is a normal quarter annulua */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = x1 + r2, p1.y = y1 + r2;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                }
+                break;
+            case 2:
+                /* We have two four-sided elements, from the tangent point
+                 * each side, to the point where the tangent crosses an
+                 * axis of the larger circle. A line back to the edge
+                 * of the larger circle, a line to the point where an axis
+                 * crosses the smaller circle, then an arc back to the starting point.
+                 */
+                /* Figure out the tangent point */
+                /* sin (angle) = y1 - y0 / r1 - r0
+                 * ty = ((y1 - y0) / (r1 - r0)) * r1
+                 */
+                ty = y1 - ((y1 - y0) / (r1 - r0)) * r1;
+                tx = x1 - ((x1 - x0) / (r1 - r0)) * r1;
+                /* Now actually calculating the point where the tangent crosses the axis of the larger circle
+                 * So we need to know the angle the tangent makes with the axis of the smaller circle
+                 * as its the same angle where it crosses the axis of the larger circle.
+                 * We know the centres and the tangent are co-linear, so sin(a) = y0 - y1 / r1 - r0
+                 * We know the tangent is r1 from the centre of the larger circle, so the hypotenuse
+                 * is r0 / cos(a). That gives us 'x' and we already know y as its the centre of the larger
+                 * circle
+                 */
+                sinalpha = (y1 - y0) / (r1 - r0);
+                alpha = asin(sinalpha);
+                cosalpha = cos(alpha);
+                intersectx = x1 - (r1 / cosalpha);
+                intersecty = y1;
+
+                p0.x = tx, p0.y = ty;
+                p1.x = tx + (intersectx - tx) / 2, p1.y = ty - (ty - intersecty) / 2;
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                p0.x = intersectx, p0.y = intersecty;
+                patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                p1.x = x1 - r1, p1.y = y1;
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                p0.x = tx, p0.y = ty;
+                centre.x = x1, centre.y = y1;
+                patch_curveto(&pfs->pgs->ctm, &centre, &p1, &p0, &curve[3], t0);
+                code = patch_fill(pfs, curve, NULL, NULL);
+                if (code < 0)
+                    return code;
+                if (intersectx > x1 - r2) {
+                    /* didn't get all the way to the edge, quadrant 1 is composed of 2 quads :-(
+                     * An 'annulus' where the right edge is less than the normal extent and a
+                     * quad which is a rectangle with one corner chopped of at an angle.
+                     */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = intersectx, p1.y = y1 + r2;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                    endy = y1+r2;
+                    endx = intersectx - ((endy - intersecty) / (tan ((M_PI / 2) - alpha)));
+                    p0.x = intersectx, p0.y = y1;
+                    p1.x = endx, p1.y = endy;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                    p0.x = x1 - r1, p0.y = endy;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                    p1.x = x1 - r1, p1.y = y1;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                    p0.x = intersectx, p0.y = y1;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[3], t0);
+                    code = patch_fill(pfs, curve, NULL, NULL);
+                    if (code < 0)
+                        return code;
+                } else {
+                    /* Quadrant 1 is a normal quarter annulua */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = x1 - r2, p1.y = y1 + r2;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                }
+
+                /* Q0 is always a full annulus... */
+                p0.x = x1, p0.y = y1;
+                p1.x = x1 + r2, p1.y = y1 + r2;
+                if (p1.y < 0)
+                    p1.y = 0;
+                draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+
+                /* alpha is now the angle between the x axis and the tangent to the
+                 * circles.
+                 */
+                alpha = (M_PI / 2) - alpha;
+                cosalpha = cos(alpha);
+                endy = y1 - (r1 / cosalpha);
+                endx = x1;
+
+                p0.x = tx, p0.y = ty;
+                p1.x = endx + ((endx - tx) / 2), p1.y = endy - ((ty - endy) / 2);
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                p0.x = endx, p0.y = endy;
+                patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                p1.x = x1, p1.y = y1 - r1;
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                p0.x = tx, p0.y = ty;
+                centre.x = x1, centre.y = y1;
+                patch_curveto(&pfs->pgs->ctm, &centre, &p1, &p0, &curve[3], t0);
+                code = patch_fill(pfs, curve, NULL, NULL);
+                if (code < 0)
+                    return code;
+
+                /* Q3 is simimlar to Q1, either a full quarter annulus
+                 * or a partial one, depending on where the tangent crosses
+                 * the y axis
+                 */
+                tanalpha = tan(alpha);
+                intersecty = y1 - tanalpha * (r2 + (x1 - intersectx));
+                intersectx = x1 + r2;
+
+                if (endy > y1 - r2) {
+                    /* didn't get all the way to the edge, quadrant 3 is composed of 2 quads :-(
+                     * An 'annulus' where the right edge is less than the normal extent and a
+                     * quad which is a rectangle with one corner chopped of at an angle.
+                     */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = x1 + r2, p1.y = endy;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                    p0.x = x1, p0.y = y1 - r1;
+                    p1.x = x1, p1.y = endy;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                    p0.x = x1 + r2, p0.y = intersecty;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                    p1.x = p0.x, p1.y = y1 - r1;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                    p0.x = x1, p0.y = y1 - r1;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[3], t0);
+                    code = patch_fill(pfs, curve, NULL, NULL);
+                    if (code < 0)
+                        return code;
+                } else {
+                    /* Quadrant 1 is a normal quarter annulua */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = x1 + r2, p1.y = y1 - r2;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                }
+                break;
+            case 3:
+                /* We have two four-sided elements, from the tangent point
+                 * each side, to the point where the tangent crosses an
+                 * axis of the larger circle. A line back to the edge
+                 * of the larger circle, a line to the point where an axis
+                 * crosses the smaller circle, then an arc back to the starting point.
+                 */
+                /* Figure out the tangent point */
+                /* sin (angle) = y1 - y0 / r1 - r0
+                 * ty = ((y1 - y0) / (r1 - r0)) * r1
+                 */
+                ty = y1 - ((y1 - y0) / (r1 - r0)) * r1;
+                tx = x1 + ((x0 - x1) / (r1 - r0)) * r1;
+                /* Now actually calculating the point where the tangent crosses the axis of the larger circle
+                 * So we need to know the angle the tangent makes with the axis of the smaller circle
+                 * as its the same angle where it crosses the axis of the larger circle.
+                 * We know the centres and the tangent are co-linear, so sin(a) = y0 - y1 / r1 - r0
+                 * We know the tangent is r1 from the centre of the larger circle, so the hypotenuse
+                 * is r0 / cos(a). That gives us 'x' and we already know y as its the centre of the larger
+                 * circle
+                 */
+                sinalpha = (y1 - y0) / (r1 - r0);
+                alpha = asin(sinalpha);
+                cosalpha = cos(alpha);
+                intersectx = x1 + (r1 / cosalpha);
+                intersecty = y1;
+
+                p0.x = tx, p0.y = ty;
+                p1.x = tx + (intersectx - tx) / 2, p1.y = ty + (intersecty - ty) / 2;
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                p0.x = intersectx, p0.y = intersecty;
+                patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                p1.x = x1 + r1, p1.y = y1;
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                p0.x = tx, p0.y = ty;
+                centre.x = x1, centre.y = y1;
+                patch_curveto(&pfs->pgs->ctm, &centre, &p1, &p0, &curve[3], t0);
+                code = patch_fill(pfs, curve, NULL, NULL);
+                if (code < 0)
+                    return code;
+                if (intersectx < x1 + r2) {
+                    /* didn't get all the way to the edge, quadrant 0 is composed of 2 quads :-(
+                     * An 'annulus' where the right edge is less than the normal extent and a
+                     * quad which is a rectangle with one corner chopped of at an angle.
+                     */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = intersectx, p1.y = y1 + r2;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                    endy = y1 + r2;
+                    endx = intersectx + ((endy - intersecty) / (tan ((M_PI / 2) - alpha)));
+                    p0.x = intersectx, p0.y = y1;
+                    p1.x = endx, p1.y = endy;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                    p0.x = x1 + r1, p0.y = endy;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                    p1.x = x1 + r1, p1.y = y1;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                    p0.x = intersectx, p0.y = y1;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[3], t0);
+                    code = patch_fill(pfs, curve, NULL, NULL);
+                    if (code < 0)
+                        return code;
+
+                } else {
+                    /* Quadrant 0 is a normal quarter annulua */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = x1 + r2, p1.y = y1 + r2;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                }
+                /* Q1 is always a full annulus... */
+                p0.x = x1, p0.y = y1;
+                p1.x = x1 - r2, p1.y = y1 + r2;
+                draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+
+                /* alpha is now the angle between the x axis and the tangent to the
+                 * circles.
+                 */
+                alpha = (M_PI / 2) - alpha;
+                cosalpha = cos(alpha);
+                endy = y1 - (r1 / cosalpha);
+                endx = x1;
+
+                p0.x = tx, p0.y = ty;
+                p1.x = endx + ((tx - endx) / 2), p1.y = endy + ((ty - endy) / 2);
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                p0.x = endx, p0.y = endy;
+                patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                p1.x = x1, p1.y = y1 - r1;
+                patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                p0.x = tx, p0.y = ty;
+                centre.x = x1, centre.y = y1;
+                patch_curveto(&pfs->pgs->ctm, &centre, &p1, &p0, &curve[3], t0);
+                code = patch_fill(pfs, curve, NULL, NULL);
+                if (code < 0)
+                    return code;
+
+                /* Q3 is simimlar to Q1, either a full quarter annulus
+                 * or a partial one, depending on where the tangent crosses
+                 * the y axis
+                 */
+                tanalpha = tan(alpha);
+                intersecty = y1 - tanalpha * (r2 + (intersectx - x1));
+                intersectx = x1 - r2;
+
+                if (endy > y1 - r2) {
+                    /* didn't get all the way to the edge, quadrant 3 is composed of 2 quads :-(
+                     * An 'annulus' where the right edge is less than the normal extent and a
+                     * quad which is a rectangle with one corner chopped of at an angle.
+                     */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = x1 - r2, p1.y = endy;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                    p0.x = x1, p0.y = y1 - r1;
+                    p1.x = x1, p1.y = endy;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[0], t0);
+                    p0.x = x1 - r2, p0.y = intersecty;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[1], t0);
+                    p1.x = p0.x, p1.y = y1 - r1;
+                    patch_lineto(&pfs->pgs->ctm, &p0, &p1, &curve[2], t0);
+                    p0.x = x1, p0.y = y1 - r1;
+                    patch_lineto(&pfs->pgs->ctm, &p1, &p0, &curve[3], t0);
+                    code = patch_fill(pfs, curve, NULL, NULL);
+                    if (code < 0)
+                        return code;
+                } else {
+                    /* Quadrant 1 is a normal quarter annulua */
+                    p0.x = x1, p0.y = y1;
+                    p1.x = x1 - r2, p1.y = y1 - r2;
+                    draw_quarter_annulus(pfs, &p0, r1, &p1, t0);
+                }
+                break;
         }
     }
     return 0;
@@ -557,11 +1456,11 @@ R_fill_triangle_new(patch_fill_state_t *pfs, const gs_rect *rect,
     p0.c = c;
     p1.c = c;
     p2.c = c;
-    code = gs_point_transform2fixed(&pfs->pis->ctm, x0, y0, &p0.p);
+    code = gs_point_transform2fixed(&pfs->pgs->ctm, x0, y0, &p0.p);
     if (code >= 0)
-        code = gs_point_transform2fixed(&pfs->pis->ctm, x1, y1, &p1.p);
+        code = gs_point_transform2fixed(&pfs->pgs->ctm, x1, y1, &p1.p);
     if (code >= 0)
-        code = gs_point_transform2fixed(&pfs->pis->ctm, x2, y2, &p2.p);
+        code = gs_point_transform2fixed(&pfs->pgs->ctm, x2, y2, &p2.p);
     if (code >= 0) {
         c->t[0] = c->t[1] = t;
         patch_resolve_color(c, pfs);
@@ -574,8 +1473,7 @@ R_fill_triangle_new(patch_fill_state_t *pfs, const gs_rect *rect,
 static int
 R_obtuse_cone(patch_fill_state_t *pfs, const gs_rect *rect,
         double x0, double y0, double r0,
-        double x1, double y1, double r1, double t0, double r_rect,
-        bool inwards)
+        double x1, double y1, double r1, double t0, double r_rect)
 {
     double dx = x1 - x0, dy = y1 - y0, dr = any_abs(r1 - r0);
     double d = hypot(dx, dy);
@@ -628,12 +1526,8 @@ R_obtuse_cone(patch_fill_state_t *pfs, const gs_rect *rect,
         code = R_tensor_annulus(pfs, x0, y0, r0, t0, ex, ey, er, t0);
         if (code < 0)
             return code;
-        /* Fill entire ending circle to ensure entire rect is covered, but
-         * only if we are filling "inwards" (as otherwise we will overwrite
-         * all the hard work we have done to this point) */
-        if (inwards)
-            code = R_tensor_annulus(pfs, ex, ey, er, t0, ex, ey, 0, t0);
-        return code;
+        /* Fill entire ending circle to ensure entire rect is covered. */
+        return R_tensor_annulus(pfs, ex, ey, er, t0, ex, ey, 0, t0);
     }
 }
 
@@ -707,7 +1601,63 @@ R_extensions(patch_fill_state_t *pfs, const gs_shading_R_t *psh, const gs_rect *
     double d = hypot(dx, dy), r;
     int code;
 
-    if (dr >= d - 1e-7 * (d + dr)) {
+    /* In order for the circles to be nested, one end circle
+     * needs to be sufficiently large to cover the entirety
+     * of the other end circle. i.e.
+     *
+     *     max(r0,r1) >= d + min(r0,r1)
+     * === min(r0,r1) + dr >= d + min(r0,r1)
+     * === dr >= d
+     *
+     * This, plus a fudge factor for FP operation is what we use below.
+     *
+     * An "Obtuse Cone" is defined to be one for which the "opening
+     * angle" is obtuse.
+     *
+     * Consider two circles; one at (r0,r0) of radius r0, and one at
+     * (r1,r1) of radius r1. These clearly lie on the acute/obtuse
+     * boundary. The distance between the centres of these two circles
+     * is d = sqr(2.(r0-r1)^2) by pythagoras. Thus d = sqr(2).dr.
+     * By observation if d gets longer, we become acute, shorter, obtuse.
+     * i.e. if sqr(2).dr > d we are obtuse, if d > sqr(2).dr we are acute.
+     * (Thanks to Paul Gardiner for this reasoning).
+     *
+     * The code below tests (dr > d/3) (i.e. 3.dr > d). This
+     * appears to be a factor of 2 and a bit out, so I am confused
+     * by it.
+     *
+     * Either Igor meant something different to the standard meaning
+     * of "Obtuse Cone", or he got his maths wrong. Or he was more
+     * cunning than I can understand. Leave it as it until we find
+     * an actual example that goes wrong.
+     */
+
+    /* Tests with Acrobat seem to indicate that it uses a fudge factor
+     * of around .0001. (i.e. [1.0001 0 0 0 0 1] is accepted as a
+     * non nested circle, but [1.00009 0 0 0 0 1] is a nested one.
+     * Approximate the same sort of value here to appease bug 690831.
+     */
+    if (any_abs (dr - d) < 0.001) {
+        if ((r0 > r1 && Extend0) || (r1 > r0 && Extend1)) {
+            r = R_rect_radius(rect, x0, y0);
+            if (r0 < r1)
+                code = R_tensor_annulus_extend_tangent(pfs, x0, y0, r0, t1, x1, y1, r1, t1, r);
+            else
+                code = R_tensor_annulus_extend_tangent(pfs, x1, y1, r1, t0, x0, y0, r0, t0, r);
+            if (code < 0)
+                return code;
+        } else {
+            if (r0 > r1) {
+                if (Extend1 && r1 > 0)
+                    return R_tensor_annulus(pfs, x1, y1, r1, t1, x1, y1, 0, t1);
+            }
+            else {
+                if (Extend0 && r0 > 0)
+                    return R_tensor_annulus(pfs, x0, y0, r0, t0, x0, y0, 0, t0);
+            }
+        }
+    } else
+    if (dr > d - 1e-4 * (d + dr)) {
         /* Nested circles, or degenerate. */
         if (r0 > r1) {
             if (Extend0) {
@@ -737,7 +1687,7 @@ R_extensions(patch_fill_state_t *pfs, const gs_shading_R_t *psh, const gs_rect *
         if (r0 > r1) {
             if (Extend0) {
                 r = R_rect_radius(rect, x0, y0);
-                code = R_obtuse_cone(pfs, rect, x0, y0, r0, x1, y1, r1, t0, r, true);
+                code = R_obtuse_cone(pfs, rect, x0, y0, r0, x1, y1, r1, t0, r);
                 if (code < 0)
                     return code;
             }
@@ -747,7 +1697,7 @@ R_extensions(patch_fill_state_t *pfs, const gs_shading_R_t *psh, const gs_rect *
         } else {
             if (Extend1) {
                 r = R_rect_radius(rect, x1, y1);
-                code = R_obtuse_cone(pfs, rect, x1, y1, r1, x0, y0, r0, t1, r, false);
+                code = R_obtuse_cone(pfs, rect, x1, y1, r1, x0, y0, r0, t1, r);
                 if (code < 0)
                     return code;
             }
@@ -802,7 +1752,7 @@ R_fill_rect_with_const_color(patch_fill_state_t *pfs, const gs_fixed_rect *clip_
     return gx_fill_rectangle_device_rop(fixed2int_pixround(clip_rect->p.x), fixed2int_pixround(clip_rect->p.y),
                                         fixed2int_pixround(clip_rect->q.x) - fixed2int_pixround(clip_rect->p.x),
                                         fixed2int_pixround(clip_rect->q.y) - fixed2int_pixround(clip_rect->p.y),
-                                        &dc, pfs->dev, pfs->pis->log_op);
+                                        &dc, pfs->dev, pfs->pgs->log_op);
 #else
     /* Can't apply fill_rectangle, because the clist writer device doesn't pass
        the clipping path with fill_recatangle. Convert into trapezoids instead.
@@ -1224,7 +2174,7 @@ is_radial_shading_large(double x0, double y0, double r0, double x1, double y1, d
 static int
 gs_shading_R_fill_rectangle_aux(const gs_shading_t * psh0, const gs_rect * rect,
                             const gs_fixed_rect *clip_rect,
-                            gx_device * dev, gs_imager_state * pis)
+                            gx_device * dev, gs_gstate * pgs)
 {
     const gs_shading_R_t *const psh = (const gs_shading_R_t *)psh0;
     float d0 = psh->params.Domain[0], d1 = psh->params.Domain[1];
@@ -1239,7 +2189,7 @@ gs_shading_R_fill_rectangle_aux(const gs_shading_t * psh0, const gs_rect * rect,
 
     if (r0 == 0 && r1 == 0)
         return 0; /* PLRM requires to paint nothing. */
-    code = shade_init_fill_state((shading_fill_state_t *)&pfs1, psh0, dev, pis);
+    code = shade_init_fill_state((shading_fill_state_t *)&pfs1, psh0, dev, pgs);
     if (code < 0)
         return code;
     pfs1.Function = psh->params.Function;
@@ -1248,7 +2198,7 @@ gs_shading_R_fill_rectangle_aux(const gs_shading_t * psh0, const gs_rect * rect,
         if (pfs1.icclink != NULL) gsicc_release_link(pfs1.icclink);
         return code;
     }
-    pfs1.function_arg_shift = 1;
+    pfs1.function_arg_shift = 0;
     pfs1.rect = *clip_rect;
     pfs1.maybe_self_intersecting = false;
     if (is_radial_shading_large(x0, y0, r0, x1, y1, r1, rect))
@@ -1308,18 +2258,7 @@ gs_shading_R_fill_rectangle_aux(const gs_shading_t * psh0, const gs_rect * rect,
 int
 gs_shading_R_fill_rectangle(const gs_shading_t * psh0, const gs_rect * rect,
                             const gs_fixed_rect * rect_clip,
-                            gx_device * dev, gs_imager_state * pis)
+                            gx_device * dev, gs_gstate * pgs)
 {
-    int code;
-
-    if (VD_TRACE_RADIAL_PATCH && vd_allowed('s')) {
-        vd_get_dc('s');
-        vd_set_shift(0, 0);
-        vd_set_scale(0.01);
-        vd_set_origin(0, 0);
-    }
-    code = gs_shading_R_fill_rectangle_aux(psh0, rect, rect_clip, dev, pis);
-    if (VD_TRACE_FUNCTIONAL_PATCH && vd_allowed('s'))
-        vd_release_dc;
-    return code;
+    return gs_shading_R_fill_rectangle_aux(psh0, rect, rect_clip, dev, pgs);
 }

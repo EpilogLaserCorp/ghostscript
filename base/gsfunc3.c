@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -206,7 +206,9 @@ gs_function_ElIn_free_params(gs_function_ElIn_params_t * params,
                              gs_memory_t * mem)
 {
     gs_free_const_object(mem, params->C1, "C1");
+    params->C1 = NULL;
     gs_free_const_object(mem, params->C0, "C0");
+    params->C0 = NULL;
     fn_common_free_params((gs_function_params_t *) params, mem);
 }
 
@@ -217,13 +219,22 @@ gs_function_ElIn_serialize(const gs_function_t * pfn, stream *s)
     uint n;
     const gs_function_ElIn_params_t * p = (const gs_function_ElIn_params_t *)&pfn->params;
     int code = fn_common_serialize(pfn, s);
+    float C0_default[2] = {0, 0};
+    float C1_default[2] = {1, 0};
 
     if (code < 0)
         return code;
-    code = sputs(s, (const byte *)&p->C0[0], sizeof(p->C0[0]) * p->n, &n);
+    if (p->C0)
+        code = sputs(s, (const byte *)&p->C0[0], sizeof(p->C0[0]) * p->n, &n);
+    else
+        code = sputs(s, (const byte *)&C0_default, sizeof(float) * 2, &n);
     if (code < 0)
         return code;
-    code = sputs(s, (const byte *)&p->C1[0], sizeof(p->C1[0]) * p->n, &n);
+
+    if (p->C1)
+        code = sputs(s, (const byte *)&p->C1[0], sizeof(p->C1[0]) * p->n, &n);
+    else
+        code = sputs(s, (const byte *)&C1_default, sizeof(float) * 2, &n);
     if (code < 0)
         return code;
     return sputs(s, (const byte *)&p->N, sizeof(p->N), &n);
@@ -335,6 +346,13 @@ fn_1ItSg_is_monotonic(const gs_function_t * pfn_common,
     int i;
 
     *mask = 0;
+
+    /* If the upper and lower parametric values are the same then this is a point
+     * and so is monotonic.
+     */
+    if (v0 == v1)
+        return 1;
+
     if (v0 > v1) {
         v0 = v1; v1 = lower[0];
     }
@@ -352,12 +370,15 @@ fn_1ItSg_is_monotonic(const gs_function_t * pfn_common,
         float e0, e1;
         float w0, w1;
         float vv0, vv1;
-        double vb0, vb1;
+        float vb0, vb1;
 
         if (v0 >= b1 - bsmall)
             continue; /* Ignore a small noise */
         vv0 = max(b0, v0);
-        vv1 = v1;
+        /* make sure we promote *both* values, in case v0 was within the
+         * noise threshold above.
+         */
+        vv1 = max(b0, v1);
         if (vv1 > b1 && v1 < b1 + bsmall)
             vv1 = b1; /* Ignore a small noise */
         if (vv0 == vv1)
@@ -369,8 +390,8 @@ fn_1ItSg_is_monotonic(const gs_function_t * pfn_common,
         e0 = pfn->params.Encode[2 * i];
         e1 = pfn->params.Encode[2 * i + 1];
         esmall = (float)1e-6 * any_abs(e1 - e0);
-        vb0 = max(vv0, b0);
-        vb1 = min(vv1, b1);
+        vb0 = (float)max(vv0, b0);
+        vb1 = (float)min(vv1, b1);
         if (b1 == b0)
             return 1; /* function is monotonous in a point */
         w0 = (float)(vb0 - b0) * (e1 - e0) / (b1 - b0) + e0;
@@ -471,8 +492,11 @@ gs_function_1ItSg_free_params(gs_function_1ItSg_params_t * params,
                               gs_memory_t * mem)
 {
     gs_free_const_object(mem, params->Encode, "Encode");
+    params->Encode = NULL;
     gs_free_const_object(mem, params->Bounds, "Bounds");
+    params->Bounds = NULL;
     fn_free_functions(params->Functions, params->k, mem);
+    params->Functions = NULL;
     fn_common_free_params((gs_function_params_t *) params, mem);
 }
 
@@ -521,7 +545,7 @@ gs_function_1ItSg_init(gs_function_t ** ppfn,
     };
     int n = (params->Range == 0 ? 0 : params->n);
     float prev = params->Domain[0];
-    int i;
+    int code, i;
 
     *ppfn = 0;			/* in case of error */
     for (i = 0; i < params->k; ++i) {
@@ -542,7 +566,11 @@ gs_function_1ItSg_init(gs_function_t ** ppfn,
     }
     if (params->Domain[1] < prev)
         return_error(gs_error_rangecheck);
-    fn_check_mnDR((const gs_function_params_t *)params, 1, n);
+
+    code = fn_check_mnDR((const gs_function_params_t *)params, 1, n);
+    if(code < 0)
+        return code;
+    else
     {
         gs_function_1ItSg_t *pfn =
             gs_alloc_struct(mem, gs_function_1ItSg_t, &st_function_1ItSg,
@@ -665,6 +693,7 @@ gs_function_AdOt_free_params(gs_function_AdOt_params_t * params,
                              gs_memory_t * mem)
 {
     fn_free_functions(params->Functions, params->n, mem);
+    params->Functions = NULL;
     fn_common_free_params((gs_function_params_t *) params, mem);
 }
 

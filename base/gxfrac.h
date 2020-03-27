@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -27,8 +27,8 @@
 typedef short frac;
 typedef short signed_frac;
 
-#define arch_log2_sizeof_frac arch_log2_sizeof_short
-#define arch_sizeof_frac arch_sizeof_short
+#define arch_log2_sizeof_frac ARCH_LOG2_SIZEOF_SHORT
+#define arch_sizeof_frac ARCH_SIZEOF_SHORT
 #define frac_bits 15
 #define frac_0 ((frac)0)
 
@@ -71,13 +71,31 @@ typedef short signed_frac;
 /*
  * Conversion between fracs and unsigned shorts.
  */
-#define ushort_bits (arch_sizeof_short * 8)
+#define ushort_bits (ARCH_SIZEOF_SHORT * 8)
 #define frac2ushort(fr) ((ushort)(\
   ((fr) << (ushort_bits - frac_bits)) +\
   ((fr) >> (frac_bits * 2 - ushort_bits - frac_1_0bits)) ))
 #define ushort2frac(us) ((frac)(\
   ((us) >> (ushort_bits - frac_bits)) -\
   ((us) >> (ushort_bits - frac_1_0bits)) ))
+
+/*
+ * Conversion between frac31s and unsigned shorts.
+ */
+#define ushort_bits (ARCH_SIZEOF_SHORT * 8)
+#define frac31_bits 31
+#if 0
+#define frac312ushort(fr) ((ushort)(\
+  ((fr) >> (frac31_bits - ushort_bits)) +\
+  ((fr) >> (frac31_bits - ushort_bits + frac_bits - frac_1_0bits)) ))
+#define ushort2frac31(us) ((frac31)(\
+  ((us) << (frac31_bits - ushort_bits)) -\
+  ((us) << (frac31_bits - ushort_bits - frac_bits + frac_1_0bits)) ))
+#else
+#define frac312ushort(fr) ((ushort)((fr) >> (frac31_bits - ushort_bits)))
+#define ushort2frac31(us) ((frac31)((us) << (frac31_bits - ushort_bits)))
+#endif
+
 /*
  * Compute the quotient Q = floor(P / frac_1),
  * where P is the (ulong) product of a uint or ushort V and a frac F.

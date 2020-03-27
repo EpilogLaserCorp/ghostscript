@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# Copyright (C) 2001-2012 Artifex Software, Inc.
+# Copyright (C) 2001-2019 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -11,8 +11,8 @@
 # of the license contained in the file LICENSE in this distribution.
 #
 # Refer to licensing information at http://www.artifex.com or contact
-# Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-# CA  94903, U.S.A., +1(415)492-9861, for further information.
+# Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+# CA 94945, U.S.A., +1(415)492-9861, for further information.
 #
 
 # noddy script to rejig the git log output into a Ghostscript html changelog
@@ -40,7 +40,7 @@ else:
 
   # Create a list of commit SHA1 sums we want to log
   commit_list = []
-  cmd="git log --cc --topo-order --pretty=oneline " + sys.argv[1] + "..." + sys.argv[2]
+  cmd="git log --topo-order --pretty=oneline " + sys.argv[1] + "..." + sys.argv[2]
   res = os.popen(cmd, "r")
   line1=res.readline()
 
@@ -55,7 +55,7 @@ else:
   for csum in commit_list:
     # we have to use the slightly baroque syntax: git log --cc --topo-order <commit>^...<commit>
     # where the "^" indicates the commit prior to the one we're processing with
-    cmd="git log --name-only --cc --topo-order --date=iso -n1 " + csum + "^" + "..." + csum
+    cmd="git log --name-only --topo-order --date=iso -n1 " + csum + "^" + "..." + csum
     res = os.popen(cmd, "r")
     commit=res.readlines()
     # This assumes the order of the lines.....

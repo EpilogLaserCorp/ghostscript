@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -213,7 +213,7 @@ hpgl_select_font_by_id(hpgl_args_t * pargs, hpgl_state_t * pgls, int index)
 
         hpgl_args_setup(&args);
         hpgl_args_add_int(&args, 1);
-        hpgl_SB(&args, pgls);
+        hpgl_call(hpgl_SB(&args, pgls));
     }
     /* note pcltrm 23-54 - only select if the table (primary or
        secondary) matches the currently selected table. */
@@ -344,10 +344,15 @@ hpgl_DT(hpgl_args_t * pargs, hpgl_state_t * pgls)
 int
 hpgl_DV(hpgl_args_t * pargs, hpgl_state_t * pgls)
 {
-    int path = 0, line = 0;
+    int path;
+    int line;
 
-    hpgl_arg_c_int(pgls->memory, pargs, &path);
-    hpgl_arg_c_int(pgls->memory, pargs, &line);
+    if (!hpgl_arg_c_int(pgls->memory, pargs, &path))
+        path = 0;
+    
+    if (!hpgl_arg_c_int(pgls->memory, pargs, &line))
+        line = 0;
+
     if ((path & ~3) | (line & ~1))
         return e_Range;
     pgls->g.character.text_path = path;
@@ -388,13 +393,18 @@ hpgl_FN(hpgl_args_t * pargs, hpgl_state_t * pgls)
 int
 hpgl_LM(hpgl_args_t * pargs, hpgl_state_t * pgls)
 {
-    int mode = 0, row_number = 0;
+    int mode;
+    int row_number;
     int old_mode =
         (pgls->g.label.double_byte ? 1 : 0) +
         (pgls->g.label.write_vertical ? 2 : 0);
 
-    hpgl_arg_c_int(pgls->memory, pargs, &mode);
-    hpgl_arg_c_int(pgls->memory, pargs, &row_number);
+    if (!hpgl_arg_c_int(pgls->memory, pargs, &mode))
+        mode = 0;
+
+    if (!hpgl_arg_c_int(pgls->memory, pargs, &row_number))
+        row_number = 0;
+
     pgls->g.label.row_offset =
         (row_number < 0 ? 0 : row_number > 255 ? 255 : row_number) << 8;
     mode &= 3;
@@ -414,9 +424,11 @@ hpgl_LM(hpgl_args_t * pargs, hpgl_state_t * pgls)
 int
 hpgl_LO(hpgl_args_t * pargs, hpgl_state_t * pgls)
 {
-    int origin = 1;
+    int origin;
 
-    hpgl_arg_c_int(pgls->memory, pargs, &origin);
+    if (!hpgl_arg_c_int(pgls->memory, pargs, &origin))
+        origin = 1;
+
     if (origin < 1 || origin == 10 || origin == 20 || origin > 21)
         return e_Range;
     pgls->g.label.origin = origin;
@@ -639,8 +651,10 @@ hpgl_DL(hpgl_args_t * pargs, hpgl_state_t * pgls)
         cdata->index = -1;
         cdata->data = NULL;
         id_set_value(pgls->g.current_dl_char_id, (ushort) cc);
-        pl_dict_put(&pgls->g.dl_531_fontdict,
+        code = pl_dict_put(&pgls->g.dl_531_fontdict,
                     id_key(pgls->g.current_dl_char_id), 2, cdata);
+        if (code < 0)
+            return code;
         hpgl_args_init(pargs);
         pargs->phase = 1;
     }
@@ -698,7 +712,7 @@ pgchar_do_registration(pcl_parser_state_t * pcl_parser_state,
     return 0;
 }
 
-static void
+static int
 pgchar_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
     if (type & pcl_reset_initial)
@@ -706,7 +720,7 @@ pgchar_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
                      hpgl_dl_dict_free_value);
     if (type & pcl_reset_permanent)
         pl_dict_release(&pcs->g.dl_531_fontdict);
-    return;
+    return 0;
 }
 
 const pcl_init_t pgchar_init = {

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -133,11 +133,13 @@ s_CFE_init(register stream_state * st)
     /*
      * The worst case for encoding is alternating white and black pixels.
      * For 1-D encoding, the worst case is 9 bits per 2 pixels; for 2-D
-     * (horizontal), 12 bits per 2 pixels.  To fill out a scan line,
+     * (horizontal), 12 bits per 2 pixels. However, for 2D vertical encoding
+     * an offset 3 vertically encoded requires 7 bits of encoding. So we need
+     * to allow 14 bits for this, not 12 (see bug 696413). To fill out a scan line,
      * we may add up to 6 12-bit EOL codes.
      */
     int code_bytes =
-    ((columns * (ss->K == 0 ? 9 : 12)) >> 4) + 20;	/* add slop */
+    (((columns * (ss->K == 0 ? 9 : 14)) + 15) >> 4) + 20;	/* add slop */
     int raster = ss->raster =
         ROUND_UP((columns + 7) >> 3, ss->DecodedByteAlign);
 
@@ -210,9 +212,9 @@ s_CFE_process(stream_state * st, stream_cursor_read * pr,
 
         if_debug2m('w', ss->memory, "[w]CFE: read_count = %d, write_count=%d,\n",
                    ss->read_count, ss->write_count);
-        if_debug6m('w', ss->memory, "    pr = 0x%lx(%d)0x%lx, pw = 0x%lx(%d)0x%lx\n",
-                   (ulong) pr->ptr, (int)(rlimit - pr->ptr), (ulong) rlimit,
-                   (ulong) pw->ptr, (int)(wlimit - pw->ptr), (ulong) wlimit);
+        if_debug6m('w', ss->memory, "    pr = "PRI_INTPTR"(%d)"PRI_INTPTR", pw = "PRI_INTPTR"(%d)"PRI_INTPTR"\n",
+                   (intptr_t) pr->ptr, (int)(rlimit - pr->ptr), (intptr_t) rlimit,
+                   (intptr_t) pw->ptr, (int)(wlimit - pw->ptr), (intptr_t) wlimit);
         if (ss->write_count) {
             /* Copy more of an encoded line to the caller. */
             int wcount = wlimit - pw->ptr;
@@ -358,10 +360,11 @@ s_CFE_process(stream_state * st, stream_cursor_read * pr,
         pw->ptr = hc_put_last_bits((stream_hc_state *) ss, q);
     }
   out:
-    if_debug9m('w', ss->memory, "[w]CFE exit %d: read_count = %d, write_count = %d,\n     pr = 0x%lx(%d)0x%lx; pw = 0x%lx(%d)0x%lx\n",
+    if_debug9m('w', ss->memory, "[w]CFE exit %d: read_count = %d, write_count = %d,\n"
+               "     pr = "PRI_INTPTR"(%d)"PRI_INTPTR"; pw = "PRI_INTPTR"(%d)"PRI_INTPTR"\n",
                status, ss->read_count, ss->write_count,
-               (ulong) pr->ptr, (int)(rlimit - pr->ptr), (ulong) rlimit,
-               (ulong) pw->ptr, (int)(wlimit - pw->ptr), (ulong) wlimit);
+               (intptr_t) pr->ptr, (int)(rlimit - pr->ptr), (intptr_t) rlimit,
+               (intptr_t) pw->ptr, (int)(wlimit - pw->ptr), (intptr_t) wlimit);
 #if defined(DEBUG) && !defined(GS_THREADSAFE)
     if (pr->ptr > rlimit || pw->ptr > wlimit) {
         lprintf("Pointer overrun!\n");
@@ -378,6 +381,8 @@ s_CFE_process(stream_state * st, stream_cursor_read * pr,
 }
 
 /* Encode a 1-D scan line. */
+/* Attempt to stop coverity thinking skip_white_pixels() taints lbuf:*/
+/* coverity[ -tainted_data_argument : arg-1 ] */
 static void
 cf_encode_1d(stream_CFE_state * ss, const byte * lbuf, stream_cursor_write * pw)
 {
@@ -409,6 +414,7 @@ cf_encode_1d(stream_CFE_state * ss, const byte * lbuf, stream_cursor_write * pw)
 }
 
 /* Encode a 2-D scan line. */
+/* coverity[ -tainted_data_argument : arg-1 ] */
 static void
 cf_encode_2d(stream_CFE_state * ss, const byte * lbuf, stream_cursor_write * pw,
              const byte * lprev)

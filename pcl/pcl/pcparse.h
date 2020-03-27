@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -23,6 +23,7 @@
 #include "gsmemory.h"
 #include "scommon.h"
 #include "pcommand.h"
+#include "pcstate.h"
 
 /* Define the lexical state of the scanner. */
 typedef enum
@@ -83,11 +84,12 @@ struct pcl_parser_state_s
     byte param_class, param_group;      /* for parameterized commands */
     uint data_pos;              /* for data crossing buffer boundaries */
     hpgl_parser_state_t *hpgl_parser_state;
+    byte min_bytes_needed; /* number of characters needed to recover from an underflow */
     pcl_command_definitions_t *definitions;
 };
 
 #define pcl_parser_init_inline(pst)\
-    ((pst)->scan_type = scanning_none, (pst)->args.data = 0, (pst)->args.data_on_heap = false, (pst)->short_hand = false)
+    ((pst)->scan_type = scanning_none, (pst)->args.data = 0, (pst)->args.data_on_heap = false, (pst)->short_hand = false, (pst)->min_bytes_needed = 0)
 
 /* Define the prefix of a macro definition. */
 typedef struct pcl_macro_s
@@ -101,7 +103,7 @@ typedef struct pcl_macro_s
 pcl_parser_state_t *pcl_process_alloc(gs_memory_t * memory);
 
 /* Initialize the PCL parser. */
-void pcl_process_init(pcl_parser_state_t * pst);
+int pcl_process_init(pcl_parser_state_t * pst, pcl_state_t * pcs);
 
 /* Process a buffer of PCL commands. */
 int pcl_process(pcl_parser_state_t * pst, pcl_state_t * pcs,
@@ -112,7 +114,7 @@ int pcl_execute_macro(const pcl_macro_t * pmac, pcl_state_t * pcs,
                       pcl_copy_operation_t before, pcl_reset_type_t reset,
                       pcl_copy_operation_t after);
 
-void pcparse_do_reset(pcl_state_t * pcs, pcl_reset_type_t type);
+int pcparse_do_reset(pcl_state_t * pcs, pcl_reset_type_t type);
 
 int pcl_init_command_index(pcl_parser_state_t * pcl_parser_state,
                            pcl_state_t * pcs);

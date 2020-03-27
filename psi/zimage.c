@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -55,7 +55,7 @@ data_image_params(const gs_memory_t *mem,
                   const ref *op, gs_data_image_t *pim,
                   image_params *pip, bool require_DataSource,
                   int num_components, int max_bits_per_component,
-                  bool has_alpha, bool islab)
+                  bool islab)
 {
     int code;
     ref *pds;
@@ -94,9 +94,9 @@ data_image_params(const gs_memory_t *mem,
         code = dict_floats_param(mem, op, "Decode", 4,
                                  &pim->Decode[2], NULL);
         if (code < 0) {
-            /* Try for all three pairs. Ignore more than 6 elements */
-                code = dict_float_array_check_param(mem, op, "Decode", 6,
-                                                    &pim->Decode[0], NULL, gs_error_rangecheck, 0);	/* over_error = 0 */
+            /* Try for all three */
+            code = dict_floats_param(mem, op, "Decode", 6,
+                                                        &pim->Decode[0], NULL);
         } else {
             /* Set the range on the L */
             pim->Decode[0] = 0;
@@ -105,9 +105,9 @@ data_image_params(const gs_memory_t *mem,
         if (code < 0)
             return code;
     } else {
-            /* more elements than we need is OK */
-        code = dict_float_array_check_param(mem, op, "Decode", 2 * num_components,
-                                            &pim->Decode[0], NULL, gs_error_rangecheck, 0);	/* over_error = 0 */
+        code = dict_floats_param(mem, op, "Decode",
+                                                    num_components * 2,
+                                                    &pim->Decode[0], NULL);
         if (code < 0)
             return code;
     }
@@ -120,20 +120,18 @@ data_image_params(const gs_memory_t *mem,
     }
     if (pip->MultipleDataSources) {
         ref *ds = pip->DataSource;
-        long i, n = num_components + (has_alpha ? 1 : 0);
+        long i;
         if (!r_is_array(pds))
             return_error(gs_error_typecheck);
-        if (r_size(pds) != n)
+        if (r_size(pds) != num_components)
             return_error(gs_error_rangecheck);
-        for (i = 0; i < n; ++i)
+        for (i = 0; i < num_components; ++i)
             array_get(mem, pds, i, &ds[i]);
         if (r_type(&ds[0]) == t_string) {
             /* We don't have a problem with the strings of different length
              * but Adobe does and CET tast 12-02.ps reports this as an error.
              */
-            if (has_alpha)
-                n--;
-            for (i = 1; i < n; ++i) {
+            for (i = 1; i < num_components; ++i) {
                 if (r_type(&ds[i]) == t_string && r_size(&ds[i]) != r_size(&ds[0])) {
                     return_error(gs_error_rangecheck);
                 }
@@ -148,7 +146,7 @@ data_image_params(const gs_memory_t *mem,
 int
 pixel_image_params(i_ctx_t *i_ctx_p, const ref *op, gs_pixel_image_t *pim,
                    image_params *pip, int max_bits_per_component,
-                   bool has_alpha, gs_color_space *csp)
+                   gs_color_space *csp)
 {
     bool islab = false;
     int num_components =
@@ -163,8 +161,7 @@ pixel_image_params(i_ctx_t *i_ctx_p, const ref *op, gs_pixel_image_t *pim,
         islab = pim->ColorSpace->cmm_icc_profile_data->islab;
 
     code = data_image_params(imemory, op, (gs_data_image_t *) pim, pip, true,
-                             num_components, max_bits_per_component,
-                             has_alpha, islab);
+                             num_components, max_bits_per_component, islab);
     if (code < 0)
         return code;
     pim->format =
@@ -182,7 +179,7 @@ zimage_setup(i_ctx_t *i_ctx_p, const gs_pixel_image_t * pim,
     gx_image_enum_common_t *pie;
     int code =
         gs_image_begin_typed((const gs_image_common_t *)pim, igs,
-                             uses_color, &pie);
+                             uses_color, false, &pie);
 
     if (code < 0)
         return code;
@@ -190,9 +187,9 @@ zimage_setup(i_ctx_t *i_ctx_p, const gs_pixel_image_t * pim,
                              sources, npop);
 }
 
-/* Common code for .image1 and .alphaimage operators */
-int
-image1_setup(i_ctx_t * i_ctx_p, bool has_alpha)
+/* <dict> .image1 - */
+static int
+zimage1(i_ctx_t *i_ctx_p)
 {
     os_ptr          op = osp;
     gs_image_t      image;
@@ -218,11 +215,11 @@ image1_setup(i_ctx_t * i_ctx_p, bool has_alpha)
                                (gs_pixel_image_t *)&image,
                                &ip,
                                (level2_enabled ? 16 : 8),
-                               has_alpha, csp);
+                               csp);
     if (code < 0)
         return code;
 
-    image.Alpha = (has_alpha ? gs_image_alpha_last : gs_image_alpha_none);
+    image.Alpha = gs_image_alpha_none;
         /* swap Width, Height, and ImageMatrix so that it comes out the same */
         /* This is only for performance, so only do it for non-skew cases */
     if (image.Width == 1 && image.Height > 1 && image.BitsPerComponent == 8 &&
@@ -250,13 +247,6 @@ image1_setup(i_ctx_t * i_ctx_p, bool has_alpha)
                          1 );
 }
 
-/* <dict> .image1 - */
-static int
-zimage1(i_ctx_t *i_ctx_p)
-{
-    return image1_setup(i_ctx_p, false);
-}
-
 /* <dict> .imagemask1 - */
 static int
 zimagemask1(i_ctx_t *i_ctx_p)
@@ -269,7 +259,7 @@ zimagemask1(i_ctx_t *i_ctx_p)
     gs_image_t_init_mask_adjust(&image, false,
                                 gs_incachedevice(igs) != CACHE_DEVICE_NONE);
     code = data_image_params(imemory, op, (gs_data_image_t *) & image,
-                             &ip, true, 1, 1, false, false);
+                             &ip, true, 1, 1, false);
     if (code < 0)
         return code;
     return zimage_setup(i_ctx_p, (gs_pixel_image_t *)&image, &ip.DataSource[0],
@@ -574,7 +564,7 @@ image_file_continue(i_ctx_t *i_ctx_p)
             total_used = 0;
             for (pi = 0, pp = ETOP_SOURCE(esp, 0); pi < num_sources;
                  ++pi, pp -= 2 ) {
-                sbufskip(pp->value.pfile, used[pi]);
+                (void)sbufskip(pp->value.pfile, used[pi]);
                 total_used += used[pi];
             }
             if (code == gs_error_Remap_Color)

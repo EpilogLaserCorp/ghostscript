@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -31,7 +31,7 @@
 static int
 identity_CIDMap_proc(gs_font_cid2 *pfont, gs_glyph glyph)
 {
-    ulong cid = glyph - gs_min_cid_glyph;
+    ulong cid = glyph - GS_MIN_CID_GLYPH;
 
     if (cid >= pfont->cidata.common.CIDCount)
         return_error(gs_error_rangecheck);
@@ -84,7 +84,7 @@ typedef struct gs_cmap_tt_16bit_format4_s {
     uint segCount2;
     ulong endCount, startCount, idDelta, idRangeOffset, glyphIdArray;
 } gs_cmap_tt_16bit_format4_t;
-gs_private_st_suffix_add1(st_cmap_tt_16bit_format4, gs_cmap_tt_16bit_format4_t,
+gs_public_st_suffix_add1(st_cmap_tt_16bit_format4, gs_cmap_tt_16bit_format4_t,
   "gs_cmap_tt_16bit_format4_t",
   cmap_tt_16bit_format4_enum_ptrs, cmap_tt_16bit_format4_reloc_ptrs,
   st_cmap, font);
@@ -104,7 +104,7 @@ tt_16bit_format4_decode_next(const gs_cmap_t * pcmap_in,
     uint segment2;
 
     if (pstr->size < *pindex + 2) {
-        *pglyph = gs_no_glyph;
+        *pglyph = GS_NO_GLYPH;
         return (*pindex == pstr->size ? 2 : -1);
     }
     chr = U16(pstr->data + *pindex);
@@ -135,7 +135,7 @@ tt_16bit_format4_decode_next(const gs_cmap_t * pcmap_in,
             value = chr + delta;
         break;
     }
-    *pglyph = gs_min_cid_glyph + (value & 0xffff);
+    *pglyph = GS_MIN_CID_GLYPH + (value & 0xffff);
     *pchr = chr;
     *pindex += 2;
     *pfidx = 0;
@@ -164,8 +164,9 @@ tt_16bit_format4_enum_ranges(const gs_cmap_t *pcmap,
     gs_cmap_ranges_enum_setup(pre, pcmap, &tt_16bit_format4_range_procs);
 }
 static int
-tt_16bit_format4_next_lookup(gs_cmap_lookups_enum_t *penum)
+tt_16bit_format4_next_lookup(gs_memory_t *mem, gs_cmap_lookups_enum_t *penum)
 {
+    penum->entry.value.data = 0L;
     if (penum->index[0] == 0) {
         penum->entry.key_size = 2;
         penum->entry.key_is_range = true;

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -18,6 +18,8 @@
 
 #ifndef gxclip_INCLUDED
 #  define gxclip_INCLUDED
+
+#include "gxdevcli.h"
 
 /*
  * Both rectangle list and mask clipping use callback procedures to process
@@ -40,7 +42,8 @@ typedef struct clip_callback_data_s {
     int sourcex;                        /* ibid. */
     uint raster;                        /* ibid. */
     int depth;                          /* copy_alpha, fill_mask */
-    const gx_drawing_color *pdcolor;    /* fill_mask, fill_rectangle_hl_color */
+    const gx_drawing_color *pdcolor;    /* fill_mask, fill_rectangle_hl_color, fill_path, fill_stroke_path */
+    const gx_drawing_color *pstroke_dcolor; /* fill_stroke_path */
     gs_logical_operation_t lop;         /* fill_mask, strip_copy_rop */
     const gx_clip_path *pcpath;         /* fill_mask, fill_rectangle_hl_color*/
     const gx_strip_bitmap *tiles;       /* strip_tile_rectangle */
@@ -49,9 +52,10 @@ typedef struct clip_callback_data_s {
     const gx_strip_bitmap *textures;    /* ibid. */
     const gx_color_index *tcolors;      /* ibid. */
     int plane_height;                   /* copy_planes, strip_copy_rop2 */
-    const gs_imager_state * pis;        /* fill_path, fill_rectangle_hl_color */
-    gx_path * ppath;                    /* fill_path */
-    const gx_fill_params * params;      /* fill_path */
+    const gs_gstate *pgs;               /* fill_path, fill_stroke_path, fill_rectangle_hl_color */
+    gx_path *ppath;                     /* fill_path, fill_stroke_path */
+    const gx_fill_params *params;       /* fill_path, fill_stroke_path */
+    const gx_stroke_params *stroke_params; /* fill_stroke_path */
 } clip_callback_data_t;
 
 /* Declare the callback procedures. */

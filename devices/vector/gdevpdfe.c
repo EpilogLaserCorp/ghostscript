@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -26,9 +26,8 @@
 #include "gdevpdfx.h"
 #include "gdevpdfg.h"
 #include "gdevpdfo.h"
-#include "ConvertUTF.h"
 
-char PDFDocEncodingLookup [92] = {
+static char PDFDocEncodingLookup [92] = {
     0x20, 0x22, 0x20, 0x20, 0x20, 0x21, 0x20, 0x26,
     0x20, 0x14, 0x20, 0x13, 0x01, 0x92, 0x20, 0x44,
     0x20, 0x39, 0x20, 0x3A, 0x22, 0x12, 0x20, 0x30,
@@ -203,8 +202,13 @@ pdf_xmp_time(char *buf, int buf_length)
     time_t t;
     char buf1[4+1+2+1+2+1]; /* yyyy-mm-dd\0 */
 
+#ifdef CLUSTER
+    memset(&t, 0, sizeof(t));
+    memset(&tms, 0, sizeof(tms));
+#else
     time(&t);
     tms = *localtime(&t);
+#endif
     gs_sprintf(buf1,
             "%04d-%02d-%02d",
             tms.tm_year + 1900, tms.tm_mon + 1, tms.tm_mday);
@@ -252,8 +256,8 @@ pdf_xmp_convert_time(char *dt, int dtl, char *buf, int bufl)
     dt[16] = ':';
     memcpy(dt + 17, buf + 12, 2); /* second */
     if (l <= 14) {
-        dt[18] = 'Z'; /* Default time zone 0. */
-        return 19;
+        dt[19] = 'Z'; /* Default time zone 0. */
+        return 20;
     }
 
     dt[19] = buf[14]; /* designator */
@@ -267,7 +271,7 @@ pdf_xmp_convert_time(char *dt, int dtl, char *buf, int bufl)
 
     dt[22] = ':';
     /* Skipping '\'' in 'buf'. */
-    memcpy(dt + 23, buf + 18, 2); /* Time zone hour difference. */
+    memcpy(dt + 23, buf + 18, 2); /* Time zone minutes difference. */
     return 25;
 }
 
@@ -280,7 +284,7 @@ pdf_get_docinfo_item(gx_device_pdf *pdev, const char *key, char *buf, int buf_le
 
     if (v != NULL && (v->value_type == COS_VALUE_SCALAR ||
                         v->value_type == COS_VALUE_CONST)) {
-        if (v->contents.chars.size > 2 && v->contents.chars.data[0] == '(') {
+        if (v->contents.chars.size >= 2 && v->contents.chars.data[0] == '(') {
             s = v->contents.chars.data + 1;
             l = v->contents.chars.size - 2;
         } else {
@@ -298,7 +302,7 @@ pdf_get_docinfo_item(gx_device_pdf *pdev, const char *key, char *buf, int buf_le
 }
 
 static inline byte
-decode_escape(const byte *data, int data_length, int *index)
+decode_escape(const byte *data, int data_length, size_t *index)
 {
     byte c;
 
@@ -343,155 +347,154 @@ decode_escape(const byte *data, int data_length, int *index)
     return c; /* A wrong escapement sequence. */
 }
 
+/*
+ * Once the bits are split out into bytes of UTF-8, this is a mask OR-ed
+ * into the first byte, depending on how many bytes follow.  There are
+ * as many entries in this table as there are UTF-8 sequence types.
+ * (I.e., one byte sequence, two byte... etc.). Remember that sequencs
+ * for *legal* UTF-8 will be 4 or fewer bytes total.
+ */
+static const char firstByteMark[7] = { 0x00, 0x00, 0xC0, 0xE0, 0xF0, 0xF8, 0xFC };
+
+static int gs_ConvertUTF16(unsigned char *UTF16, size_t UTF16Len, unsigned char **UTF8Start, int UTF8Len)
+{
+    size_t i, bytes = 0;
+    unsigned short U16;
+    unsigned char *UTF8 = *UTF8Start;
+    unsigned char *UTF8End = UTF8 + UTF8Len;
+
+    if (UTF16Len % sizeof(short) != 0)
+        return gs_note_error(gs_error_rangecheck);
+
+    for (i=0;i<UTF16Len / sizeof(short);i++)
+    {
+        U16 = (*UTF16++) << 8;
+        U16 += *UTF16++;
+
+        if (U16 >= 0xD800 && U16 <= 0xDBFF) {
+            return gs_note_error(gs_error_rangecheck);
+        }
+        if (U16 >= 0xDC00 && U16 <= 0xDFFF) {
+            return gs_note_error(gs_error_rangecheck);
+        }
+
+        if(U16 < 0x80) {
+            bytes = 1;
+        } else {
+            if (U16 < 0x800) {
+                    bytes = 2;
+            } else {
+                bytes = 3;
+                U16 = 0xFFFD;
+            }
+        }
+        if (UTF8 + bytes > UTF8End)
+            return gs_note_error(gs_error_VMerror);
+
+        /* Write from end to beginning, low bytes first */
+        UTF8 += bytes;
+
+        switch(bytes) {
+            case 3:
+                *--UTF8 = (unsigned char)((U16 | 0x80) & 0xBF);
+                U16 >>= 6;
+            case 2:
+                *--UTF8 = (unsigned char)((U16 | 0x80) & 0xBF);
+                U16 >>= 6;
+            case 1:
+                *--UTF8 = (unsigned char)(U16 | firstByteMark[bytes]);
+                break;
+            default:
+                return gs_note_error(gs_error_rangecheck);
+        }
+
+        /* Move to start of next set */
+        UTF8 += bytes;
+    }
+    *UTF8Start = UTF8;
+    return 0;
+}
+
 static int
 pdf_xmp_write_translated(gx_device_pdf *pdev, stream *s, const byte *data, int data_length,
                          void(*write)(stream *s, const byte *data, int data_length))
 {
-    if (pdev->DSCEncodingToUnicode.data == 0) {
-        int i, j=0;
-        unsigned char *buf0;
+    size_t i, j=0;
+    unsigned char *buf0;
 
-        buf0 = (unsigned char *)gs_alloc_bytes(pdev->memory, data_length * sizeof(unsigned char),
-                        "pdf_xmp_write_translated");
-        if (buf0 == NULL)
-            return_error(gs_error_VMerror);
-        for (i = 0; i < data_length; i++) {
-            byte c = data[i];
-
-            if (c == '\\')
-                c = decode_escape(data, data_length, &i);
-            buf0[j] = c;
-            j++;
-        }
-        if (buf0[0] != 0xfe || buf0[1] != 0xff) {
-            unsigned char *buf1;
-            /* We must assume that the information is PDFDocEncoding. In this case
-             * we need to convert it into UTF-8. If we just convert it to UTF-16
-             * then we can safely fall through to the code below.
-             */
-            /* NB the code below skips the BOM in positions 0 and 1, so we need
-             * two extra bytes, to be ignored.
-             */
-            buf1 = (unsigned char *)gs_alloc_bytes(pdev->memory, (j * sizeof(UTF16)) + 2,
-                        "pdf_xmp_write_translated");
-            if (buf1 == NULL) {
-                gs_free_object(pdev->memory, buf0, "pdf_xmp_write_translated");
-                return_error(gs_error_VMerror);
-            }
-            memset(buf1, 0x00, (j * sizeof(UTF16)) + 2);
-            for (i = 0; i < j; i++) {
-                if (buf0[i] <= 0x7f || buf0[i] >= 0xAE) {
-                    if (buf0[i] == 0x7f) {
-                        emprintf1(pdev->memory, "PDFDocEncoding %x cannot be represented in Unicode\n",
-                            buf0[i]);
-                    } else
-                        buf1[(i * 2) + 3] = buf0[i];
-                } else {
-                    buf1[(i * 2) + 2] = PDFDocEncodingLookup[(buf0[i] - 0x80) * 2];
-                    buf1[(i * 2) + 3] = PDFDocEncodingLookup[((buf0[i] - 0x80) * 2) + 1];
-                    if (PDFDocEncodingLookup[((buf0[i] - 0x80) * 2) + 1] == 0x00)
-                        emprintf1(pdev->memory, "PDFDocEncoding %x cannot be represented in Unicode\n",
-                            PDFDocEncodingLookup[((buf0[i] - 0x80) * 2) + 1]);
-                }
-            }
-            gs_free_object(pdev->memory, buf0, "pdf_xmp_write_translated");
-            buf0 = buf1;
-            data_length = j = (j * 2) + 2;
-        }
-        {
-            /* Its a Unicode (UTF-16BE) string, convert to UTF-8 */
-            UTF16 *buf0b, U16;
-            UTF8 *buf1, *buf1b;
-
-            /* A single UTF-16 (2 bytes) can end up as 4 bytes in UTF-8 */
-            buf1 = (UTF8 *)gs_alloc_bytes(pdev->memory, data_length * 2 * sizeof(unsigned char),
-                        "pdf_xmp_write_translated");
-            if (buf1 == NULL) {
-                gs_free_object(pdev->memory, buf0, "pdf_xmp_write_translated");
-                return_error(gs_error_VMerror);
-            }
-            buf1b = buf1;
-            /* Skip the Byte Order Mark (0xfe 0xff) */
-            buf0b = (UTF16 *)(buf0 + 2);
-            /* ConvertUTF16to UTF8 expects a buffer of UTF16s in the local
-             * endian-ness, but the data is big-endian. In case this is a little-endian
-             * machine, process the buffer from big-endian to whatever is right for this platform.
-             */
-            for (i = 2; i < j; i+=2) {
-                U16 = (buf0[i] << 8) + buf0[i + 1];
-                *(buf0b++) = U16;
-            }
-            buf0b = (UTF16 *)(buf0 + 2);
-            switch (ConvertUTF16toUTF8((const UTF16**)&buf0b, (UTF16 *)(buf0 + j),
-                             &buf1b, buf1 + (data_length * 2 * sizeof(unsigned char)), strictConversion)) {
-                case conversionOK:
-                    write(s, buf1, buf1b - buf1);
-                    gs_free_object(pdev->memory, buf1, "pdf_xmp_write_translated");
-                    break;
-                case sourceExhausted:
-                case targetExhausted:
-                case sourceIllegal:
-                default:
-                    gs_free_object(pdev->memory, buf0, "pdf_xmp_write_translated");
-                    gs_free_object(pdev->memory, buf1, "pdf_xmp_write_translated");
-                    return_error(gs_error_rangecheck);
-            }
-        }
-        gs_free_object(pdev->memory, buf0, "pdf_xmp_write_translated");
+    if (data_length == 0)
         return 0;
-    } else {
-        UTF16 *buf0;
-        const UTF16 *buf0b;
-        UTF8 *buf1, *buf1b;
-        int i, j = 0;
 
-        buf0 = (UTF16 *)gs_alloc_bytes(pdev->memory, data_length * sizeof(UTF16),
-                        "pdf_xmp_write_translated");
-        if (buf0 == NULL)
-            return_error(gs_error_VMerror);
-        buf1 = (UTF8 *)gs_alloc_bytes(pdev->memory, data_length * 2,
-                        "pdf_xmp_write_translated");
+    buf0 = (unsigned char *)gs_alloc_bytes(pdev->memory, data_length * sizeof(unsigned char),
+                    "pdf_xmp_write_translated");
+    if (buf0 == NULL)
+        return_error(gs_error_VMerror);
+    for (i = 0; i < (size_t)data_length; i++) {
+        byte c = data[i];
+
+        if (c == '\\')
+            c = decode_escape(data, data_length, &i);
+        buf0[j] = c;
+        j++;
+    }
+    if (buf0[0] != 0xfe || buf0[1] != 0xff) {
+        unsigned char *buf1;
+        /* We must assume that the information is PDFDocEncoding. In this case
+         * we need to convert it into UTF-8. If we just convert it to UTF-16
+         * then we can safely fall through to the code below.
+         */
+        /* NB the code below skips the BOM in positions 0 and 1, so we need
+         * two extra bytes, to be ignored.
+         */
+        buf1 = (unsigned char *)gs_alloc_bytes(pdev->memory, (j * sizeof(short)) + 2,
+                    "pdf_xmp_write_translated");
         if (buf1 == NULL) {
             gs_free_object(pdev->memory, buf0, "pdf_xmp_write_translated");
             return_error(gs_error_VMerror);
         }
-        buf0b = buf0;
-        buf1b = buf1;
-        for (i = 0; i < data_length; i++) {
-            byte c = data[i];
-            int v;
-
-            if (c == '\\')
-                c = decode_escape(data, data_length, &i);
-            if (c > pdev->DSCEncodingToUnicode.size) {
-                gs_free_object(pdev->memory, buf0, "pdf_xmp_write_translated");
-                gs_free_object(pdev->memory, buf1, "pdf_xmp_write_translated");
-                return_error(gs_error_rangecheck);
+        memset(buf1, 0x00, (j * sizeof(short)) + 2);
+        for (i = 0; i < j; i++) {
+            if (buf0[i] <= 0x7f || buf0[i] >= 0xAE) {
+                if (buf0[i] == 0x7f) {
+                    emprintf1(pdev->memory, "PDFDocEncoding %x cannot be represented in Unicode\n",
+                        buf0[i]);
+                } else
+                    buf1[(i * 2) + 3] = buf0[i];
+            } else {
+                buf1[(i * 2) + 2] = PDFDocEncodingLookup[(buf0[i] - 0x80) * 2];
+                buf1[(i * 2) + 3] = PDFDocEncodingLookup[((buf0[i] - 0x80) * 2) + 1];
+                if (PDFDocEncodingLookup[((buf0[i] - 0x80) * 2) + 1] == 0x00)
+                    emprintf1(pdev->memory, "PDFDocEncoding %x cannot be represented in Unicode\n",
+                        PDFDocEncodingLookup[((buf0[i] - 0x80) * 2) + 1]);
             }
-
-            v = pdev->DSCEncodingToUnicode.data[c];
-            if (v == -1)
-                v = '?'; /* Arbitrary. */
-            buf0[j] = v;
-            j++;
-        }
-        switch (ConvertUTF16toUTF8(&buf0b, buf0 + j,
-                             &buf1b, buf1 + data_length * 2, strictConversion)) {
-            case conversionOK:
-                write(s, buf1, buf1b - buf1);
-                break;
-            case sourceExhausted:
-            case targetExhausted:
-            case sourceIllegal:
-            default:
-                gs_free_object(pdev->memory, buf0, "pdf_xmp_write_translated");
-                gs_free_object(pdev->memory, buf1, "pdf_xmp_write_translated");
-                return_error(gs_error_rangecheck);
         }
         gs_free_object(pdev->memory, buf0, "pdf_xmp_write_translated");
-        gs_free_object(pdev->memory, buf1, "pdf_xmp_write_translated");
-        return 0;
+        buf0 = buf1;
+        data_length = j = (j * 2) + 2;
     }
+    {
+        /* Its a Unicode (UTF-16BE) string, convert to UTF-8 */
+        short *buf0b;
+        char *buf1, *buf1b;
+        int code;
+
+        /* A single UTF-16 (2 bytes) can end up as 4 bytes in UTF-8 */
+        buf1 = (char *)gs_alloc_bytes(pdev->memory, data_length * 2 * sizeof(unsigned char),
+                    "pdf_xmp_write_translated");
+        if (buf1 == NULL) {
+            gs_free_object(pdev->memory, buf0, "pdf_xmp_write_translated");
+            return_error(gs_error_VMerror);
+        }
+        buf1b = buf1;
+        /* Skip the Byte Order Mark (0xfe 0xff) */
+        buf0b = (short *)(buf0 + 2);
+        code = gs_ConvertUTF16((unsigned char *)buf0b, j - 2, (unsigned char **)&buf1b, data_length * 2 * sizeof(unsigned char));
+        if (code < 0)
+            return code;
+        write(s, (const byte *)buf1, buf1b - buf1);
+    }
+    gs_free_object(pdev->memory, buf0, "pdf_xmp_write_translated");
+    return 0;
 }
 
 static int
@@ -574,7 +577,7 @@ pdf_make_instance_uuid(gx_device_pdf *pdev, const byte digest[6], char *buf, int
         int l = min(buf_length - 6, pdev->InstanceUUID.size);
 
         memcpy(buf+5, pdev->InstanceUUID.data, l);
-        buf[l] = 0;
+        buf[l+5] = 0;
     } else
         pdf_make_uuid(digest, pdf_uuid_time(pdev), pdev->DocumentTimeSeq, buf + 5, buf_length - 5);
     return 0;
@@ -590,7 +593,7 @@ pdf_make_document_uuid(gx_device_pdf *pdev, const byte digest[6], char *buf, int
         int l = min(buf_length - 6, pdev->DocumentUUID.size);
 
         memcpy(buf+5, pdev->DocumentUUID.data, l);
-        buf[l] = 0;
+        buf[l+5] = 0;
     } else
         pdf_make_uuid(digest, pdf_uuid_time(pdev), pdev->DocumentTimeSeq, buf+5, buf_length - 5);
     return 0;
@@ -648,8 +651,7 @@ pdf_write_document_metadata(gx_device_pdf *pdev, const byte digest[6])
         {
 
             pdf_xml_tag_open_beg(s, "rdf:Description");
-            pdf_xml_attribute_name(s, "rdf:about");
-            pdf_xml_attribute_value(s, instance_uuid);
+            pdf_xml_copy(s, " rdf:about=\"\"");
             pdf_xml_attribute_name(s, "xmlns:pdf");
             pdf_xml_attribute_value(s, "http://ns.adobe.com/pdf/1.3/");
 
@@ -686,8 +688,7 @@ pdf_write_document_metadata(gx_device_pdf *pdev, const byte digest[6])
             }
 
             pdf_xml_tag_open_beg(s, "rdf:Description");
-            pdf_xml_attribute_name(s, "rdf:about");
-            pdf_xml_attribute_value(s, instance_uuid);
+            pdf_xml_copy(s, " rdf:about=\"\"");
             pdf_xml_attribute_name(s, "xmlns:xmp");
             pdf_xml_attribute_value(s, "http://ns.adobe.com/xap/1.0/");
             pdf_xml_tag_end(s);
@@ -720,8 +721,7 @@ pdf_write_document_metadata(gx_device_pdf *pdev, const byte digest[6])
             pdf_xml_newline(s);
 
             pdf_xml_tag_open_beg(s, "rdf:Description");
-            pdf_xml_attribute_name(s, "rdf:about");
-            pdf_xml_attribute_value(s, instance_uuid);
+            pdf_xml_copy(s, " rdf:about=\"\"");
             pdf_xml_attribute_name(s, "xmlns:xapMM");
             pdf_xml_attribute_value(s, "http://ns.adobe.com/xap/1.0/mm/");
             pdf_xml_attribute_name(s, "xapMM:DocumentID");
@@ -730,8 +730,7 @@ pdf_write_document_metadata(gx_device_pdf *pdev, const byte digest[6])
             pdf_xml_newline(s);
 
             pdf_xml_tag_open_beg(s, "rdf:Description");
-            pdf_xml_attribute_name(s, "rdf:about");
-            pdf_xml_attribute_value(s, instance_uuid);
+            pdf_xml_copy(s, " rdf:about=\"\"");
             pdf_xml_attribute_name(s, "xmlns:dc");
             pdf_xml_attribute_value(s, "http://purl.org/dc/elements/1.1/");
             pdf_xml_attribute_name(s, "dc:format");
@@ -805,19 +804,28 @@ pdf_write_document_metadata(gx_device_pdf *pdev, const byte digest[6])
             pdf_xml_newline(s);
             if (pdev->PDFA != 0) {
                 pdf_xml_tag_open_beg(s, "rdf:Description");
-                pdf_xml_attribute_name(s, "rdf:about");
-                pdf_xml_attribute_value(s, instance_uuid);
+                pdf_xml_copy(s, " rdf:about=\"\"");
                 pdf_xml_attribute_name(s, "xmlns:pdfaid");
                 pdf_xml_attribute_value(s, "http://www.aiim.org/pdfa/ns/id/");
                 pdf_xml_attribute_name(s, "pdfaid:part");
-                if (pdev->PDFA == 1)
-                    pdf_xml_attribute_value(s,"1");
-                else
-                    pdf_xml_attribute_value(s,"2");
+                switch(pdev->PDFA) {
+                    case 1:
+                        pdf_xml_attribute_value(s,"1");
+                        break;
+                    case 2:
+                        pdf_xml_attribute_value(s,"2");
+                        break;
+                    case 3:
+                        pdf_xml_attribute_value(s,"3");
+                        break;
+                }
                 pdf_xml_attribute_name(s, "pdfaid:conformance");
                 pdf_xml_attribute_value(s,"B");
                 pdf_xml_tag_end_empty(s);
            }
+        }
+        if (pdev->ExtensionMetadata) {
+            pdf_xml_copy(s, pdev->ExtensionMetadata);
         }
         pdf_xml_copy(s, "</rdf:RDF>\n");
     }
@@ -832,9 +840,14 @@ pdf_write_document_metadata(gx_device_pdf *pdev, const byte digest[6])
 int
 pdf_document_metadata(gx_device_pdf *pdev)
 {
+    int j;
+
     if (pdev->CompatibilityLevel < 1.4)
         return 0;
-    if (pdev->ParseDSCCommentsForDocInfo || pdev->PreserveEPSInfo) {
+    if (cos_dict_find_c_key(pdev->Catalog, "/Metadata"))
+        return 0;
+
+    if (pdev->ParseDSCCommentsForDocInfo || pdev->PreserveEPSInfo || pdev->PDFA) {
         pdf_resource_t *pres;
         char buf[20];
         byte digest[6] = {0,0,0,0,0,0};
@@ -849,14 +862,20 @@ pdf_document_metadata(gx_device_pdf *pdev)
         if (code < 0)
             return code;
         code = cos_dict_put_c_key_string((cos_dict_t *)pres->object, "/Type", (const byte *)"/Metadata", 9);
-        if (code < 0)
+        if (code < 0) {
+            pdf_close_aside(pdev);
             return code;
+        }
         code = cos_dict_put_c_key_string((cos_dict_t *)pres->object, "/Subtype", (const byte *)"/XML", 4);
-        if (code < 0)
+        if (code < 0) {
+            pdf_close_aside(pdev);
             return code;
+        }
         code = pdf_write_document_metadata(pdev, digest);
-        if (code < 0)
+        if (code < 0) {
+            pdf_close_aside(pdev);
             return code;
+        }
         code = pdf_close_aside(pdev);
         if (code < 0)
             return code;
@@ -869,6 +888,34 @@ pdf_document_metadata(gx_device_pdf *pdev)
         code = cos_dict_put_c_key_object(pdev->Catalog, "/Metadata", pres->object);
         if (code < 0)
             return code;
+
+        /* By storing the Metadata in the Catalog dictionary we have referenced it from the
+         * 'global named objects', and the object will be freed when we free those objects.
+         * We *don't* want it referenced by any resource because if it is then we will free
+         * it before we free the global named resources. So remove the Metadata cos_stream
+         * object from the resourceOther resource type chains.
+         */
+        for (j = 0; j < NUM_RESOURCE_CHAINS; ++j) {
+            pdf_resource_t *pres1, *head = pdev->resources[resourceOther].chains[j];
+
+            pres1 = head;
+
+            if (pres1 == pres) {
+                pdev->resources[resourceOther].chains[j] = pres1->next;
+                break;
+            } else {
+                while (pres1->next) {
+                    if (pres1->next == pres) {
+                        pres1->next = pres->next;
+                        break;
+                    }
+                    if (pres1->next == pres->next)
+                        break;
+
+                    pres1 = pres1->next;
+                }
+            }
+        }
     }
     return 0;
 }

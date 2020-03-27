@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2012 Artifex Software, Inc.
+# Copyright (C) 2001-2019 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 # of the license contained in the file LICENSE in this distribution.
 #
 # Refer to licensing information at http://www.artifex.com or contact
-# Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-# CA  94903, U.S.A., +1(415)492-9861, for further information.
+# Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+# CA 94945, U.S.A., +1(415)492-9861, for further information.
 #
 # makefile for Unix/ANSI C/X11 configuration.
 
@@ -147,7 +147,7 @@ SHARE_LIBPNG=0
 LIBPNG_NAME=png
 
 # Define whether to use a shared version of libtiff and where
-# it is stored and what its name is.  
+# it is stored and what its name is.
 
 SHARE_LIBTIFF=0
 TIFFSRCDIR=tiff
@@ -178,7 +178,7 @@ JBIG2SRCDIR=jbig2dec
 # See lcms.mak for more information
 
 SHARE_LCMS=0
-LCMSSRCDIR=lcms
+LCMS2MTSRCDIR=lcms2mt
 
 # Define the directory where the lcms2 source is stored.
 # See lcms2.mak for more information
@@ -186,9 +186,9 @@ LCMSSRCDIR=lcms
 LCMS2SRCDIR=lcms2
 
 # Which CMS are we using?
-# Options are currently lcms or lcms2
+# Options are currently lcms2mt or lcms2
 
-WHICH_CMS=lcms2
+WHICH_CMS=lcms2mt
 
 # Define the directory where the ijs source is stored,
 # and the process forking method to use for the server.
@@ -221,9 +221,9 @@ CCLD=$(CC)
 
 # Define the added flags for standard, debugging, and profiling builds.
 
-CFLAGS_STANDARD=-O
+CFLAGS_STANDARD=-O -DNDEBUG
 CFLAGS_DEBUG=-g
-CFLAGS_PROFILE=-pg -O
+CFLAGS_PROFILE=-pg -O -DNDEBUG
 
 # Define the other compilation flags.  Add at most one of the following:
 #	-Aa -w -D_HPUX_SOURCE for the HP 400.
@@ -248,6 +248,10 @@ CFLAGS=$(CFLAGS_STANDARD) $(XCFLAGS)
 XLDFLAGS=
 
 LDFLAGS=$(XLDFLAGS)
+
+GS_LDFLAGS=$(LDFLAGS)
+PCL_LDFLAGS=$(LDFLAGS)
+XPS_LDFLAGS=$(LDFLAGS)
 
 # Define any extra libraries to link into the executable.
 # ISC Unix 2.2 wants -linet.
@@ -311,7 +315,7 @@ SYNC=nosync
 
 # Choose the language feature(s) to include.  See gs.mak for details.
 
-FEATURE_DEVS=$(PSD)psl3.dev $(PSD)pdf.dev $(PSD)dpsnext.dev $(PSD)ttfont.dev $(PSD)epsf.dev $(GLD)pipe.dev $(PSD)fapi.dev
+FEATURE_DEVS=$(PSD)psl3.dev $(PSD)pdf.dev $(PSD)ttfont.dev $(PSD)epsf.dev $(GLD)pipe.dev $(PSD)fapi.dev
 
 # Choose whether to compile the .ps initialization files into the executable.
 # See gs.mak for details.
@@ -333,11 +337,6 @@ BAND_LIST_COMPRESSOR=zlib
 
 FILE_IMPLEMENTATION=stdio
 
-# Choose the implementation of stdio: '' for file I/O and 'c' for callouts
-# See gs.mak and ziodevs.c/ziodevsc.c for more details.
-
-STDIO_IMPLEMENTATION=c
-
 # Choose the device(s) to include.  See devs.mak for details,
 # devs.mak and contrib.mak for the list of available devices.
 
@@ -357,13 +356,13 @@ DEVICE_DEVS12=$(DD)bit.dev $(DD)bitrgb.dev $(DD)bitcmyk.dev
 DEVICE_DEVS13=$(DD)pngmono.dev $(DD)pngmonod.dev $(DD)pnggray.dev $(DD)png16.dev $(DD)png256.dev $(DD)png16m.dev $(DD)pngalpha.dev
 DEVICE_DEVS14=$(DD)jpeg.dev $(DD)jpeggray.dev $(DD)jpegcmyk.dev
 DEVICE_DEVS15=$(DD)pdfwrite.dev $(DD)ps2write.dev $(DD)eps2write.dev $(DD)txtwrite.dev $(DD)pxlmono.dev $(DD)pxlcolor.dev
-DEVICE_DEVS16=$(DD)bbox.dev $(DD)inkcov.dev $(DD)ink_cov.dev
+DEVICE_DEVS16=$(DD)bbox.dev $(DD)inkcov.dev $(DD)ink_cov.dev $(DD)pdfimage8.dev $(DD)pdfimage24.dev $(DD)pdfimage32.dev $(DD)PCLm.dev
 # Overflow from DEVS9
 DEVICE_DEVS17=$(DD)pnm.dev $(DD)pnmraw.dev $(DD)ppm.dev $(DD)ppmraw.dev $(DD)pkm.dev $(DD)pkmraw.dev $(DD)pksm.dev $(DD)pksmraw.dev $(DD)pamcmyk32.dev
 DEVICE_DEVS18=
 DEVICE_DEVS19=
 DEVICE_DEVS20=
-DEVICE_DEVS21=$(DD)spotcmyk.dev $(DD)devicen.dev $(DD)xcf.dev $(DD)bmpsep1.dev $(DD)bmpsep8.dev $(DD)bmp16m.dev $(DD)bmp32b.dev $(DD)psdcmyk.dev $(DD)psdrgb.dev $(DD)pamcmyk32.dev $(DD)psdcmykog.dev $(DD)fpng.dev
+DEVICE_DEVS21=$(DD)spotcmyk.dev $(DD)devicen.dev $(DD)xcf.dev $(DD)bmpsep1.dev $(DD)bmpsep8.dev $(DD)bmp16m.dev $(DD)bmp32b.dev $(DD)psdcmyk.dev $(DD)psdrgb.dev $(DD)pamcmyk32.dev $(DD)psdcmykog.dev $(DD)fpng.dev  $(DD)psdcmyk16.dev $(DD)psdrgb16.dev
 
 # ---------------------------- End of options --------------------------- #
 
@@ -416,7 +415,7 @@ include $(GLSRCDIR)/unixlink.mak
 include $(GLSRCDIR)/unix-end.mak
 include $(GLSRCDIR)/unixinst.mak
 
-# platform-specific clean-up  
+# platform-specific clean-up
 # this makefile is intended to be hand edited so we don't distribute
 # the (presumedly modified) version in the top level directory
 distclean : clean config-clean
@@ -425,4 +424,3 @@ distclean : clean config-clean
 
 maintainer-clean : distclean
 	# nothing special to do
-

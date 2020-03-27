@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -26,46 +26,18 @@
 #include "gxbcache.h"
 #include "gxfixed.h"
 #include "gxftype.h"
+#include "gsfont.h"
+#include "gslibctx.h"
 
 /* ------ Font/matrix pair cache entry ------ */
 
-#ifndef gs_font_DEFINED
-#  define gs_font_DEFINED
-typedef struct gs_font_s gs_font;
-#endif
-#ifndef cached_fm_pair_DEFINED
-#  define cached_fm_pair_DEFINED
 typedef struct cached_fm_pair_s cached_fm_pair;
-#endif
-#ifndef gs_matrix_DEFINED
-#  define gs_matrix_DEFINED
-typedef struct gs_matrix_s gs_matrix;
-#endif
 
-#ifndef ttfFont_DEFINED
-#  define ttfFont_DEFINED
 typedef struct ttfFont_s ttfFont;
-#endif
-#ifndef gx_ttfReader_DEFINED
-#  define gx_ttfReader_DEFINED
 typedef struct gx_ttfReader_s gx_ttfReader;
-#endif
-#ifndef ttfInterpreter_DEFINED
-#  define ttfInterpreter_DEFINED
 typedef struct ttfInterpreter_s ttfInterpreter;
-#endif
-#ifndef gx_ttfMemory_DEFINED
-#  define gx_ttfMemory_DEFINED
 typedef struct gx_ttfMemory_s gx_ttfMemory;
-#endif
-#ifndef gx_device_spot_analyzer_DEFINED
-#   define gx_device_spot_analyzer_DEFINED
 typedef struct gx_device_spot_analyzer_s gx_device_spot_analyzer;
-#endif
-#ifndef gs_state_DEFINED
-#  define gs_state_DEFINED
-typedef struct gs_state_s gs_state;
-#endif
 
 /*
  * Define the entry for a cached (font,matrix) pair.  If the UID
@@ -145,11 +117,8 @@ typedef gx_cached_bits_head cached_char_head;
  *      - cc_has_bits(cc);
  *      - cc->xglyph != gx_no_xglyph && cc_pair(cc)->xfont != 0.
  */
-#ifndef cached_char_DEFINED
-#  define cached_char_DEFINED
 typedef struct cached_char_s cached_char;
 
-#endif
 struct cached_char_s {
 
     /* The code, font/matrix pair, wmode, and depth */
@@ -255,10 +224,6 @@ typedef struct char_cache_s {
 /* ------ Font/character cache ------ */
 
 /* A font "directory" (font/character cache manager). */
-#ifndef gs_font_dir_DEFINED
-#  define gs_font_dir_DEFINED
-typedef struct gs_font_dir_s gs_font_dir;
-#endif
 struct gs_font_dir_s {
 
     /* Original (unscaled) fonts */

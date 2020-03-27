@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2001-2004 Artifex Software, Inc.
+ * Copyright (C) 2001-2019 Artifex Software, Inc.
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
@@ -516,7 +516,7 @@ ijs_server_parse_int (const char *value, int size, int *result)
         return IJS_ESYNTAX;
       num = (num * 10) + (c - '0');
     }
-  *result = num;
+  *result = sign * num;
   return 0;
 }
 

@@ -1,4 +1,4 @@
-.TH GS 1 "30 March 2015" 9.16 Ghostscript \" -*- nroff -*-
+.TH GS 1 "19 March 2020" 9.52 Ghostscript \" -*- nroff -*-
 .SH NAME
 gs \- Ghostscript (PostScript and PDF language interpreter and previewer)
 .SH SYNOPSIS
@@ -261,12 +261,6 @@ read-only, so the values of names defined with \fB\-D\fR, \fB\-d\fR,
 superseded by definitions in "userdict" or other dictionaries.)
 .SH "SPECIAL NAMES"
 .TP
-.B \-dDISKFONTS
-Causes individual character outlines to be loaded from the disk
-the first time they are encountered.  (Normally Ghostscript loads all the
-character outlines when it loads a font.)  This may allow loading more
-fonts into RAM, at the expense of slower rendering.
-.TP
 .B \-dNOCACHE
 Disables character caching.  Useful only for debugging.
 .TP
@@ -294,8 +288,8 @@ important files.
 .TP
 .B \-dWRITESYSTEMDICT
 Leaves "systemdict" writable.  This is necessary when running special
-utility programs such as \fBfont2c\fR and \fBpcharstr\fR, which must bypass
-normal PostScript access protection.
+utility programs, but is strongly discouraged as it bypasses normal Postscript
+security measures.
 .TP
 .BI \-sDEVICE= device
 Selects an alternate initial output device, as described above.
@@ -448,7 +442,7 @@ The various Ghostscript document files (above), especially \fBUse.htm\fR.
 See http://bugs.ghostscript.com/ and the Usenet news group 
 comp.lang.postscript.
 .SH VERSION
-This document was last revised for Ghostscript version 9.16.
+This document was last revised for Ghostscript version 9.52.
 .SH AUTHOR
 Artifex Software, Inc. are the primary maintainers
 of Ghostscript.

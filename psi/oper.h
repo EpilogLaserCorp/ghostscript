@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -90,17 +90,11 @@ int check_type_failed(const ref *);
  * It is OK to return o_pop_estack if nothing has been popped,
  * but it is not OK to return o_push_estack if nothing has been pushed.
  *
- * If an operator has suspended the current context and wants the
- * interpreter to call the scheduler, it must return o_reschedule.
- * It may also have pushed or popped elements on the control stack.
- * (This is only used when the Display PostScript option is included.)
- *
  * These values must be greater than 1, and far enough apart from zero and
  * from each other not to tempt a compiler into implementing a 'switch'
  * on them using indexing rather than testing.
  */
 #define o_push_estack 5
 #define o_pop_estack 14
-#define o_reschedule 22
 
 #endif /* oper_INCLUDED */

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,6 +19,9 @@
 
 #ifndef iutil_INCLUDED
 #  define iutil_INCLUDED
+
+#include "imemory.h"
+#include "gsmatrix.h"
 
 /* ------ Object utilities ------ */
 
@@ -130,12 +133,6 @@ int int_param(const ref *, int, int *);
 /* Return gs_error_limitcheck for infinities or double->float overflow. */
 int make_reals(ref *, const double *, int);
 int make_floats(ref *, const float *, int);
-
-/* Define the gs_matrix type if necessary. */
-#ifndef gs_matrix_DEFINED
-#  define gs_matrix_DEFINED
-typedef struct gs_matrix_s gs_matrix;
-#endif
 
 /* Read a matrix operand. */
 int read_matrix(const gs_memory_t *mem, const ref *, gs_matrix *);

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -23,6 +23,8 @@
    PDF_DEVICE_MaxInlineImageSize - a value of PDF_DEVICE_MaxInlineImageSize.
    PDF_FOR_OPDFREAD - an integer 0 (false) or 1 (true).
  */
+
+#ifdef PDF_DEVICE_NAME
 
 const gx_device_pdf PDF_DEVICE_IDENT =
 {std_device_dci_type_body(gx_device_pdf, 0, PDF_DEVICE_NAME,
@@ -96,7 +98,16 @@ const gx_device_pdf PDF_DEVICE_IDENT =
   NULL,				/* push_transparency_state */
   NULL,				/* pop_transparency_state */
   NULL,				/* put_image */
-  gdev_pdf_dev_spec_op		/* dev_spec_op */
+  gdev_pdf_dev_spec_op,		/* dev_spec_op */
+  NULL,             /* copy_planes */
+  NULL,             /* get_profile */
+  NULL,             /* set_graphics_type_tag */
+  NULL,             /* strip_copy_rop2 */
+  NULL,             /* strip_tile_rect_devn */
+  NULL,             /* copy_alpha_hl_color */
+  NULL,             /* process_page */
+  NULL,             /* transform_pixel_region */
+  gdev_pdf_fill_stroke_path /* fill_stroke_path */
  },
  psdf_initial_values(PSDF_VERSION_INITIAL, 0 /*false */ ),  /* (!ASCII85EncodePages) */
  0,                     /* pdf_font_dir */
@@ -121,6 +132,7 @@ const gx_device_pdf PDF_DEVICE_IDENT =
  1 /*true*/,			/* ReEncodeCharacters */
  1,				/* FirstObjectNumber */
  1 /*true*/,			/* CompressFonts */
+ 1 /*true*/,			/* CompressStreams */
  0 /*false*/,			/* PrintStatistics */
  {0, 0, 0},			/* DocumentUUID */
  {0, 0, 0},			/* InstanceUUID */
@@ -140,7 +152,6 @@ const gx_device_pdf PDF_DEVICE_IDENT =
  12000,				/* MaxClipPathSize */ /* HP LaserJet 1320 hangs with 14000. */
  256000,			/* MaxShadingBitmapSize */
  PDF_DEVICE_MaxInlineImageSize,	/* MaxInlineImageSize */
- {0, 0},                        /* DSCEncodingToUnicode */
  {0, 0, 0},			/* OwnerPassword */
  {0, 0, 0},			/* UserPassword */
  0,				/* KeyLength */
@@ -160,9 +171,9 @@ const gx_device_pdf PDF_DEVICE_IDENT =
  {-1, -1},			/* page_dsc_info */
  0 /*false*/,			/* fill_overprint */
  0 /*false*/,			/* stroke_overprint */
+ 1 /* Absolute Colorimetric */, /* rendering intent */
  0 /*false*/,                   /* remap_fill_coilor */
  0 /*false*/,                   /* remap_stroke_coilor */
- 0,				/* overprint_mode */
  gs_no_id,			/* halftone_id */
  {gs_no_id, gs_no_id, gs_no_id, gs_no_id}, /* transfer_ids */
  0,				/* transfer_not_identity */
@@ -233,6 +244,7 @@ const gx_device_pdf PDF_DEVICE_IDENT =
  0,             /* HighLevelForm */
  0,				/* PatternDepth */
  {0,0,0,0,0,0},                 /* AccumulatedPatternMatrix */
+ 0,             /* PatternsSinceForm */
  0,				/* substream_Resources */
  1,				/* pcm_color_info_index == DeviceRGB */
  false,				/* skip_colors */
@@ -271,16 +283,24 @@ const gx_device_pdf PDF_DEVICE_IDENT =
  true,				/* DetectDuplicateImages */
  false,				/* AllowIncrementalCFF */
  !PDF_FOR_OPDFREAD,		/* WantsToUnicode */
+ !PDF_FOR_OPDFREAD,		/* WantsPageLabels */
  PDF_FOR_OPDFREAD,		/* AllowPSRepeatFunctions */
  true,				/* IsDistiller (true even for ps2write!) */
  !PDF_FOR_OPDFREAD,		/* PreserveSMask */
  !PDF_FOR_OPDFREAD,		/* PreserveTrMode */
  false,                 /* NoT3CCITT */
- false,                 /* UseOldColor */
  false,                 /* Linearise */
  0,                     /* pointer to resourceusage */
  0,                     /* Size of resourceusage */
  false,                 /* called from output_page */
  false,                 /* FlattenFonts, writes text as outlines instead of fonts */
- -1                     /* Last Form ID, start with -1 which means 'none' */
+ -1,                    /* Last Form ID, start with -1 which means 'none' */
+ 0,                     /* ExtensionMetadata */
+ 0,                     /* PDFFormName */
+ 0,                     /* PassThroughWriter */
+ 1.0                    /* UserUnit */
 };
+
+#else
+int dummy;
+#endif

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,13 +9,14 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
 /* Bitmap cache implementation */
 #include "memory_.h"
+#include "stdint_.h"
 #include "gx.h"
 #include "gsmdebug.h"
 #include "gxbcache.h"
@@ -85,16 +86,16 @@ gx_bits_cache_alloc(gx_bits_cache * bc, ulong lsize, gx_cached_bits_head ** pcbh
             return -1;
         }
         fsize += cbh_next->size;
-        if_debug2('K', "[K]merging free bits 0x%lx(%u)\n",
-                  (ulong) cbh_next, cbh_next->size);
+        if_debug2('K', "[K]merging free bits "PRI_INTPTR"(%u)\n",
+                  (intptr_t)cbh_next, cbh_next->size);
         cbh_next = (gx_cached_bits_head *) ((byte *) cbh + fsize);
     }
     if (fsize > ssize) {	/* fsize >= ssize1 */
         cbh_next = (gx_cached_bits_head *) ((byte *) cbh + ssize);
         cbh_next->size = fsize - ssize;
         cb_head_set_free(cbh_next);
-        if_debug2('K', "[K]shortening bits 0x%lx by %u (initial)\n",
-                  (ulong) cbh, fsize - ssize);
+        if_debug2('K', "[K]shortening bits "PRI_INTPTR" by %u (initial)\n",
+                  (intptr_t)cbh, fsize - ssize);
     }
     gs_alloc_fill(cbh, gs_alloc_fill_block, ssize);
     cbh->size = ssize;

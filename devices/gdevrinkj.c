@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -25,19 +25,10 @@
 #include "gdevdcrd.h"
 #include "gstypes.h"
 #include "gxdcconv.h"
-#include "gscms.h"
 #include "gsicc_cache.h"
 #include "gsicc_manage.h"
-
-#ifndef cmm_gcmmhlink_DEFINED
-    #define cmm_gcmmhlink_DEFINED
-    typedef void* gcmmhlink_t;
-#endif
-
-#ifndef cmm_gcmmhprofile_DEFINED
-    #define cmm_gcmmhprofile_DEFINED
-    typedef void* gcmmhprofile_t;
-#endif
+#include "gsicc_cms.h"
+#include "gdevdevn.h"
 
 #include "rinkj/rinkj-device.h"
 #include "rinkj/rinkj-byte-stream.h"
@@ -66,12 +57,6 @@ static dev_proc_get_color_mapping_procs(get_rinkj_color_mapping_procs);
 static dev_proc_get_color_comp_index(rinkj_get_color_comp_index);
 static dev_proc_encode_color(rinkj_encode_color);
 static dev_proc_decode_color(rinkj_decode_color);
-
-/*
- * Type definitions associated with the fixed color model names.
- */
-typedef const char * fixed_colorant_name;
-typedef fixed_colorant_name fixed_colorant_names_list[];
 
 /*
  * Structure for holding SeparationNames and SeparationOrder elements.
@@ -114,7 +99,7 @@ typedef struct rinkj_device_s {
      * names are those in this list plus those in the separation_names
      * list (below).
      */
-    const fixed_colorant_names_list * std_colorant_names;
+    fixed_colorant_names_list std_colorant_names;
     int num_std_colorant_names;	/* Number of names in list */
 
     /*
@@ -127,19 +112,17 @@ typedef struct rinkj_device_s {
      */
     gs_separation_names separation_order;
 
-    /* ICC color profile objects, for color conversion. */
-    char profile_out_fn[256];
-
     /* This device can use a device link ICC profile to map
        the colors to the appropriate color space.  Not
        as flexible as having source and destination profiles
        and creating the link on the fly, but I am doing
        the minimal changes on this device to make it work
        with the new ICC architecture.  No optimizations yet. */
-
     gcmmhlink_t icc_link;
     cmm_profile_t *link_profile;
 
+    /* ICC color profile objects, for color conversion. */
+    char profile_out_fn[256];
     char setup_fn[256];
 } rinkj_device;
 
@@ -203,26 +186,6 @@ typedef struct rinkj_device_s {
         rinkj_decode_color		/* decode_color */\
 }
 
-static const fixed_colorant_names_list DeviceGrayComponents = {
-        "Gray",
-        0		/* List terminator */
-};
-
-static const fixed_colorant_names_list DeviceRGBComponents = {
-        "Red",
-        "Green",
-        "Blue",
-        0		/* List terminator */
-};
-
-static const fixed_colorant_names_list DeviceCMYKComponents = {
-        "Cyan",
-        "Magenta",
-        "Yellow",
-        "Black",
-        0		/* List terminator */
-};
-
 static const gx_device_procs spot_cmyk_procs = device_procs(get_rinkj_color_mapping_procs);
 
 const rinkj_device gs_rinkj_device =
@@ -242,10 +205,12 @@ const rinkj_device gs_rinkj_device =
     RINKJ_DEVICE_CMYK,		/* Color model */
     8,				/* Bits per color - must match ncomp, depth, etc. above */
     4,				/* Number of output color planes, overwritten below. */
-    (&DeviceCMYKComponents),	/* Names of color model colorants */
+    DeviceCMYKComponents,	/* Names of color model colorants */
     4,				/* Number colorants for CMYK */
     {0},			/* SeparationNames */
-    {0}				/* SeparationOrder names */
+    {0},			/* SeparationOrder names */
+     0,              /* icc_link (link handle) */
+     0               /* link_profile (device link profile) */
 };
 
 /*
@@ -264,7 +229,7 @@ gray_cs_to_spotrgb_cm(gx_device * dev, frac gray, frac out[])
 }
 
 static void
-rgb_cs_to_spotrgb_cm(gx_device * dev, const gs_imager_state *pis,
+rgb_cs_to_spotrgb_cm(gx_device * dev, const gs_gstate *pgs,
                                   frac r, frac g, frac b, frac out[])
 {
 /* TO_DO_DEVICEN  This routine needs to include the effects of the SeparationOrder array */
@@ -301,7 +266,7 @@ gray_cs_to_spotcmyk_cm(gx_device * dev, frac gray, frac out[])
 }
 
 static void
-rgb_cs_to_spotcmyk_cm(gx_device * dev, const gs_imager_state *pis,
+rgb_cs_to_spotcmyk_cm(gx_device * dev, const gs_gstate *pgs,
                                    frac r, frac g, frac b, frac out[])
 {
 /* TO_DO_DEVICEN  This routine needs to include the effects of the SeparationOrder array */
@@ -309,7 +274,7 @@ rgb_cs_to_spotcmyk_cm(gx_device * dev, const gs_imager_state *pis,
     int n = rdev->separation_names.num_names;
     int i;
 
-    color_rgb_to_cmyk(r, g, b, pis, out, dev->memory);
+    color_rgb_to_cmyk(r, g, b, pgs, out, dev->memory);
     for(i = 0; i < n; i++)			/* Clear spot colors */
         out[4 + i] = 0;
 }
@@ -356,13 +321,13 @@ gray_cs_to_spotn_cm(gx_device * dev, frac gray, frac out[])
 }
 
 static void
-rgb_cs_to_spotn_cm(gx_device * dev, const gs_imager_state *pis,
+rgb_cs_to_spotn_cm(gx_device * dev, const gs_gstate *pgs,
                                    frac r, frac g, frac b, frac out[])
 {
 /* TO_DO_DEVICEN  This routine needs to include the effects of the SeparationOrder array */
     frac cmyk[4];
 
-    color_rgb_to_cmyk(r, g, b, pis, cmyk, dev->memory);
+    color_rgb_to_cmyk(r, g, b, pgs, cmyk, dev->memory);
     cmyk_cs_to_spotn_cm(dev, cmyk[0], cmyk[1], cmyk[2], cmyk[3],
                         out);
 }
@@ -480,7 +445,6 @@ rinkj_open_profile(rinkj_device *rdev)
 
         if (rdev->icc_link == NULL)
             return gs_throw(-1, "Could not create link handle for rinkj device");
-
     }
     return(0);
 }
@@ -532,11 +496,10 @@ rinkj_get_params(gx_device * pdev, gs_param_list * plist)
  * color component names.
  */
 static bool
-check_process_color_names(const fixed_colorant_names_list * pcomp_list,
+check_process_color_names(fixed_colorant_names_list plist,
                           const gs_param_string * pstring)
 {
-    if (pcomp_list) {
-        const fixed_colorant_name * plist = *pcomp_list;
+    if (plist) {
         uint size = pstring->size;
 
         while( *plist) {
@@ -547,35 +510,6 @@ check_process_color_names(const fixed_colorant_names_list * pcomp_list,
         }
     }
     return false;
-}
-
-/*
- * This utility routine calculates the number of bits required to store
- * color information.  In general the values are rounded up to an even
- * byte boundary except those cases in which mulitple pixels can evenly
- * into a single byte.
- *
- * The parameter are:
- *   ncomp - The number of components (colorants) for the device.  Valid
- * 	values are 1 to GX_DEVICE_COLOR_MAX_COMPONENTS
- *   bpc - The number of bits per component.  Valid values are 1, 2, 4, 5,
- *	and 8.
- * Input values are not tested for validity.
- */
-static int
-bpc_to_depth(int ncomp, int bpc)
-{
-    static const byte depths[4][8] = {
-        {1, 2, 0, 4, 8, 0, 0, 8},
-        {2, 4, 0, 8, 16, 0, 0, 16},
-        {4, 8, 0, 16, 16, 0, 0, 24},
-        {4, 8, 0, 16, 32, 0, 0, 32}
-    };
-
-    if (ncomp <=4 && bpc <= 8)
-        return depths[ncomp -1][bpc-1];
-    else
-        return (ncomp * bpc + 7) & ~7;
 }
 
 #define BEGIN_ARRAY_PARAM(pread, pname, pa, psize, e)\
@@ -626,22 +560,22 @@ rinkj_set_color_model(rinkj_device *rdev, rinkj_color_model color_model)
 
     rdev->color_model = color_model;
     if (color_model == RINKJ_DEVICE_GRAY) {
-        rdev->std_colorant_names = &DeviceGrayComponents;
+        rdev->std_colorant_names = DeviceGrayComponents;
         rdev->num_std_colorant_names = 1;
         rdev->color_info.cm_name = "DeviceGray";
         rdev->color_info.polarity = GX_CINFO_POLARITY_ADDITIVE;
     } else if (color_model == RINKJ_DEVICE_RGB) {
-        rdev->std_colorant_names = &DeviceRGBComponents;
+        rdev->std_colorant_names = DeviceRGBComponents;
         rdev->num_std_colorant_names = 3;
         rdev->color_info.cm_name = "DeviceRGB";
         rdev->color_info.polarity = GX_CINFO_POLARITY_ADDITIVE;
     } else if (color_model == RINKJ_DEVICE_CMYK) {
-        rdev->std_colorant_names = &DeviceCMYKComponents;
+        rdev->std_colorant_names = DeviceCMYKComponents;
         rdev->num_std_colorant_names = 4;
         rdev->color_info.cm_name = "DeviceCMYK";
         rdev->color_info.polarity = GX_CINFO_POLARITY_SUBTRACTIVE;
     } else if (color_model == RINKJ_DEVICE_N) {
-        rdev->std_colorant_names = &DeviceCMYKComponents;
+        rdev->std_colorant_names = DeviceCMYKComponents;
         rdev->num_std_colorant_names = 4;
         rdev->color_info.cm_name = "DeviceN";
         rdev->color_info.polarity = GX_CINFO_POLARITY_SUBTRACTIVE;
@@ -701,7 +635,7 @@ rinkj_put_params(gx_device * pdev, gs_param_list * plist)
         }
     }
     if (code < 0)
-        ecode = code;
+        return code;
 
     /*
      * Save the color_info in case gdev_prn_put_params fails, and for
@@ -725,7 +659,7 @@ rinkj_put_params(gx_device * pdev, gs_param_list * plist)
         if (scna.data != 0) {
             int i;
             int num_names = scna.size;
-            const fixed_colorant_names_list * pcomp_names =
+            fixed_colorant_names_list pcomp_names =
                                 ((rinkj_device *)pdev)->std_colorant_names;
 
             for (i = num_spot = 0; i < num_names; i++) {
@@ -774,7 +708,9 @@ rinkj_close_device(gx_device *dev)
 {
     rinkj_device * const rdev = (rinkj_device *) dev;
 
-    gscms_release_link(rdev->icc_link);
+    /* ICC link profile only used (and set) if specified on command line */
+    if (rdev->icc_link != NULL)
+        gscms_release_link(rdev->icc_link);
     rc_decrement(rdev->link_profile, "rinkj_close_device");
 
     return gdev_prn_close(dev);
@@ -797,8 +733,7 @@ rinkj_get_color_comp_index(gx_device * dev, const char * pname, int name_size,
                                 int src_index)
 {
 /* TO_DO_DEVICEN  This routine needs to include the effects of the SeparationOrder array */
-    const fixed_colorant_names_list * list = ((const rinkj_device *)dev)->std_colorant_names;
-    const fixed_colorant_name * pcolor = *list;
+    fixed_colorant_name * pcolor = ((const rinkj_device *)dev)->std_colorant_names;
     int color_component_number = 0;
     int i;
 
@@ -860,7 +795,7 @@ struct rinkj_lutchain_s {
 };
 
 static int
-rinkj_add_lut(rinkj_device *rdev, rinkj_lutset *lutset, char plane, FILE *f)
+rinkj_add_lut(rinkj_device *rdev, rinkj_lutset *lutset, char plane, gp_file *f)
 {
     char linebuf[256];
     rinkj_lutchain *chain;
@@ -876,11 +811,16 @@ rinkj_add_lut(rinkj_device *rdev, rinkj_lutset *lutset, char plane, FILE *f)
         return -1;
     pp = &lutset->lut[plane_ix];
 
-    if (fgets(linebuf, sizeof(linebuf), f) == NULL)
+    if (gp_fgets(linebuf, sizeof(linebuf), f) == NULL)
         return -1;
     if (sscanf(linebuf, "%d", &n_graph) != 1)
         return -1;
+    if (n_graph < 0 || n_graph > 256)
+        return -1;
     chain = (rinkj_lutchain *)gs_alloc_bytes(rdev->memory, sizeof(rinkj_lutchain), "rinkj_add_lut");
+    if (chain == NULL) {
+        return -1;
+    }
     chain->next = NULL;
     chain->n_graph = n_graph;
     chain->graph_x = (double *)gs_alloc_bytes(rdev->memory, sizeof(double) * n_graph, "rinkj_add_lut");
@@ -888,7 +828,7 @@ rinkj_add_lut(rinkj_device *rdev, rinkj_lutset *lutset, char plane, FILE *f)
     for (i = 0; i < n_graph; i++) {
         double x, y;
 
-        if (fgets(linebuf, sizeof(linebuf), f) == NULL)
+        if (gp_fgets(linebuf, sizeof(linebuf), f) == NULL)
             return -1;
         if (sscanf(linebuf, "%lf %lf", &y, &x) != 2)
             return -1;
@@ -931,7 +871,7 @@ rinkj_set_luts(rinkj_device *rdev,
                RinkjDevice *printer_dev, RinkjDevice *cmyk_dev,
                const char *config_fn, const RinkjDeviceParams *params)
 {
-    FILE *f = gp_fopen(config_fn, "r");
+  gp_file *f = gp_fopen(rdev->memory, config_fn, "r");
     char linebuf[256];
     char key[256];
     char *val;
@@ -943,7 +883,7 @@ rinkj_set_luts(rinkj_device *rdev,
         lutset.lut[i] = NULL;
     }
     for (;;) {
-        if (fgets(linebuf, sizeof(linebuf), f) == NULL)
+        if (gp_fgets(linebuf, sizeof(linebuf), f) == NULL)
             break;
         for (i = 0; linebuf[i]; i++)
             if (linebuf[i] == ':') break;
@@ -965,7 +905,7 @@ rinkj_set_luts(rinkj_device *rdev,
         }
     }
 
-    fclose(f);
+    gp_fclose(f);
 
     rinkj_apply_luts(rdev, cmyk_dev, &lutset);
     /* todo: free lutset contents */
@@ -974,7 +914,7 @@ rinkj_set_luts(rinkj_device *rdev,
 }
 
 static RinkjDevice *
-rinkj_init(rinkj_device *rdev, FILE *file)
+rinkj_init(rinkj_device *rdev, gp_file *file)
 {
     RinkjByteStream *bs;
     RinkjDevice *epson_dev;
@@ -1035,14 +975,23 @@ rinkj_write_image_data(gx_device_printer *pdev, RinkjDevice *cmyk_dev)
     n_planes = n_planes_in + rdev->separation_names.num_names;
     if_debug1m('r', rdev->memory, "[r]n_planes = %d\n", n_planes);
     xsb = pdev->width;
-    for (i = 0; i < n_planes_out; i++)
+    for (i = 0; i < n_planes_out; i++) {
         plane_data[i] = gs_alloc_bytes(pdev->memory, xsb, "rinkj_write_image_data");
-
+        if (plane_data[i] == NULL) {
+            while (--i >= 0)
+                gs_free_object(pdev->memory, plane_data[i], "rinkj_write_image_data");
+            return_error(gs_error_VMerror);
+        }
+    }
     if (rdev->icc_link != NULL) {
 
         cache = (rinkj_color_cache_entry *)gs_alloc_bytes(pdev->memory, RINKJ_CCACHE_SIZE * sizeof(rinkj_color_cache_entry), "rinkj_write_image_data");
-        if (cache == NULL)
-            return gs_note_error(gs_error_VMerror);
+        if (cache == NULL) {
+            /* i == n_planes_out from above */
+            while (--i >= 0)
+                gs_free_object(pdev->memory, plane_data[i], "rinkj_write_image_data");
+            return_error(gs_error_VMerror);
+        }
 
         /* Set up cache so that none of the keys will hit. */
 
@@ -1062,11 +1011,15 @@ rinkj_write_image_data(gx_device_printer *pdev, RinkjDevice *cmyk_dev)
     split_plane_data[6] = plane_data[3];
 
     line = gs_alloc_bytes(pdev->memory, raster, "rinkj_write_image_data");
+    if (line == NULL)
+        goto xit;
     for (y = 0; y < pdev->height; y++) {
         byte *row;
         int x;
 
         code = gdev_prn_get_bits(pdev, y, line, &row);
+        if (code < 0)
+            goto xit;
 
         if (rdev->icc_link == NULL) {
             int rowix = 0;
@@ -1090,7 +1043,7 @@ rinkj_write_image_data(gx_device_printer *pdev, RinkjDevice *cmyk_dev)
                 if (cache[hash].key != color) {
 
                     /* 3 channel to CMYK */
-                    gscms_transform_color((gx_device *)rdev, rdev->icc_link, 
+                    gscms_transform_color((gx_device *)rdev, rdev->icc_link,
                                           &cbuf, &(vbuf), 1);
                     cache[hash].key = color;
                     cache[hash].value = ((bits32 *)vbuf)[0];
@@ -1116,7 +1069,7 @@ rinkj_write_image_data(gx_device_printer *pdev, RinkjDevice *cmyk_dev)
                     ((bits32 *)cbuf)[0] = color;
 
                     /* 4 channel to CMYK */
-                    gscms_transform_color((gx_device *)rdev, rdev->icc_link, 
+                    gscms_transform_color((gx_device *)rdev, rdev->icc_link,
                                            &cbuf, &(vbuf), 1);
                     cache[hash].key = color;
                     cache[hash].value = ((bits32 *)vbuf)[0];
@@ -1148,7 +1101,7 @@ rinkj_write_image_data(gx_device_printer *pdev, RinkjDevice *cmyk_dev)
                        code was still working with 4 to 4
                        conversion.  Replacing with new ICC AMP call */
 
-                    gscms_transform_color((gx_device *) rdev, rdev->icc_link, 
+                    gscms_transform_color((gx_device *) rdev, rdev->icc_link,
                                           &cbuf, &(vbuf), 1);
                     cache[hash].key = color;
                     cache[hash].value = ((bits32 *)vbuf)[0];
@@ -1178,6 +1131,7 @@ rinkj_write_image_data(gx_device_printer *pdev, RinkjDevice *cmyk_dev)
     }
 
     rinkj_device_write(cmyk_dev, NULL);
+xit:
     for (i = 0; i < n_planes_in; i++)
         gs_free_object(pdev->memory, plane_data[i], "rinkj_write_image_data");
     gs_free_object(pdev->memory, line, "rinkj_write_image_data");
@@ -1187,12 +1141,16 @@ rinkj_write_image_data(gx_device_printer *pdev, RinkjDevice *cmyk_dev)
 }
 
 static int
-rinkj_print_page(gx_device_printer *pdev, FILE *file)
+rinkj_print_page(gx_device_printer *pdev, gp_file *file)
 {
     rinkj_device *rdev = (rinkj_device *)pdev;
     int code = 0;
     RinkjDevice *cmyk_dev;
 
+    if (rdev->setup_fn[0] == 0) {
+        emprintf(rdev->memory, "Error, SetupFile not defined, output aborted\n");
+        return 0;
+    }
     cmyk_dev = rinkj_init(rdev, file);
     if (cmyk_dev == 0)
         return gs_note_error(gs_error_ioerror);

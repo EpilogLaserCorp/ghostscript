@@ -32,12 +32,6 @@
 
 ******************************************************************************/
 
-/* Configuration management identification */
-#ifndef lint
-static const char
-  cm_id[] = "@(#)$Id: eprnparm.c,v 1.24 2001/08/18 17:42:34 Martin Rel $";
-#endif
-
 /*****************************************************************************/
 
 #ifndef _XOPEN_SOURCE
@@ -207,21 +201,21 @@ void eprn_dump_parameter_list(gs_param_list *plist)
 /******************************************************************************
 
   Function: eprn_fillpage
-  This is just a "call-through" to the default, so we can grab the imager state
+  This is just a "call-through" to the default, so we can grab the gs_gstate
 
 ******************************************************************************/
 int
-eprn_fillpage(gx_device *dev, gs_imager_state * pis, gx_device_color *pdevc)
+eprn_fillpage(gx_device *dev, gs_gstate * pgs, gx_device_color *pdevc)
 {
   eprn_Eprn *eprn = &((eprn_Device *)dev)->eprn;
 
-  eprn->pis = pis;
+  eprn->pgs = pgs;
 
-  return (*eprn->orig_fillpage)(dev, pis, pdevc);
+  return (*eprn->orig_fillpage)(dev, pgs, pdevc);
 }
 
 
-void eprn_replace_fillpage(gx_device *dev)
+static void eprn_replace_fillpage(gx_device *dev)
 {
     eprn_Eprn *eprn = &((eprn_Device *)dev)->eprn;
 
@@ -394,7 +388,7 @@ static char *next_word(char *s)
 #define BUFFER_SIZE     200
   /* should be large enough for a single line */
 
-#define cleanup()       (free(list), fclose(f))
+#define cleanup()       (free(list), gp_fclose(f))
 
 static int eprn_read_media_data(eprn_Eprn *eprn, gs_memory_t *memory)
 {
@@ -402,7 +396,7 @@ static int eprn_read_media_data(eprn_Eprn *eprn, gs_memory_t *memory)
   const char
     *epref = eprn->CUPS_messages? CUPS_ERRPREF: "",
     *wpref = eprn->CUPS_messages? CUPS_WARNPREF: "";
-  FILE *f;
+  gp_file *f;
   float conversion_factor = BP_PER_IN;
     /* values read have to be multiplied by this value to obtain bp */
   int
@@ -411,7 +405,7 @@ static int eprn_read_media_data(eprn_Eprn *eprn, gs_memory_t *memory)
   eprn_PageDescription *list = NULL;
 
   /* Open the file */
-  if ((f = gp_fopen(eprn->media_file, "r")) == NULL) {
+  if ((f = gp_fopen(memory, eprn->media_file, "r")) == NULL) {
     eprintf5("%s" ERRPREF "Error opening the media configuration file\n"
       "%s    `%s'\n%s  for reading: %s.\n",
       epref, epref, eprn->media_file, epref, strerror(errno));
@@ -419,7 +413,7 @@ static int eprn_read_media_data(eprn_Eprn *eprn, gs_memory_t *memory)
   }
 
   /* Loop over input lines */
-  while (fgets(buffer, BUFFER_SIZE, f) != NULL) {
+  while (gp_fgets(buffer, BUFFER_SIZE, f) != NULL) {
     char *s, *t;
     eprn_PageDescription *current;
     int chars_read;
@@ -427,7 +421,7 @@ static int eprn_read_media_data(eprn_Eprn *eprn, gs_memory_t *memory)
     line++;
 
     /* Check for buffer overflow */
-    if ((s = strchr(buffer, '\n')) == NULL && fgetc(f) != EOF) {
+    if ((s = strchr(buffer, '\n')) == NULL && gp_fgetc(f) != EOF) {
       eprintf5("%s" ERRPREF "Exceeding line length %d in "
           "media configuration file\n%s  %s, line %d.\n",
         epref, BUFFER_SIZE - 2 /* '\n'+'\0' */, epref, eprn->media_file, line);
@@ -569,14 +563,14 @@ static int eprn_read_media_data(eprn_Eprn *eprn, gs_memory_t *memory)
         "%s    are not supported by the %s.\n",
         wpref, eprn->media_file, wpref, line, wpref, eprn->cap->name);
   }
-  if (ferror(f)) {
+  if (gp_ferror(f)) {
     eprintf2("%s" ERRPREF
       "Unidentified system error while reading `%s'.\n",
       epref, eprn->media_file);
     cleanup();
     return_error(gs_error_invalidfileaccess);
   }
-  fclose(f);
+  gp_fclose(f);
 
   /* Was the file empty? */
   if (read == 0) {
@@ -770,8 +764,8 @@ int eprn_check_colour_info(const eprn_ColourInfo *list,
   /* Search for a match. Successful exits are in the middle of the loop. */
   for (entry = list; entry->info[0] != NULL; entry++)
     if (entry->colour_model == *model ||
-        entry->colour_model == eprn_DeviceCMYK &&
-          *model == eprn_DeviceCMY_plus_K) {
+        (entry->colour_model == eprn_DeviceCMYK &&
+         *model == eprn_DeviceCMY_plus_K)) {
       const eprn_ResLev *rl;
       unsigned int levels = (entry->colour_model == eprn_DeviceRGB ||
           entry->colour_model == eprn_DeviceCMY? *non_black_levels:
@@ -792,8 +786,8 @@ int eprn_check_colour_info(const eprn_ColourInfo *list,
             for (rl2 = entry->info[1]; rl2->levels != NULL; rl2++)
               if (reslev_supported(rl2, *hres, *vres, *non_black_levels)) break;
           }
-          if (entry->info[1] == NULL && *black_levels == *non_black_levels ||
-              entry->info[1] != NULL && rl2->levels != NULL)
+          if ((entry->info[1] == NULL && *black_levels == *non_black_levels) ||
+              (entry->info[1] != NULL && rl2->levels != NULL))
             return 0;
         }
     }
@@ -963,7 +957,7 @@ int eprn_put_params(gx_device *dev, gs_param_list *plist)
     if (rc != 0) {                                                      \
       if (rc != gs_error_VMerror) {                                     \
         eprintf1("%s" ERRPREF "Unknown colour model: `", epref);        \
-        errwrite(dev->memory, string_value.data, sizeof(char)*string_value.size); \
+        errwrite(dev->memory, (const char *)string_value.data, sizeof(char)*string_value.size); \
         eprintf("'.\n");                                                \
       }                                                                 \
       last_error = rc;                                                  \
@@ -1019,11 +1013,11 @@ int eprn_put_params(gx_device *dev, gs_param_list *plist)
 
   /* BlackLevels. Various depending values will be adjusted below. */
   if ((rc = param_read_int(plist, (pname = "BlackLevels"), &temp)) == 0) {
-    if (temp == 0 && (eprn->colour_model == eprn_DeviceRGB ||
-          eprn->colour_model == eprn_DeviceCMY) ||
-        2 <= temp && temp <= 256 &&
-          eprn->colour_model != eprn_DeviceRGB &&
-          eprn->colour_model != eprn_DeviceCMY) {
+    if ((temp == 0 && (eprn->colour_model == eprn_DeviceRGB ||
+                       eprn->colour_model == eprn_DeviceCMY)) ||
+        (2 <= temp && temp <= 256 &&
+         eprn->colour_model != eprn_DeviceRGB &&
+         eprn->colour_model != eprn_DeviceCMY)) {
       if (eprn->black_levels != temp && dev->is_open) gs_closedevice(dev);
       eprn->black_levels = temp;
     }
@@ -1039,8 +1033,8 @@ int eprn_put_params(gx_device *dev, gs_param_list *plist)
 
   /* CMYLevels */
   if ((rc = param_read_int(plist, (pname = "CMYLevels"), &temp)) == 0) {
-    if (temp == 0 && eprn->colour_model == eprn_DeviceGray ||
-        2 <= temp && temp <= 256 && eprn->colour_model != eprn_DeviceGray) {
+    if ((temp == 0 && eprn->colour_model == eprn_DeviceGray) ||
+        (2 <= temp && temp <= 256 && eprn->colour_model != eprn_DeviceGray)) {
       if (eprn->non_black_levels != temp && dev->is_open) gs_closedevice(dev);
       eprn->non_black_levels = temp;
     }
@@ -1078,7 +1072,7 @@ int eprn_put_params(gx_device *dev, gs_param_list *plist)
     else {
       eprintf1("%s" ERRPREF "Invalid method for IntensityRendering: `",
         epref);
-      errwrite(dev->memory, string_value.data, sizeof(char)*string_value.size);
+      errwrite(dev->memory, (const char *)string_value.data, sizeof(char)*string_value.size);
       eprintf("'.\n");
       last_error = gs_error_rangecheck;
       param_signal_error(plist, pname, last_error);
@@ -1196,7 +1190,7 @@ int eprn_put_params(gx_device *dev, gs_param_list *plist)
 
   /* RGBLevels */
   if ((rc = param_read_int(plist, (pname = "RGBLevels"), &temp)) == 0) {
-    if (temp == 0 || 2 <= temp && temp <= 256) {
+    if (temp == 0 || (2 <= temp && temp <= 256)) {
       if (eprn->non_black_levels != temp && dev->is_open) gs_closedevice(dev);
       eprn->non_black_levels = temp;
     }
@@ -1246,7 +1240,8 @@ int eprn_put_params(gx_device *dev, gs_param_list *plist)
 
   /* Process parameters defined by base classes (should occur after treating
      parameters defined for the derived class, see gsparam.h) */
-  if ((rc = gdev_prn_put_params(dev, plist)) < 0 || rc > 0 && last_error >= 0)
+  rc = gdev_prn_put_params(dev, plist);
+  if (rc < 0 || (rc > 0 && last_error >= 0))
     last_error = rc;
 
   if (last_error < 0) return_error(last_error);

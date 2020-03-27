@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -18,6 +18,8 @@
 
 #ifndef gxdevsop_INCLUDED
 #  define gxdevsop_INCLUDED
+
+#include "gxdevcli.h"
 
 /* This file enumerates a series of device specific operations, that can be
  * performed using the 'dev_spec_op' procedure in the gs_device structure.
@@ -127,6 +129,7 @@ typedef struct dev_param_req_s {
 /* structure used to pass the parameters for pattern handling */
 typedef struct pattern_accum_param_t {
     void *pinst;
+    gs_memory_t *interpreter_memory;
     void *graphics_state;
     int pinst_id;
 }pattern_accum_param_s;
@@ -300,6 +303,75 @@ enum {
     gxdso_adjust_bandheight,
     /* Retrieve a *single* device parameter */
     gxdso_get_dev_param,
+    /* gxdso_in_pattern_accumulator:
+     *     data = NULL
+     *     size = 0
+     * Returns +ve value if we are rendering into a pattern accumulator
+     * device.
+     */
+    gxdso_in_pattern_accumulator,
+    /* Determine if we are in a PDF14 device and the target is a separation
+     * device.   In this case, we may want to not use the alternate tint
+     * tranform even if the blending color space is RGB or Gray. */
+    gxdso_pdf14_sep_device,
+    /* Used only by pdfwrite to pass a Form Appearance Name, so that
+     * we can use the name in a pdfmark.
+     */
+    gxdso_pdf_form_name,
+    gxdso_pdf_last_form_ID,
+    /* Restrict the supplied bbox to that actually used by the underlying device.
+     * Used to restrict alphabits drawing to the area defined by compositors etc.*/
+    gxdso_restrict_bbox,
+    /* JPEG passthrough requests/control. Currently used for the pdfwrite family only.
+     */
+    gxdso_JPEG_passthrough_query,
+    gxdso_JPEG_passthrough_begin,
+    gxdso_JPEG_passthrough_data,
+    gxdso_JPEG_passthrough_end,
+    gxdso_supports_iccpostrender,
+    /* Retrieve the last device in a device chain
+       (either forwarding or subclass devices).
+     */
+    gxdso_current_output_device,
+    /* Should we call copy_color rather than resolving images to fill_rectangles? */
+    gxdso_copy_color_is_fast,
+    /* gxdso_is_encoding_direct:
+     *     data = NULL
+     *     size = 0
+     * Returns 1 if the device maps color byte values directly into the device,
+     * 0 otherwise.
+     */
+    gxdso_is_encoding_direct,
+    /* gxdso_event_info:
+     *     data = dev_param_req_t
+     *     size = sizeof(dev_param-req_t
+     * Passes a single name in request->Param, naming the event which occurred.
+     * Used to send a warning to pdfwrite that some event has happened we want to know about.
+     * Currently this is used in pdf_font.ps to signal that a substittue font has been
+     * used. If we are emitting PDF/A then we need to abort it, as the Widths array of
+     * the PDF font may not match the widths of the glyphs in the font.
+     */
+    gxdso_event_info,
+    /* gxdso_overprint_active:
+    *     data = NULL
+    *     size = 0
+    * Returns 1 if the overprint device is active,
+    * 0 otherwise.
+    */
+    gxdso_overprint_active,
+    /* gxdso_in_smask:
+    *     data = NULL
+    *     size = 0
+    * Returns 1 if we are within an smask (either construction or usage),
+    * 0 otherwise.
+    */
+    gxdso_in_smask,
+
+    /* Debug only dsos follow here */
+#ifdef DEBUG
+    /* Private dso used to check that a printer device properly forwards to the default */
+    gxdso_debug_printer_check,
+#endif
     /* Add new gxdso_ keys above this. */
     gxdso_pattern__LAST
 };

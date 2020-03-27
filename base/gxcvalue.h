@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -22,7 +22,6 @@
 /* Define the type for gray or RGB values at the driver interface. */
 typedef unsigned short gx_color_value;
 
-#define arch_sizeof_gx_color_value arch_sizeof_short
 /* We might use less than the full range someday. */
 /* ...bits must lie between 8 and 16. */
 #define gx_color_value_bits (sizeof(gx_color_value) * 8)
@@ -37,6 +36,10 @@ typedef unsigned short gx_color_value;
 /* Convert between gx_color_values and fracs. */
 #define frac2cv(fr) frac2ushort(fr)
 #define cv2frac(cv) ushort2frac(cv)
+
+/* Convert between gx_color_values and frac31s. */
+#define frac312cv(fr) frac312ushort(fr)
+#define cv2frac31(cv) ushort2frac31(cv)
 
 /* At various points in the code (particularly inside encode_color and
  * decode_color functions), we need to convert colour values between

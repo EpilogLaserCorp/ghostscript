@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -58,10 +58,10 @@ static int upath_stroke(i_ctx_t *, gs_matrix *, bool);
 /* ---------------- Insideness testing ---------------- */
 
 /* Forward references */
-static int in_test(i_ctx_t *, int (*)(gs_state *));
+static int in_test(i_ctx_t *, int (*)(gs_gstate *));
 static int in_path(os_ptr, i_ctx_t *, gx_device *);
 static int in_path_result(i_ctx_t *, int, int);
-static int in_utest(i_ctx_t *, int (*)(gs_state *));
+static int in_utest(i_ctx_t *, int (*)(gs_gstate *));
 static int in_upath(i_ctx_t *, gx_device *);
 static int in_upath_result(i_ctx_t *, int, int);
 
@@ -130,8 +130,10 @@ zinustroke(i_ctx_t *i_ctx_p)
     }
     if (npop > 1)		/* matrix was supplied */
         code = gs_concat(igs, &mat);
-    if (code >= 0)
+    if (code >= 0) {
+        dev_proc(&hdev, set_graphics_type_tag)(&hdev, GS_PATH_TAG);	/* so that fills don't unset dev_color */
         code = gs_stroke(igs);
+    }
     return in_upath_result(i_ctx_p, npop + spop, code);
 }
 
@@ -139,7 +141,7 @@ zinustroke(i_ctx_t *i_ctx_p)
 
 /* Do the work of the non-user-path insideness operators. */
 static int
-in_test(i_ctx_t *i_ctx_p, int (*paintproc)(gs_state *))
+in_test(i_ctx_t *i_ctx_p, int (*paintproc)(gs_gstate *))
 {
     os_ptr op = osp;
     gx_device hdev;
@@ -148,6 +150,7 @@ in_test(i_ctx_t *i_ctx_p, int (*paintproc)(gs_state *))
 
     if (npop < 0)
         return npop;
+    dev_proc(&hdev, set_graphics_type_tag)(&hdev, GS_PATH_TAG);	/* so that fills don't unset dev_color */
     code = (*paintproc)(igs);
     return in_path_result(i_ctx_p, npop, code);
 }
@@ -197,8 +200,11 @@ in_path(os_ptr oppath, i_ctx_t *i_ctx_p, gx_device * phdev)
         gs_grestore(igs);
         return code;
     }
+    code = gx_set_device_color_1(igs);
+    if (code < 0)
+        return code;
+
     /* Install the hit detection device. */
-    gx_set_device_color_1(igs);
     gx_device_init_on_stack((gx_device *) phdev, (const gx_device *)&gs_hit_device,
                             imemory);
     phdev->width = phdev->height = max_int;
@@ -231,7 +237,7 @@ in_path_result(i_ctx_t *i_ctx_p, int npop, int code)
 
 /* Do the work of the user-path insideness operators. */
 static int
-in_utest(i_ctx_t *i_ctx_p, int (*paintproc)(gs_state *))
+in_utest(i_ctx_t *i_ctx_p, int (*paintproc)(gs_gstate *))
 {
     gx_device hdev;
     int npop = in_upath(i_ctx_p, &hdev);
@@ -239,6 +245,7 @@ in_utest(i_ctx_t *i_ctx_p, int (*paintproc)(gs_state *))
 
     if (npop < 0)
         return npop;
+    dev_proc(&hdev, set_graphics_type_tag)(&hdev, GS_PATH_TAG);	/* so that fills don't unset dev_color */
     code = (*paintproc)(igs);
     return in_upath_result(i_ctx_p, npop, code);
 }
@@ -447,20 +454,6 @@ zustrokepath(i_ctx_t *i_ctx_p)
     return 0;
 }
 
-/* <with_ucache> upath <userpath> */
-/* We do all the work in a procedure that is also used to construct */
-/* the UnpaintedPath user path for ImageType 2 images. */
-int make_upath(i_ctx_t *i_ctx_p, ref *rupath, gs_state *pgs, gx_path *ppath,
-               bool with_ucache);
-static int
-zupath(i_ctx_t *i_ctx_p)
-{
-    os_ptr op = osp;
-
-    check_type(*op, t_boolean);
-    return make_upath(i_ctx_p, op, igs, igs->path, op->value.boolval);
-}
-
 /* Compute the path length for user path purposes. */
 static int
 path_length_for_upath(const gx_path *ppath)
@@ -489,8 +482,8 @@ path_length_for_upath(const gx_path *ppath)
     return size;
 }
 
-int
-make_upath(i_ctx_t *i_ctx_p, ref *rupath, gs_state *pgs, gx_path *ppath,
+static int
+make_upath(i_ctx_t *i_ctx_p, ref *rupath, gs_gstate *pgs, gx_path *ppath,
            bool with_ucache)
 {
     int size = (with_ucache ? 6 : 5);
@@ -586,6 +579,16 @@ make_upath(i_ctx_t *i_ctx_p, ref *rupath, gs_state *pgs, gx_path *ppath,
         }
     }
     return 0;
+}
+
+/* <with_ucache> upath <userpath> */
+static int
+zupath(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+
+    check_type(*op, t_boolean);
+    return make_upath(i_ctx_p, op, igs, igs->path, op->value.boolval);
 }
 
 static int
@@ -886,7 +889,12 @@ const op_def zupath_l2_op_defs[] =
     {"1upath", zupath},
     {"1ustroke", zustroke},
     {"1ustrokepath", zustrokepath},
-                /* Path access for PDF */
+    op_def_end(0)
+};
+
+const op_def zupath_op_defs[] =
+{
+    /* Path access for PDF */
     {"0.getpath", zgetpath},
     op_def_end(0)
 };

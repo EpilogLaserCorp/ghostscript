@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -196,8 +196,10 @@ define_pcl_ptrn(pcl_state_t * pcs, int id, pcl_pattern_t * pptrn, bool gl2)
     id_set_value(key, id);
     if (pptrn == 0)
         pl_dict_undef(pd, id_key(key), 2);
-    else if (pl_dict_put(pd, id_key(key), 2, pptrn) < 0)
+    else if (pl_dict_put(pd, id_key(key), 2, pptrn) < 0) {
+        /* on error, pl_dict_put consumes pptrn */
         return e_Memory;
+    }
 
     if (gl2) {
         if (pcs->last_gl2_RF_indx == id)
@@ -213,13 +215,14 @@ define_pcl_ptrn(pcl_state_t * pcs, int id, pcl_pattern_t * pptrn, bool gl2)
  * Delete all temporary patterns or all patterns, based on the value of
  * the operand.
  */
-static void
+static int
 delete_all_pcl_ptrns(bool renderings, bool tmp_only, pcl_state_t * pcs)
 {
     pcl_pattern_t *pptrn;
     pl_dict_enum_t denum;
     gs_const_string plkey;
     pl_dict_t *pdict[2];
+    int code = 0;
     int i;
 
     pdict[0] = &pcs->pcl_patterns;
@@ -232,14 +235,17 @@ delete_all_pcl_ptrns(bool renderings, bool tmp_only, pcl_state_t * pcs)
                 pcl_id_t key;
 
                 id_set_key(key, plkey.data);
-                define_pcl_ptrn(pcs, id_value(key), NULL,
+                code = define_pcl_ptrn(pcs, id_value(key), NULL,
                                 (pdict[i] == &pcs->gl_patterns));
+                if (code < 0)
+                    return code;
                 /* NB this should be checked - if instead of
                    else-if? */
             } else if (renderings)
                 free_pattern_rendering(pcs->memory, pptrn);
         }
     }
+    return code;
 }
 
 /*
@@ -428,10 +434,7 @@ download_pcl_pattern(pcl_args_t * pargs, pcl_state_t * pcs)
     /* place the pattern into the pattern dictionary */
     if ((code < 0) ||
         ((code = define_pcl_ptrn(pcs, pcs->pattern_id, pptrn, false)) < 0)) {
-        if (pptrn != 0)
-            pcl_pattern_free_pattern(pcs->memory, pptrn,
-                                     "download PCL pattern");
-        else
+        if (pptrn == NULL)
             gs_free_object(pcs->memory,
                            (void *)pixinfo.data, "download PCL pattern");
     }
@@ -448,17 +451,18 @@ static int
 pattern_control(pcl_args_t * pargs, pcl_state_t * pcs)
 {
     pcl_pattern_t *pptrn = 0;
+    int code = 0;
 
     switch (int_arg(pargs)) {
 
             /* delete all patterns */
         case 0:
-            delete_all_pcl_ptrns(false, false, pcs);
+            code = delete_all_pcl_ptrns(false, false, pcs);
             break;
 
             /* delete all temporary patterns */
         case 1:
-            delete_all_pcl_ptrns(false, true, pcs);
+            code = delete_all_pcl_ptrns(false, true, pcs);
             break;
 
             /* delete last specified pattern */
@@ -483,7 +487,7 @@ pattern_control(pcl_args_t * pargs, pcl_state_t * pcs)
             break;
     }
 
-    return 0;
+    return code;
 }
 
 static int
@@ -527,9 +531,11 @@ upattern_do_registration(pcl_parser_state_t * pcl_parser_state,
     }, END_CLASS return 0;
 }
 
-static void
+static int
 upattern_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
+    int code = 0;
+
     if ((type & pcl_reset_initial) != 0) {
         pl_dict_init(&pcs->pcl_patterns, pcs->memory,
                      pcl_pattern_free_pattern);
@@ -544,10 +550,12 @@ upattern_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
         if ((type &
              (pcl_reset_cold | pcl_reset_printer | pcl_reset_permanent)) !=
             0) {
-        delete_all_pcl_ptrns(true, !(type & pcl_reset_permanent), pcs);
+        code = delete_all_pcl_ptrns(true, !(type & pcl_reset_permanent), pcs);
         pcl_pattern_clear_bi_patterns(pcs);
         /* GL's IN command takes care of the GL patterns */
     }
+
+    return code;
 }
 
 const pcl_init_t pcl_upattern_init =

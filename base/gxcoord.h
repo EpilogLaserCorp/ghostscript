@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -21,13 +21,14 @@
 #  define gxcoord_INCLUDED
 
 #include "gscoord.h"
+#include "gxmatrix.h"
 
 /* Set the translation to a fixed value, and translate any existing path. */
 /* Used by gschar.c to prepare for a BuildChar or BuildGlyph procedure. */
-int gx_translate_to_fixed(gs_state *, fixed, fixed);
+int gx_translate_to_fixed(gs_gstate *, fixed, fixed);
 
 /* Scale the CTM and character matrix for oversampling. */
-int gx_scale_char_matrix(gs_state *, int, int);
+int gx_scale_char_matrix(gs_gstate *, int, int);
 
 /* Compute the coefficients for fast fixed-point distance transformations */
 /* from a transformation matrix. */

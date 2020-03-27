@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -23,6 +23,7 @@
 #include "gserrors.h"
 #include "gp.h"
 #include "gsicc_cms.h"
+#include "gxdevice.h"
 
 #define USE_LCMS2_LOCKING
 
@@ -51,7 +52,9 @@ static
 void *gs_lcms2_malloc(cmsContext id, unsigned int size)
 {
     void *ptr;
+#if !(defined(SHARE_LCMS) && SHARE_LCMS==1)
     gs_memory_t *mem = (gs_memory_t *)cmsGetContextUserData(id);
+#endif
 
 #if defined(SHARE_LCMS) && SHARE_LCMS==1
     ptr = malloc(size);
@@ -68,7 +71,10 @@ void *gs_lcms2_malloc(cmsContext id, unsigned int size)
 static
 void gs_lcms2_free(cmsContext id, void *ptr)
 {
+#if !(defined(SHARE_LCMS) && SHARE_LCMS==1)
     gs_memory_t *mem = (gs_memory_t *)cmsGetContextUserData(id);
+#endif
+
     if (ptr != NULL) {
 #if DEBUG_LCMS_MEM
         gs_warn1("lcms free at 0x%x",ptr);
@@ -85,7 +91,9 @@ void gs_lcms2_free(cmsContext id, void *ptr)
 static
 void *gs_lcms2_realloc(cmsContext id, void *ptr, unsigned int size)
 {
+#if !(defined(SHARE_LCMS) && SHARE_LCMS==1)
     gs_memory_t *mem = (gs_memory_t *)cmsGetContextUserData(id);
+#endif
     void *ptr2;
 
     if (ptr == 0)
@@ -130,7 +138,7 @@ void *gs_lcms2_createMutex(cmsContext id)
 {
     gs_memory_t *mem = (gs_memory_t *)cmsGetContextUserData(id);
 
-    return gx_monitor_alloc(mem);
+    return gx_monitor_label(gx_monitor_alloc(mem), "lcms2");
 }
 
 static
@@ -170,7 +178,7 @@ static cmsPluginMutex gs_cms_mutexhandler =
 /* Get the number of channels for the profile.
   Input count */
 int
-gscms_get_input_channel_count(gcmmhprofile_t profile)
+gscms_get_input_channel_count(gcmmhprofile_t profile, gs_memory_t *memory)
 {
     cmsColorSpaceSignature colorspace;
 
@@ -180,7 +188,7 @@ gscms_get_input_channel_count(gcmmhprofile_t profile)
 
 /* Get the number of output channels for the profile */
 int
-gscms_get_output_channel_count(gcmmhprofile_t profile)
+gscms_get_output_channel_count(gcmmhprofile_t profile, gs_memory_t *memory)
 {
     cmsColorSpaceSignature colorspace;
 
@@ -190,7 +198,7 @@ gscms_get_output_channel_count(gcmmhprofile_t profile)
 
 /* Get the number of colorant names in the clrt tag */
 int
-gscms_get_numberclrtnames(gcmmhprofile_t profile)
+gscms_get_numberclrtnames(gcmmhprofile_t profile, gs_memory_t *memory)
 {
     cmsNAMEDCOLORLIST *lcms_names;
 
@@ -228,28 +236,28 @@ gscms_get_clrtname(gcmmhprofile_t profile, int colorcount, gs_memory_t *memory)
 
 /* Check if the profile is a device link type */
 bool
-gscms_is_device_link(gcmmhprofile_t profile)
+gscms_is_device_link(gcmmhprofile_t profile, gs_memory_t *memory)
 {
     return cmsGetDeviceClass(profile) == cmsSigLinkClass;
 }
 
 /* Needed for v2 profile creation */
 int
-gscms_get_device_class(gcmmhprofile_t profile)
+gscms_get_device_class(gcmmhprofile_t profile, gs_memory_t *memory)
 {
     return cmsGetDeviceClass(profile);
 }
 
 /* Check if the profile is a input type */
 bool
-gscms_is_input(gcmmhprofile_t profile)
+gscms_is_input(gcmmhprofile_t profile, gs_memory_t *memory)
 {
     return (cmsGetDeviceClass(profile) == cmsSigInputClass);
 }
 
 /* Get the device space associated with this profile */
 gsicc_colorbuffer_t
-gscms_get_profile_data_space(gcmmhprofile_t profile)
+gscms_get_profile_data_space(gcmmhprofile_t profile, gs_memory_t *memory)
 {
     cmsColorSpaceSignature colorspace;
 
@@ -272,8 +280,8 @@ gscms_get_profile_data_space(gcmmhprofile_t profile)
 
 /* Get ICC Profile handle from buffer */
 gcmmhprofile_t
-gscms_get_profile_handle_mem(gs_memory_t *mem, unsigned char *buffer, 
-                             unsigned int input_size)
+gscms_get_profile_handle_mem(unsigned char *buffer,
+                             unsigned int input_size, gs_memory_t *mem)
 {
     cmsContext ctx = gs_lib_ctx_get_cms_context(mem);
 
@@ -283,7 +291,7 @@ gscms_get_profile_handle_mem(gs_memory_t *mem, unsigned char *buffer,
 
 /* Get ICC Profile handle from file ptr */
 gcmmhprofile_t
-gscms_get_profile_handle_file(gs_memory_t *mem,const char *filename)
+gscms_get_profile_handle_file(const char *filename, gs_memory_t *mem)
 {
     cmsContext ctx = gs_lib_ctx_get_cms_context(mem);
 
@@ -291,7 +299,7 @@ gscms_get_profile_handle_file(gs_memory_t *mem,const char *filename)
 }
 
 /* Transform an entire buffer */
-void
+int
 gscms_transform_color_buffer(gx_device *dev, gsicc_link_t *icclink,
                              gsicc_bufferdesc_t *input_buff_desc,
                              gsicc_bufferdesc_t *output_buff_desc,
@@ -303,7 +311,7 @@ gscms_transform_color_buffer(gx_device *dev, gsicc_link_t *icclink,
     int planar,numbytes, big_endian, hasalpha, k;
     unsigned char *inputpos, *outputpos;
 #if DUMP_CMS_BUFFER
-    FILE *fid_in, *fid_out;
+    gp_file *fid_in, *fid_out;
 #endif
     /* Although little CMS does  make assumptions about data types in its
        transformations you can change it after the fact.  */
@@ -343,7 +351,7 @@ gscms_transform_color_buffer(gx_device *dev, gsicc_link_t *icclink,
     if (num_src_lcms != input_buff_desc->num_chan ||
         num_des_lcms != output_buff_desc->num_chan) {
         /* We can't transform this. Someone is doing something odd */
-        return;
+        return_error(gs_error_unknownerror);
     }
     dwInputFormat = dwInputFormat | CHANNELS_SH(num_src_lcms);
     dwOutputFormat = dwOutputFormat | CHANNELS_SH(num_des_lcms);
@@ -366,36 +374,36 @@ gscms_transform_color_buffer(gx_device *dev, gsicc_link_t *icclink,
     inputpos = (byte *) inputbuffer;
     outputpos = (byte *) outputbuffer;
     if(input_buff_desc->is_planar){
-        /* Determine if we can do this in one operation or if we have to break 
+        /* Determine if we can do this in one operation or if we have to break
            it up.  Essentially if the width * height = plane_stride then yes.  If
            we are doing some subsection of a plane then no. */
         if (input_buff_desc->num_rows * input_buff_desc->pixels_per_row ==
-            input_buff_desc->plane_stride  && 
+            input_buff_desc->plane_stride  &&
             output_buff_desc->num_rows * output_buff_desc->pixels_per_row ==
             output_buff_desc->plane_stride) {
             /* Do entire buffer.*/
-            cmsDoTransform(hTransform, inputpos, outputpos, 
+            cmsDoTransform(hTransform, inputpos, outputpos,
                            input_buff_desc->plane_stride);
         } else {
             /* We have to do this row by row, with memory transfers */
             byte *temp_des, *temp_src;
-            int source_size = input_buff_desc->bytes_per_chan * 
+            int source_size = input_buff_desc->bytes_per_chan *
                               input_buff_desc->pixels_per_row;
 
-            int des_size = output_buff_desc->bytes_per_chan * 
+            int des_size = output_buff_desc->bytes_per_chan *
                            output_buff_desc->pixels_per_row;
             int y, i;
 
-            temp_src = (byte*) gs_alloc_bytes(icclink->icc_link_cache->memory, 
-                                              source_size * input_buff_desc->num_chan, 
+            temp_src = (byte*)gs_alloc_bytes(dev->memory->non_gc_memory,
+                                              source_size * input_buff_desc->num_chan,
                                               "gscms_transform_color_buffer");
             if (temp_src == NULL)
-                return;
-            temp_des = (byte*) gs_alloc_bytes(icclink->icc_link_cache->memory, 
-                                              des_size * output_buff_desc->num_chan, 
+                return_error(gs_error_VMerror);
+            temp_des = (byte*) gs_alloc_bytes(dev->memory->non_gc_memory,
+                                              des_size * output_buff_desc->num_chan,
                                               "gscms_transform_color_buffer");
             if (temp_des == NULL)
-                return;
+                return_error(gs_error_VMerror);
             for (y = 0; y < input_buff_desc->num_rows; y++) {
                 byte *src_cm = temp_src;
                 byte *src_buff = inputpos;
@@ -409,7 +417,7 @@ gscms_transform_color_buffer(gx_device *dev, gsicc_link_t *icclink,
                     src_buff += input_buff_desc->plane_stride;
                 }
                 /* Transform */
-                cmsDoTransform(hTransform, temp_src, temp_des, 
+                cmsDoTransform(hTransform, temp_src, temp_des,
                                input_buff_desc->pixels_per_row);
                 /* Get out of temp planar buffer */
                 for (i = 0; i < output_buff_desc->num_chan; i ++) {
@@ -420,23 +428,23 @@ gscms_transform_color_buffer(gx_device *dev, gsicc_link_t *icclink,
                 inputpos += input_buff_desc->row_stride;
                 outputpos += output_buff_desc->row_stride;
             }
-            gs_free_object(icclink->icc_link_cache->memory, temp_src, 
+            gs_free_object(dev->memory->non_gc_memory, temp_src,
                            "gscms_transform_color_buffer");
-            gs_free_object(icclink->icc_link_cache->memory, temp_des, 
+            gs_free_object(dev->memory->non_gc_memory, temp_des,
                            "gscms_transform_color_buffer");
         }
     } else {
         /* Do row by row. */
         for(k = 0; k < input_buff_desc->num_rows ; k++){
-            cmsDoTransform(hTransform, inputpos, outputpos, 
+            cmsDoTransform(hTransform, inputpos, outputpos,
                            input_buff_desc->pixels_per_row);
             inputpos += input_buff_desc->row_stride;
             outputpos += output_buff_desc->row_stride;
         }
     }
 #if DUMP_CMS_BUFFER
-    fid_in = gp_fopen("CM_Input.raw","ab");
-    fid_out = gp_fopen("CM_Output.raw","ab");
+    fid_in = gp_fopen(dev->memory,"CM_Input.raw","ab");
+    fid_out = gp_fopen(dev->memory,"CM_Output.raw","ab");
     fwrite((unsigned char*) inputbuffer,sizeof(unsigned char),
                             input_buff_desc->row_stride,fid_in);
     fwrite((unsigned char*) outputbuffer,sizeof(unsigned char),
@@ -444,12 +452,13 @@ gscms_transform_color_buffer(gx_device *dev, gsicc_link_t *icclink,
     fclose(fid_in);
     fclose(fid_out);
 #endif
+    return 0;
 }
 
 /* Transform a single color. We assume we have passed to us the proper number
    of elements of size gx_device_color. It is up to the caller to make sure
    the proper allocations for the colors are there. */
-void
+int
 gscms_transform_color(gx_device *dev, gsicc_link_t *icclink, void *inputcolor,
                              void *outputcolor, int num_bytes)
 {
@@ -468,18 +477,21 @@ gscms_transform_color(gx_device *dev, gsicc_link_t *icclink, void *inputcolor,
     cmsChangeBuffersFormat(hTransform,dwInputFormat,dwOutputFormat);
     /* Do conversion */
     cmsDoTransform(hTransform,inputcolor,outputcolor,1);
+
+    return 0;
 }
 
 /* Get the flag to avoid having to the cmm do any white fix up, it such a flag
    exists for the cmm */
 int
-gscms_avoid_white_fix_flag()
+gscms_avoid_white_fix_flag(gs_memory_t *memory)
 {
     return cmsFLAGS_NOWHITEONWHITEFIXUP;
 }
 
 void
-gscms_get_link_dim(gcmmhlink_t link, int *num_inputs, int *num_outputs)
+gscms_get_link_dim(gcmmhlink_t link, int *num_inputs, int *num_outputs,
+    gs_memory_t *memory)
 {
     *num_inputs = T_CHANNELS(cmsGetTransformInputFormat(link));
     *num_outputs = T_CHANNELS(cmsGetTransformOutputFormat(link));
@@ -518,8 +530,8 @@ gscms_get_link(gcmmhprofile_t  lcms_srchandle,
     if (lcms_deshandle != NULL) {
         des_color_space  = cmsGetColorSpace(lcms_deshandle);
     } else {
-        /* We must have a device link profile. */
-        des_color_space = cmsGetPCS(lcms_deshandle);
+        /* We must have a device link profile. Use it's PCS space. */
+        des_color_space = cmsGetPCS(lcms_srchandle);
     }
     lcms_des_color_space = _cmsLCMScolorSpace(des_color_space);
     if (lcms_des_color_space < 0) lcms_des_color_space = 0;
@@ -574,15 +586,15 @@ gscms_get_link(gcmmhprofile_t  lcms_srchandle,
     /* cmsFLAGS_HIGHRESPRECALC)  cmsFLAGS_NOTPRECALC  cmsFLAGS_LOWRESPRECALC*/
 }
 
-/* Get the link from the CMS, but include proofing and/or a device link  
+/* Get the link from the CMS, but include proofing and/or a device link
    profile.  Note also, that the source may be a device link profile, in
    which case we will not have a destination profile but could still have
    a proof profile or an additional device link profile */
 gcmmhlink_t
 gscms_get_link_proof_devlink(gcmmhprofile_t lcms_srchandle,
                              gcmmhprofile_t lcms_proofhandle,
-                             gcmmhprofile_t lcms_deshandle, 
-                             gcmmhprofile_t lcms_devlinkhandle, 
+                             gcmmhprofile_t lcms_deshandle,
+                             gcmmhprofile_t lcms_devlinkhandle,
                              gsicc_rendering_param_t *rendering_params,
                              bool src_dev_link, int cmm_flags,
                              gs_memory_t *memory)
@@ -591,18 +603,18 @@ gscms_get_link_proof_devlink(gcmmhprofile_t lcms_srchandle,
     cmsColorSpaceSignature src_color_space,des_color_space;
     int src_nChannels,des_nChannels;
     int lcms_src_color_space, lcms_des_color_space;
-    cmsHPROFILE hProfiles[5]; 
+    cmsHPROFILE hProfiles[5];
     int nProfiles = 0;
     unsigned int flag;
     cmsContext ctx = gs_lib_ctx_get_cms_context(memory);
 
     /* Check if the rendering intent is something other than relative colorimetric
-       and  if we have a proofing profile.  In this case we need to create the 
+       and  if we have a proofing profile.  In this case we need to create the
        combined profile a bit different.  LCMS does not allow us to use different
        intents in the cmsCreateMultiprofileTransform transform.  Also, don't even
        think about doing this if someone has snuck in a source based device link
        profile into the mix */
-    if (lcms_proofhandle != NULL && 
+    if (lcms_proofhandle != NULL &&
         rendering_params->rendering_intent != gsRELATIVECOLORIMETRIC &&
         !src_dev_link) {
         /* First handle the source to proof profile with its particular intent as
@@ -610,15 +622,15 @@ gscms_get_link_proof_devlink(gcmmhprofile_t lcms_srchandle,
         cmsHPROFILE src_to_proof;
         cmsHTRANSFORM temptransform;
 
-        temptransform = gscms_get_link(lcms_srchandle, lcms_proofhandle, 
+        temptransform = gscms_get_link(lcms_srchandle, lcms_proofhandle,
                                       rendering_params, cmm_flags, memory);
         /* Now mash that to a device link profile */
         flag = cmsFLAGS_HIGHRESPRECALC;
-        if (rendering_params->black_point_comp == gsBLACKPTCOMP_ON || 
+        if (rendering_params->black_point_comp == gsBLACKPTCOMP_ON ||
             rendering_params->black_point_comp == gsBLACKPTCOMP_ON_OR) {
             flag = (flag | cmsFLAGS_BLACKPOINTCOMPENSATION);
         }
-        src_to_proof = cmsTransform2DeviceLink(temptransform, 3.4, flag); 
+        src_to_proof = cmsTransform2DeviceLink(temptransform, 3.4, flag);
         /* Free up the link handle */
         cmsDeleteTransform(temptransform);
         src_color_space  = cmsGetColorSpace(src_to_proof);
@@ -629,7 +641,7 @@ gscms_get_link_proof_devlink(gcmmhprofile_t lcms_srchandle,
         /* For now, just do single byte data, interleaved.  We can change this
           when we use the transformation. */
         src_data_type = (COLORSPACE_SH(lcms_src_color_space)|
-                            CHANNELS_SH(src_nChannels)|BYTES_SH(2)); 
+                            CHANNELS_SH(src_nChannels)|BYTES_SH(2));
         if (lcms_devlinkhandle == NULL) {
             des_color_space = cmsGetColorSpace(lcms_deshandle);
         } else {
@@ -644,7 +656,7 @@ gscms_get_link_proof_devlink(gcmmhprofile_t lcms_srchandle,
            destination and then to the device link profile if there was one. */
         hProfiles[nProfiles++] = src_to_proof;  /* Src to proof with special intent */
         hProfiles[nProfiles++] = lcms_proofhandle; /* Proof to CIELAB */
-        if (lcms_deshandle != NULL) {   
+        if (lcms_deshandle != NULL) {
             hProfiles[nProfiles++] = lcms_deshandle;  /* Our destination */
         }
         /* The output device link profile */
@@ -672,7 +684,7 @@ gscms_get_link_proof_devlink(gcmmhprofile_t lcms_srchandle,
         /* For now, just do single byte data, interleaved.  We can change this
           when we use the transformation. */
         src_data_type = (COLORSPACE_SH(lcms_src_color_space)|
-                            CHANNELS_SH(src_nChannels)|BYTES_SH(2)); 
+                            CHANNELS_SH(src_nChannels)|BYTES_SH(2));
         if (lcms_devlinkhandle == NULL) {
             if (src_dev_link) {
                 des_color_space = cmsGetPCS(lcms_srchandle);
@@ -687,8 +699,8 @@ gscms_get_link_proof_devlink(gcmmhprofile_t lcms_srchandle,
         des_nChannels = cmsChannelsOf(des_color_space);
         des_data_type = (COLORSPACE_SH(lcms_des_color_space)|
                             CHANNELS_SH(des_nChannels)|BYTES_SH(2));
-        /* lcms proofing transform has a clunky API and can't include the device 
-           link profile if we have both. So use cmsCreateMultiprofileTransform 
+        /* lcms proofing transform has a clunky API and can't include the device
+           link profile if we have both. So use cmsCreateMultiprofileTransform
            instead and round trip the proofing profile. */
         hProfiles[nProfiles++] = lcms_srchandle;
         /* Note if source is device link, we cannot do any proofing */
@@ -725,7 +737,7 @@ gscms_create(gs_memory_t *memory)
     /* Set our own error handling function */
     ctx = cmsCreateContext((void *)&gs_cms_memhandler, memory);
     if (ctx == NULL)
-        return gs_error_VMerror;
+        return_error(gs_error_VMerror);
 
 #ifdef USE_LCMS2_LOCKING
     cmsPluginTHR(ctx, (void *)&gs_cms_mutexhandler);
@@ -760,7 +772,7 @@ gscms_release_link(gsicc_link_t *icclink)
 
 /* Have the CMS release the profile handle */
 void
-gscms_release_profile(void *profile)
+gscms_release_profile(void *profile, gs_memory_t *memory)
 {
     cmsHPROFILE profile_handle;
 
@@ -817,14 +829,13 @@ gscms_get_name2device_link(gsicc_link_t *icclink,
                            gcmmhprofile_t  lcms_srchandle,
                            gcmmhprofile_t lcms_deshandle,
                            gcmmhprofile_t lcms_proofhandle,
-                           gsicc_rendering_param_t *rendering_params,
-                           gs_memory_t *memory)
+                           gsicc_rendering_param_t *rendering_params)
 {
     cmsHTRANSFORM hTransform;
     cmsUInt32Number dwOutputFormat;
     cmsUInt32Number lcms_proof_flag;
     int number_colors;
-    cmsContext ctx = gs_lib_ctx_get_cms_context(memory);
+    cmsContext ctx = gs_lib_ctx_get_cms_context(icclink->memory);
 
     /* NOTE:  We need to add a test here to check that we even HAVE
     device values in here and NOT just CIELAB values */
@@ -855,4 +866,10 @@ gscms_get_name2device_link(gsicc_link_t *icclink,
     if(lcms_deshandle) cmsCloseProfile(lcms_deshandle);
     if(lcms_proofhandle) cmsCloseProfile(lcms_proofhandle);
     return;
+}
+
+bool
+gscms_is_threadsafe(void)
+{
+    return false;
 }

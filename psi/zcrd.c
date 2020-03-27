@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -53,7 +53,7 @@ static int
 zbuildcolorrendering1(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
-    gs_memory_t *mem = gs_state_memory(igs);
+    gs_memory_t *mem = gs_gstate_memory(igs);
     int code;
     es_ptr ep = esp;
     gs_cie_render *pcrd;
@@ -82,7 +82,7 @@ static int
 zbuilddevicecolorrendering1(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
-    gs_memory_t *mem = gs_state_memory(igs);
+    gs_memory_t *mem = gs_gstate_memory(igs);
     dict_param_list list;
     gs_cie_render *pcrd = 0;
     int code;
@@ -214,24 +214,27 @@ zcrd1_params(os_ptr op, gs_cie_render * pcrd,
         return code;
     if ((code = zcrd1_proc_params(mem, op, pcprocs)) < 0)
         return code;
-	if ((code = dict_matrix3_param(mem, op, "MatrixLMN", &pcrd->MatrixLMN)) < 0)
-        return code;
-	if ((code = dict_range3_param(mem, op, "RangeLMN", &pcrd->RangeLMN)) < 0)
-        return code;
-	if ((code = dict_matrix3_param(mem, op, "MatrixABC", &pcrd->MatrixABC)) < 0)
-        return code;
-	if ((code = dict_range3_param(mem, op, "RangeABC", &pcrd->RangeABC)) < 0)
-        return code;
-	if ((code = cie_points_param(mem, op, &pcrd->points)) < 0)
-		return code;
-	if ((code = dict_matrix3_param(mem, op, "MatrixPQR", &pcrd->MatrixPQR)) < 0)
-		return code;
-	if ((code = dict_range3_param(mem,op, "RangePQR", &pcrd->RangePQR)) < 0)
-		return code;
 
-	if (dict_find_string(op, "RenderTable", &pRT) > 0) {
-        const ref *prte = pRT->value.const_refs;
+    if ((code = dict_matrix3_param(mem, op, "MatrixLMN", &pcrd->MatrixLMN)) < 0)
+        return code;
+    if ((code = dict_range3_param(mem, op, "RangeLMN", &pcrd->RangeLMN)) < 0)
+        return code;
+    if ((code = dict_matrix3_param(mem, op, "MatrixABC", &pcrd->MatrixABC)) < 0)
+        return code;
+    if ((code = dict_range3_param(mem, op, "RangeABC", &pcrd->RangeABC)) < 0)
+        return code;
+    if ((code = cie_points_param(mem, op, &pcrd->points)) < 0)
+        return code;
+    if ((code = dict_matrix3_param(mem, op, "MatrixPQR", &pcrd->MatrixPQR)) < 0)
+        return code;
+    if ((code = dict_range3_param(mem,op, "RangePQR", &pcrd->RangePQR)) < 0)
+        return code;
 
+    if (dict_find_string(op, "RenderTable", &pRT) > 0) {
+        const ref *prte;
+
+        check_read_type(*pRT, t_array);
+        prte = pRT->value.const_refs;
         /* Finish unpacking and checking the RenderTable parameter. */
         check_type_only(prte[4], t_integer);
         if (!(prte[4].value.intval == 3 || prte[4].value.intval == 4))
@@ -262,11 +265,11 @@ static int
     cie_tpqr_finish(i_ctx_t *);
 int
 cie_cache_joint(i_ctx_t *i_ctx_p, const ref_cie_render_procs * pcrprocs,
-                const gs_cie_common *pcie, gs_state * pgs)
+                const gs_cie_common *pcie, gs_gstate * pgs)
 {
     const gs_cie_render *pcrd = gs_currentcolorrendering(pgs);
     gx_cie_joint_caches *pjc = gx_unshare_cie_caches(pgs);
-    gs_ref_memory_t *imem = (gs_ref_memory_t *) gs_state_memory(pgs);
+    gs_ref_memory_t *imem = (gs_ref_memory_t *) gs_gstate_memory(pgs);
     ref pqr_procs;
     uint space;
     int code;
@@ -290,7 +293,10 @@ cie_cache_joint(i_ctx_t *i_ctx_p, const ref_cie_render_procs * pcrprocs,
         return code;
     /* When we're done, deallocate the procs and complete the caches. */
     check_estack(3);
-    cie_cache_push_finish(i_ctx_p, cie_tpqr_finish, imem, pgs);
+    code = cie_cache_push_finish(i_ctx_p, cie_tpqr_finish, imem, pgs);
+    if (code < 0)
+        return code;
+
     *++esp = pqr_procs;
     space = r_space(&pqr_procs);
     for (i = 0; i < 3; i++) {
@@ -356,7 +362,7 @@ static int
 cie_tpqr_finish(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
-    gs_state *pgs = r_ptr(op, gs_state);
+    gs_gstate *pgs = r_ptr(op, gs_gstate);
     gs_cie_render *pcrd =
         (gs_cie_render *)gs_currentcolorrendering(pgs);  /* break const */
     int code;

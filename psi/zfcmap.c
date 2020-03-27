@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -310,6 +310,10 @@ cid_system_info_compatible(const gs_cid_system_info_t * psi1,
 
 /* ---------------- (Semi-)public procedures ---------------- */
 
+extern_st(st_cmap_tt_16bit_format4);
+extern_st(st_cmap_identity);
+extern_st(st_cmap_ToUnicode);
+
 /* Get the CodeMap from a Type 0 font, and check the CIDSystemInfo of */
 /* its subsidiary fonts. */
 int
@@ -323,16 +327,12 @@ ztype0_get_cmap(const gs_cmap_t **ppcmap, const ref *pfdepvector,
     uint num_fonts;
     uint i;
 
-    /*
-     * We have no way of checking whether the CodeMap is a concrete
-     * subclass of gs_cmap_t, so we just check that it is in fact a
-     * t_struct and is large enough.
-     */
     if (dict_find_string(op, "CMap", &prcmap) <= 0 ||
         !r_has_type(prcmap, t_dictionary) ||
         dict_find_string(prcmap, "CodeMap", &pcodemap) <= 0 ||
-        !r_is_struct(pcodemap) ||
-        gs_object_size(imem, r_ptr(pcodemap, gs_cmap_t)) < sizeof(gs_cmap_t)
+        !r_is_struct(pcodemap) || (!r_has_stype(pcodemap, imem, st_cmap_tt_16bit_format4) &&
+        !r_has_stype(pcodemap, imem, st_cmap_identity) && !r_has_stype(pcodemap, imem, st_cmap_ToUnicode) &&
+        !r_has_stype(pcodemap, imem, st_cmap_adobe1))
         )
         return_error(gs_error_invalidfont);
     pcmap = r_ptr(pcodemap, gs_cmap_t);

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -119,6 +119,9 @@ pdf_simple_font_needs_ToUnicode(const pdf_font_resource_t *pdfont)
             In this circumstance, write the ToUnicode map to get a searchable PDF.
         */
         return true;
+    if (!pdfont->u.simple.TwoByteToUnicode)
+        return true;
+
     for (ch = 0; ch < 256; ++ch) {
         pdf_encoding_element_t *pet = &pdfont->u.simple.Encoding[ch];
         gs_glyph glyph = pet->glyph;
@@ -136,6 +139,7 @@ pdf_simple_font_needs_ToUnicode(const pdf_font_resource_t *pdfont)
         if( glyph > GS_C_PDF_MAX_GOOD_GLYPH ||
            !(gs_c_pdf_glyph_type[glyph >> 2] & (mask << (( glyph & 3 )<<1) )))
           return true;
+
     }
     return false;
 }
@@ -349,11 +353,10 @@ pdf_write_CIDFont_widths(gx_device_pdf *pdev,
             int cid = glyph - GS_MIN_CID_GLYPH;
             int width = (int)(w[cid] + 0.5);
 
-#if 0 /* Must write zero widths - see test file of the bug Bug 687681.
-         We don't enumerate unused glyphs here due to pdfont->used. */
-            if (width == 0)
-                continue; /* Don't write for unused glyphs. */
-#else
+      /* Must write zero widths - see test file of the bug Bug 687681. */
+      /* We don't enumerate unused glyphs here due to pdfont->used. */
+      /* if (width == 0)
+                continue; */ /* Don't write for unused glyphs. */
             {	/* Check whether copied font really have this glyph.
                    debugged with 401-01.ps, which uses undefined CIDs. */
                 gs_font_base *pfont = pdf_font_resource_font(pdfont, false);
@@ -375,7 +378,6 @@ pdf_write_CIDFont_widths(gx_device_pdf *pdev,
                 } else if (pfont->procs.glyph_info((gs_font *)pfont, glyph, NULL, 0, &info) < 0)
                     continue;
             }
-#endif
             if (cid == prev + 1) {
                 if (wmode) {
                     int vx = (int)(pdfont->u.cidfont.v[cid * 2 + 0] + 0.5);
@@ -669,7 +671,7 @@ pdf_finish_resources(gx_device_pdf *pdev, pdf_resource_type_t type,
                         int (*finish_proc)(gx_device_pdf *,
                                            pdf_resource_t *))
 {
-    int j;
+    int j, ecode = 0;
     pdf_resource_t *pres;
 
     for (j = 0; j < NUM_RESOURCE_CHAINS; ++j)
@@ -679,9 +681,9 @@ pdf_finish_resources(gx_device_pdf *pdev, pdf_resource_type_t type,
             int code = finish_proc(pdev, pres);
 
             if (code < 0)
-                return code;
+                ecode = code;
         }
-    return 0;
+    return ecode;
 }
 
 /* ================ CMap resource writing ================ */

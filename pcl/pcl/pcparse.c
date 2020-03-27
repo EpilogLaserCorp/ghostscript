@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -199,10 +199,24 @@ pcl_get_command_definition(pcl_parser_state_t * pcl_parser_state,
 /* ---------------- Parsing ---------------- */
 
 /* Initialize the parser state. */
-void
-pcl_process_init(pcl_parser_state_t * pst)
+int
+pcl_process_init(pcl_parser_state_t * pst, pcl_state_t * pcs)
 {
+    pcl_args_t args;
+    int code = 0;
     pcl_parser_init_inline(pst);
+
+    /*
+     * RTL Files should start with a PCL escape sequence to enter the
+     * GL/2 parser but many do not, so we start in HPGL.  If an escape
+     * sequence is detected the parse mode returns to PCL.
+     */
+
+    if (pcs->personality == rtl) {
+        arg_set_uint(&args, 0);
+        code = rtl_enter_hpgl_mode(&args, pcs);
+    }
+    return code;
 }
 
 /* Adjust the argument value according to the command's argument type. */
@@ -243,16 +257,18 @@ pcl_adjust_arg(pcl_args_t * pargs, const pcl_command_definition_t * pdefn)
 static int
 append_macro(const byte * from, const byte * to, pcl_state_t * pcs)
 {
-    uint count = to - from;
-    uint size = gs_object_size(pcs->memory, pcs->macro_definition);
-    byte *new_defn =
-        gs_resize_object(pcs->memory, pcs->macro_definition, size + count,
-                         "append_macro");
+    if (pcs->macro_definition != NULL) {
+        uint count = to - from;
+        uint size = gs_object_size(pcs->memory, pcs->macro_definition);
+        byte *new_defn =
+            gs_resize_object(pcs->memory, pcs->macro_definition, size + count,
+                             "append_macro");
 
-    if (new_defn == 0)
-        return_error(e_Memory);
-    memcpy(new_defn + size, from + 1, count);
-    pcs->macro_definition = new_defn;
+        if (new_defn == 0)
+            return_error(e_Memory);
+        memcpy(new_defn + size, from + 1, count);
+        pcs->macro_definition = new_defn;
+    }
     return 0;
 }
 
@@ -293,8 +309,16 @@ pcl_process(pcl_parser_state_t * pst, pcl_state_t * pcs,
 #  define do_display_functions() (!in_macro)
 #endif
 
+    if (rlimit - p < pst->min_bytes_needed) {
+        pst->min_bytes_needed = 0;
+        p = rlimit;
+        goto x;
+    } else {
+        pst->min_bytes_needed = 0;
+    }
+
     while (p < rlimit) {
-        byte chr;
+        byte chr = 0x00; /* silence a compiler warning */
         const pcl_command_definition_t *cdefn = NULL;
         switch (pst->scan_type) {
             case scanning_data:
@@ -316,9 +340,10 @@ pcl_process(pcl_parser_state_t * pst, pcl_state_t * pcs,
                                                        pst->param_class,
                                                        pst->param_group,
                                                        pst->args.command);
-                    if (pst->short_hand)
+                    if (pst->short_hand) {
                         pst->scan_type = scanning_parameter;
-                    else
+                        continue;
+                    } else
                         pst->scan_type = scanning_none;
                     break;
                 }
@@ -354,8 +379,9 @@ pcl_process(pcl_parser_state_t * pst, pcl_state_t * pcs,
                     }
                     if (do_display_functions()) {
                         if (chr == CR) {
-                            pcl_do_CR(pcs);
-                            code = pcl_do_LF(pcs);
+                            code = pcl_do_CR(pcs);
+                            if (code >= 0)
+                                code = pcl_do_LF(pcs);
                         } else {
                             pst->args.command = chr;
                             code = pcl_plain_char(&pst->args, pcs);
@@ -459,6 +485,7 @@ pcl_process(pcl_parser_state_t * pst, pcl_state_t * pcs,
                             if (pst->args.data == 0) {
                                 --p;
                                 code = gs_note_error(e_Memory);
+                                (void)pcl_grestore(pcs);
                                 goto x;
                             }
                             pst->args.data_on_heap = true;
@@ -476,32 +503,7 @@ pcl_process(pcl_parser_state_t * pst, pcl_state_t * pcs,
                 param_init();
                 continue;
             case scanning_none:
-                /* in rtl mode we should only reach this state if the
-                   job begins without proper initialization, starts
-                   with HPGL commands directly */
-                if (pcs->personality == rtl && !pcs->parse_other) {
-                    /* we need at least 2 bytes to make the comparison */
-                    if (p >= rlimit - 2)
-                        goto x;
-
-                    /* now check if these commands DF or IN, likely
-                       candidates to start an HPGL file. */
-                    if ((*(p + 1) == 'I' && *(p + 2) == 'N') ||
-                        (*(p + 1) == 'D' && *(p + 2) == 'F') ||
-                        (*(p + 1) == 'B' && *(p + 2) == 'P') ||
-                        (*(p + 1) == 'P' && *(p + 2) == 'G') ||
-                        (*(p + 1) == 'S' && *(p + 2) == 'P')) {
-
-                        pcl_args_t args;
-                        arg_set_uint(&args, 0);
-                        rtl_enter_hpgl_mode(&args, pcs);
-                    }
-                }
-
-                if (pcs->parse_other) { /*
-                                         * Hand off the data stream
-                                         * to another parser (HP-GL/2).
-                                         */
+                if (pcs->parse_other) { /* HPGL/2 mode */
                     pr->ptr = p;
                     code = (*pcs->parse_other)
                         (pcs->parse_data, pcs, pr);
@@ -509,6 +511,7 @@ pcl_process(pcl_parser_state_t * pst, pcl_state_t * pcs,
                     if (code < 0 || (code == 0 && pcs->parse_other))
                         goto x;
                 }
+
                 chr = *++p;
                 /* check for multi-byte scanning */
                 bytelen = pcl_char_bytelen(chr, pcs->text_parsing_method);
@@ -518,6 +521,7 @@ pcl_process(pcl_parser_state_t * pst, pcl_state_t * pcs,
                 if (bytelen > 1) {
                     /* check if we need more data */
                     if ((p + bytelen - 1) > rlimit) {
+                        pst->min_bytes_needed = 2;
                         --p;
                         goto x;
                     }
@@ -568,6 +572,7 @@ pcl_process(pcl_parser_state_t * pst, pcl_state_t * pcs,
                     }
                 } else {
                     if (p >= rlimit) {
+                        pst->min_bytes_needed = 2;
                         --p;
                         goto x;
                     }
@@ -597,6 +602,7 @@ pcl_process(pcl_parser_state_t * pst, pcl_state_t * pcs,
                     } else {
                         if (p >= rlimit) {
                             p -= 2;
+                            pst->min_bytes_needed = 3;
                             goto x;
                         }
                         pst->param_class = chr;
@@ -644,7 +650,7 @@ pcl_process(pcl_parser_state_t * pst, pcl_state_t * pcs,
             /*
              * If we allocated a buffer for command data,
              * and the command didn't take possession of it,
-             * free it now.  
+             * free it now.
              */
             if (pst->args.data_on_heap && pst->args.data) {
                 gs_free_object(pcs->memory, pst->args.data, "command data");
@@ -667,7 +673,9 @@ pcl_process(pcl_parser_state_t * pst, pcl_state_t * pcs,
                     /* start definition of macro with esc&f preloaded */
                     static const byte macro_prefix[4] = " \033&f";
 
-                    append_macro(&macro_prefix[0], &macro_prefix[3], pcs);
+                    code = append_macro(&macro_prefix[0], &macro_prefix[3], pcs);
+                    if (code < 0)
+                        goto x;
                 }
                 macro_p = p;
             }
@@ -730,11 +738,13 @@ pcl_parser_shutdown(pcl_parser_state_t * pcl_parser_state, gs_memory_t * mem)
 }
 /* ---------------- Initialization ---------------- */
 
-void
+int
 pcparse_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
     if (type & (pcl_reset_initial | pcl_reset_printer))
         pcs->parse_other = 0;
+
+    return 0;
 }
 
 const pcl_init_t pcparse_init = {

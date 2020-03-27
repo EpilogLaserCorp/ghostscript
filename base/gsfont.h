@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,28 +19,24 @@
 #ifndef gsfont_INCLUDED
 #  define gsfont_INCLUDED
 
-#ifndef gs_matrix_DEFINED
-#  define gs_matrix_DEFINED
-typedef struct gs_matrix_s gs_matrix;
-#endif
-
-/* A 'font directory' object (to avoid making fonts global). */
-/* 'directory' is something of a misnomer: this structure */
-/* just keeps track of the defined fonts, and the scaled font and */
-/* rendered character caches. */
-#ifndef gs_font_dir_DEFINED
-#  define gs_font_dir_DEFINED
-typedef struct gs_font_dir_s gs_font_dir;
-#endif
+#include "std.h"
+#include "gsgstate.h"
+#include "gstypes.h"
+#include "gsmatrix.h"
+#include "gslibctx.h"
 
 /* Font objects */
-#ifndef gs_font_DEFINED
-#  define gs_font_DEFINED
 typedef struct gs_font_s gs_font;
-#endif
+
+/* A font object as seen by clients. */
+/* See the PostScript Language Reference Manual for details. */
+
+typedef struct gs_show_enum_s gs_show_enum;
 
 /* Initialization */
 /* These procedures return 0 if they fail. */
+/* The returned gs_font_dir can be cleanly deallocated by
+ * simply calling gs_free_object on it. */
 gs_font_dir *gs_font_dir_alloc2(gs_memory_t * struct_mem,
                                 gs_memory_t * bits_mem);
 gs_font_dir *gs_font_dir_alloc2_limits(gs_memory_t * struct_mem,
@@ -65,10 +61,10 @@ int gs_font_find_similar(const gs_font_dir * pdir, const gs_font **ppfont,
 /* was already in the cache, 1 if a new font was created. */
 int gs_scalefont(gs_font_dir *, const gs_font *, double, gs_font **);
 int gs_makefont(gs_font_dir *, const gs_font *, const gs_matrix *, gs_font **);
-int gs_setfont(gs_state *, gs_font *);
-gs_font *gs_currentfont(const gs_state *);
-gs_font *gs_rootfont(const gs_state *);
-void gs_set_currentfont(gs_state *, gs_font *);
+int gs_setfont(gs_gstate *, gs_font *);
+gs_font *gs_currentfont(const gs_gstate *);
+gs_font *gs_rootfont(const gs_gstate *);
+void gs_set_currentfont(gs_gstate *, gs_font *);
 int  gs_purge_font(gs_font *);
 /* Locate a gs_font by gs_id. */
 gs_font *gs_find_font_by_id(gs_font_dir *pdir, gs_id id, gs_matrix *FontMatrix);
@@ -78,7 +74,7 @@ void gs_cachestatus(const gs_font_dir *, uint[7]);
 
 #define gs_setcachelimit(pdir,limit) gs_setcacheupper(pdir,limit)
 uint gs_currentcachesize(const gs_font_dir *);
-int gs_setcachesize(gs_state * pgs, gs_font_dir *, uint);
+int gs_setcachesize(gs_gstate * pgs, gs_font_dir *, uint);
 uint gs_currentcachelower(const gs_font_dir *);
 int gs_setcachelower(gs_font_dir *, uint);
 uint gs_currentcacheupper(const gs_font_dir *);

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -55,6 +55,9 @@ xps_decode_jpeg(xps_context_t *ctx, byte *rbuf, int rlen, xps_image_t *image)
     jddp.templat = s_DCTD_template;
     jddp.memory = ctx->memory;
     jddp.scanline_buffer = NULL;
+    jddp.PassThrough = 0;
+    jddp.device = (void *)NULL;
+    jddp.PassThroughfn = 0;
 
     if ((code = gs_jpeg_create_decompress(&state)) < 0)
         return gs_throw(-1, "cannot gs_jpeg_create_decompress");
@@ -74,8 +77,10 @@ xps_decode_jpeg(xps_context_t *ctx, byte *rbuf, int rlen, xps_image_t *image)
     jpeg_save_markers(&(jddp.dinfo), 0xe2, 0xFFFF);
 
     code = s_DCTD_template.process((stream_state*)&state, &rp, &wp, true);
-    if (code != 1)
-        return gs_throw(-1, "premature EOF or error in jpeg");
+    if (code != 1) {
+        code = gs_throw(-1, "premature EOF or error in jpeg");
+        goto error;
+    }
 
     /* Check if we had an ICC profile */
     curr_marker = jddp.dinfo.marker_list;
@@ -103,12 +108,18 @@ xps_decode_jpeg(xps_context_t *ctx, byte *rbuf, int rlen, xps_image_t *image)
     image->bits = 8;
     image->stride = image->width * image->comps;
 
-    if (image->comps == 1)
+    if (image->comps == 1) {
+        rc_increment(ctx->gray);
         image->colorspace = ctx->gray;
-    if (image->comps == 3)
+    }
+    if (image->comps == 3) {
+        rc_increment(ctx->srgb);
         image->colorspace = ctx->srgb;
-    if (image->comps == 4)
+    }
+    if (image->comps == 4) {
+        rc_increment(ctx->cmyk);
         image->colorspace = ctx->cmyk;
+    }
 
     if (jddp.dinfo.density_unit == 1)
     {
@@ -117,8 +128,8 @@ xps_decode_jpeg(xps_context_t *ctx, byte *rbuf, int rlen, xps_image_t *image)
     }
     else if (jddp.dinfo.density_unit == 2)
     {
-        image->xres = jddp.dinfo.X_density * 2.54;
-        image->yres = jddp.dinfo.Y_density * 2.54;
+        image->xres = (int)(jddp.dinfo.X_density * 2.54 + 0.5);
+        image->yres = (int)(jddp.dinfo.Y_density * 2.54 + 0.5);
     }
     else
     {
@@ -128,8 +139,10 @@ xps_decode_jpeg(xps_context_t *ctx, byte *rbuf, int rlen, xps_image_t *image)
 
     wlen = image->stride * image->height;
     wbuf = xps_alloc(ctx, wlen);
-    if (!wbuf)
-        return gs_throw1(gs_error_VMerror, "out of memory allocating samples: %d", wlen);
+    if (!wbuf) {
+        code = gs_throw1(gs_error_VMerror, "out of memory allocating samples: %d", wlen);
+        goto error;
+    }
 
     image->samples = wbuf;
 
@@ -137,10 +150,19 @@ xps_decode_jpeg(xps_context_t *ctx, byte *rbuf, int rlen, xps_image_t *image)
     wp.limit = wbuf + wlen - 1;
 
     code = s_DCTD_template.process((stream_state*)&state, &rp, &wp, true);
-    if (code != EOFC)
-        return gs_throw1(-1, "error in jpeg (code = %d)", code);
+    if (code != EOFC) {
+        code = gs_throw1(-1, "error in jpeg (code = %d)", code);
+        goto error;
+    }
 
+    code = gs_okay;
+error:
     gs_jpeg_destroy(&state);
+    if (jddp.scanline_buffer != NULL) {
+        gs_free_object(gs_memory_stable(ctx->memory),
+                       jddp.scanline_buffer,
+                       "xps_decode_jpeg");
+    }
 
-    return gs_okay;
+    return code;
 }

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -21,7 +21,7 @@
 #include "stdio_.h"
 #include "memory_.h"
 #include "math_.h"
-#include "ierrors.h"
+#include "gserrors.h"
 #include "iplugin.h"
 #include "ifapi.h"
 #include "strmio.h"
@@ -89,7 +89,7 @@ InitFont(Bitstream_server * server, FAPI_font * ff)
             else
                 written = FF_serialize_type2_font(ff, own_font_data, length);
             if (written != length)
-                return (e_unregistered);        /* Must not happen. */
+                return (gs_error_unregistered);        /* Must not happen. */
         }
         /* It must be type 42 (see code in FAPI_FF_get_glyph in zfapi.c). */
         else {
@@ -97,14 +97,14 @@ InitFont(Bitstream_server * server, FAPI_font * ff)
             long length = ff->get_long(ff, FAPI_FONT_FEATURE_TT_size, 0);
 
             if (length == 0)
-                return e_invalidfont;
+                return = gs_error_invalidfont;
 
             /* Load the TrueType data into a single buffer. */
             own_font_data = gs_malloc(mem, 1, length, "Type 42 fotn copy");
             if (!own_font_data)
-                return e_VMerror;
+                return_error(gs_error_VMerror);
             if (ff->serialize_tt_font(ff, own_font_data, length))
-                return e_invalidfont;
+                return_error(gs_error_invalidfont);
         }
     }
     face->font_data = own_font_data;
@@ -318,6 +318,17 @@ check_cmap_for_GID(FAPI_server * server, uint index)
     return 0;
 }
 
+static FAPI_retcode
+gs_fapi_bstm_set_mm_weight_vector(gs_fapi_server *server, gs_fapi_font *ff, float *wvector, int length)
+{
+    (void)server;
+    (void)ff;
+    (void)wvector;
+    (void)length;
+    
+    return gs_error_invalidaccess;
+}
+
 static void gs_fapibstm_finit(i_plugin_instance * instance,
                               i_plugin_client_memory * mem);
 
@@ -352,7 +363,9 @@ static const FAPI_server If0 = {
     get_char_outline,
     release_char_data,
     release_typeface,
-    check_cmap_for_GID NULL     /* get_font_info */
+    check_cmap_for_GID,
+    NULL,     /* get_font_info */
+    gs_fapi_bstm_set_mm_weight_vector
 };
 
 plugin_instantiation_proc(gs_fapibstm_instantiate);     /* check prototype */
@@ -370,7 +383,7 @@ gs_fapibstm_instantiate(i_plugin_client_memory * client_mem,
                                                     (fapi_bitstream_server),
                                                     "fapi_bitstream_server");
     if (r == 0)
-        return e_VMerror;
+        return_error(gs_error_VMerror);
     memset(r, 0, sizeof(*r));
     r->If = If0;
     r->client_mem = *client_mem;

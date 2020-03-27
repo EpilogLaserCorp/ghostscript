@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -67,8 +67,7 @@ write_matrix3(gs_param_list * plist, gs_param_name key,
               const gs_matrix3 * pmat, gs_memory_t * mem)
 {
     float values[9];
-
-    if (!memcmp(pmat, &Matrix3_default, sizeof(*pmat)))
+    if(matrix_equal(pmat, &Matrix3_default))
         return 0;
     store_vector3(values, &pmat->cu);
     store_vector3(values + 3, &pmat->cv);
@@ -81,13 +80,26 @@ write_range3(gs_param_list * plist, gs_param_name key,
 {
     float values[6];
 
-    if (!memcmp(prange, &Range3_default, sizeof(*prange)))
+    if (range_equal(prange, &Range3_default))
         return 0;
     values[0] = prange->ranges[0].rmin, values[1] = prange->ranges[0].rmax;
     values[2] = prange->ranges[1].rmin, values[3] = prange->ranges[1].rmax;
     values[4] = prange->ranges[2].rmin, values[5] = prange->ranges[2].rmax;
     return write_floats(plist, key, values, 6, mem);
 }
+
+static bool
+render_proc3_equal(const gs_cie_render_proc3 *p1, const gs_cie_render_proc3 *p2)
+{
+    int k;
+
+    for (k = 0; k < 3; k++) {
+        if (p1->procs[k] != p2->procs[k])
+            return false;
+    }
+    return true;
+}
+
 static int
 write_proc3(gs_param_list * plist, gs_param_name key,
             const gs_cie_render * pcrd, const gs_cie_render_proc3 * procs,
@@ -98,7 +110,7 @@ write_proc3(gs_param_list * plist, gs_param_name key,
     gs_param_float_array fa;
     int i;
 
-    if (!memcmp(procs, &Encode_default, sizeof(*procs)))
+    if (render_proc3_equal(procs, &Encode_default))
         return 0;
     values = (float *)gs_alloc_byte_array(mem, size * 3, sizeof(float),
                                           "write_proc3");
@@ -167,8 +179,7 @@ param_put_cie_render1(gs_param_list * plist, gs_cie_render * pcrd,
         (code = write_vector3(plist, "WhitePoint", &pcrd->points.WhitePoint, mem)) < 0
         )
         return code;
-    if (memcmp(&pcrd->points.BlackPoint, &BlackPoint_default,
-               sizeof(pcrd->points.BlackPoint))) {
+    if (!vector_equal(&pcrd->points.BlackPoint, &BlackPoint_default)) {
         if ((code = write_vector3(plist, "BlackPoint", &pcrd->points.BlackPoint, mem)) < 0)
             return code;
     }
@@ -562,8 +573,8 @@ param_get_cie_render1(gs_cie_render * pcrd, gs_param_list * plist,
         pcrd->EncodeABC = Encode_default;
     else
         pcrd->EncodeABC = EncodeABC_from_data;
-    code_rt = code = param_read_int_array(plist, "RenderTableSize", &rt_size);
-    if (code == 1) {
+    code_rt = param_read_int_array(plist, "RenderTableSize", &rt_size);
+    if (code_rt == 1) {
         if (pcrd->RenderTable.lookup.table) {
             gs_free_object(pcrd->rc.memory,
                 (void *)pcrd->RenderTable.lookup.table, /* break const */
@@ -572,8 +583,8 @@ param_get_cie_render1(gs_cie_render * pcrd, gs_param_list * plist,
         }
         pcrd->RenderTable.T = RenderTableT_default;
         code_t = 1;
-    } else if (code < 0)
-        return code;
+    } else if (code_rt < 0)
+        return code_rt;
     else if (rt_size.size != 4)
         return_error(gs_error_rangecheck);
     else {

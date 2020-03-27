@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Default implementation of device get_bits[_rectangle] */
@@ -82,7 +82,7 @@ requested_includes_stored(const gx_device *dev,
                  dev->color_info.depth : dev->color_info.num_components);
 
         if (!(requested->options & GB_SELECT_PLANES) ||
-            !(both & (GB_PACKING_PLANAR || GB_PACKING_BIT_PLANAR))
+            !(both & (GB_PACKING_PLANAR | GB_PACKING_BIT_PLANAR))
             )
             return false;
         for (i = 0; i < n; ++i)
@@ -360,11 +360,11 @@ gx_get_bits_copy(gx_device * dev, int x, int w, int h,
                (stored_options & GB_PACKING_CHUNKY) &&
                ((options & stored_options) & GB_COLORS_NATIVE)
                ) {
-        int num_planes = dev->color_info.num_components;
+        uchar num_planes = dev->color_info.num_components;
         int dest_depth = depth / num_planes;
         bits_plane_t source, dest;
         int plane = -1;
-        int i;
+        uchar i;
 
         /* Make sure only one plane is being requested. */
         for (i = 0; i < num_planes; ++i)
@@ -373,6 +373,9 @@ gx_get_bits_copy(gx_device * dev, int x, int w, int h,
                     return_error(gs_error_rangecheck); /* > 1 plane */
                 plane = i;
             }
+        /* Ensure at least one plane is requested */
+        if (plane < 0)
+            return_error(gs_error_rangecheck); /* No planes */
         source.data.read = src_base;
         source.raster = dev_raster;
         source.depth = depth;
@@ -381,7 +384,10 @@ gx_get_bits_copy(gx_device * dev, int x, int w, int h,
         dest.raster =
             (options & GB_RASTER_STANDARD ?
              bitmap_raster((x_offset + w) * dest_depth) : params->raster);
-        dest.depth = dest_depth;
+        if (dev->color_info.separable_and_linear == GX_CINFO_SEP_LIN)
+            dest.depth = dev->color_info.comp_bits[plane];
+        else
+            dest.depth = dest_depth;
         dest.x = x_offset;
         return bits_extract_plane(&dest, &source,
                                   (num_planes - 1 - plane) * dest_depth,
@@ -421,38 +427,43 @@ gx_get_bits_std_to_native(gx_device * dev, int x, int w, int h,
     params->options &= ~GB_COLORS_ALL | GB_COLORS_NATIVE;
     for (; h > 0; dest_line += raster, src_line += dev_raster, --h) {
         int i;
-
-        sample_load_declare_setup(src, sbit, src_line,
-                                  src_bit_offset & 7, src_depth);
-        sample_store_declare_setup(dest, dbit, dbyte, dest_line,
-                                   dest_bit_offset & 7, depth);
+        const byte *src = src_line;
+        int sbit = src_bit_offset & 7;
+        byte *dest = dest_line;
+        int dbit = dest_bit_offset & 7;
+        byte dbyte = (dbit ? (byte)(*dest & (0xff00 >> dbit)) : 0);
 
 #define v2frac(value) ((long)(value) * frac_1 / src_max)
 
         for (i = 0; i < w; ++i) {
             int j;
+            uchar k;
             frac sc[4], dc[GX_DEVICE_COLOR_MAX_COMPONENTS];
-            gx_color_value v[GX_DEVICE_COLOR_MAX_COMPONENTS], va = alpha_default;
+            gx_color_value v[GX_DEVICE_COLOR_MAX_COMPONENTS];
+            gx_color_value va = alpha_default;
             gx_color_index pixel;
             bool do_alpha = false;
-            const gx_cm_color_map_procs * map_procs;
+            subclass_color_mappings scm;
 
-            map_procs = get_color_mapping_procs_subclass(dev);
+            scm = get_color_mapping_procs_subclass(dev);
 
             /* Fetch the source data. */
             if (stored->options & GB_ALPHA_FIRST) {
-                sample_load_next16(va, src, sbit, src_depth);
+                if (sample_load_next16(&va, &src, &sbit, src_depth) < 0)
+                    return_error(gs_error_rangecheck);
                 va = v2cv(va);
                 do_alpha = true;
             }
             for (j = 0; j < ncolors; ++j) {
                 gx_color_value vj;
 
-                sample_load_next16(vj, src, sbit, src_depth);
+                if (sample_load_next16(&vj, &src, &sbit, src_depth) < 0)
+                    return_error(gs_error_rangecheck);
                 sc[j] = v2frac(vj);
             }
             if (stored->options & GB_ALPHA_LAST) {
-                sample_load_next16(va, src, sbit, src_depth);
+                if (sample_load_next16(&va, &src, &sbit, src_depth) < 0)
+                    return_error(gs_error_rangecheck);
                 va = v2cv(va);
                 do_alpha = true;
             }
@@ -469,26 +480,33 @@ gx_get_bits_std_to_native(gx_device * dev, int x, int w, int h,
 
                 switch (ncolors) {
                 case 1:
-                    map_gray_subclass(map_procs, dev, sc[0], dc);
+                    map_gray_subclass(scm, sc[0], dc);
                     break;
                 case 3:
-                    map_rgb_subclass(map_procs, dev, 0, sc[0], sc[1], sc[2], dc);
+                    map_rgb_subclass(scm, 0, sc[0], sc[1], sc[2], dc);
                     break;
                 case 4:
-                    map_cmyk_subclass(map_procs, dev, sc[0], sc[1], sc[2], sc[3], dc);
+                    map_cmyk_subclass(scm, sc[0], sc[1], sc[2], sc[3], dc);
                     break;
                 default:
                     return_error(gs_error_rangecheck);
                 }
 
-                for (j = 0; j < dev->color_info.num_components; j++)
-                    v[j] = frac2cv(dc[j]);
+                for (k = 0; k < dev->color_info.num_components; k++)
+                    v[k] = frac2cv(dc[k]);
 
                 pixel = dev_proc(dev, encode_color)(dev, v);
             }
-            sample_store_next_any(pixel, dest, dbit, depth, dbyte);
+            if (sizeof(pixel) > 4) {
+                if (sample_store_next64(pixel, &dest, &dbit, depth, &dbyte) < 0)
+                    return_error(gs_error_rangecheck);
+            }
+            else {
+                if (sample_store_next32(pixel, &dest, &dbit, depth, &dbyte) < 0)
+                    return_error(gs_error_rangecheck);
+            }
         }
-        sample_store_flush(dest, dbit, depth, dbyte);
+        sample_store_flush(dest, dbit, dbyte);
     }
     return 0;
 }
@@ -560,15 +578,22 @@ gx_get_bits_native_to_std(gx_device * dev, int x, int w, int h,
     for (i = (depth > 4 ? 16 : 1 << depth); --i >= 0; )
         mapped[i] = 0;
     for (; h > 0; dest_line += raster, src_line += dev_raster, --h) {
-        sample_load_declare_setup(src, bit, src_line,
-                                  src_bit_offset & 7, depth);
+        const byte *src = src_line;
+        int bit = src_bit_offset & 7;
         byte *dest = dest_line;
 
         for (i = 0; i < w; ++i) {
             gx_color_index pixel = 0;
             gx_color_value rgba[4];
 
-            sample_load_next_any(pixel, src, bit, depth);
+            if (sizeof(pixel) > 4) {
+                if (sample_load_next64((uint64_t *)&pixel, &src, &bit, depth) < 0)
+                    return_error(gs_error_rangecheck);
+            }
+            else {
+                if (sample_load_next32((uint32_t *)&pixel, &src, &bit, depth) < 0)
+                    return_error(gs_error_rangecheck);
+            }
             if (pixel < 16) {
                 if (mapped[pixel]) {
                     /* Use the value from the cache. */

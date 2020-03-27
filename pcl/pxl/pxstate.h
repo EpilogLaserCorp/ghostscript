@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -23,19 +23,11 @@
 #include "gsmemory.h"
 #include "pxgstate.h"
 #include "pltop.h"
+#include "gslibctx.h"
+#include "gxtext.h"
 
-/* Define an abstract type for a font directory. */
-#ifndef gs_font_dir_DEFINED
-#  define gs_font_dir_DEFINED
-typedef struct gs_font_dir_s gs_font_dir;
-#endif
-
-/* Define an abstract type for a text enumerator. */
-/* We only need this for the preallocated enumerator for the error page. */
-#ifndef gs_show_enum_DEFINED
-#  define gs_show_enum_DEFINED
-typedef struct gs_show_enum_s gs_show_enum;
-#endif
+#include "pcparse.h"
+#include "pgmand.h"
 
 /* Define an abstract type for an image enumerator. */
 #ifndef px_image_enum_DEFINED
@@ -47,12 +39,6 @@ typedef struct px_image_enum_s px_image_enum_t;
 #ifndef px_pattern_enum_DEFINED
 #  define px_pattern_enum_DEFINED
 typedef struct px_pattern_enum_s px_pattern_enum_t;
-#endif
-
-/* Define an abstract type for vendor state */
-#ifndef px_vendor_state_DEFINED
-#  define px_vendor_state_DEFINED
-typedef struct px_vendor_state_s px_vendor_state_t;
 #endif
 
 /* Define the type of the PCL XL state. */
@@ -71,7 +57,7 @@ typedef struct px_media_s
 } px_media_t;
 
 /* This structure captures the entire state of the PCL XL "virtual */
-/* machine", except for graphics state parameters in the gs_state. */
+/* machine", except for graphics state parameters in the gs_gstate. */
 struct px_state_s
 {
 
@@ -143,12 +129,11 @@ struct px_state_s
 
     /* Graphics state */
 
-    gs_state *pgs;              /* PostScript graphics state */
+    gs_gstate *pgs;              /* PostScript graphics state */
     px_gstate_t *pxgs;
     /* Image/pattern reading state */
     px_image_enum_t *image_enum;
     px_pattern_enum_t *pattern_enum;
-    px_vendor_state_t *vendor_state;
 
     /* Miscellaneous */
     bool interpolate;           /* image interpolation */
@@ -174,9 +159,30 @@ struct px_state_s
     uint warning_length;
     char warnings[px_max_warning_message + 1];
     /* ---------------- PJL state -------------------- */
-    pl_interp_instance_t *pjls;
+    pl_interp_implementation_t *pjls;
     /* ---------------- PCL state -------------------- */
-    pl_interp_instance_t *pcls;
+    pl_interp_implementation_t *pcls;
+
+    struct pcl_state_s *pcs;
+
+    pcl_parser_state_t  pcl_parser_state;
+
+    hpgl_parser_state_t gl_parser_state;
+
+    /* if this is a contiguous passthrough meaning that 2 passtrough
+       operators have been given back to back and pxl should not regain
+       control. */
+    bool                this_pass_contiguous;
+
+    bool                pass_first;
+
+    /* store away the current font attributes PCL can't set these,
+     * they persist for XL */
+    gs_point            char_shear;
+    gs_point            char_scale;
+    float               char_bold_value;
+    float               char_angle;
+
 };
 
 /* Allocate a px_state_t. */
@@ -186,7 +192,7 @@ px_state_t *px_state_alloc(gs_memory_t *);
 void px_state_release(px_state_t * pxs);
 
 /* Do one-time state initialization. */
-void px_state_init(px_state_t *, gs_state *);
+void px_state_init(px_state_t *, gs_gstate *);
 
 /* Define the default end-of-page procedure. */
 int px_default_end_page(px_state_t *, int, int);

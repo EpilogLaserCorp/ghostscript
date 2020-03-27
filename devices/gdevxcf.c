@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -25,19 +25,10 @@
 #include "gdevdcrd.h"
 #include "gstypes.h"
 #include "gxdcconv.h"
-#include "gscms.h"
 #include "gsicc_cache.h"
 #include "gsicc_manage.h"
-
-#ifndef cmm_gcmmhlink_DEFINED
-    #define cmm_gcmmhlink_DEFINED
-    typedef void* gcmmhlink_t;
-#endif
-
-#ifndef cmm_gcmmhprofile_DEFINED
-    #define cmm_gcmmhprofile_DEFINED
-    typedef void* gcmmhprofile_t;
-#endif
+#include "gsicc_cms.h"
+#include "gdevdevn.h"
 
 #ifndef MAX_CHAN
 #   define MAX_CHAN 8
@@ -65,12 +56,6 @@ static dev_proc_get_color_mapping_procs(get_xcf_color_mapping_procs);
 static dev_proc_get_color_comp_index(xcf_get_color_comp_index);
 static dev_proc_encode_color(xcf_encode_color);
 static dev_proc_decode_color(xcf_decode_color);
-
-/*
- * Type definitions associated with the fixed color model names.
- */
-typedef const char * fixed_colorant_name;
-typedef fixed_colorant_name fixed_colorant_names_list[];
 
 /*
  * Structure for holding SeparationNames and SeparationOrder elements.
@@ -112,7 +97,7 @@ typedef struct xcf_device_s {
      * names are those in this list plus those in the separation_names
      * list (below).
      */
-    const fixed_colorant_names_list * std_colorant_names;
+    fixed_colorant_names_list std_colorant_names;
     int num_std_colorant_names;	/* Number of names in list */
 
     /*
@@ -207,26 +192,6 @@ typedef struct xcf_device_s {
         xcf_decode_color		/* decode_color */\
 }
 
-static const fixed_colorant_names_list DeviceGrayComponents = {
-        "Gray",
-        0		/* List terminator */
-};
-
-static const fixed_colorant_names_list DeviceRGBComponents = {
-        "Red",
-        "Green",
-        "Blue",
-        0		/* List terminator */
-};
-
-static const fixed_colorant_names_list DeviceCMYKComponents = {
-        "Cyan",
-        "Magenta",
-        "Yellow",
-        "Black",
-        0		/* List terminator */
-};
-
 /*
  * Example device with RGB and spot color support
  */
@@ -248,7 +213,7 @@ const xcf_device gs_xcf_device =
     /* DeviceN device specific parameters */
     XCF_DEVICE_RGB,		/* Color model */
     8,				/* Bits per color - must match ncomp, depth, etc. above */
-    (&DeviceRGBComponents),	/* Names of color model colorants */
+    DeviceRGBComponents,	/* Names of color model colorants */
     3,				/* Number colorants for RGB */
     {0},			/* SeparationNames */
     {0}				/* SeparationOrder names */
@@ -272,7 +237,7 @@ const xcf_device gs_xcfcmyk_device =
     /* DeviceN device specific parameters */
     XCF_DEVICE_CMYK,		/* Color model */
     8,				/* Bits per color - must match ncomp, depth, etc. above */
-    (&DeviceCMYKComponents),	/* Names of color model colorants */
+    DeviceCMYKComponents,	/* Names of color model colorants */
     4,				/* Number colorants for RGB */
     {0},			/* SeparationNames */
     {0}				/* SeparationOrder names */
@@ -294,7 +259,7 @@ gray_cs_to_spotrgb_cm(gx_device * dev, frac gray, frac out[])
 }
 
 static void
-rgb_cs_to_spotrgb_cm(gx_device * dev, const gs_imager_state *pis,
+rgb_cs_to_spotrgb_cm(gx_device * dev, const gs_gstate *pgs,
                                   frac r, frac g, frac b, frac out[])
 {
 /* TO_DO_DEVICEN  This routine needs to include the effects of the SeparationOrder array */
@@ -331,7 +296,7 @@ gray_cs_to_spotcmyk_cm(gx_device * dev, frac gray, frac out[])
 }
 
 static void
-rgb_cs_to_spotcmyk_cm(gx_device * dev, const gs_imager_state *pis,
+rgb_cs_to_spotcmyk_cm(gx_device * dev, const gs_gstate *pgs,
                                    frac r, frac g, frac b, frac out[])
 {
 /* TO_DO_DEVICEN  This routine needs to include the effects of the SeparationOrder array */
@@ -339,7 +304,7 @@ rgb_cs_to_spotcmyk_cm(gx_device * dev, const gs_imager_state *pis,
     int n = xdev->separation_names.num_names;
     int i;
 
-    color_rgb_to_cmyk(r, g, b, pis, out, dev->memory);
+    color_rgb_to_cmyk(r, g, b, pgs, out, dev->memory);
     for(i = 0; i < n; i++)			/* Clear spot colors */
         out[4 + i] = 0;
 }
@@ -406,7 +371,7 @@ gray_cs_to_spotn_cm(gx_device * dev, frac gray, frac out[])
 }
 
 static void
-rgb_cs_to_spotn_cm(gx_device * dev, const gs_imager_state *pis,
+rgb_cs_to_spotn_cm(gx_device * dev, const gs_gstate *pgs,
                                    frac r, frac g, frac b, frac out[])
 {
 /* TO_DO_DEVICEN  This routine needs to include the effects of the SeparationOrder array */
@@ -433,7 +398,7 @@ rgb_cs_to_spotn_cm(gx_device * dev, const gs_imager_state *pis,
     } else {
         frac cmyk[4];
 
-        color_rgb_to_cmyk(r, g, b, pis, cmyk, dev->memory);
+        color_rgb_to_cmyk(r, g, b, pgs, cmyk, dev->memory);
         cmyk_cs_to_spotn_cm(dev, cmyk[0], cmyk[1], cmyk[2], cmyk[3],
                             out);
     }
@@ -709,11 +674,13 @@ xcf_get_params(gx_device * pdev, gs_param_list * plist)
         prgbs.size = strlen(xdev->profile_rgb_fn),
         prgbs.persistent = false;
     code = param_write_string(plist, "ProfileRgb", &prgbs);
+    if (code < 0)
+        return code;
 
     pcmyks.data = (const byte *)xdev->profile_cmyk_fn,
         pcmyks.size = strlen(xdev->profile_cmyk_fn),
         pcmyks.persistent = false;
-    code = param_write_string(plist, "ProfileCmyk", &prgbs);
+    code = param_write_string(plist, "ProfileCmyk", &pcmyks);
 
     return code;
 }
@@ -728,11 +695,10 @@ xcf_get_params(gx_device * pdev, gs_param_list * plist)
  * color component names.
  */
 static bool
-check_process_color_names(const fixed_colorant_names_list * pcomp_list,
+check_process_color_names(fixed_colorant_names_list plist,
                           const gs_param_string * pstring)
 {
-    if (pcomp_list) {
-        const fixed_colorant_name * plist = *pcomp_list;
+    if (plist) {
         uint size = pstring->size;
 
         while( *plist) {
@@ -743,35 +709,6 @@ check_process_color_names(const fixed_colorant_names_list * pcomp_list,
         }
     }
     return false;
-}
-
-/*
- * This utility routine calculates the number of bits required to store
- * color information.  In general the values are rounded up to an even
- * byte boundary except those cases in which mulitple pixels can evenly
- * into a single byte.
- *
- * The parameter are:
- *   ncomp - The number of components (colorants) for the device.  Valid
- * 	values are 1 to GX_DEVICE_COLOR_MAX_COMPONENTS
- *   bpc - The number of bits per component.  Valid values are 1, 2, 4, 5,
- *	and 8.
- * Input values are not tested for validity.
- */
-static int
-bpc_to_depth(int ncomp, int bpc)
-{
-    static const byte depths[4][8] = {
-        {1, 2, 0, 4, 8, 0, 0, 8},
-        {2, 4, 0, 8, 16, 0, 0, 16},
-        {4, 8, 0, 16, 16, 0, 0, 24},
-        {4, 8, 0, 16, 32, 0, 0, 32}
-    };
-
-    if (ncomp <=4 && bpc <= 8)
-        return depths[ncomp -1][bpc-1];
-    else
-        return (ncomp * bpc + 7) & ~7;
 }
 
 #define BEGIN_ARRAY_PARAM(pread, pname, pa, psize, e)\
@@ -820,22 +757,22 @@ xcf_set_color_model(xcf_device *xdev, xcf_color_model color_model)
 {
     xdev->color_model = color_model;
     if (color_model == XCF_DEVICE_GRAY) {
-        xdev->std_colorant_names = &DeviceGrayComponents;
+        xdev->std_colorant_names = DeviceGrayComponents;
         xdev->num_std_colorant_names = 1;
         xdev->color_info.cm_name = "DeviceGray";
         xdev->color_info.polarity = GX_CINFO_POLARITY_ADDITIVE;
     } else if (color_model == XCF_DEVICE_RGB) {
-        xdev->std_colorant_names = &DeviceRGBComponents;
+        xdev->std_colorant_names = DeviceRGBComponents;
         xdev->num_std_colorant_names = 3;
         xdev->color_info.cm_name = "DeviceRGB";
         xdev->color_info.polarity = GX_CINFO_POLARITY_ADDITIVE;
     } else if (color_model == XCF_DEVICE_CMYK) {
-        xdev->std_colorant_names = &DeviceCMYKComponents;
+        xdev->std_colorant_names = DeviceCMYKComponents;
         xdev->num_std_colorant_names = 4;
         xdev->color_info.cm_name = "DeviceCMYK";
         xdev->color_info.polarity = GX_CINFO_POLARITY_SUBTRACTIVE;
     } else if (color_model == XCF_DEVICE_N) {
-        xdev->std_colorant_names = &DeviceCMYKComponents;
+        xdev->std_colorant_names = DeviceCMYKComponents;
         xdev->num_std_colorant_names = 4;
         xdev->color_info.cm_name = "DeviceN";
         xdev->color_info.polarity = GX_CINFO_POLARITY_SUBTRACTIVE;
@@ -922,7 +859,7 @@ xcf_put_params(gx_device * pdev, gs_param_list * plist)
         }
     }
     if (code < 0)
-        ecode = code;
+        return code;
 
     /*
      * Save the color_info in case gdev_prn_put_params fails, and for
@@ -946,7 +883,7 @@ xcf_put_params(gx_device * pdev, gs_param_list * plist)
         if (scna.data != 0) {
             int i;
             int num_names = scna.size;
-            const fixed_colorant_names_list * pcomp_names =
+            fixed_colorant_names_list pcomp_names =
                                 ((xcf_device *)pdev)->std_colorant_names;
 
             for (i = num_spot = 0; i < num_names; i++) {
@@ -1007,8 +944,7 @@ xcf_get_color_comp_index(gx_device * dev, const char * pname, int name_size,
                                         int component_type)
 {
 /* TO_DO_DEVICEN  This routine needs to include the effects of the SeparationOrder array */
-    const fixed_colorant_names_list * list = ((const xcf_device *)dev)->std_colorant_names;
-    const fixed_colorant_name * pcolor = *list;
+    fixed_colorant_name * pcolor = ((const xcf_device *)dev)->std_colorant_names;
     int color_component_number = 0;
     int i;
 
@@ -1042,7 +978,7 @@ xcf_get_color_comp_index(gx_device * dev, const char * pname, int name_size,
 /* ------ Private definitions ------ */
 
 /* All two-byte quantities are stored MSB-first! */
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
 #  define assign_u16(a,v) a = (v)
 #  define assign_u32(a,v) a = (v)
 #else
@@ -1051,7 +987,7 @@ xcf_get_color_comp_index(gx_device * dev, const char * pname, int name_size,
 #endif
 
 typedef struct {
-    FILE *f;
+    gp_file *f;
     int offset;
 
     int width;
@@ -1113,7 +1049,7 @@ static int
 xcf_write(xcf_write_ctx *xc, const byte *buf, int size) {
     int code;
 
-    code = fwrite(buf, 1, size, xc->f);
+    code = gp_fwrite(buf, 1, size, xc->f);
     if (code < 0)
         return code;
     xc->offset += code;
@@ -1334,11 +1270,18 @@ xcf_write_image_data(xcf_write_ctx *xc, gx_device_printer *pdev)
     tile_data = (byte **)gs_alloc_bytes(pdev->memory,
                                         xc->n_tiles_x * sizeof(byte *),
                                         "xcf_write_image_data");
+    if (line == NULL || tile_data ==  NULL) {
+        code = gs_error_VMerror;
+        goto xit;
+    }
+    memset(tile_data, 0, xc->n_tiles_x * sizeof(byte *));
     for (tile_i = 0; tile_i < xc->n_tiles_x; tile_i++) {
         int tile_bytes = xcf_tile_sizeof(xc, tile_i) * bytes_pp;
 
         tile_data[tile_i] = gs_alloc_bytes(pdev->memory, tile_bytes,
                                            "xcf_write_image_data");
+        if (tile_data[tile_i] == NULL)
+            goto xit;
     }
     for (tile_j = 0; tile_j < xc->n_tiles_y; tile_j++) {
         int y0, y1;
@@ -1349,6 +1292,8 @@ xcf_write_image_data(xcf_write_ctx *xc, gx_device_printer *pdev)
         y1 = min(xc->height, y0 + TILE_HEIGHT);
         for (y = y0; y < y1; y++) {
             code = gdev_prn_get_bits(pdev, y, line, &row);
+            if (code < 0)
+                goto xit;
             if (link == NULL)
                 xcf_shuffle_to_tile(xc, tile_data, row, y);
             else
@@ -1367,9 +1312,12 @@ xcf_write_image_data(xcf_write_ctx *xc, gx_device_printer *pdev)
         }
     }
 
-    for (tile_i = 0; tile_i < xc->n_tiles_x; tile_i++) {
-        gs_free_object(pdev->memory, tile_data[tile_i],
-                "xcf_write_image_data");
+xit:
+    if (tile_data != NULL) {
+        for (tile_i = 0; tile_i < xc->n_tiles_x; tile_i++) {
+            gs_free_object(pdev->memory, tile_data[tile_i],
+                    "xcf_write_image_data");
+        }
     }
     gs_free_object(pdev->memory, tile_data, "xcf_write_image_data");
     gs_free_object(pdev->memory, line, "xcf_write_image_data");
@@ -1411,7 +1359,7 @@ xcf_write_footer(xcf_write_ctx *xc, xcf_device *pdev)
         int offset;
         int tile_idx;
 
-        dmlprintf2(pdev->memory, "actual tile offset: %d %d\n", xc->offset, (int)arch_sizeof_color_index);
+        dmlprintf2(pdev->memory, "actual tile offset: %d %d\n", xc->offset, (int)ARCH_SIZEOF_COLOR_INDEX);
         xcf_write_32(xc, xc->width);
         xcf_write_32(xc, xc->height);
         xcf_write_32(xc, separation_name->size + 1);
@@ -1454,7 +1402,7 @@ xcf_write_footer(xcf_write_ctx *xc, xcf_device *pdev)
 }
 
 static int
-xcf_print_page(gx_device_printer *pdev, FILE *file)
+xcf_print_page(gx_device_printer *pdev, gp_file *file)
 {
     xcf_write_ctx xc;
 

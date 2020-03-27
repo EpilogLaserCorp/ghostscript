@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -166,23 +166,6 @@ gp_file_is_console(FILE * f)
     return false;
 }
 
-/* ------ Persistent data cache ------*/
-
-/* insert a buffer under a (type, key) pair */
-int gp_cache_insert(int type, byte *key, int keylen, void *buffer, int buflen)
-{
-    /* not yet implemented */
-    return 0;
-}
-
-/* look up a (type, key) in the cache */
-int gp_cache_query(int type, byte* key, int keylen, void **buffer,
-    gp_cache_alloc alloc, void *userdata)
-{
-    /* not yet implemented */
-    return -1;
-}
-
 /*************************************************************/
 /* from gp_iwatc.c and gp_itbc.c */
 
@@ -300,9 +283,10 @@ gp_set_file_binary(int prnfno, int binary)
  *   "port"            open port using fopen()
  */
 FILE *
-gp_open_printer(const gs_memory_t *mem,
-                      char         fname[gp_file_name_sizeof],
-                      int          binary_mode)
+gp_open_printer_impl(gs_memory_t *mem,
+                     const char  *fname,
+                     int         *binary_mode,
+                     int          (**close)(FILE *))
 {
     FILE *pfile;
 
@@ -311,34 +295,35 @@ gp_open_printer(const gs_memory_t *mem,
             /* default or spool */
             if (pm_spool(mem, NULL, fname))	/* check if spool queue valid */
                 return NULL;
-            pfile = gp_open_scratch_file(mem,
-                                         gp_scratch_file_name_prefix,
-                                         pm_prntmp,
-                                         (binary_mode ? "wb" : "w"));
-        } else
-            pfile = fopen("PRN", (binary_mode ? "wb" : "w"));
-    } else if ((isos2) && (fname[0] == '|'))
+            pfile = gp_open_scratch_file_impl(mem,
+                                              gp_scratch_file_name_prefix,
+                                              pm_prntmp,
+                                              (binary_mode ? "wb" : "w"),
+                                              0);
+        } else {
+            pfile = fopen("PRN", (*binary_mode ? "wb" : "w"));
+        }
+    } else if ((isos2) && (fname[0] == '|')) {
         /* pipe */
-        pfile = popen(fname + 1, (binary_mode ? "wb" : "w"));
+        pfile = popen(fname + 1, (*binary_mode ? "wb" : "w"));
+        *close = isos2 ? pclose : fclose;
     else
         /* normal file or port */
-        pfile = gp_fopen(fname, (binary_mode ? "wb" : "w"));
+        pfile = gp_fopen_impl(mem, fname, (*binary_mode ? "wb" : "w"));
 
-    if (pfile == (FILE *) NULL)
-        return (FILE *) NULL;
+    if (pfile == NULL)
+        return NULL;
     if (!isos2)
-        gp_set_file_binary(fileno(pfile), binary_mode);
+        *binary_mode = 1;
+
     return pfile;
 }
 
 /* Close the connection to the printer. */
 void
-gp_close_printer(const gs_memory_t *mem, FILE * pfile, const char *fname)
+gp_close_printer(gp_file *pfile, const char *fname)
 {
-    if (isos2 && (fname[0] == '|'))
-        pclose(pfile);
-    else
-        fclose(pfile);
+    gp_fclose(pfile);
 
     if ((strlen(fname) == 0) || is_os2_spool(fname)) {
         /* spool temporary file */
@@ -351,7 +336,7 @@ gp_close_printer(const gs_memory_t *mem, FILE * pfile, const char *fname)
 
 /* Set a file into binary or text mode. */
 int
-gp_setmode_binary(FILE * pfile, bool binary)
+gp_setmode_binary_impl(FILE * pfile, bool binary)
 {
     gp_set_file_binary(fileno(pfile), binary);
     return 0;
@@ -553,8 +538,11 @@ pm_spool(const gs_memory_t *mem, char *filename, const char *queue)
             if (!rc)
                 emprintf(mem, "SplQmClose failed.\n");
         }
-    } else
+    } else {
+        free(buffer);
+        fclose(f);
         rc = 0;			/* no memory */
+    }
     return !rc;
 }
 
@@ -584,32 +572,12 @@ void gp_enumerate_fonts_free(void *enum_state)
  * Currently we stub it with 32 bits access.
  */
 
-FILE *gp_fopen_64(const char *filename, const char *mode)
-{
-    return fopen(filename, mode);
-}
-
-FILE *gp_open_scratch_file_64(const gs_memory_t *mem,
-                              const char        *prefix,
-                                    char         fname[gp_file_name_sizeof],
-                              const char        *mode)
-{
-    return gp_open_scratch_file(mem, prefix, fname, mode);
-}
-
-FILE *gp_open_printer_64(const gs_memory_t *mem,
-                               char         fname[gp_file_name_sizeof],
-                               int          binary_mode)
-{
-    return gp_open_printer(mem, fname, binary_mode);
-}
-
-int64_t gp_ftell_64(FILE *strm)
+int64_t gp_ftell_impl(FILE *strm)
 {
     return ftell(strm);
 }
 
-int gp_fseek_64(FILE *strm, int64_t offset, int origin)
+int gp_fseek_impl(FILE *strm, gs_offset_t offset, int origin)
 {
     long offset1 = (long)offset;
 
@@ -618,7 +586,7 @@ int gp_fseek_64(FILE *strm, int64_t offset, int origin)
     return fseek(strm, offset1, origin);
 }
 
-bool gp_fseekable (FILE *f)
+bool gp_fseekable_impl(FILE *f)
 {
     struct stat s;
     int fno;

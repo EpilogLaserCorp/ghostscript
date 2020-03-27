@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -56,8 +56,9 @@ static int zwidthshow(i_ctx_t *i_ctx_p);
 static int
 zshow(i_ctx_t *i_ctx_p)
 {
+    es_ptr ep = esp;        /* Save in case of error */
     os_ptr op = osp;
-    gs_text_enum_t *penum;
+    gs_text_enum_t *penum = NULL;
     int code = op_show_setup(i_ctx_p, op);
 
     if (code != 0 ||
@@ -65,18 +66,34 @@ zshow(i_ctx_t *i_ctx_p)
         return code;
     *(op_proc_t *)&penum->enum_client_data = zshow;
     if ((code = op_show_finish_setup(i_ctx_p, penum, 1, finish_show)) < 0) {
-        ifree_object(penum, "op_show_enum_setup");
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
         return code;
     }
-    return op_show_continue_pop(i_ctx_p, 1);
+
+    code = op_show_continue_pop(i_ctx_p, 1);
+    if (code < 0) {
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
+    }
+    return code;
 }
 
 /* <ax> <ay> <string> ashow - */
 static int
 zashow(i_ctx_t *i_ctx_p)
 {
+    es_ptr ep = esp;        /* Save in case of error */
     os_ptr op = osp;
-    gs_text_enum_t *penum;
+    gs_text_enum_t *penum = NULL;
     double axy[2];
     int code = num_params(op - 1, 2, axy);
 
@@ -86,17 +103,32 @@ zashow(i_ctx_t *i_ctx_p)
         return code;
     *(op_proc_t *)&penum->enum_client_data = zashow;
     if ((code = op_show_finish_setup(i_ctx_p, penum, 3, finish_show)) < 0) {
-        ifree_object(penum, "op_show_enum_setup");
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
         return code;
     }
-    return op_show_continue_pop(i_ctx_p, 3);
+    code = op_show_continue_pop(i_ctx_p, 3);
+    if (code < 0) {
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
+    }
+    return code;
 }
 
 static int
 widthshow_aux(i_ctx_t *i_ctx_p, bool single_byte_space)
 {
+    es_ptr ep = esp;        /* Save in case of error */
     os_ptr op = osp;
-    gs_text_enum_t *penum;
+    gs_text_enum_t *penum = NULL;
     double cxy[2];
     int code;
 
@@ -115,18 +147,39 @@ widthshow_aux(i_ctx_t *i_ctx_p, bool single_byte_space)
     if ((code = gs_widthshow_begin(igs, cxy[0], cxy[1],
                                    (gs_char) op[-1].value.intval,
                                    op->value.bytes, r_size(op),
-                                   imemory_local, &penum)) < 0)
+                                   imemory_local, &penum)) < 0) {
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
         return code;
+    }
     *(op_proc_t *)&penum->enum_client_data = zwidthshow;
 
     penum->single_byte_space = single_byte_space;
-    
+
     if ((code = op_show_finish_setup(i_ctx_p, penum, 4, finish_show)) < 0) {
-        ifree_object(penum, "op_show_enum_setup");
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
         return code;
     }
 
-    return op_show_continue_pop(i_ctx_p, 4);
+    code = op_show_continue_pop(i_ctx_p, 4);
+    if (code < 0) {
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
+    }
+    return code;
 }
 
 /* <cx> <cy> <char> <string> widthshow - */
@@ -158,8 +211,9 @@ zpdfwidthshow(i_ctx_t *i_ctx_p)
 static int
 awidthshow_aux(i_ctx_t *i_ctx_p, bool single_byte_space)
 {
+    es_ptr ep = esp;        /* Save in case of error */
     os_ptr op = osp;
-    gs_text_enum_t *penum;
+    gs_text_enum_t *penum = NULL;
     double cxy[2], axy[2];
     int code;
 
@@ -186,13 +240,27 @@ awidthshow_aux(i_ctx_t *i_ctx_p, bool single_byte_space)
     *(op_proc_t *)&penum->enum_client_data = zawidthshow;
 
     penum->single_byte_space = single_byte_space;
-    
+
     if ((code = op_show_finish_setup(i_ctx_p, penum, 6, finish_show)) < 0) {
-        ifree_object(penum, "op_show_enum_setup");
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
         return code;
     }
 
-    return op_show_continue_pop(i_ctx_p, 6);
+    code = op_show_continue_pop(i_ctx_p, 6);
+    if (code < 0) {
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
+    }
+    return code;
 }
 
 /* <cx> <cy> <char> <ax> <ay> <string> awidthshow - */
@@ -213,8 +281,9 @@ zpdfawidthshow(i_ctx_t *i_ctx_p)
 static int
 zkshow(i_ctx_t *i_ctx_p)
 {
+    es_ptr ep = esp;        /* Save in case of error */
     os_ptr op = osp;
-    gs_text_enum_t *penum;
+    gs_text_enum_t *penum = NULL;
     int code;
 
     check_read_type(*op, t_string);
@@ -232,11 +301,25 @@ zkshow(i_ctx_t *i_ctx_p)
         return code;
     *(op_proc_t *)&penum->enum_client_data = zkshow;
     if ((code = op_show_finish_setup(i_ctx_p, penum, 2, finish_show)) < 0) {
-        ifree_object(penum, "op_show_enum_setup");
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
         return code;
     }
     sslot = op[-1];		/* save kerning proc */
-    return op_show_continue_pop(i_ctx_p, 2);
+    code = op_show_continue_pop(i_ctx_p, 2);
+    if (code < 0) {
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
+    }
+    return code;
 }
 
 /* Common finish procedure for all show operations. */
@@ -247,29 +330,9 @@ finish_show(i_ctx_t *i_ctx_p)
     return 0;
 }
 
-/* <string> stringwidth <wx> <wy> */
-static int
-zstringwidth(i_ctx_t *i_ctx_p)
-{
-    os_ptr op = osp;
-    gs_text_enum_t *penum;
-    int code = op_show_setup(i_ctx_p, op);
-
-    if (code != 0 ||
-        (code = gs_stringwidth_begin(igs, op->value.bytes, r_size(op),
-                                     imemory, &penum)) < 0)
-        return code;
-    *(op_proc_t *)&penum->enum_client_data = zstringwidth;
-    if ((code = op_show_finish_setup(i_ctx_p, penum, 1, finish_stringwidth)) < 0) {
-        ifree_object(penum, "op_show_enum_setup");
-        return code;
-    }
-    return op_show_continue_pop(i_ctx_p, 1);
-}
 /* Finishing procedure for stringwidth. */
 /* Pushes the accumulated width. */
-/* This is exported for .glyphwidth (in zcharx.c). */
-int
+static int
 finish_stringwidth(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
@@ -282,14 +345,49 @@ finish_stringwidth(i_ctx_t *i_ctx_p)
     return 0;
 }
 
+/* <string> stringwidth <wx> <wy> */
+static int
+zstringwidth(i_ctx_t *i_ctx_p)
+{
+    es_ptr ep = esp;        /* Save in case of error */
+    os_ptr op = osp;
+    gs_text_enum_t *penum = NULL;
+    int code = op_show_setup(i_ctx_p, op);
+
+    if (code != 0 ||
+        (code = gs_stringwidth_begin(igs, op->value.bytes, r_size(op),
+                                     imemory, &penum)) < 0)
+        return code;
+    *(op_proc_t *)&penum->enum_client_data = zstringwidth;
+    if ((code = op_show_finish_setup(i_ctx_p, penum, 1, finish_stringwidth)) < 0) {
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
+        return code;
+    }
+    code = op_show_continue_pop(i_ctx_p, 1);
+    if (code < 0) {
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
+    }
+    return code;
+}
 /* Common code for charpath and .charboxpath. */
 static int
 zchar_path(i_ctx_t *i_ctx_p, op_proc_t proc,
-           int (*begin)(gs_state *, const byte *, uint,
+           int (*begin)(gs_gstate *, const byte *, uint,
                         bool, gs_memory_t *, gs_text_enum_t **))
 {
+    es_ptr ep = esp;        /* Save in case of error */
     os_ptr op = osp;
-    gs_text_enum_t *penum;
+    gs_text_enum_t *penum = NULL;
     int code;
 
     check_type(*op, t_boolean);
@@ -300,10 +398,24 @@ zchar_path(i_ctx_t *i_ctx_p, op_proc_t proc,
         return code;
     *(op_proc_t *)&penum->enum_client_data = proc;
     if ((code = op_show_finish_setup(i_ctx_p, penum, 2, finish_show)) < 0) {
-        ifree_object(penum, "op_show_enum_setup");
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
         return code;
     }
-    return op_show_continue_pop(i_ctx_p, 2);
+    code = op_show_continue_pop(i_ctx_p, 2);
+    if (code < 0) {
+        /* We must restore the exec stack pointer back to the point where we entered, in case
+         * we 'retry' the operation (eg having increased the operand stack).
+         * We'll rely on gc to handle the enumerator.
+         * Bug #700618.
+         */
+        esp = ep;
+    }
+    return code;
 }
 /* <string> <outline_bool> charpath - */
 static int
@@ -447,7 +559,7 @@ const op_def zchar_a_op_defs[] =
     {"1.fontbbox", zfontbbox},
     {"6.pdfawidthshow", zpdfawidthshow},
     {"4.pdfwidthshow", zpdfwidthshow},
-    
+
                 /* Internal operators */
     {"0%finish_show", finish_show},
     op_def_end(0)
@@ -469,10 +581,10 @@ const op_def zchar_b_op_defs[] =
 void
 glyph_ref(const gs_memory_t *mem, gs_glyph glyph, ref * gref)
 {
-    if (glyph < gs_min_cid_glyph)
+    if (glyph < GS_MIN_CID_GLYPH)
         name_index_ref(mem, glyph, gref);
     else
-        make_int(gref, glyph - gs_min_cid_glyph);
+        make_int(gref, glyph - GS_MIN_CID_GLYPH);
 }
 
 /* Prepare to set up for a text operator. */
@@ -516,8 +628,8 @@ op_show_finish_setup(i_ctx_t *i_ctx_p, gs_text_enum_t * penum, int npop,
         SHOW_IS_ALL_OF(osenum,
                        TEXT_FROM_STRING | TEXT_DO_NONE | TEXT_INTERVENE) &&
         SHOW_IS_ALL_OF(penum, TEXT_FROM_STRING | TEXT_RETURN_WIDTH) &&
-        (glyph = gs_text_current_glyph(osenum)) != gs_no_glyph &&
-        glyph >= gs_min_cid_glyph &&
+        (glyph = gs_text_current_glyph(osenum)) != GS_NO_GLYPH &&
+        glyph >= GS_MIN_CID_GLYPH &&
 
         /* According to PLRM, we don't need to raise a rangecheck error,
            if currentfont is changed in the proc of the operator 'cshow'. */
@@ -640,7 +752,7 @@ op_show_continue_dispatch(i_ctx_t *i_ctx_p, int npop, int code)
                 /* Type 3 font, prefer BuildGlyph. */
                 if (level2_enabled &&
                     !r_has_type(&pfdata->BuildGlyph, t_null) &&
-                    glyph != gs_no_glyph
+                    glyph != GS_NO_GLYPH
                     ) {
                     glyph_ref(imemory, glyph, op);
                     esp[2] = pfdata->BuildGlyph;
@@ -679,7 +791,7 @@ op_show_continue_dispatch(i_ctx_t *i_ctx_p, int npop, int code)
 
                 if (chr != gs_no_char &&
                     !r_has_type(&pfdata->BuildChar, t_null) &&
-                    (glyph == gs_no_glyph ||
+                    (glyph == GS_NO_GLYPH ||
                      (!r_has_type(&pfdata->Encoding, t_null) &&
                        array_get(imemory, &pfdata->Encoding, (long)(chr & 0xff), &eref) >= 0 &&
                       (glyph_ref(imemory, glyph, &gref), obj_eq(imemory, &gref, &eref))))
@@ -688,7 +800,7 @@ op_show_continue_dispatch(i_ctx_t *i_ctx_p, int npop, int code)
                     esp[2] = pfdata->BuildChar;
                 } else {
                     /* We might not have a glyph: substitute 0. **HACK** */
-                    if (glyph == gs_no_glyph)
+                    if (glyph == GS_NO_GLYPH)
                         make_int(op, 0);
                     else
                         glyph_ref(imemory, glyph, op);
@@ -722,10 +834,13 @@ op_show_continue_dispatch(i_ctx_t *i_ctx_p, int npop, int code)
                     code = z1_set_cache(i_ctx_p, (gs_font_base *)pfont,
                                     &cnref, glyph, cont, &exec_cont);
                 else
-                    return_error(gs_error_unregistered); /* Unimplemented. */
+                    code = gs_note_error(gs_error_unregistered); /* Unimplemented. */
                 if (exec_cont != 0)
-                    return_error(gs_error_unregistered); /* Must not happen. */
-                return code;
+                    code = gs_note_error(gs_error_unregistered); /* Must not happen. */
+                if (code < 0)
+                  goto err;
+                else
+                  return code;
             }
         default:		/* error */
 err:

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -118,8 +118,8 @@ zfile_name_parent(i_ctx_t *i_ctx_p)
 
 const op_def zfile1_op_defs[] =
 {
-    {"0.file_name_combine", zfile_name_combine},
-    {"0.file_name_is_absolute", zfile_name_is_absolute},
+    {"3.file_name_combine", zfile_name_combine},
+    {"1.file_name_is_absolute", zfile_name_is_absolute},
     {"0.file_name_separator", zfile_name_separator},
     {"0.file_name_directory_separator", zfile_name_directory_separator},
     {"0.file_name_current", zfile_name_current},

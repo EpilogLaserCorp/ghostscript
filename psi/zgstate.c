@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -35,7 +35,7 @@ private_st_int_remap_color_info();
 /* ------ Utilities ------ */
 
 static int
-zset_real(i_ctx_t *i_ctx_p, int (*set_proc)(gs_state *, double))
+zset_real(i_ctx_t *i_ctx_p, int (*set_proc)(gs_gstate *, double))
 {
     os_ptr op = osp;
     double param;
@@ -44,13 +44,23 @@ zset_real(i_ctx_t *i_ctx_p, int (*set_proc)(gs_state *, double))
     if (code < 0)
         return_op_typecheck(op);
     code = set_proc(igs, param);
-    if (!code)
+    if (code == 0)
         pop(1);
     return code;
 }
 
 static int
-zset_bool(i_ctx_t *i_ctx_p, void (*set_proc)(gs_state *, bool))
+zcurrent_real(i_ctx_t *i_ctx_p, double (*current_proc)(const gs_gstate *))
+{
+    os_ptr op = osp;
+
+    push(1);
+    make_real(op, current_proc(igs));
+    return 0;
+}
+
+static int
+zset_bool(i_ctx_t *i_ctx_p, void (*set_proc)(gs_gstate *, bool))
 {
     os_ptr op = osp;
 
@@ -61,7 +71,7 @@ zset_bool(i_ctx_t *i_ctx_p, void (*set_proc)(gs_state *, bool))
 }
 
 static int
-zcurrent_bool(i_ctx_t *i_ctx_p, bool (*current_proc)(const gs_state *))
+zcurrent_bool(i_ctx_t *i_ctx_p, bool (*current_proc)(const gs_gstate *))
 {
     os_ptr op = osp;
 
@@ -71,7 +81,7 @@ zcurrent_bool(i_ctx_t *i_ctx_p, bool (*current_proc)(const gs_state *))
 }
 
 static int
-zset_uint(i_ctx_t *i_ctx_p, void (*set_proc)(gs_state *, uint))
+zset_uint(i_ctx_t *i_ctx_p, void (*set_proc)(gs_gstate *, uint))
 {
     os_ptr op = osp;
 
@@ -82,7 +92,7 @@ zset_uint(i_ctx_t *i_ctx_p, void (*set_proc)(gs_state *, uint))
 }
 
 static int
-zcurrent_uint(i_ctx_t *i_ctx_p, uint (*current_proc)(const gs_state *))
+zcurrent_uint(i_ctx_t *i_ctx_p, uint (*current_proc)(const gs_gstate *))
 {
     os_ptr op = osp;
 
@@ -97,7 +107,7 @@ zcurrent_uint(i_ctx_t *i_ctx_p, uint (*current_proc)(const gs_state *))
 static void *gs_istate_alloc(gs_memory_t * mem);
 static int gs_istate_copy(void *to, const void *from);
 static void gs_istate_free(void *old, gs_memory_t * mem);
-static const gs_state_client_procs istate_procs = {
+static const gs_gstate_client_procs istate_procs = {
     gs_istate_alloc,
     gs_istate_copy,
     gs_istate_free,
@@ -105,7 +115,7 @@ static const gs_state_client_procs istate_procs = {
 };
 
 /* Initialize the graphics stack. */
-gs_state *
+gs_gstate *
 int_gstate_alloc(const gs_dual_memory_t * dmem)
 {
     int_gstate *iigs;
@@ -113,7 +123,7 @@ int_gstate_alloc(const gs_dual_memory_t * dmem)
     int_remap_color_info_t *prci;
     gs_ref_memory_t *lmem = dmem->space_local;
     gs_ref_memory_t *gmem = dmem->space_global;
-    gs_state *pgs = gs_state_alloc((gs_memory_t *)lmem);
+    gs_gstate *pgs = gs_gstate_alloc((gs_memory_t *)lmem);
 
     iigs = gs_alloc_struct((gs_memory_t *)lmem, int_gstate, &st_int_gstate,
                            "int_gstate_alloc(int_gstate)");
@@ -121,8 +131,9 @@ int_gstate_alloc(const gs_dual_memory_t * dmem)
         return NULL;
     int_gstate_map_refs(iigs, make_null);
     make_empty_array(&iigs->dash_pattern_array, a_all);
-    gs_alloc_ref_array(lmem, &proc0, a_readonly + a_executable, 2,
-                       "int_gstate_alloc(proc0)");
+    if (gs_alloc_ref_array(lmem, &proc0, a_readonly + a_executable, 2,
+                       "int_gstate_alloc(proc0)") < 0)
+        return NULL;
     make_oper(proc0.value.refs, 0, zpop);
     make_real(proc0.value.refs + 1, 0.0);
     iigs->black_generation = proc0;
@@ -140,7 +151,7 @@ int_gstate_alloc(const gs_dual_memory_t * dmem)
         return NULL;
     make_struct(&iigs->remap_color_info, imemory_space(gmem), prci);
     clear_pagedevice(iigs);
-    gs_state_set_client(pgs, iigs, &istate_procs, true);
+    gs_gstate_set_client(pgs, iigs, &istate_procs, true);
     /* PostScript code wants limit clamping enabled. */
     gs_setlimitclamp(pgs, true);
     /*
@@ -177,8 +188,10 @@ static int
 zinitgraphics(i_ctx_t *i_ctx_p)
 {
     /*
-     * gs_initigraphics does not reset the colorspace;
-     * this is now handled in the PostScript code.
+     * Although gs_initgraphics resets the color space to DeviceGray, it does
+     * not modify the 'interpreter' gstate, which stores a copy of the PostScript
+     * object used to set the colour space. We could do this here, with effort,
+     * but instead we choose t do it in gs_cspace.ps and handle it all in PostScript.
      */
      make_empty_array(&istate->dash_pattern_array, a_all);
      return gs_initgraphics(igs);
@@ -518,6 +531,69 @@ zcurrenttextrenderingmode(i_ctx_t *i_ctx_p)
 {
     return zcurrent_uint(i_ctx_p, gs_currenttextrenderingmode);
 }
+static int
+zsettextspacing(i_ctx_t *i_ctx_p)
+{
+    return zset_real(i_ctx_p, gs_settextspacing);
+}
+static int
+zcurrenttextspacing(i_ctx_t *i_ctx_p)
+{
+    return zcurrent_real(i_ctx_p, gs_currenttextspacing);
+}
+static int
+zsettextleading(i_ctx_t *i_ctx_p)
+{
+    return zset_real(i_ctx_p, gs_settextleading);
+}
+static int
+zcurrenttextleading(i_ctx_t *i_ctx_p)
+{
+    return zcurrent_real(i_ctx_p, gs_currenttextleading);
+}
+static int
+zsettextrise(i_ctx_t *i_ctx_p)
+{
+    return zset_real(i_ctx_p, gs_settextrise);
+}
+static int
+zcurrenttextrise(i_ctx_t *i_ctx_p)
+{
+    return zcurrent_real(i_ctx_p, gs_currenttextrise);
+}
+static int
+zsetwordspacing(i_ctx_t *i_ctx_p)
+{
+    return zset_real(i_ctx_p, gs_setwordspacing);
+}
+static int
+zcurrentwordspacing(i_ctx_t *i_ctx_p)
+{
+    return zcurrent_real(i_ctx_p, gs_currentwordspacing);
+}
+
+static int
+zsettexthscaling(i_ctx_t *i_ctx_p)
+{
+    return zset_real(i_ctx_p, gs_settexthscaling);
+}
+static int
+zcurrenttexthscaling(i_ctx_t *i_ctx_p)
+{
+    return zcurrent_real(i_ctx_p, gs_currenttexthscaling);
+}
+
+static int
+zsetPDFfontsize(i_ctx_t *i_ctx_p)
+{
+    return zset_real(i_ctx_p, gs_setPDFfontsize);
+}
+static int
+zcurrentPDFfontsize(i_ctx_t *i_ctx_p)
+{
+    return zcurrent_real(i_ctx_p, gs_currentPDFfontsize);
+}
+
 
 /* <bool> .sethpglpathmode - */
 static int
@@ -573,10 +649,25 @@ const op_def zgstate2_op_defs[] = {
     op_def_end(0)
 };
 const op_def zgstate3_op_defs[] = {
-    {"0.settextrenderingmode", zsettextrenderingmode},
+    {"1.settextrenderingmode", zsettextrenderingmode},
     {"0.currenttextrenderingmode", zcurrenttextrenderingmode},
+    {"1.settextspacing", zsettextspacing},
+    {"0.currenttextspacing", zcurrenttextspacing},
+    {"1.settextleading", zsettextleading},
+    {"0.currenttextleading", zcurrenttextleading},
+    {"1.settextrise", zsettextrise},
+    {"0.currenttextrise", zcurrenttextrise},
+    {"1.setwordspacing", zsetwordspacing},
+    {"0.currentwordspacing", zcurrentwordspacing},
+    {"1.settexthscaling", zsettexthscaling},
+    {"0.currenttexthscaling", zcurrenttexthscaling},
     {"0.sethpglpathmode", zsethpglpathmode},
     {"0.currenthpglpathmode", zcurrenthpglpathmode},
+    op_def_end(0)
+};
+const op_def zgstate4_op_defs[] = {
+    {"1.setPDFfontsize", zsetPDFfontsize},
+    {"0.currentPDFfontsize", zcurrentPDFfontsize},
     op_def_end(0)
 };
 

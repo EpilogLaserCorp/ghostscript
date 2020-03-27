@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -115,7 +115,8 @@ sparc_print_page(gx_device_printer *pdev, FILE *prn)
   struct lpvi_page lpvipage;
   struct lpvi_err lpvierr;
   char *out_buf;
-  int out_size;
+  int out_size, code = 0;
+
   if (ioctl(fileno(prn),LPVIIOC_GETPAGE,&lpvipage)!=0)
     {
     errprintf(pdev->memory, "sparc_print_page: LPVIIOC_GETPAGE failed\n");
@@ -132,7 +133,12 @@ sparc_print_page(gx_device_printer *pdev, FILE *prn)
     }
   out_size=lpvipage.bitmap_width*lpvipage.page_length;
   out_buf=gs_malloc(pdev->memory, out_size,1,"sparc_print_page: out_buf");
-  gdev_prn_copy_scan_lines(pdev,0,out_buf,out_size);
+  if (out_buf == NULL)
+      return_error(gs_error_VMerror);
+
+  code = gdev_prn_copy_scan_lines(pdev,0,out_buf,out_size);
+  if (code < 0)
+    goto xit;
   while (write(fileno(prn),out_buf,out_size)!=out_size)
     {
     if (ioctl(fileno(prn),LPVIIOC_GETERR,&lpvierr)!=0)
@@ -182,6 +188,7 @@ sparc_print_page(gx_device_printer *pdev, FILE *prn)
     errprintf(pdev->memory, "OK.\n");
     warning=0;
     }
+xit:
   gs_free(pdev->memory, out_buf,out_size,1,"sparc_print_page: out_buf");
-  return 0;
+  return code;
   }

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -213,7 +213,13 @@ param_print_typed(gs_param_list * plist, gs_param_name pkey,
             pprintd1(s, " %d", pvalue->value.i);
             break;
         case gs_param_type_long:
-            pprintld1(s, " %l", pvalue->value.l);
+            pprintld1(s, " %ld", pvalue->value.l);
+            break;
+        case gs_param_type_size_t:
+            pprintzd1(s, " %"PRIdSIZE, pvalue->value.z);
+            break;
+        case gs_param_type_i64:
+            pprinti64d1(s, " %"PRId64, pvalue->value.i64);
             break;
         case gs_param_type_float:
             pprintg1(s, " %g", pvalue->value.f);

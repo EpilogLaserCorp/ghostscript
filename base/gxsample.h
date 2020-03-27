@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -18,6 +18,8 @@
 
 #ifndef gxsample_INCLUDED
 #  define gxsample_INCLUDED
+
+#include "std.h"
 
 /*
  * The following union implements the expansion of sample
@@ -39,10 +41,7 @@ typedef union sample_lookup_s {
 extern const bits32 lookup4x1to32_identity[16];
 extern const bits32 lookup4x1to32_inverted[16];
 
-#ifndef sample_map_DEFINED
-#define sample_map_DEFINED
 typedef struct sample_map_s sample_map;
-#endif
 
 /*
  * Define procedures to unpack and shuffle image data samples.  The Unix C
@@ -79,5 +78,10 @@ SAMPLE_UNPACK_PROC(sample_unpack_1_interleaved);
 SAMPLE_UNPACK_PROC(sample_unpack_2_interleaved);
 SAMPLE_UNPACK_PROC(sample_unpack_4_interleaved);
 SAMPLE_UNPACK_PROC(sample_unpack_8_interleaved);
+
+/* The following don't have interleaved variants */
+SAMPLE_UNPACK_PROC(sample_unpack_12);
+SAMPLE_UNPACK_PROC(sample_unpack_16);
+SAMPLE_UNPACK_PROC(sample_unpackicc_16);
 
 #endif /* gxsample_INCLUDED */

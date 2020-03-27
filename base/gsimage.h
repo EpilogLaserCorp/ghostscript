@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -21,6 +21,7 @@
 #  define gsimage_INCLUDED
 
 #include "gsiparam.h"
+#include "gsdevice.h"
 
 /*
   The API defined in this file and implemented in gsimage.c provides a
@@ -113,14 +114,12 @@
  * rows of data, not the buffered enumerator used by the procedures below:
  * for this reason, we may move the prototype elsewhere in the future.
  */
-#ifndef gx_image_enum_common_t_DEFINED
-#  define gx_image_enum_common_t_DEFINED
 typedef struct gx_image_enum_common_s gx_image_enum_common_t;
-#endif
 
 typedef struct gs_image_enum_s gs_image_enum;
-int gs_image_begin_typed(const gs_image_common_t * pic, gs_state * pgs,
-                         bool uses_color, gx_image_enum_common_t ** ppie);
+int gs_image_begin_typed(const gs_image_common_t * pic, gs_gstate * pgs,
+                         bool uses_color, bool image_is_text,
+                         gx_image_enum_common_t ** ppie);
 
 gs_image_enum *gs_image_enum_alloc(gs_memory_t *, client_name_t);
 
@@ -129,14 +128,6 @@ gs_image_enum *gs_image_enum_alloc(gs_memory_t *, client_name_t);
  * Note that gs_image_init serves for both image and imagemask,
  * depending on the value of ImageMask in the image structure.
  */
-#ifndef gx_device_DEFINED
-#  define gx_device_DEFINED
-typedef struct gx_device_s gx_device;
-#endif
-#ifndef gx_device_color_DEFINED
-#  define gx_device_color_DEFINED
-typedef struct gx_device_color_s gx_device_color;
-#endif
 
 /* Initialize the common part of the image class */
 int gs_image_common_init(gs_image_enum * penum,
@@ -145,14 +136,14 @@ int gs_image_common_init(gs_image_enum * penum,
 
 /* Initialize an enumerator for an ImageType 1 image. */
 int gs_image_init(gs_image_enum * penum, const gs_image_t * pim,
-                  bool MultipleDataSources, gs_state * pgs);
+                  bool MultipleDataSources, bool image_is_text, gs_gstate * pgs);
 
 /* Initialize an enumerator for a general image.
    penum->memory must be initialized in advance.
 */
 int gs_image_enum_init(gs_image_enum * penum,
                        gx_image_enum_common_t * pie,
-                       const gs_data_image_t * pim, gs_state *pgs);
+                       const gs_data_image_t * pim, gs_gstate *pgs);
 
 /*
  * Return the number of bytes of data per row
@@ -196,9 +187,9 @@ int gs_image_next(gs_image_enum * penum, const byte * dbytes,
                   uint dsize, uint * pused);
 
 /* Clean up after processing an image. */
-int gs_image_cleanup(gs_image_enum * penum, gs_state *pgs);
+int gs_image_cleanup(gs_image_enum * penum, gs_gstate *pgs);
 
 /* Clean up after processing an image and free the enumerator. */
-int gs_image_cleanup_and_free_enum(gs_image_enum * penum, gs_state *pgs);
+int gs_image_cleanup_and_free_enum(gs_image_enum * penum, gs_gstate *pgs);
 
 #endif /* gsimage_INCLUDED */

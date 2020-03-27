@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -24,7 +24,7 @@
 #include "gxfixed.h"
 #include "gxmatrix.h"
 #include "gxcoord.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gxpath.h"
 #include "gxfont.h"
 #include "gxfont1.h"
@@ -127,11 +127,10 @@ gs_type1_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
     cs_ptr csp;
 #define clear CLEAR_CSTACK(cstack, csp)
     ip_state_t *ipsp = &pcis->ipstack[pcis->ips_count - 1];
-    const byte *cip;
+    const byte *cip, *cipend;
     crypt_state state;
     register int c;
     int code = 0;
-    fixed ftx = pcis->origin.x, fty = pcis->origin.y;
 
     switch (pcis->init_done) {
         case -1:
@@ -139,8 +138,7 @@ gs_type1_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
             break;
         case 0:
             gs_type1_finish_init(pcis);	/* sets origin */
-            ftx = pcis->origin.x, fty = pcis->origin.y;
-            code = t1_hinter__set_mapping(h, &pcis->pis->ctm,
+            code = t1_hinter__set_mapping(h, &pcis->pgs->ctm,
                             &pfont->FontMatrix, &pfont->base->FontMatrix,
                             pcis->scale.x.log2_unit, pcis->scale.x.log2_unit,
                             pcis->scale.x.log2_unit - pcis->log2_subpixels.x,
@@ -149,7 +147,7 @@ gs_type1_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                             gs_currentaligntopixels(pfont->dir));
             if (code < 0)
                 return code;
-            code = t1_hinter__set_font_data(h, 1, pdata, pcis->no_grid_fitting,
+            code = t1_hinter__set_font_data(pfont->memory, h, 1, pdata, pcis->no_grid_fitting,
                             pcis->pfont->is_resource);
             if (code < 0)
                 return code;
@@ -165,6 +163,7 @@ gs_type1_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
     cip = pgd->bits.data;
     if (cip == 0)
         return (gs_note_error(gs_error_invalidfont));
+    cipend = cip + pgd->bits.size;
   call:state = crypt_charstring_seed;
     if (encrypted) {
         int skip = pdata->lenIV;
@@ -177,9 +176,12 @@ gs_type1_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
   cont:if (ipsp < pcis->ipstack || ipsp->ip == 0)
         return (gs_note_error(gs_error_invalidfont));
     cip = ipsp->ip;
+    cipend = ipsp->cs_data.bits.data + ipsp->cs_data.bits.size;
     state = ipsp->dstate;
   top:for (;;) {
         uint c0 = *cip++;
+        if (cip > cipend)
+            return_error(gs_error_invalidfont);
 
         charstring_next(c0, state, c, encrypted);
         if (c >= c_num1) {
@@ -216,9 +218,9 @@ gs_type1_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
             {char1_command_names};
 
             if (c1names[c] == 0)
-                dmlprintf2(pfont->memory, "[1]0x%lx: %02x??\n", (ulong) (cip - 1), c);
+                dmlprintf2(pfont->memory, "[1]"PRI_INTPTR": %02x??\n", (intptr_t)(cip - 1), c);
             else
-                dmlprintf3(pfont->memory, "[1]0x%lx: %02x %s\n", (ulong) (cip - 1), c,
+                dmlprintf3(pfont->memory, "[1]"PRI_INTPTR": %02x %s\n", (intptr_t)(cip - 1), c,
                           c1names[c]);
         }
 #endif
@@ -234,18 +236,22 @@ gs_type1_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
             case c_undef17:
                 return_error(gs_error_invalidfont);
             case c_callsubr:
+                CS_CHECK_POP(csp, cstack);
                 c = fixed2int_var(*csp) + pdata->subroutineNumberBias;
                 code = pdata->procs.subr_data
                     (pfont, c, false, &ipsp[1].cs_data);
                 if (code < 0)
-                    return_error(code);
+                    return code;
                 --csp;
                 ipsp->ip = cip, ipsp->dstate = state;
                 ++ipsp;
+                CS_CHECK_IPSTACK(ipsp, pcis->ipstack);
                 cip = ipsp->cs_data.bits.data;
+                cipend = ipsp->cs_data.bits.data + ipsp->cs_data.bits.size;
                 goto call;
             case c_return:
                 gs_glyph_data_free(&ipsp->cs_data, "gs_type1_interpret");
+                CS_CHECK_IPSTACK(ipsp, pcis->ipstack);
                 --ipsp;
                 goto cont;
             case c_undoc15:
@@ -294,7 +300,10 @@ gs_type1_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                            Rewind the data pointer to the beginning of the glyph, re-initialise
                            the hinter, execute a '0' sbw op, and then carry on as if we had
                            actually received one. */
-                        cip = pgd->bits.data;
+                        if (pgd) {
+                            cip = pgd->bits.data;
+                            cipend = pgd->bits.data + pgd->bits.size;
+                        }
                         t1_hinter__init(h, pcis->path);
                         code = t1_hinter__sbw(h, fixed_0, fixed_0, fixed_0, fixed_0);
                         if (code < 0)
@@ -305,7 +314,7 @@ gs_type1_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                     code = t1_hinter__endglyph(h);
                     if (code < 0)
                         return code;
-                    code = gx_setcurrentpoint_from_path(pcis->pis, pcis->path);
+                    code = gx_setcurrentpoint_from_path(pcis->pgs, pcis->path);
                     if (code < 0)
                         return code;
                 } else {
@@ -319,6 +328,7 @@ gs_type1_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                     /* do accent of seac */
                     ipsp = &pcis->ipstack[pcis->ips_count - 1];
                     cip = ipsp->cs_data.bits.data;
+                    cipend = ipsp->cs_data.bits.data + ipsp->cs_data.bits.size;
                     goto call;
                 }
                 return code;
@@ -382,17 +392,19 @@ rsbw:		/* Give the caller the opportunity to intervene. */
             case cx_escape:
                 charstring_next(*cip, state, c, encrypted);
                 ++cip;
+                if (cip > cipend)
+                    return_error(gs_error_invalidfont);
 #ifdef DEBUG
                 if (gs_debug['1'] && c < char1_extended_command_count) {
                     static const char *const ce1names[] =
                     {char1_extended_command_names};
 
                     if (ce1names[c] == 0)
-                        dmlprintf2(pfont->memory, "[1]0x%lx: %02x??\n",
-                                   (ulong) (cip - 1), c);
+                        dmlprintf2(pfont->memory, "[1]"PRI_INTPTR": %02x??\n",
+                                   (intptr_t)(cip - 1), c);
                     else
-                        dmlprintf3(pfont->memory, "[1]0x%lx: %02x %s\n",
-                                   (ulong) (cip - 1), c, ce1names[c]);
+                        dmlprintf3(pfont->memory, "[1]"PRI_INTPTR": %02x %s\n",
+                                   (intptr_t)(cip - 1), c, ce1names[c]);
                 }
 #endif
                 switch ((char1_extended_command) c) {
@@ -420,6 +432,7 @@ rsbw:		/* Give the caller the opportunity to intervene. */
                         }
                         clear;
                         cip = ipsp->cs_data.bits.data;
+                        cipend = ipsp->cs_data.bits.data + ipsp->cs_data.bits.size;
                         goto call;
                     case ce1_sbw:
                         if (!pcis->seac_flag)
@@ -431,6 +444,7 @@ rsbw:		/* Give the caller the opportunity to intervene. */
                         gs_type1_sbw(pcis, cs0, cs1, cs2, cs3);
                         goto rsbw;
                     case ce1_div:
+                        CS_CHECK_POP(&csp[-1], cstack);
                         csp[-1] = float2fixed((double)csp[-1] / (double)*csp);
                         --csp;
                         goto pushed;
@@ -440,10 +454,13 @@ rsbw:		/* Give the caller the opportunity to intervene. */
                     case ce1_callothersubr:
                         {
                             int num_results;
+
                             /* We must remember to pop both the othersubr # */
                             /* and the argument count off the stack. */
                             switch (*pindex = fixed2int_var(*csp)) {
                                 case 0:
+                                    if (!CS_CHECK_CSTACK_BOUNDS(&csp[-4], cstack))
+                                        return_error(gs_error_invalidfont);
                                     {
                                         fixed fheight = csp[-4];
                                         /* Assume the next two opcodes */
@@ -462,6 +479,7 @@ rsbw:		/* Give the caller the opportunity to intervene. */
                                     pcis->flex_count = flex_max;	/* not inside flex */
                                     inext;
                                 case 1:
+                                    CS_CHECK_POP(csp, cstack);
                                     code = t1_hinter__flex_beg(h);
                                     if (code < 0)
                                         return code;
@@ -469,6 +487,7 @@ rsbw:		/* Give the caller the opportunity to intervene. */
                                     csp -= 2;
                                     inext;
                                 case 2:
+                                    CS_CHECK_POP(csp, cstack);
                                     if (pcis->flex_count >= flex_max)
                                         return_error(gs_error_invalidfont);
                                     code = t1_hinter__flex_point(h);
@@ -477,6 +496,7 @@ rsbw:		/* Give the caller the opportunity to intervene. */
                                     csp -= 2;
                                     inext;
                                 case 3:
+                                    CS_CHECK_POP(csp, cstack);
                                     /* Assume the next opcode is a `pop'. */
                                     /* See above as to why we don't just */
                                     /* look ahead in the opcode stream. */
@@ -497,6 +517,8 @@ rsbw:		/* Give the caller the opportunity to intervene. */
                                                           num_results);
                                     if (code < 0)
                                         return code;
+                                    if (!CS_CHECK_CSTACK_BOUNDS(&csp[1 - code], cstack))
+                                        return_error(gs_error_invalidfont);
                                     csp -= code;
                                     inext;
                                 case 15:
@@ -519,6 +541,8 @@ rsbw:		/* Give the caller the opportunity to intervene. */
                             int scount = csp - cstack;
                             int n;
 
+                            if (!CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack))
+                                return_error(gs_error_invalidfont);
                             /* Copy the arguments to the caller's stack. */
                             if (scount < 1 || csp[-1] < 0 ||
                                 csp[-1] > int2fixed(scount - 1)

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -48,18 +48,34 @@ xps_png_read(png_structp png, png_bytep data, png_size_t length)
     io->ptr += length;
 }
 
+#define PNG_MEM_ALIGN 16
 static png_voidp
 xps_png_malloc(png_structp png, png_size_t size)
 {
     gs_memory_t *mem = png_get_mem_ptr(png);
-    return gs_alloc_bytes(mem, size, "libpng");
+    uchar *unaligned;
+    uchar *aligned;
+
+    if (size == 0)
+        return NULL;
+    unaligned = gs_alloc_bytes(mem, size + PNG_MEM_ALIGN, "libpng");
+    if (unaligned == NULL)
+        return NULL;
+
+    aligned = (uchar *)((intptr_t)(unaligned + PNG_MEM_ALIGN) & ~(PNG_MEM_ALIGN - 1));
+    aligned[-1] = (uchar)(aligned - unaligned);
+
+    return aligned;
 }
 
 static void
 xps_png_free(png_structp png, png_voidp ptr)
 {
     gs_memory_t *mem = png_get_mem_ptr(png);
-    gs_free_object(mem, ptr, "libpng");
+    uchar *aligned = ptr;
+    if (aligned == NULL)
+        return;
+    gs_free_object(mem, aligned - aligned[-1], "libpng");
 }
 
 /* This only determines if we have an alpha value */
@@ -109,8 +125,13 @@ xps_png_has_alpha(xps_context_t *ctx, byte *rbuf, int rlen)
     /*
      * Read PNG header
      */
-
     png_read_info(png, info);
+    if (png_get_valid(png, info, PNG_INFO_tRNS))
+    {
+        /* this will also expand the depth to 8-bits */
+        png_set_tRNS_to_alpha(png);
+    }
+    png_read_update_info(png, info);
 
     switch (png_get_color_type(png, info))
     {
@@ -241,21 +262,25 @@ xps_decode_png(xps_context_t *ctx, byte *rbuf, int rlen, xps_image_t *image)
     switch (png_get_color_type(png, info))
     {
     case PNG_COLOR_TYPE_GRAY:
+        rc_increment(ctx->gray);
         image->colorspace = ctx->gray;
         image->hasalpha = 0;
         break;
 
     case PNG_COLOR_TYPE_RGB:
+        rc_increment(ctx->srgb);
         image->colorspace = ctx->srgb;
         image->hasalpha = 0;
         break;
 
     case PNG_COLOR_TYPE_GRAY_ALPHA:
+        rc_increment(ctx->gray);
         image->colorspace = ctx->gray;
         image->hasalpha = 1;
         break;
 
     case PNG_COLOR_TYPE_RGB_ALPHA:
+        rc_increment(ctx->srgb);
         image->colorspace = ctx->srgb;
         image->hasalpha = 1;
         break;
@@ -275,8 +300,8 @@ xps_decode_png(xps_context_t *ctx, byte *rbuf, int rlen, xps_image_t *image)
     {
         if (unit == PNG_RESOLUTION_METER)
         {
-            image->xres = xres * 0.0254 + 0.5;
-            image->yres = yres * 0.0254 + 0.5;
+            image->xres = (int)(xres * 0.0254 + 0.5);
+            image->yres = (int)(yres * 0.0254 + 0.5);
         }
     }
 

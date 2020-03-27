@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -28,7 +28,7 @@
 
 /* Define masks for little-endian operation. */
 /* masks[i] has the first i bits off and the rest on. */
-#if !arch_is_big_endian
+#if !ARCH_IS_BIG_ENDIAN
 const bits16 mono_copy_masks[17] = {
     0xffff, 0xff7f, 0xff3f, 0xff1f,
     0xff0f, 0xff07, 0xff03, 0xff01,
@@ -38,7 +38,7 @@ const bits16 mono_copy_masks[17] = {
 };
 const bits32 mono_fill_masks[33] = {
 #define mask(n)\
-  ((~0xff | (0xff >> (n & 7))) << (n & -8))
+  (((bits32)~0xff | (0xff >> (n & 7))) << (n & -8))
     mask( 0),mask( 1),mask( 2),mask( 3),mask( 4),mask( 5),mask( 6),mask( 7),
     mask( 8),mask( 9),mask(10),mask(11),mask(12),mask(13),mask(14),mask(15),
     mask(16),mask(17),mask(18),mask(19),mask(20),mask(21),mask(22),mask(23),
@@ -354,7 +354,7 @@ bits_bounding_box(const byte * data, uint height, uint raster,
     /* We know that the first and last rows are non-blank. */
 
     {
-        uint raster_longs = raster >> arch_log2_sizeof_long;
+        uint raster_longs = raster >> ARCH_LOG2_SIZEOF_LONG;
         uint left = raster_longs - 1, right = 0;
         ulong llong = 0, rlong = 0;
         const byte *q;
@@ -382,22 +382,22 @@ bits_bounding_box(const byte * data, uint height, uint raster,
 
         /* Do binary subdivision on edge longs.  We assume that */
         /* sizeof(long) = 4 or 8. */
-#if arch_sizeof_long > 8
+#if ARCH_SIZEOF_LONG > 8
         Error_longs_are_too_large();
 #endif
 
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
 #  define last_bits(n) ((1L << (n)) - 1)
 #  define shift_out_last(x,n) ((x) >>= (n))
 #  define right_justify_last(x,n) DO_NOTHING
 #else
-#  define last_bits(n) (-1L << ((arch_sizeof_long * 8) - (n)))
+#  define last_bits(n) (-1L << ((ARCH_SIZEOF_LONG * 8) - (n)))
 #  define shift_out_last(x,n) ((x) <<= (n))
-#  define right_justify_last(x,n) (x) >>= ((arch_sizeof_long * 8) - (n))
+#  define right_justify_last(x,n) (x) >>= ((ARCH_SIZEOF_LONG * 8) - (n))
 #endif
 
-        left <<= arch_log2_sizeof_long + 3;
-#if arch_sizeof_long == 8
+        left <<= ARCH_LOG2_SIZEOF_LONG + 3;
+#if ARCH_SIZEOF_LONG == 8
         if (llong & ~last_bits(32))
             shift_out_last(llong, 32);
         else
@@ -417,8 +417,8 @@ bits_bounding_box(const byte * data, uint height, uint raster,
         else
             left += first_1[(byte) llong] + 4;
 
-        right <<= arch_log2_sizeof_long + 3;
-#if arch_sizeof_long == 8
+        right <<= ARCH_LOG2_SIZEOF_LONG + 3;
+#if ARCH_SIZEOF_LONG == 8
         if (!(rlong & last_bits(32)))
             shift_out_last(rlong, 32);
         else
@@ -498,7 +498,7 @@ bits_extract_plane(const bits_plane_t *dest /*write*/,
 
                 *dst++ =
                     byte_acegbdfh_to_abcdefgh[(
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
                     (sword >> 21) | (sword >> 14) | (sword >> 7) | sword
 #else
                     (sword << 3) | (sword >> 6) | (sword >> 15) | (sword >> 24)
@@ -529,21 +529,30 @@ bits_extract_plane(const bits_plane_t *dest /*write*/,
             break;
         }
         default: {
-            sample_load_declare_setup(sptr, sbit, source_row, source_bit,
-                                      source_depth);
-            sample_store_declare_setup(dptr, dbit, dbbyte, dest_row, dest_bit,
-                                       dest_depth);
+            const byte *sptr = source_row;
+            int sbit = source_bit;
+            byte *dptr = dest_row;
+            int dbit = dest_bit;
+            byte dbbyte = (dbit ? (byte)(*dptr & (0xff00 >> dbit)) : 0);
 
-            sample_store_preload(dbbyte, dptr, dbit, dest_depth);
+            dbbyte = (dbit ? (byte)(*dptr & (0xff00 >> dbit)) : 0);
             for (x = width; x > 0; --x) {
                 gx_color_index color;
                 uint pixel;
 
-                sample_load_next_any(color, sptr, sbit, source_depth);
+                if (sizeof(color) > 4) {
+                    if (sample_load_next64((uint64_t *)&color, &sptr, &sbit, source_depth) < 0)
+                        return_error(gs_error_rangecheck);
+                }
+                else {
+                    if (sample_load_next32((uint32_t *)&color, &sptr, &sbit, source_depth) < 0)
+                        return_error(gs_error_rangecheck);
+                }
                 pixel = (color >> shift) & plane_mask;
-                sample_store_next8(pixel, dptr, dbit, dest_depth, dbbyte);
+                if (sample_store_next8(pixel, &dptr, &dbit, dest_depth, &dbbyte) < 0)
+                    return_error(gs_error_rangecheck);
             }
-            sample_store_flush(dptr, dbit, dest_depth, dbbyte);
+            sample_store_flush(dptr, dbit, dbbyte);
         }
         }
     }
@@ -589,7 +598,7 @@ bits_expand_plane(const bits_plane_t *dest /*write*/,
     switch (loop_case) {
 
     case EXPAND_8_TO_32: {
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
 #  define word_shift (shift)
 #else
         int word_shift = 24 - shift;
@@ -614,21 +623,31 @@ bits_expand_plane(const bits_plane_t *dest /*write*/,
              ++y, source_row += source->raster, dest_row += dest->raster
              ) {
             int x;
-            sample_load_declare_setup(sptr, sbit, source_row, source_bit,
-                                      source_depth);
-            sample_store_declare_setup(dptr, dbit, dbbyte, dest_row, dest_bit,
-                                       dest_depth);
+            const byte *sptr = source_row;
+            int sbit = source_bit;
+            byte *dptr = dest_row;
+            int dbit = dest_bit;
+            byte dbbyte = (dbit ? (byte)(*dptr & (0xff00 >> dbit)) : 0);
 
-            sample_store_preload(dbbyte, dptr, dbit, dest_depth);
+            dbbyte = (dbit ? (byte)(*dptr & (0xff00 >> dbit)) : 0);
             for (x = width; x > 0; --x) {
                 uint color;
                 gx_color_index pixel;
 
-                sample_load_next8(color, sptr, sbit, source_depth);
-                pixel = color << shift;
-                sample_store_next_any(pixel, dptr, dbit, dest_depth, dbbyte);
+                if (sample_load_next8(&color, &sptr, &sbit, source_depth) < 0)
+                    return_error(gs_error_rangecheck);
+
+                pixel = (gx_color_index)color << shift;
+                if (sizeof(pixel) > 4) {
+                    if (sample_store_next64(pixel, &dptr, &dbit, dest_depth, &dbbyte) < 0)
+                        return_error(gs_error_rangecheck);
+                }
+                else {
+                    if (sample_store_next32(pixel, &dptr, &dbit, dest_depth, &dbbyte) < 0)
+                        return_error(gs_error_rangecheck);
+                }
             }
-            sample_store_flush(dptr, dbit, dest_depth, dbbyte);
+            sample_store_flush(dptr, dbit, dbbyte);
         }
         break;
 

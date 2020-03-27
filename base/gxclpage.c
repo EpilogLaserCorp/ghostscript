@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,13 +9,14 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
 /* Page object management */
 #include "gdevprn.h"
+#include "gdevdevn.h"
 #include "gxcldev.h"
 #include "gxclpage.h"
 #include "gsicc_cache.h"
@@ -23,32 +24,37 @@
 #include "string_.h"
 #include <ctype.h>	/* for isalpha, etc. */
 
-/* Save a page. The elements are allocated by this function in non_gc_memory */
-int
-gdev_prn_save_page(gx_device_printer * pdev, gx_saved_page * page)
+/* Save the current clist state into a saved page structure,
+ * and optionally stashes the files into the given save_files
+ * pointers.
+ * Does NOT alter the clist files. */
+/* RJW: Does too. The opendevice call at the end calls clist_open */
+static int
+do_page_save(gx_device_printer * pdev, gx_saved_page * page, clist_file_ptr *save_files)
 {
     gx_device_clist *cdev = (gx_device_clist *) pdev;
     gx_device_clist_writer * const pcldev = (gx_device_clist_writer *)pdev;
     int code;
     gs_c_param_list paramlist;
+    gs_devn_params *pdevn_params;
 
-    /* Make sure we are banding. */
-    if (!PRINTER_IS_CLIST(pdev))
-        return_error(gs_error_rangecheck);
-
-    if ((code = clist_end_page(pcldev)) < 0 ||
-        (code = cdev->common.page_info.io_procs->fclose(pcldev->page_info.cfile, pcldev->page_info.cfname, false)) < 0 ||
-        (code = cdev->common.page_info.io_procs->fclose(pcldev->page_info.bfile, pcldev->page_info.bfname, false)) < 0
-        )
-        return code;
     /* Save the device information. */
-    strncpy(page->dname, pdev->dname, sizeof(page->dname));
+    strncpy(page->dname, pdev->dname, sizeof(page->dname)-1);
     page->color_info = pdev->color_info;
+    page->tag = pdev->graphics_type_tag;
     page->io_procs = cdev->common.page_info.io_procs;
     /* Save the page information. */
-    strncpy(page->cfname, pcldev->page_info.cfname, sizeof(page->cfname));
-    strncpy(page->bfname, pcldev->page_info.bfname, sizeof(page->bfname));
+    strncpy(page->cfname, pcldev->page_info.cfname, sizeof(page->cfname)-1);
+    strncpy(page->bfname, pcldev->page_info.bfname, sizeof(page->bfname)-1);
     page->bfile_end_pos = pcldev->page_info.bfile_end_pos;
+    if (save_files != NULL) {
+      save_files[0] =  pcldev->page_info.cfile;
+      save_files[1] =  pcldev->page_info.bfile;
+      pcldev->page_info.cfile = NULL;
+      pcldev->page_info.bfile = NULL;
+    }
+    pcldev->page_info.cfname[0] = 0;
+    pcldev->page_info.bfname[0] = 0;
     page->tile_cache_size = pcldev->page_info.tile_cache_size;
     page->band_params = pcldev->page_info.band_params;
     /* Now serialize and save the rest of the information from the device params */
@@ -67,6 +73,7 @@ gdev_prn_save_page(gx_device_printer * pdev, gx_saved_page * page)
     if ((page->paramlist = gs_alloc_bytes(page->mem,
                                            page->paramlist_len,
                                            "saved_page paramlist")) == NULL) {
+        code = gs_error_VMerror;
         goto params_out;
     }
     code = gs_param_list_serialize((gs_param_list *)&paramlist, page->paramlist,
@@ -77,8 +84,49 @@ params_out:
         return code;			/* all device param errors collect here */
 
     /* Save other information. */
+    /* If this device has spot colors that were added dynamically, we need to pass the names */
+    /* through as well. These are from the devn_params->separations->names array.            */
+    if ((pdevn_params = dev_proc(pdev, ret_devn_params)((gx_device *)pdev)) != NULL) {
+        int i;
+
+        page->num_separations = pdevn_params->separations.num_separations;
+        for (i=0; i < page->num_separations; i++) {
+            page->separation_name_sizes[i] = pdevn_params->separations.names[i].size;
+            page->separation_names[i] = gs_alloc_bytes(page->mem, page->separation_name_sizes[i],
+                                                       "saved_page separation_names");
+            if (page->separation_names[i] == NULL) {
+                gs_free_object(page->mem, page->paramlist, "saved_page paramlist");
+                while (--i > 0)
+                    gs_free_object(page->mem, page->separation_names[i],
+                                   "saved_page separation_names");
+                return gs_error_VMerror;
+            }
+            memcpy(page->separation_names[i], pdevn_params->separations.names[i].data,
+                   page->separation_name_sizes[i]);
+        }
+    }
     /* Now re-open the clist device so that we get new files for the next page */
     return (*gs_clist_device_procs.open_device) ((gx_device *) pdev);
+}
+
+/* Save a page. The elements are allocated by this function in non_gc_memory */
+int
+gdev_prn_save_page(gx_device_printer * pdev, gx_saved_page * page)
+{
+    gx_device_clist *cdev = (gx_device_clist *) pdev;
+    gx_device_clist_writer * const pcldev = (gx_device_clist_writer *)pdev;
+    int code;
+
+    /* Make sure we are banding. */
+    if (!PRINTER_IS_CLIST(pdev))
+        return_error(gs_error_rangecheck);
+
+    if ((code = clist_end_page(pcldev)) < 0 ||
+        (code = cdev->common.page_info.io_procs->fclose(pcldev->page_info.cfile, pcldev->page_info.cfname, false)) < 0 ||
+        (code = cdev->common.page_info.io_procs->fclose(pcldev->page_info.bfile, pcldev->page_info.bfname, false)) < 0
+        )
+        return code;
+    return do_page_save(pdev, page, NULL);
 }
 
 /* Render an array of saved pages. */
@@ -99,8 +147,7 @@ gdev_prn_render_pages(gx_device_printer * pdev,
             /* We would like to fully check the color representation, */
             /* but we don't have enough information to do that. */
             if (strcmp(page->dname, pdev->dname) != 0 ||
-                memcmp(&page->color_info, &pdev->color_info,
-                       sizeof(pdev->color_info)) != 0
+                !gx_color_info_equal(&page->color_info, &pdev->color_info)
                 )
                 return_error(gs_error_rangecheck);
             /* Currently we don't allow translation in Y. */
@@ -281,7 +328,7 @@ param_find_key(byte *token, int token_size)
     if (*token == (byte)'*')
         return PARAM_STAR;
 
-    for (i=0; i < sizeof(saved_pages_keys); i++) {
+    for (i=0; i < (sizeof(saved_pages_keys)/sizeof(saved_pages_keys[0])); i++) {
         if (strncasecmp((char *)token, saved_pages_keys[i], token_size) == 0) {
             found = (saved_pages_key_enum) (i + 1);
             break;
@@ -339,11 +386,12 @@ param_parse_token(byte *param, int param_left, int *token_size)
 }
 
 static int
-gx_saved_page_load(gx_device_printer *pdev, gx_saved_page *page)
+do_page_load(gx_device_printer *pdev, gx_saved_page *page, clist_file_ptr *save_files)
 {
     int code;
     gx_device_clist_reader *crdev = (gx_device_clist_reader *)pdev;
     gs_c_param_list paramlist;
+    gs_devn_params *pdevn_params;
 
     /* fetch and put the params we saved with the page */
     gs_c_param_list_write(&paramlist, pdev->memory);
@@ -355,6 +403,29 @@ gx_saved_page_load(gx_device_printer *pdev, gx_saved_page *page)
     if (code < 0) {
         goto out;
     }
+    /* if this is a DeviceN device (that supports spot colors), we need to load the */
+    /* devn_params saved in the page (num_separations, separations[])               */
+    if ((pdevn_params = dev_proc(pdev, ret_devn_params)((gx_device *)pdev)) != NULL) {
+        int i;
+
+        pdevn_params->separations.num_separations = page->num_separations;
+        for (i=0; i < page->num_separations; i++) {
+            pdevn_params->separations.names[i].size = page->separation_name_sizes[i];
+            pdevn_params->separations.names[i].data = gs_alloc_bytes(pdev->memory->stable_memory,
+                                                                     page->separation_name_sizes[i],
+                                                                     "saved_page separation_names");
+            if (pdevn_params->separations.names[i].data == NULL) {
+                while (--i > 0)
+                    gs_free_object(pdev->memory->stable_memory,
+                                   pdevn_params->separations.names[i].data,
+                                   "saved_page separation_names");
+                code = gs_error_VMerror;
+                goto out;
+            }
+            memcpy(pdevn_params->separations.names[i].data, page->separation_names[i],
+                   page->separation_name_sizes[i]);
+        }
+    }
     if (code > 0)
         if ((code = gs_opendevice((gx_device *)pdev)) < 0)
             goto out;
@@ -362,7 +433,8 @@ gx_saved_page_load(gx_device_printer *pdev, gx_saved_page *page)
     /* If the device is now a writer, that means putparams realloced the device */
     /* so we need to get back to reader mode and remove the extra clist files  */
     if (CLIST_IS_WRITER((gx_device_clist *)pdev)) {
-        clist_close_writer_and_init_reader((gx_device_clist *)crdev);
+        if ((code = clist_close_writer_and_init_reader((gx_device_clist *)crdev)) < 0)
+            goto out;
         /* close and unlink the temp files just created */
         if (crdev->page_info.cfile != NULL)
             crdev->page_info.io_procs->fclose(crdev->page_info.cfile, crdev->page_info.cfname, true);
@@ -376,6 +448,7 @@ gx_saved_page_load(gx_device_printer *pdev, gx_saved_page *page)
     crdev->page_info.tile_cache_size = page->tile_cache_size;
     crdev->page_info.bfile_end_pos = page->bfile_end_pos;
     crdev->page_info.band_params = page->band_params;
+    crdev->graphics_type_tag = page->tag;
 
     crdev->yplane.index = -1;
     crdev->pages = NULL;
@@ -385,8 +458,27 @@ gx_saved_page_load(gx_device_printer *pdev, gx_saved_page *page)
     crdev->ymin = crdev->ymax = 0;      /* invalidate buffer contents to force rasterizing */
 
     /* We probably don't need to copy in the filenames, but do it in case something expects it */
-    strncpy(crdev->page_info.cfname, page->cfname, sizeof(crdev->page_info.cfname));
-    strncpy(crdev->page_info.bfname, page->bfname, sizeof(crdev->page_info.bfname));
+    strncpy(crdev->page_info.cfname, page->cfname, sizeof(crdev->page_info.cfname)-1);
+    strncpy(crdev->page_info.bfname, page->bfname, sizeof(crdev->page_info.bfname)-1);
+    if (save_files != NULL)
+    {
+        crdev->page_info.cfile = save_files[0];
+        crdev->page_info.bfile = save_files[1];
+    }
+out:
+    return code;
+}
+
+static int
+gx_saved_page_load(gx_device_printer *pdev, gx_saved_page *page)
+{
+    int code;
+    gx_device_clist_reader *crdev = (gx_device_clist_reader *)pdev;
+
+    code = do_page_load(pdev, page, NULL);
+    if (code < 0)
+        return code;
+
     /* Now open this page's files */
     code = crdev->page_info.io_procs->fopen(crdev->page_info.cfname,
                gp_fmode_rb, &(crdev->page_info.cfile), crdev->bandlist_memory,
@@ -396,14 +488,14 @@ gx_saved_page_load(gx_device_printer *pdev, gx_saved_page *page)
                    gp_fmode_rb, &(crdev->page_info.bfile), crdev->bandlist_memory,
                    crdev->bandlist_memory, false);
     }
-out:
+
     return code;
 }
 
 static int
 gx_output_saved_page(gx_device_printer *pdev, gx_saved_page *page)
 {
-    int code;
+    int code, ecode;
     /* Note that banding_type is NOT a device parameter handled in the paramlist */
     gdev_banding_type save_banding_type = pdev->space_params.banding_type;
     gx_device_clist_reader *crdev = (gx_device_clist_reader *)pdev;
@@ -440,13 +532,15 @@ gx_output_saved_page(gx_device_printer *pdev, gx_saved_page *page)
     crdev->icc_cache_cl = NULL;
 
     /* Close the clist files */
-    code = crdev->page_info.io_procs->fclose(crdev->page_info.cfile, crdev->page_info.cfname, false);
-    if (code >= 0) {
+    ecode = crdev->page_info.io_procs->fclose(crdev->page_info.cfile, crdev->page_info.cfname, false);
+    if (ecode >= 0) {
         crdev->page_info.cfile = NULL;
-        code = crdev->page_info.io_procs->fclose(crdev->page_info.bfile, crdev->page_info.bfname, false);
+        ecode = crdev->page_info.io_procs->fclose(crdev->page_info.bfile, crdev->page_info.bfname, false);
     }
-    if (code < 0)
+    if (ecode < 0) {
+        code = ecode;
         goto out;
+    }
     crdev->page_info.bfile = NULL;
 
 out:
@@ -522,24 +616,18 @@ gx_saved_pages_list_print(gx_device_printer *pdev, gx_saved_pages_list *list,
     bool save_bg_print = false;                 /* arbitrary, silence warning */
     bool save_bandfile_open_close = false;      /* arbitrary, silence warning */
     gx_saved_page saved_page;
+    clist_file_ptr saved_files[2];
 
     /* save the current (empty) page while we print  */
-    if ((code = gdev_prn_save_page(pdev, &saved_page)) < 0) {
+    if ((code = do_page_save(pdev, &saved_page, saved_files)) < 0) {
         emprintf(pdev->memory, "gx_saved_pages_list_print: Error getting device params\n");
         goto out;
     }
+
     /* save_page leaves the clist in writer mode, so prepare for reading clist */
     /* files. When we are done with printing, we'll go back to write mode.     */
     if ((code = clist_close_writer_and_init_reader((gx_device_clist *)pdev)) < 0)
         goto out;
-
-    /* The clist files that were opened with the save_page are not needed */
-    /* so delete them now so we don't leave them "orphaned".              */
-    if (crdev->page_info.cfile != NULL)
-        crdev->page_info.io_procs->fclose(crdev->page_info.cfile, crdev->page_info.cfname, true);
-    if (crdev->page_info.bfile != NULL)
-        crdev->page_info.io_procs->fclose(crdev->page_info.bfile, crdev->page_info.bfname, true);
-    crdev->page_info.cfile = crdev->page_info.bfile = NULL;
 
     /* While printing, disable the saved_pages mode and bg_print */
     pdev->saved_pages_list = NULL;
@@ -729,9 +817,9 @@ out:
     pdev->saved_pages_list = list;
     pdev->bg_print_requested = save_bg_print;
     crdev->do_not_open_or_close_bandfiles = save_bandfile_open_close;
-    /* load must be after we've set saved_pages_list which forces clist mode. */
-    gx_saved_page_load(pdev, &saved_page);
 
+    /* load must be after we've set saved_pages_list which forces clist mode. */
+    do_page_load(pdev, &saved_page, saved_files);
 
     /* Finally, do the finish page which will reset the clist to empty and write mode */
     endcode = clist_finish_page((gx_device *)pdev, true);
@@ -764,6 +852,7 @@ gx_saved_pages_param_process(gx_device_printer *pdev, byte *param, int param_siz
             if (pdev->saved_pages_list == NULL) {
                 if ((pdev->saved_pages_list = gx_saved_pages_list_new(pdev)) == NULL)
                     return_error(gs_error_VMerror);
+                pdev->finalize = gdev_prn_finalize;	/* set to make sure the list gets freed */
 
                 /* We need to change to clist mode. Always uses clist when saving pages */
                 pdev->saved_pages_list->save_banding_type = pdev->space_params.banding_type;
@@ -797,6 +886,7 @@ gx_saved_pages_param_process(gx_device_printer *pdev, byte *param, int param_siz
             /* Always return with an empty list, even if we weren't saving previously */
             if ((pdev->saved_pages_list = gx_saved_pages_list_new(pdev)) == NULL)
                 return_error(gs_error_VMerror);
+            pdev->finalize = gdev_prn_finalize;	/* set to make sure the list gets freed */
             /* restore the original count */
             pdev->saved_pages_list->collated_copies = collated_copies;
             break;

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -43,12 +43,14 @@ static iodev_proc_fopen(mswin_handle_fopen);
 static iodev_proc_fclose(mswin_handle_fclose);
 const gx_io_device gs_iodev_handle = {
     "%handle%", "FileSystem",
-    {iodev_no_init, iodev_no_open_device,
+    {iodev_no_init, iodev_no_finit, iodev_no_open_device,
      NULL /*iodev_os_open_file */ , mswin_handle_fopen, mswin_handle_fclose,
      iodev_no_delete_file, iodev_no_rename_file, iodev_no_file_status,
      iodev_no_enumerate_files, NULL, NULL,
      iodev_no_get_params, iodev_no_put_params
-    }
+    },
+    NULL,
+    NULL
 };
 
 /* The file device procedures */
@@ -87,33 +89,67 @@ get_os_handle(const char *name)
 
 static int
 mswin_handle_fopen(gx_io_device * iodev, const char *fname, const char *access,
-           FILE ** pfile, char *rfname, uint rnamelen)
+                   gp_file ** pfile, char *rfname, uint rnamelen, gs_memory_t *mem)
 {
     int fd;
     long hfile;	/* Correct for Win32, may be wrong for Win64 */
-    errno = 0;
+    gs_lib_ctx_t *ctx = mem->gs_lib_ctx;
+    gs_fs_list_t *fs = ctx->core->fs;
 
-    if ((hfile = get_os_handle(fname)) == (long)INVALID_HANDLE_VALUE)
+    if (gp_validate_path(mem, fname, access) != 0)
+        return gs_error_invalidfileaccess;
+
+    /* First we try the open_handle method. */
+    /* Note that the loop condition here ensures we don't
+     * trigger on the last registered fs entry (our standard
+     * 'file' one). */
+    *pfile = NULL;
+    for (fs = ctx->core->fs; fs != NULL && fs->next != NULL; fs = fs->next)
+    {
+        int code = 0;
+        if (fs->fs.open_handle)
+            code = fs->fs.open_handle(mem, fs->secret, fname, access, pfile);
+        if (code < 0)
+            return code;
+        if (*pfile != NULL)
+            return code;
+    }
+
+    /* If nothing claimed that, then continue with the
+     * standard MS way of working. */
+    errno = 0;
+    *pfile = gp_file_FILE_alloc(mem);
+    if (*pfile == NULL) {
+        return gs_error_VMerror;
+    }
+
+    if ((hfile = get_os_handle(fname)) == (long)INVALID_HANDLE_VALUE) {
+        gp_file_dealloc(*pfile);
         return_error(gs_fopen_errno_to_code(EBADF));
+    }
 
     /* associate a C file handle with an OS file handle */
     fd = _open_osfhandle((long)hfile, 0);
-    if (fd == -1)
+    if (fd == -1) {
+        gp_file_dealloc(*pfile);
         return_error(gs_fopen_errno_to_code(EBADF));
+    }
 
     /* associate a C file stream with C file handle */
-    *pfile = fdopen(fd, (char *)access);
-    if (*pfile == NULL)
+    if (gp_file_FILE_set(*pfile, fdopen(fd, (char *)access), NULL)) {
+        *pfile = NULL;
         return_error(gs_fopen_errno_to_code(errno));
+    }
 
     if (rfname != NULL)
         strcpy(rfname, fname);
+
     return 0;
 }
 
 static int
-mswin_handle_fclose(gx_io_device * iodev, FILE * file)
+mswin_handle_fclose(gx_io_device * iodev, gp_file * file)
 {
-    fclose(file);
+    gp_fclose(file);
     return 0;
 }

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,21 +20,15 @@
 #  define gxttfb_INCLUDED
 
 #include "ttfoutl.h"
-
-#ifndef gx_ttfReader_DEFINED
-#  define gx_ttfReader_DEFINED
-typedef struct gx_ttfReader_s gx_ttfReader;
-#endif
-
-#ifndef gs_font_type42_DEFINED
-#  define gs_font_type42_DEFINED
-typedef struct gs_font_type42_s gs_font_type42;
-#endif
+#include "gxfont.h"
+#include "gslibctx.h"
+#include "gsgcache.h"
+#include "gxfcache.h"
 
 struct gx_ttfReader_s {
     ttfReader super;
     int pos;
-    bool error;
+    int error;
     int extra_glyph_index;
     gs_font_type42 *pfont;
     gs_memory_t *memory;

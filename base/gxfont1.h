@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -21,17 +21,14 @@
 
 #include "gstype1.h"		/* for charstring_interpret_proc */
 #include "gxfixed.h"
+#include "gxfapi.h"
+#include "gxfont.h"
 
 /*
  * This is the type-specific information for Adobe Type 1 fonts.
  * It also includes the information for Type 2 fonts, because
  * there isn't very much of it and it's less trouble to include here.
  */
-
-#ifndef gs_font_type1_DEFINED
-#  define gs_font_type1_DEFINED
-typedef struct gs_font_type1_s gs_font_type1;
-#endif
 
 /*
  * The zone_table values should be ints, according to the Adobe
@@ -50,10 +47,7 @@ typedef struct gs_font_type1_s gs_font_type1;
 #define stem_table(size)\
         float_array(size)
 
-#ifndef gs_type1_data_DEFINED
-#define gs_type1_data_DEFINED
 typedef struct gs_type1_data_s gs_type1_data;
-#endif
 
 typedef struct gs_type1_data_procs_s {
 
@@ -142,8 +136,6 @@ struct gs_type1_data_s {
     byte hash_subrs[16];	/* Used only for checking font copying compatibility */
     int num_subrs;		/* Used only for checking font copying compatibility */
 };
-
-#define gs_type1_data_s_DEFINED
 
 struct gs_font_type1_s {
     gs_font_base_common;

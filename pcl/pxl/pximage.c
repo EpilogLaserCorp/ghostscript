@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -84,6 +84,28 @@ px_purge_pattern_cache(px_state_t * pxs, pxePatternPersistence_t max_persist)
                             px_pattern_purge_proc, (void *)&max_persist);
 }
 
+/* active decompression types */
+typedef enum
+{
+    unset  = 0,
+    nocomp = 1,
+    rle    = 2,
+    jpeg   = 4,
+    delta  = 8,
+} decomp_init_t;
+
+static inline bool nocomp_inited(uint comp)  {return comp & nocomp;}
+static inline bool rle_inited(uint comp)     {return comp & rle;}
+static inline bool jpeg_inited(uint comp)    {return comp & jpeg;}
+static inline bool delta_inited(uint comp)   {return comp & delta;}
+
+static inline void nocomp_set(uint *comp) {*comp |= nocomp;}
+static inline void rle_set(uint *comp)    {*comp |= rle;}
+static inline void jpeg_set(uint *comp)   {*comp |= jpeg;}
+static inline void delta_set(uint *comp)  {*comp |= delta;}
+
+static inline void comp_unset(uint *comp)  {*comp = unset;}
+
 /* pxl delta row decompression state machine states */
 typedef enum
 {
@@ -110,13 +132,29 @@ typedef struct px_bitmap_enum_s
 {
     gs_memory_t *mem;           /* used only for the jpeg filter */
     uint data_per_row;          /* ditto minus possible trailing padding */
-    bool initialized;
-    pxeCompressMode_t compress_type;
+    uint initialized;
     stream_RLD_state rld_stream_state;  /* decompressor states */
     stream_DCT_state dct_stream_state;
     jpeg_decompress_data jdd;
     deltarow_state_t deltarow_state;
+
+    /* Entries to deal with 'rebuffering' - the idea of making
+     * input image data appear a different (but equivalent) shape.
+     * Currently just morphing '1xH' bitmaps into 'Hx1' ones. */
+    uint rebuffered_data_per_row; /* equal to data_per_row except when flipping */
+    bool rebuffered;
+    uint rebuffered_width;
+    uint rebuffered_height;
+    int rebuffered_row_pos;
+    bool grayscale;
 } px_bitmap_enum_t;
+
+typedef struct px_begin_image_args_s {
+    uint width, height;
+    int depth;
+    pxeColorMapping_t mapping;
+    real dest_width, dest_height;
+} px_bitmap_args_t;
 
 /* Define our image enumerator. */
 #ifndef px_image_enum_DEFINED
@@ -127,31 +165,126 @@ struct px_image_enum_s
 {
     gs_image_t image;
     byte *row;                  /* buffer for one row of data */
-    uint raster;
     void *info;                 /* state structure for driver */
     px_bitmap_enum_t benum;
+    px_bitmap_args_t bi_args;
+    bool enum_started;
 };
 
 gs_private_st_simple(st_px_image_enum, px_image_enum_t, "px_image_enum_t");
 
-/* ---------------- Utilities ---------------- */
+
+static int
+stream_error(stream_state * st, const char *str)
+{
+    return_error(-1);
+}
+
+static int
+px_jpeg_init(px_bitmap_enum_t * benum, px_bitmap_params_t * params, px_args_t * par)
+{
+    stream_cursor_read r;
+    stream_cursor_write w;
+    uint used;
+    const byte *data = par->source.data;
+    stream_DCT_state *ss = (&benum->dct_stream_state);
+    jpeg_decompress_data *jddp = &(benum->jdd);
+    uint avail = par->source.available;
+    int code = 0;
+
+    if (!jpeg_inited(benum->initialized)) {
+        s_init_state((stream_state *)ss, &s_DCTD_template, benum->mem);
+        ss->report_error = stream_error;
+        s_DCTD_template.set_defaults((stream_state *)ss);
+
+        ss->jpeg_memory = benum->mem;
+        ss->data.decompress = jddp;
+
+        jddp->templat = s_DCTD_template;
+        jddp->memory = benum->mem;
+        jddp->scanline_buffer = NULL;
+        jddp->PassThrough = 0;
+        jddp->PassThroughfn = 0;
+        jddp->device = (void *)0;
+
+        if (gs_jpeg_create_decompress(ss) < 0)
+            return_error(errorInsufficientMemory);
+
+        (*s_DCTD_template.init) ((stream_state *)ss);
+        jpeg_set(&benum->initialized);
+    }
+
+    r.ptr = data - 1;
+    r.limit = r.ptr + avail;
+
+    /* this seems to be the way to just get the header info */
+    w.ptr = w.limit = 0;
+    code =
+        (*s_DCTD_template.process) ((stream_state *)ss, &r, &w, false);
+
+    if (code < 0)
+        goto error;
+
+    used = r.ptr + 1 - data;
+    par->source.data = r.ptr + 1;
+    par->source.available = avail - used;
+
+    /* Needs more data to complete reading the header */
+    if (ss->phase < 2)
+        return pxNeedData;
+
+    params->width = jddp->dinfo.output_width;
+    params->height = jddp->dinfo.output_height;
+    {
+        int comps = jddp->dinfo.output_components;
+        if (comps == 1) {
+            params->color_space = eGray;
+        } else if (comps == 3) {
+            params->color_space = eRGB;
+        }
+        else {
+            code = -1;
+            goto error;
+        }
+        params->depth = 8;
+        return 0;
+    }
+
+error:
+    gs_jpeg_destroy(ss);
+    return_error(code);
+}
 
 /* Extract the parameters for reading a bitmap image or raster pattern. */
-/* Attributes: pxaColorMapping, pxaColorDepth, pxaSourceWidth, */
-/* pxaSourceHeight, pxaDestinationSize. */
 static int
 begin_bitmap(px_bitmap_params_t * params, px_bitmap_enum_t * benum,
-             const px_args_t * par, const px_state_t * pxs)
+             const px_bitmap_args_t * bar, const px_state_t * pxs, bool is_jpeg, px_args_t * par)
 {
+    int depth;
+    int num_components;
     px_gstate_t *pxgs = pxs->pxgs;
-    int depth = "\001\004\010"[par->pv[1]->value.i];
-    int num_components = (pxgs->color_space == eGray ? 1 : 3);
 
-    params->width = par->pv[2]->value.i;
-    params->height = par->pv[3]->value.i;
-    params->depth = depth;
-    params->color_space = pxgs->color_space;
-    if (par->pv[0]->value.i == eIndexedPixel) {
+    benum->mem = pxs->memory;
+
+    if (is_jpeg) {
+        int code = px_jpeg_init(benum, params, par);
+        if (code < 0 || code == pxNeedData)
+            return_error(code);
+        depth = params->depth;
+        num_components = (params->color_space == eGray ? 1 : 3);
+        if (num_components == 3 && pxgs->color_space == eGray)
+            benum->grayscale = true;
+    } else {
+        px_gstate_t *pxgs = pxs->pxgs;
+        depth = "\001\004\010"[bar->depth];
+        num_components = (pxgs->color_space == eGray ? 1 : 3);
+        params->width = bar->width;
+        params->height = bar->height;
+        params->depth = depth;
+        params->color_space = pxgs->color_space;
+    }
+
+    if (bar->mapping == eIndexedPixel && !is_jpeg) {
         if (pxgs->palette.data == 0)
             return_error(errorMissingPalette);
         if (pxgs->palette.size != (1 << depth) * num_components)
@@ -160,25 +293,45 @@ begin_bitmap(px_bitmap_params_t * params, px_bitmap_enum_t * benum,
         num_components = 1;
     } else
         params->indexed = false;
-    params->dest_width = real_value(par->pv[4], 0);
-    params->dest_height = real_value(par->pv[4], 1);
+
+    params->dest_width = bar->dest_width;
+    params->dest_height = bar->dest_height;
     benum->data_per_row =
-        round_up(params->width * params->depth * num_components, 8) >> 3;
-    benum->mem = pxs->memory;
-    benum->initialized = false;
+        ((params->width * params->depth * num_components) + 7) >> 3;
     return 0;
 }
 
+/* Extract the parameters for reading a bitmap image or raster pattern. */
+/* Attributes: pxaColorMapping, pxaColorDepth, pxaSourceWidth, */
+/* pxaSourceHeight, pxaDestinationSize. */
 static int
-stream_error(stream_state * st, const char *str)
+begin_rebuffered_bitmap(px_bitmap_params_t * params, px_bitmap_enum_t * benum,
+                        const px_bitmap_args_t * bar, const px_state_t * pxs, bool is_jpeg, px_args_t * par)
 {
-    dmprintf1(st->memory, "pxl stream error %s\n", str);
-    return 0;
+    int code = begin_bitmap(params, benum, bar, pxs, is_jpeg, par);
+
+    if (code < 0 || code == pxNeedData)
+        return_error(code);
+
+    if (params->width == 1 && params->height > 1) {
+        benum->rebuffered_data_per_row = benum->data_per_row * params->height;
+        benum->rebuffered = 1;
+        benum->rebuffered_width = params->height;
+        benum->rebuffered_height = params->width;
+        benum->rebuffered_row_pos = 0;
+    } else {
+        benum->rebuffered_data_per_row = benum->data_per_row;
+        benum->rebuffered = 0;
+        benum->rebuffered_width = params->width;
+        benum->rebuffered_height = params->height;
+    }
+
+    return code;
 }
 
 static int
 read_jpeg_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata,
-                      px_args_t * par)
+                      px_args_t * par, bool last)
 {
     uint data_per_row = benum->data_per_row;    /* jpeg doesn't pad */
     uint avail = par->source.available;
@@ -194,14 +347,20 @@ read_jpeg_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata,
     /* consumed all of the data */
     if ((par->source.position >= end_pos) && (ss->phase != 4) && (par->source.available == 0)) {
         /* shutdown jpeg filter if necessary */
-        if (benum->initialized)
+        if (jpeg_inited(benum->initialized))
             gs_jpeg_destroy((&benum->dct_stream_state));
         return 0;
     }
 
-    if (!benum->initialized) {
+    if (last)
+        return_error(errorIllegalDataLength);
+
+    if (!jpeg_inited(benum->initialized)) {
         jpeg_decompress_data *jddp = &(benum->jdd);
 
+        /* we do not allow switching from other compression schemes to jpeg */
+        if (benum->initialized != unset)
+            return_error(errorIllegalAttributeValue);
         /* use the graphics library support for DCT streams */
         ss->memory = benum->mem;
         ss->templat = &s_DCTD_template;
@@ -212,11 +371,14 @@ read_jpeg_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata,
         jddp->memory = ss->jpeg_memory = benum->mem;
         /* set this early for safe error exit */
         jddp->scanline_buffer = NULL;
+        jddp->PassThrough = 0;
+        jddp->PassThroughfn = 0;
+        jddp->device = (void *)0;
         if (gs_jpeg_create_decompress(ss) < 0)
             return_error(errorInsufficientMemory);
         (*s_DCTD_template.init) ((stream_state *) ss);
         jddp->templat = s_DCTD_template;
-        benum->initialized = true;
+        jpeg_set(&benum->initialized);
     }
     r.ptr = data - 1;
     r.limit = r.ptr + avail;
@@ -230,6 +392,14 @@ read_jpeg_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata,
             (*s_DCTD_template.process) ((stream_state *) ss, &r, &w, false);
         /* code = num scanlines processed (0=need more data, -ve=error) */
         used = w.ptr + 1 - data - pos_in_row;
+
+        /* the filter process returns 1 to indicate more room is
+         * needed for the output data, which should not happen unless
+         * the parameters are specified incorrectly.
+         */
+
+        if (code == 1)
+            code = -1;
         if ((code == EOFC) && (used > 0))
             code = 1;
         pos_in_row += used;
@@ -254,7 +424,7 @@ read_jpeg_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata,
 
 static int
 read_uncompressed_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata,
-                              px_args_t * par)
+                              px_args_t * par, bool last)
 {
     int code;
     uint avail = par->source.available;
@@ -267,12 +437,15 @@ read_uncompressed_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata,
     if (par->pv[3])
         pad = par->pv[3]->value.i;
 
-    data_per_row_padded = round_up(data_per_row, pad);
+    data_per_row_padded = round_up(data_per_row, (int)pad);
     pos_in_row = par->source.position % data_per_row_padded;
 
     /* consumed all of the data */
     if (par->source.position >= data_per_row_padded * par->pv[1]->value.i)
         return 0;
+
+    if (last)
+        return_error(errorIllegalDataLength);
 
     if (avail >= data_per_row_padded && pos_in_row == 0) {
         /* Use the data directly from the input buffer. */
@@ -293,7 +466,7 @@ read_uncompressed_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata,
 }
 
 static int
-read_rle_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata, px_args_t * par)
+read_rle_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata, px_args_t * par, bool last)
 {
     stream_RLD_state *ss = (&benum->rld_stream_state);
     uint avail = par->source.available;
@@ -307,18 +480,21 @@ read_rle_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata, px_args_t * par)
     if (par->pv[3])
         pad = par->pv[3]->value.i;
     data_per_row = benum->data_per_row;
-    data_per_row_padded = round_up(benum->data_per_row, pad);
+    data_per_row_padded = round_up(benum->data_per_row, (int)pad);
     pos_in_row = par->source.position % data_per_row_padded;
 
     /* consumed all of the data */
     if (par->source.position >= data_per_row_padded * par->pv[1]->value.i)
         return 0;
 
-    if (!benum->initialized) {
+    if (last)
+        return_error(errorIllegalDataLength);
+
+    if (!rle_inited(benum->initialized)) {
         ss->EndOfData = false;
         ss->templat = &s_RLD_template;
         s_RLD_init_inline(ss);
-        benum->initialized = true;
+        rle_set(&benum->initialized);
     }
     r.ptr = data - 1;
     r.limit = r.ptr + avail;
@@ -404,7 +580,7 @@ read_rle_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata, px_args_t * par)
  */
 static int
 read_deltarow_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata,
-                          px_args_t * par)
+                          px_args_t * par, bool last)
 {
     deltarow_state_t *deltarow = &benum->deltarow_state;
     uint avail = par->source.available;
@@ -413,13 +589,16 @@ read_deltarow_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata,
     const byte *pout_start = pout;
     bool end_of_row = false;
 
-    if (benum->initialized && deltarow->rowwritten == par->pv[1]->value.i) {
+    if (delta_inited(benum->initialized) && deltarow->rowwritten == par->pv[1]->value.i) {
         deltarow->rowwritten = 0;
         return 0;
     }
 
+    if (last)
+        return_error(errorIllegalDataLength);
+
     /* initialize at begin of image */
-    if (!benum->initialized) {
+    if (!delta_inited(benum->initialized)) {
         /* zero seed row */
         deltarow->seedrow =
             gs_alloc_bytes(benum->mem, benum->data_per_row,
@@ -430,7 +609,7 @@ read_deltarow_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata,
         deltarow->short_offset = 0;
         deltarow->state = next_is_bytecount;
         deltarow->rowwritten = 0;
-        benum->initialized = true;
+        delta_set(&benum->initialized);
     }
 
     if (deltarow->row_byte_count == 0) {
@@ -544,23 +723,56 @@ read_deltarow_bitmap_data(px_bitmap_enum_t * benum, byte ** pdata,
  * Attributes: pxaStartLine (ignored), pxaBlockHeight, pxaCompressMode.
  */
 static int
-read_bitmap(px_bitmap_enum_t * benum, byte ** pdata, px_args_t * par)
+read_bitmap(px_bitmap_enum_t * benum, byte ** pdata, px_args_t * par, bool last)
 {
-    benum->compress_type = par->pv[2]->value.i;
-    switch (benum->compress_type) {
+    switch (par->pv[2]->value.i) {
         case eRLECompression:
-            return read_rle_bitmap_data(benum, pdata, par);
+            return read_rle_bitmap_data(benum, pdata, par, last);
         case eJPEGCompression:
-            return read_jpeg_bitmap_data(benum, pdata, par);
+            return read_jpeg_bitmap_data(benum, pdata, par, last);
         case eDeltaRowCompression:
-            return read_deltarow_bitmap_data(benum, pdata, par);
+            return read_deltarow_bitmap_data(benum, pdata, par, last);
         case eNoCompression:
-            return read_uncompressed_bitmap_data(benum, pdata, par);
+            return read_uncompressed_bitmap_data(benum, pdata, par, last);
         default:
             break;
     }
     return -1;
 }
+
+static int read_rebuffered_bitmap(px_bitmap_enum_t * benum, byte ** pdata, px_args_t * par)
+{
+    int code;
+
+    if (!benum->rebuffered)
+        return read_bitmap(benum, pdata, par, /* last */ false);
+
+    {
+        int w = benum->rebuffered_width;
+        byte *rowptr = *pdata;
+        byte *data2 = rowptr + benum->rebuffered_row_pos * benum->data_per_row;
+        for (; benum->rebuffered_row_pos < w; benum->rebuffered_row_pos++) {
+            byte *data3 = data2;
+            code = read_bitmap(benum, &data3, par, /* last */ false);
+            if (code == 0) {
+                return 0;
+            } else if (code == 1) {
+                /* got a scanline! (well, 1 pixel really, cos we are flipping) */
+            } else {
+                if (par->source.available == 0)
+                    return pxNeedData;
+                return code;
+            }
+            if (data3 != data2) {
+                memcpy(data2, data3, benum->data_per_row);
+            }
+            data2 += benum->data_per_row;
+        }
+        benum->rebuffered_row_pos = 0;
+    }
+    return code;
+}
+
 
 /* ---------------- Image operators ---------------- */
 
@@ -568,15 +780,49 @@ const byte apxBeginImage[] = {
     pxaColorMapping, pxaColorDepth, pxaSourceWidth, pxaSourceHeight,
     pxaDestinationSize, 0, 0
 };
+
 int
 pxBeginImage(px_args_t * par, px_state_t * pxs)
 {
+    px_image_enum_t *pxenum;
+    px_bitmap_args_t bi_args;
+
+    pxenum =
+        gs_alloc_struct(pxs->memory, px_image_enum_t,
+                        &st_px_image_enum, "setup_bitmap(pxenum)");
+
+    if (pxenum == 0)
+        return_error(errorInsufficientMemory);
+
+    /*
+     * store a copy of the args.  For JPEG these parameters may be
+     * revised depending on the color parameters in the JPEG data.
+     * We defer image set up until we read the image data.
+     */
+
+    bi_args.mapping     = par->pv[0]->value.i;
+    bi_args.depth       = par->pv[1]->value.i;
+    bi_args.width       = par->pv[2]->value.i;
+    bi_args.height      = par->pv[3]->value.i;
+    bi_args.dest_width  = real_value(par->pv[4], 0);
+    bi_args.dest_height = real_value(par->pv[4], 1);
+
+    pxenum->bi_args = bi_args;
+    pxenum->enum_started = false;
+    pxs->image_enum = pxenum;
+    memset(&pxenum->benum, 0, sizeof(pxenum->benum));
+    return 0;
+}
+
+static int
+px_begin_image(px_state_t * pxs, bool is_jpeg, px_args_t * par)
+{
     gs_point origin;
     px_bitmap_params_t params;
-    px_bitmap_enum_t benum;
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     px_gstate_t *pxgs = pxs->pxgs;
-    px_image_enum_t *pxenum;
+    px_image_enum_t *pxenum = pxs->image_enum;
+    px_bitmap_enum_t *pbenum = &pxenum->benum;
     int code;
 
     if (gs_currentpoint(pgs, &origin) < 0)
@@ -600,34 +846,28 @@ pxBeginImage(px_args_t * par, px_state_t * pxs)
     code = px_set_halftone(pxs);
     if (code < 0)
         return code;
-    code = begin_bitmap(&params, &benum, par, pxs);
-    if (code < 0)
-        return code;
-    pxenum =
-        gs_alloc_struct(pxs->memory, px_image_enum_t,
-                        &st_px_image_enum, "setup_bitmap(pxenum)");
+    code = begin_rebuffered_bitmap(&params, pbenum, &pxenum->bi_args, pxs, is_jpeg, par);
+    if (code < 0 || code == pxNeedData)
+        return_error(code);
 
-    if (pxenum == 0)
-        return_error(errorInsufficientMemory);
-    {
-        pxenum->raster = round_up(benum.data_per_row, align_bitmap_mod);
-        pxenum->row = gs_alloc_byte_array(pxs->memory, 1, pxenum->raster,
-                                          "pxReadImage(row)");
-        if (pxenum->row == 0)
-            code = gs_note_error(errorInsufficientMemory);
-        else
-            code =
-                px_image_color_space(&pxenum->image, &params,
-                                     (const gs_string *)&pxgs->palette, pgs);
-    }
+    pxenum->row = gs_alloc_byte_array(pxs->memory, 1, pbenum->rebuffered_data_per_row,
+                                      "pxReadImage(row)");
+    if (pxenum->row == 0)
+        code = gs_note_error(errorInsufficientMemory);
+    else
+        code =
+            px_image_color_space(&pxenum->image, &params,
+                                 (const gs_string *)&pxgs->palette, pgs);
+
     if (code < 0) {
         gs_free_object(pxs->memory, pxenum->row, "pxReadImage(row)");
         gs_free_object(pxs->memory, pxenum, "pxReadImage(pxenum)");
         return code;
     }
+
     /* Set up the image parameters. */
-    pxenum->image.Width = params.width;
-    pxenum->image.Height = params.height;
+    pxenum->image.Width = pbenum->rebuffered_width;
+    pxenum->image.Height = pbenum->rebuffered_height;
     {
         gs_matrix imat, dmat;
 
@@ -635,10 +875,16 @@ pxBeginImage(px_args_t * par, px_state_t * pxs)
         /* We also need to account for the upside-down H-P */
         /* coordinate system. */
         gs_make_scaling(params.width, params.height, &imat);
+        if (pbenum->rebuffered) {
+            imat.xy = imat.xx; imat.xx = 0;
+            imat.yx = imat.yy; imat.yy = 0;
+        }
         gs_make_translation(origin.x, origin.y, &dmat);
         gs_matrix_scale(&dmat, params.dest_width, params.dest_height, &dmat);
         /* The ImageMatrix is dmat' * imat. */
-        gs_matrix_invert(&dmat, &dmat);
+        code = gs_matrix_invert(&dmat, &dmat);
+        if (code < 0)
+            return code;
         gs_matrix_multiply(&dmat, &imat, &pxenum->image.ImageMatrix);
     }
     pxenum->image.CombineWithColor = true;
@@ -646,13 +892,16 @@ pxBeginImage(px_args_t * par, px_state_t * pxs)
 
     code = pl_begin_image(pgs, &pxenum->image, &pxenum->info);
     if (code < 0) {
-        gs_free_object(pxs->memory, pxenum->row, "pxReadImage(row)");
-        gs_free_object(pxs->memory, pxenum, "pxBeginImage(pxenum)");
+        /* This procedure will be re-invoked if we are remapping the
+           color so don't free the resources */
+        if (code != gs_error_Remap_Color) {
+            gs_free_object(pxs->memory, pxenum->row, "pxReadImage(row)");
+            gs_free_object(pxs->memory, pxenum, "pxBeginImage(pxenum)");
+        }
         return code;
     }
-    pxenum->benum = benum;
-    pxs->image_enum = pxenum;
     return 0;
+
 }
 
 const byte apxReadImage[] = {
@@ -664,22 +913,44 @@ int
 pxReadImage(px_args_t * par, px_state_t * pxs)
 {
     px_image_enum_t *pxenum = pxs->image_enum;
+    int code = 0;
 
     if (par->pv[1]->value.i == 0)
         return 0;               /* no data */
     /* Make a quick check for the first call, when no data is available. */
     if (par->source.available == 0)
         return pxNeedData;
+    if (!pxenum->enum_started) {
+        bool is_jpeg = par->pv[2]->value.i == eJPEGCompression;
+        code = px_begin_image(pxs, is_jpeg, par);
+        if (code < 0 || code == pxNeedData)
+            return code;
+        pxenum->enum_started = true;
+    }
     for (;;) {
         byte *data = pxenum->row;
-        int code = read_bitmap(&pxenum->benum, &data, par);
-
+        int code = read_rebuffered_bitmap(&pxenum->benum, &data, par);
         if (code != 1)
             return code;
+
+        if (pxenum->benum.grayscale) {
+            int i;
+            for (i = 2; i < pxenum->benum.rebuffered_data_per_row; i+=3) {
+                int r = data[i-2];
+                int g = data[i-1];
+                int b = data[i];
+                /* we think this simple conversion is commensurate
+                   with typical XL business graphics use cases. */
+                int gray = (r + g + b) / 3;
+                data[i-2] = data[i-1] = data[i] = gray;
+            }
+        }
+
         code = pl_image_data(pxs->pgs, pxenum->info, (const byte **)&data, 0,
-                             pxenum->benum.data_per_row, 1);
+                             pxenum->benum.rebuffered_data_per_row, 1);
         if (code < 0)
             return code;
+
         pxs->have_page = true;
     }
 }
@@ -693,9 +964,8 @@ pxEndImage(px_args_t * par, px_state_t * pxs)
     int code = pl_end_image(pxs->pgs, pxenum->info, true);
 
     gs_free_object(pxs->memory, pxenum->row, "pxEndImage(row)");
-    if (pbenum->compress_type == eDeltaRowCompression)
-        gs_free_object(pbenum->mem, pbenum->deltarow_state.seedrow,
-                       "pxEndImage(seedrow)");
+    gs_free_object(pbenum->mem, pbenum->deltarow_state.seedrow,
+                   "pxEndImage(seedrow)");
     if (pxenum->image.ColorSpace)
         rc_decrement(pxenum->image.ColorSpace,
                      "pxEndImage(image.ColorSpace)");
@@ -717,6 +987,7 @@ struct px_pattern_enum_s
     int32_t pattern_id;
     pxePatternPersistence_t persistence;
     px_pattern_t *pattern;
+    int lines_rendered;
 };
 
 gs_private_st_simple(st_px_pattern_enum, px_pattern_enum_t,
@@ -734,13 +1005,24 @@ pxBeginRastPattern(px_args_t * par, px_state_t * pxs)
     px_pattern_t *pattern;
     px_pattern_enum_t *pxenum;
     px_bitmap_enum_t benum;
+    px_bitmap_args_t bi_args;
     byte *data;
     uint psize;
     byte *pdata;
-
-    int code = begin_bitmap(&params, &benum, par, pxs);
+    int code;
     static const gs_memory_struct_type_t st_px_pattern =
         { sizeof(px_pattern_t), "", 0, 0, 0, 0, 0 };
+
+
+    bi_args.mapping     = par->pv[0]->value.i;
+    bi_args.depth       = par->pv[1]->value.i;
+    bi_args.width       = par->pv[2]->value.i;
+    bi_args.height      = par->pv[3]->value.i;
+    bi_args.dest_width  = real_value(par->pv[4], 0);
+    bi_args.dest_height = real_value(par->pv[4], 1);
+
+    memset(&benum, 0, sizeof(benum));
+    code = begin_bitmap(&params, &benum, &bi_args, pxs, false, par);
 
     if (code < 0)
         return code;
@@ -771,6 +1053,7 @@ pxBeginRastPattern(px_args_t * par, px_state_t * pxs)
     pxenum->benum = benum;
     pxenum->pattern_id = par->pv[5]->value.i;
     pxenum->persistence = par->pv[6]->value.i;
+    pxenum->lines_rendered = 0;
     pattern->params = params;
     pattern->palette.data = pdata;
     pattern->palette.size = psize;
@@ -791,33 +1074,34 @@ pxReadRastPattern(px_args_t * par, px_state_t * pxs)
 {
     px_pattern_enum_t *pxenum = pxs->pattern_enum;
     int code;
-    uint input_per_row = round_up(pxenum->benum.data_per_row, 4);
+    byte *plimit = pxenum->pattern->data +
+        (pxenum->benum.data_per_row * pxenum->pattern->params.height);
 
-    if (par->pv[3])
-        input_per_row =
-            round_up(pxenum->benum.data_per_row, par->pv[3]->value.i);
-    /* Make a quick check for the first call, when no data is available. */
-    if (par->source.available == 0 && par->pv[1]->value.i != 0)
-        return pxNeedData;
-    /* emulate hp bug */
-    {
-        pxeCompressMode_t c = par->pv[2]->value.i;
+    if (par->pv[1]->value.i == 0)
+        return 0;               /* no data */
 
-        if (c == eDeltaRowCompression || c == eJPEGCompression)
-            input_per_row = pxenum->benum.data_per_row;
-    }
+    /* first call */
+    if (par->source.available == 0)
+        pxenum->lines_rendered = 0;
+
     for (;;) {
         byte *data = pxenum->pattern->data +
-            (par->pv[0]->value.i + par->source.position / input_per_row)
-            * pxenum->benum.data_per_row;
+            (par->pv[0]->value.i + pxenum->lines_rendered) * pxenum->benum.data_per_row;
         byte *rdata = data;
 
-        code = read_bitmap(&pxenum->benum, &rdata, par);
+        if (data > plimit)
+            return_error(gs_error_rangecheck);
+
+        code = read_bitmap(&pxenum->benum, &rdata, par, /* last */ data == plimit);
         if (code != 1)
             break;
+
+        pxenum->lines_rendered++;
+
         if (rdata != data)
             memcpy(data, rdata, pxenum->benum.data_per_row);
     }
+
     return code;
 }
 
@@ -890,7 +1174,7 @@ pxScanLineRel(px_args_t * par, px_state_t * pxs)
                                  * We use the separate variable source.count to keep track of
                                  * the number of x-pairs left in the scan line.
                                  */
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     bool big_endian = pxs->data_source_big_endian;
     const byte *data = par->source.data;
     pxeDataType_t

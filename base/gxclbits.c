@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -71,33 +71,73 @@ clist_bitmap_bytes(uint width_bits, uint height, int compression_mask,
  * necessary.  We require height >= 1, raster >= bitmap_raster(width_bits).
  */
 static int
+go_process(stream_state * st, stream_cursor_read *pr, stream_cursor_write *pw, bool end)
+{
+    int status = (*st->templat->process) (st, pr, pw, end);
+    if (status)
+        return status;
+    /* We don't attempt to handle compressors that */
+    /* require >1 input byte to make progress. */
+    if (pr->ptr != pr->limit)
+        return -1;
+    return 0;
+}
+static byte zeros[1<<align_bitmap_mod];
+static int
 cmd_compress_bitmap(stream_state * st, const byte * data, uint width_bits,
                     uint raster, uint height, stream_cursor_write * pw)
 {
     uint width_bytes = bitmap_raster(width_bits);
     int status = 0;
     stream_cursor_read r;
+    stream_cursor_read r2;
+    uint whole_bytes = width_bits>>3;
+    uint mask = (0xff00>>(width_bits & 7)) & 0xff;
+    uint padding = width_bytes - ((width_bits+7)>>3);
 
     r.ptr = data - 1;
-    if (raster == width_bytes) {
+    if (raster == whole_bytes) {
         r.limit = r.ptr + raster * height;
         status = (*st->templat->process) (st, &r, pw, true);
     } else {			/* Compress row-by-row. */
         uint y;
 
-        for (y = 1; (r.limit = r.ptr + width_bytes), y < height; ++y) {
-            status = (*st->templat->process) (st, &r, pw, false);
+        for (y = height-1; (r.limit = r.ptr + whole_bytes), y > 0; y--) {
+            status = go_process(st, &r, pw, false);
             if (status)
                 break;
-            if (r.ptr != r.limit) {	/* We don't attempt to handle compressors that */
-                /* require >1 input byte to make progress. */
-                status = -1;
-                break;
+            if (mask) {
+                byte b = r.ptr[1] & mask;
+                r2.limit = &b;
+                r2.ptr = r2.limit-1;
+
+                status = go_process(st, &r2, pw, false);
+                if (status)
+                    break;
             }
-            r.ptr += raster - width_bytes;
+            if (padding) {
+                r2.ptr = zeros - 1;
+                r2.limit = r2.ptr + padding;
+                status = go_process(st, &r2, pw, false);
+                if (status)
+                    break;
+            }
+            r.ptr += (int)(raster - whole_bytes);
         }
-        if (status == 0)
-            status = (*st->templat->process) (st, &r, pw, true);
+        if (status == 0) {
+            status = go_process(st, &r, pw, padding == 0 && mask == 0);
+            if (status == 0 && mask) {
+                byte b = r.ptr[1] & mask;
+                r2.limit = &b;
+                r2.ptr = r2.limit-1;
+                status = go_process(st, &r2, pw, padding == 0);
+            }
+            if (status == 0 && padding) {
+                r2.ptr = zeros - 1;
+                r2.limit = r2.ptr + padding;
+                status = go_process(st, &r2, pw, true);
+            }
+        }
     }
     if (st->templat->release)
         (*st->templat->release) (st);
@@ -110,6 +150,7 @@ cmd_compress_bitmap(stream_state * st, const byte * data, uint width_bits,
  * Return <0 if error, otherwise the compression method.
  * A return value of gs_error_limitcheck means that the bitmap was too big
  * to fit in the command reading buffer.
+ * This won't happen if the compression_mask has allow_large_bitmap set.
  * Note that this leaves room for the command and initial arguments,
  * but doesn't fill them in.
  */
@@ -119,15 +160,14 @@ cmd_put_bits(gx_device_clist_writer * cldev, gx_clist_state * pcls,
              int compression_mask, byte ** pdp, uint * psize)
 {
     uint short_raster, full_raster;
-    uint short_size =
-    clist_bitmap_bytes(width_bits, height,
-                       compression_mask & ~cmd_mask_compress_any,
-                       &short_raster, &full_raster);
+    uint short_size = clist_bitmap_bytes(width_bits, height,
+                          compression_mask & ~cmd_mask_compress_any,
+                          &short_raster, &full_raster);
     uint uncompressed_raster;
-    uint uncompressed_size =
-    clist_bitmap_bytes(width_bits, height, compression_mask,
+    uint uncompressed_size = clist_bitmap_bytes(width_bits, height, compression_mask,
                        &uncompressed_raster, &full_raster);
-    uint max_size = data_bits_size - op_size;
+    uint max_size = (compression_mask & allow_large_bitmap) ? 0x7fffffff :
+                        data_bits_size - op_size;
     gs_memory_t *mem = cldev->memory;
     byte *dp;
     int compress = 0;
@@ -153,8 +193,8 @@ cmd_put_bits(gx_device_clist_writer * cldev, gx_clist_state * pcls,
 
         *psize = try_size;
         code = (pcls != 0 ?
-                set_cmd_put_op(dp, cldev, pcls, 0, try_size) :
-                set_cmd_put_all_op(dp, cldev, 0, try_size));
+                set_cmd_put_op(&dp, cldev, pcls, 0, try_size) :
+                set_cmd_put_all_op(&dp, cldev, 0, try_size));
         if (code < 0)
             return code;
         cmd_uncount_op(0, try_size);
@@ -189,7 +229,7 @@ cmd_put_bits(gx_device_clist_writer * cldev, gx_clist_state * pcls,
             w.ptr = wbase;
             w.limit = w.ptr + min(wmax, short_size >> 1);
             status = cmd_compress_bitmap((stream_state *) & sstate, data,
-                                  uncompressed_raster << 3 /*width_bits */ ,
+                                  width_bits, /* was uncompressed_raster << 3, but this overruns. */
                                          raster, height, &w);
             if (status == 0) {	/* Use compressed representation. */
                 uint wcount = w.ptr - wbase;
@@ -225,8 +265,8 @@ cmd_put_bits(gx_device_clist_writer * cldev, gx_clist_state * pcls,
     else {
         *psize = op_size + short_size;
         code = (pcls != 0 ?
-                set_cmd_put_op(dp, cldev, pcls, 0, *psize) :
-                set_cmd_put_all_op(dp, cldev, 0, *psize));
+                set_cmd_put_op(&dp, cldev, pcls, 0, *psize) :
+                set_cmd_put_all_op(&dp, cldev, 0, *psize));
         if (code < 0)
             return code;
         cmd_uncount_op(0, *psize);
@@ -239,9 +279,11 @@ cmd_put_bits(gx_device_clist_writer * cldev, gx_clist_state * pcls,
         *psize = op_size + 1;
         dp[op_size] = code;
         compress = cmd_compress_const;
-    } else
-        bytes_copy_rectangle(dp + op_size, short_raster, data, raster,
-                             short_raster, height);
+    } else {
+        uint copy_bytes = (width_bits + 7) >> 3;
+        bytes_copy_rectangle_zero_padding(dp + op_size, short_raster, data, raster,
+                             copy_bytes, height);
+    }
 out:
     *pdp = dp;
     return compress;
@@ -302,12 +344,12 @@ cmd_put_tile_index(gx_device_clist_writer *cldev, gx_clist_state *pcls,
     int code;
 
     if (!(idelta & ~15)) {
-        code = set_cmd_put_op(dp, cldev, pcls,
+        code = set_cmd_put_op(&dp, cldev, pcls,
                               cmd_op_delta_tile_index + idelta, 1);
         if (code < 0)
             return code;
     } else {
-        code = set_cmd_put_op(dp, cldev, pcls,
+        code = set_cmd_put_op(&dp, cldev, pcls,
                               cmd_op_set_tile_index + (indx >> 8), 2);
         if (code < 0)
             return code;
@@ -329,7 +371,7 @@ cmd_put_color_map(gx_device_clist_writer * cldev, cmd_map_index map_index,
     if (map == 0) {
         if (pid && *pid == gs_no_id)
             return 0;	/* no need to write */
-        code = set_cmd_put_all_op(dp, cldev, cmd_opv_set_misc, 3);
+        code = set_cmd_put_all_op(&dp, cldev, cmd_opv_set_misc, 3);
         if (code < 0)
             return code;
         dp[1] = cmd_set_misc_map + (cmd_map_none << 4) + map_index;
@@ -340,13 +382,13 @@ cmd_put_color_map(gx_device_clist_writer * cldev, cmd_map_index map_index,
         if (pid && map->id == *pid)
             return 0;	/* no need to write */
         if (map->proc == gs_identity_transfer) {
-            code = set_cmd_put_all_op(dp, cldev, cmd_opv_set_misc, 3);
+            code = set_cmd_put_all_op(&dp, cldev, cmd_opv_set_misc, 3);
             if (code < 0)
                 return code;
             dp[1] = cmd_set_misc_map + (cmd_map_identity << 4) + map_index;
             dp[2] = comp_num;
         } else {
-            code = set_cmd_put_all_op(dp, cldev, cmd_opv_set_misc,
+            code = set_cmd_put_all_op(&dp, cldev, cmd_opv_set_misc,
                                       3 + sizeof(map->values));
             if (code < 0)
                 return code;
@@ -657,13 +699,15 @@ clist_change_tile(gx_device_clist_writer * cldev, gx_clist_state * pcls,
                 if (tiles->num_planes != 1)
                     pdepth /= tiles->num_planes;
 
+                /* put the bits, but don't restrict to a single buffer */
                 code = cmd_put_bits(cldev, pcls, ts_bits(cldev, loc.tile),
                                     tiles->rep_width * pdepth,
                                     tiles->rep_height * tiles->num_planes,
                                     loc.tile->cb_raster, rsize,
-                                    (cldev->tile_params.size.x > tiles->rep_width ?
-                                     decompress_elsewhere | decompress_spread :
-                                     decompress_elsewhere),
+                                    allow_large_bitmap |
+                                        (cldev->tile_params.size.x > tiles->rep_width ?
+                                             decompress_elsewhere | decompress_spread :
+                                             decompress_elsewhere),
                                     &dp, &csize);
 
                 if (code < 0)
@@ -748,11 +792,13 @@ clist_change_bits(gx_device_clist_writer * cldev, gx_clist_state * pcls,
                     pdepth /= loc.tile->num_planes;
             if (loc.tile->num_bands == CHAR_ALL_BANDS_COUNT)
                 bit_pcls = NULL;
+            /* put the bits, but don't restrict to a single buffer */
             code = cmd_put_bits(cldev, bit_pcls, ts_bits(cldev, loc.tile),
                                 loc.tile->width * pdepth,
                                 loc.tile->height * loc.tile->num_planes, loc.tile->cb_raster,
                                 rsize,
-                              decompress_elsewhere | (((gx_device_printer *)cldev->target)->BLS_force_memory ? (1 << cmd_compress_cfe) : 0),
+                                decompress_elsewhere |
+                                    (cldev->target->BLS_force_memory ? (1 << cmd_compress_cfe) : 0),
                                 &dp, &csize);
 
             if (code < 0)

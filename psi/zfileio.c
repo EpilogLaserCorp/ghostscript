@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -156,7 +156,7 @@ zreadhexstring_at(i_ctx_t *i_ctx_p, os_ptr op, uint start, int odd)
     }
     nread = cw.ptr + 1 - str;
     if (status != EOFC) {	/* Error */
-        nread |= odd_byte << 24;
+        nread |= ((uchar)odd_byte) << 24;
         return handle_read_status(i_ctx_p, status, op - 1, &nread,
                                   zreadhexstring_continue);
     }
@@ -185,7 +185,7 @@ zreadhexstring_continue(i_ctx_t *i_ctx_p)
 
     check_type(*op, t_integer);
     length = op->value.intval & 0xFFFFFF;
-    odd = (char)(op->value.intval >> 24);
+    odd = (schar)(op->value.intval >> 24);
 
     if (length > r_size(op - 1) || odd < -1 || odd > 0xF)
         return_error(gs_error_rangecheck);

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -46,6 +46,10 @@ zcopydevice2(i_ctx_t *i_ctx_p)
 
     check_read_type(op[-1], t_device);
     check_type(*op, t_boolean);
+    if (op[-1].value.pdevice == NULL)
+        /* This can happen if we invalidated devices on the stack by calling nulldevice after they were pushed */
+        return_error(gs_error_undefined);
+
     code = gs_copydevice2(&new_dev, op[-1].value.pdevice, op->value.boolval,
                           imemory);
     if (code < 0)
@@ -57,6 +61,7 @@ zcopydevice2(i_ctx_t *i_ctx_p)
 }
 
 /* - currentdevice <device> */
+/* Returns the current device in the graphics state */
 int
 zcurrentdevice(i_ctx_t *i_ctx_p)
 {
@@ -71,6 +76,34 @@ zcurrentdevice(i_ctx_t *i_ctx_p)
     return 0;
 }
 
+/* - .currentoutputdevice <device> */
+/* Returns the *output* device - which will often
+   be the same as above, but not always: if a compositor
+   or other forwarding device, or subclassing device is
+   in force, that will be referenced by the graphics state
+   rather than the output device.
+   This is equivalent of currentdevice device, but returns
+   the *device* object, rather than the dictionary describing
+   the device and device state.
+ */
+int
+zcurrentoutputdevice(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+    gx_device *odev = NULL, *dev = gs_currentdevice(igs);
+    gs_ref_memory_t *mem = (gs_ref_memory_t *) dev->memory;
+    int code = dev_proc(dev, dev_spec_op)(dev,
+                        gxdso_current_output_device, (void *)&odev, 0);
+    if (code < 0)
+        return code;
+
+    push(1);
+    make_tav(op, t_device,
+             (mem == 0 ? avm_foreign : imemory_space(mem)) | a_all,
+             pdevice, odev);
+    return 0;
+}
+
 /* <device> .devicename <string> */
 static int
 zdevicename(i_ctx_t *i_ctx_p)
@@ -79,6 +112,10 @@ zdevicename(i_ctx_t *i_ctx_p)
     const char *dname;
 
     check_read_type(*op, t_device);
+    if (op->value.pdevice == NULL)
+        /* This can happen if we invalidated devices on the stack by calling nulldevice after they were pushed */
+        return_error(gs_error_undefined);
+
     dname = op->value.pdevice->dname;
     make_const_string(op, avm_foreign | a_readonly, strlen(dname),
                       (const byte *)dname);
@@ -128,6 +165,10 @@ zgetbitsrect(i_ctx_t *i_ctx_p)
 
     check_read_type(op[-7], t_device);
     dev = op[-7].value.pdevice;
+    if (dev == NULL)
+        /* This can happen if we invalidated devices on the stack by calling nulldevice after they were pushed */
+        return_error(gs_error_undefined);
+
     check_int_leu(op[-6], dev->width);
     rect.p.x = op[-6].value.intval;
     check_int_leu(op[-5], dev->height);
@@ -239,8 +280,15 @@ zget_device_params(i_ctx_t *i_ctx_p, bool is_hardware)
     ref *pmark;
 
     check_read_type(op[-1], t_device);
+
+    if(!r_has_type(op, t_null)) {
+        check_type(*op, t_dictionary);
+    }
     rkeys = *op;
     dev = op[-1].value.pdevice;
+    if (op[-1].value.pdevice == NULL)
+        /* This can happen if we invalidated devices on the stack by calling nulldevice after they were pushed */
+        return_error(gs_error_undefined);
     pop(1);
     stack_param_list_write(&list, &o_stack, &rkeys, iimemory);
     code = gs_get_device_or_hardware_params(dev, (gs_param_list *) & list,
@@ -249,8 +297,11 @@ zget_device_params(i_ctx_t *i_ctx_p, bool is_hardware)
         /* We have to put back the top argument. */
         if (list.count > 0)
             ref_stack_pop(&o_stack, list.count * 2 - 1);
-        else
-            ref_stack_push(&o_stack, 1);
+        else {
+            code = ref_stack_push(&o_stack, 1);
+            if (code < 0)
+                return code;
+        }
         *osp = rkeys;
         return code;
     }
@@ -339,10 +390,10 @@ static void invalidate_stack_devices(i_ctx_t *i_ctx_p)
 static int
 znulldevice(i_ctx_t *i_ctx_p)
 {
-    gs_nulldevice(igs);
+    int code = gs_nulldevice(igs);
     invalidate_stack_devices(i_ctx_p);
     clear_pagedevice(istate);
-    return 0;
+    return code;
 }
 
 extern void print_resource_usage(const gs_main_instance *, gs_dual_memory_t *,
@@ -362,13 +413,8 @@ zoutputpage(i_ctx_t *i_ctx_p)
 
         print_resource_usage(minst, &(i_ctx_p->memory), "Outputpage start");
     }
-#ifdef PSI_INCLUDED
-    code = ps_end_page_top(imemory,
-                           (int)op[-1].value.intval, op->value.boolval);
-#else
     code = gs_output_page(igs, (int)op[-1].value.intval,
                           op->value.boolval);
-#endif
     if (code < 0)
         return code;
     pop(2);
@@ -412,6 +458,9 @@ zputdeviceparams(i_ctx_t *i_ctx_p)
     check_type_only(*prequire_all, t_boolean);
     check_write_type_only(*pdev, t_device);
     dev = pdev->value.pdevice;
+    if (dev == NULL)
+        /* This can happen if we invalidated devices on the stack by calling nulldevice after they were pushed */
+        return_error(gs_error_undefined);
     code = stack_param_list_read(&list, &o_stack, 0, ppolicy,
                                  prequire_all->value.boolval, iimemory);
     if (code < 0)
@@ -431,7 +480,7 @@ zputdeviceparams(i_ctx_t *i_ctx_p)
     iparam_list_release(&list);
     if (code < 0) {		/* There were errors reported. */
         ref_stack_pop(&o_stack, dest + 1);
-        return 0;
+        return (code == gs_error_Fatal) ? code : 0;	/* cannot continue from Fatal */
     }
     if (code > 0 || (code == 0 && (dev->width != old_width || dev->height != old_height))) {
         /*
@@ -457,37 +506,63 @@ zputdeviceparams(i_ctx_t *i_ctx_p)
     return 0;
 }
 
+int
+zsetdevice_no_safer(i_ctx_t *i_ctx_p, gx_device *new_dev)
+{
+    gx_device *dev = gs_currentdevice(igs);
+    int code;
+
+    dev->ShowpageCount = 0;
+
+    if (new_dev == NULL)
+        return gs_note_error(gs_error_undefined);
+
+    code = gs_setdevice_no_erase(igs, new_dev);
+    if (code < 0)
+        return code;
+
+    invalidate_stack_devices(i_ctx_p);
+    clear_pagedevice(istate);
+    return code;
+}
+
 /* <device> .setdevice <eraseflag> */
 /* Note that .setdevice clears the current pagedevice. */
 int
 zsetdevice(i_ctx_t *i_ctx_p)
 {
-    gx_device *dev = gs_currentdevice(igs);
+    gx_device *odev = NULL, *dev = gs_currentdevice(igs);
+    gx_device *ndev = NULL;
     os_ptr op = osp;
-    int code = 0;
+    int code = dev_proc(dev, dev_spec_op)(dev,
+                        gxdso_current_output_device, (void *)&odev, 0);
 
+    if (code < 0)
+        return code;
     check_write_type(*op, t_device);
-    if (dev->LockSafetyParams) {	  /* do additional checking if locked  */
-        if(op->value.pdevice != dev) 	  /* don't allow a different device    */
-            return_error(gs_error_invalidaccess);
-    }
-    dev->ShowpageCount = 0;
-#ifndef PSI_INCLUDED
-    /* the language switching build shouldn't install a new device
-       here.  The language switching machinery installs a shared
-       device. */
 
     if (op->value.pdevice == 0)
         return gs_note_error(gs_error_undefined);
 
-    code = gs_setdevice_no_erase(igs, op->value.pdevice);
+    /* slightly icky special case: the new device may not have had
+     * it's procs initialised, at this point - but we need to check
+     * whether we're being asked to change the device here
+     */
+    if (dev_proc((op->value.pdevice), dev_spec_op) == NULL)
+        ndev = op->value.pdevice;
+    else
+        code = dev_proc((op->value.pdevice), dev_spec_op)(op->value.pdevice,
+                        gxdso_current_output_device, (void *)&ndev, 0);
+
     if (code < 0)
         return code;
 
-#endif
+    if (odev->LockSafetyParams) {	  /* do additional checking if locked  */
+        if(ndev != odev) 	  /* don't allow a different device    */
+            return_error(gs_error_invalidaccess);
+    }
+    code = zsetdevice_no_safer(i_ctx_p, op->value.pdevice);
     make_bool(op, code != 0);	/* erase page if 1 */
-    invalidate_stack_devices(i_ctx_p);
-    clear_pagedevice(istate);
     return code;
 }
 
@@ -508,12 +583,13 @@ struct spec_op_s {
     int spec_op;                /* Integer used to switch on the name */
 };
 
-/* To ad    d more spec_ops, put a key name (used to identify the specific
+/* To add more spec_ops, put a key name (used to identify the specific
  * spec_op required) in this table, the integer is just used in the switch
  * in the main code to execute the required spec_op code.
  */
 spec_op_t spec_op_defs[] = {
-    {(char *)"GetDeviceParam", 0}
+    {(char *)"GetDeviceParam", 0},
+    {(char *)"EventInfo", 1},
 };
 
 /* <any> <any> .... /spec_op name .special_op <any> <any> .....
@@ -603,6 +679,50 @@ zspec_op(i_ctx_t *i_ctx_p)
                 }
             }
             break;
+        case 1:
+            {
+                stack_param_list list;
+                dev_param_req_t request;
+                ref rkeys;
+                /* Get a single device parameter, we should be supplied with
+                 * the name of the paramter, as a name object.
+                 */
+                check_op(1);
+                if (!r_has_type(op, t_name))
+                    return_error(gs_error_typecheck);
+
+                ref_assign(&opname, op);
+                name_string_ref(imemory, &opname, &namestr);
+
+                data = (char *)gs_alloc_bytes(imemory, r_size(&namestr) + 1, "temporary special_op string");
+                if (data == 0)
+                    return_error(gs_error_VMerror);
+                memset(data, 0x00, r_size(&namestr) + 1);
+                memcpy(data, namestr.value.bytes, r_size(&namestr));
+
+                /* Discard the parameter name now, we're done with it */
+                pop (1);
+                /* Make a null object so that the stack param list won't check for requests */
+                make_null(&rkeys);
+                stack_param_list_write(&list, &o_stack, &rkeys, iimemory);
+                /* Stuff the data into a structure for passing to the spec_op */
+                request.Param = data;
+                request.list = &list;
+
+                code = dev_proc(dev, dev_spec_op)(dev, gxdso_event_info, &request, sizeof(dev_param_req_t));
+
+                gs_free_object(imemory, data, "temporary special_op string");
+
+                if (code < 0) {
+                    if (code == gs_error_undefined) {
+                        op = osp;
+                        push(1);
+                        make_bool(op, 0);
+                    } else
+                        return_error(code);
+                }
+            }
+            break;
         default:
             /* Belt and braces; it shold not be possible to get here, as the table
              * containing the names should mirror the entries in this switch. If we
@@ -618,14 +738,15 @@ zspec_op(i_ctx_t *i_ctx_p)
 
 const op_def zdevice_op_defs[] =
 {
-    {"1.copydevice2", zcopydevice2},
+    {"2.copydevice2", zcopydevice2},
     {"0currentdevice", zcurrentdevice},
+    {"0.currentoutputdevice", zcurrentoutputdevice},
     {"1.devicename", zdevicename},
     {"0.doneshowpage", zdoneshowpage},
     {"0flushpage", zflushpage},
     {"7.getbitsrect", zgetbitsrect},
     {"1.getdevice", zgetdevice},
-    {"1.getdefaultdevice", zgetdefaultdevice},
+    {"0.getdefaultdevice", zgetdefaultdevice},
     {"2.getdeviceparams", zgetdeviceparams},
     {"2.gethardwareparams", zgethardwareparams},
     {"5makewordimagedevice", zmakewordimagedevice},

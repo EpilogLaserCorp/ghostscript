@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -165,8 +165,10 @@ H6:	    H = 6;
             ref_assign(&op[0], &Rn[j]);
             break;
         case 6:
-/*H6_cont:*/if (!r_has_type(&op[0], t_boolean))
+            /*H6_cont:*/if (!r_has_type(&op[0], t_boolean)) {
+                esp -= 9;
                 return_error(gs_error_typecheck);
+            }
             if (op[0].value.boolval) {
 /* H7: */  	ref_assign_old(&arry, &Rn[i], &Rn[j], ".sort(H7)");
                 goto H4;
@@ -176,6 +178,7 @@ H8:		ref_assign_old(&arry, &Rn[i], &R, ".sort(H8)");
             }
         default:
             pop(1);
+            esp -= 9;
             return_error(gs_error_unregistered); /* Must not happen. */
     }
     esp += 2;

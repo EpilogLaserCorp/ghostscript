@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -27,6 +27,7 @@
 #include "gsstype.h"
 #include "stream.h"
 #include "strmio.h"
+#include "gserrors.h"
 
 /*
  * Open a stream using a filename that can include a PS style IODevice prefix
@@ -67,7 +68,7 @@ sfopen(const char *path, const char *mode, gs_memory_t *mem)
     s->position = 0;
     code = ssetfilename(s, (const byte *)path, strlen(path));
     if (code < 0) {
-        /* Only error is e_VMerror */
+        /* Only error is gs_error_VMerror */
         sclose(s);
         gs_free_object(s->memory, s, "sfopen: allocation error");
 #       define EMSG     "sfopen: allocation error setting path name into stream.\n"
@@ -89,6 +90,8 @@ sfread(void *ptr, size_t size, size_t count, stream *s)
     uint nread;
 
     code = sgets(s, ptr, size*count, &nread);
+    if (code < 0)
+        return code;
     return nread*size;
 }
 
@@ -166,8 +169,76 @@ int
 sfclose(stream *s)
 {
     /* no need to flush since these are 'read' only */
-    gs_memory_t *mem = s->memory;
+    gs_memory_t *mem;
+
+    if (s == NULL)
+        return 0;
+    mem = s->memory;
     sclose(s);
     gs_free_object(mem, s, "sfclose(stream)");
+    return 0;
+}
+
+/* And now, a special version of the stdin iodev that can
+ * read via the gsapi callout. This is lifted and modified
+ * from gsiodev.c. Maybe at some point in the future we
+ * can unify the two. */
+
+#define STDIN_BUF_SIZE 1024
+/* Read from stdin into the buffer. */
+/* If interactive, only read one character. */
+static int
+s_stdin_read_process(stream_state * st, stream_cursor_read * ignore_pr,
+                     stream_cursor_write * pw, bool last)
+{
+    int wcount = (int)(pw->limit - pw->ptr);
+    int count;
+    gs_memory_t *mem = st->memory;
+    gs_lib_ctx_core_t *core = mem->gs_lib_ctx->core;
+
+    if (wcount <= 0)
+        return 0;
+
+    /* do the callout */
+    if (core->stdin_fn)
+        count = (*core->stdin_fn)
+            (core->caller_handle, (char *)pw->ptr + 1,
+             core->stdin_is_interactive ? 1 : wcount);
+    else
+        count = gp_stdin_read((char *)pw->ptr + 1, wcount,
+                      core->stdin_is_interactive,
+                      core->fstdin);
+
+    pw->ptr += (count < 0) ? 0 : count;
+    return ((count < 0) ? ERRC : (count == 0) ? EOFC : count);
+}
+
+int
+gs_get_callout_stdin(stream **ps, gs_memory_t *mem)
+{
+    stream *s;
+    byte *buf;
+    static const stream_procs p = {
+        s_std_noavailable, s_std_noseek, s_std_read_reset,
+        s_std_read_flush, file_close_file, s_stdin_read_process
+    };
+
+    s = file_alloc_stream(mem, "gs_get_callout_stdin(stream)");
+
+    /* We want stdin to read only one character at a time, */
+    /* but it must have a substantial buffer, in case it is used */
+    /* by a stream that requires more than one input byte */
+    /* to make progress. */
+    buf = gs_alloc_bytes(mem, STDIN_BUF_SIZE, "gs_get_callout_stdin(buffer)");
+    if (s == 0 || buf == 0)
+        return_error(gs_error_VMerror);
+
+    s_std_init(s, buf, STDIN_BUF_SIZE, &p, s_mode_read);
+    s->file = 0;
+    s->file_modes = s->modes;
+    s->file_offset = 0;
+    s->file_limit = S_FILE_LIMIT_MAX;
+    s->save_close = s_std_null;
+    *ps = s;
     return 0;
 }

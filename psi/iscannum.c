@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -125,7 +125,7 @@ scan_number(const byte * str, const byte * end, int sign,
                     break;
                 }
             } else
-                dval = ival;
+                dval = (double)ival;
             goto l2d;
         }
     }
@@ -144,7 +144,7 @@ scan_number(const byte * str, const byte * end, int sign,
         case 'E':
             if (sign < 0)
                 ival = -ival;
-            dval = ival;
+            dval = (double)ival;
             exp10 = 0;
             goto fe;
         case '#':
@@ -276,7 +276,7 @@ i2r:
             break;
         }
         if (WOULD_OVERFLOW(ival, d, max_int)) {
-            dval = ival;
+            dval = (double)ival;
             goto fd;
         }
         ival = ival * 10 + d;
@@ -292,7 +292,7 @@ i2r:
         make_real(pref, ival * neg_powers_10[-exp10]);
         return code;
     }
-    dval = ival;
+    dval = (double)ival;
     goto fe;
 
     /* Now we are accumulating a double in dval. */
@@ -318,6 +318,7 @@ fe:
                 switch (c) {
                     case '-':
                         esign = 1;
+                        /* fall through */
                     case '+':
                         GET_NEXT(c, sp, return_error(gs_error_syntaxerror));
                 }

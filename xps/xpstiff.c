@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -247,6 +247,7 @@ xps_decode_tiff_lzw(xps_context_t *ctx, xps_tiff_t *tiff, byte *rp, byte *rl, by
     {
         state.EarlyChange = 0;
         state.FirstBitLowOrder = 1;
+        state.OldTiff = 1;
     }
 
     /* new-style TIFF 6.0 normal bit order, early change */
@@ -254,6 +255,7 @@ xps_decode_tiff_lzw(xps_context_t *ctx, xps_tiff_t *tiff, byte *rp, byte *rl, by
     {
         state.EarlyChange = 1;
         state.FirstBitLowOrder = 0;
+        state.OldTiff = 0;
     }
 
     s_LZWD_template.init((stream_state*)&state);
@@ -381,6 +383,9 @@ xps_decode_tiff_jpeg(xps_context_t *ctx, xps_tiff_t *tiff, byte *rp, byte *rl, b
     jddp.templat = s_DCTD_template;
     jddp.memory = ctx->memory;
     jddp.scanline_buffer = NULL;
+    jddp.PassThrough = 0;
+    jddp.PassThroughfn = 0;
+    jddp.device = (void *)0;
 
     if ((code = gs_jpeg_create_decompress(&state)) < 0)
         return gs_throw(-1, "error in gs_jpeg_create_decompress");
@@ -623,6 +628,7 @@ xps_decode_tiff_strips(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
     unsigned row;
     unsigned strip;
     unsigned i;
+    gs_color_space *old_cs;
 
     if (!tiff->rowsperstrip || !tiff->stripoffsets || !tiff->rowsperstrip)
         return gs_throw(-1, "no image data in tiff; maybe it is tiled");
@@ -636,6 +642,7 @@ xps_decode_tiff_strips(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
     image->bits = tiff->bitspersample;
     image->stride = (image->width * image->comps * image->bits + 7) / 8;
 
+    old_cs = image->colorspace;
     switch (tiff->photometric)
     {
     case 0: /* WhiteIsZero -- inverted */
@@ -660,6 +667,8 @@ xps_decode_tiff_strips(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
     default:
         return gs_throw1(-1, "unknown photometric: %d", tiff->photometric);
     }
+    rc_increment(image->colorspace);
+    rc_decrement(old_cs, "xps_decode_tiff_strips");
 
     switch (tiff->resolutionunit)
     {
@@ -668,8 +677,8 @@ xps_decode_tiff_strips(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
         image->yres = tiff->yresolution;
         break;
     case 3:
-        image->xres = tiff->xresolution * 2.54 + 0.5;
-        image->yres = tiff->yresolution * 2.54 + 0.5;
+        image->xres = (int)(tiff->xresolution * 2.54 + 0.5);
+        image->yres = (int)(tiff->yresolution * 2.54 + 0.5);
 
         break;
     default:

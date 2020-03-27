@@ -11,12 +11,6 @@
 *									      *
 ******************************************************************************/
 
-/* Configuration management identification */
-#ifndef lint
-static const char
-  cm_id[] = "@(#)$Id: pclsize.c,v 1.10 2001/08/18 17:41:49 Martin Rel $";
-#endif
-
 /*****************************************************************************/
 
 #ifndef _XOPEN_SOURCE
@@ -126,7 +120,7 @@ pcl_PageSize pcl3_page_size(ms_MediaCode code)
     initialized = TRUE;
   }
 
-  key.mc = ms_without_flags(code) | code & PCL_CARD_FLAG;
+  key.mc = ms_without_flags(code) |( code & PCL_CARD_FLAG);
   result = (const CodeEntry *)bsearch(&key, code_map, array_size(code_map),
     sizeof(CodeEntry), cmp_by_size);
 

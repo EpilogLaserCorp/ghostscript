@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2012 Artifex Software, Inc.
+# Copyright (C) 2001-2019 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -9,14 +9,14 @@
 # of the license contained in the file LICENSE in this distribution.
 #
 # Refer to licensing information at http://www.artifex.com or contact
-# Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-# CA  94903, U.S.A., +1(415)492-9861, for further information.
+# Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+# CA 94945, U.S.A., +1(415)492-9861, for further information.
 #
 #
 # makefile for contributed device drivers.
 
 # Define the name of this makefile.
-CONTRIB_MAK=$(DEVSRC)contrib.mak
+DCONTRIB_MAK=$(DEVSRC)contrib.mak $(TOP_MAKEFILES)
 
 ###### --------------------------- Catalog -------------------------- ######
 
@@ -27,15 +27,11 @@ CONTRIB_MAK=$(DEVSRC)contrib.mak
 
 # Displays:
 #   MS-DOS (note: not usable with Desqview/X):
-#	herc	Hercules Graphics display   [MS-DOS only]
 #	pe	Private Eye display
 #   Unix and VMS:
-#	att3b1	AT&T 3b1/Unixpc monochrome display   [3b1 only]
 #	sonyfb	Sony Microsystems monochrome display   [Sony only]
-#	sunview  SunView window system   [SunOS only]
 # Printers:
 #	ap3250	Epson AP3250 printer
-#	appledmp  Apple Dot Matrix Printer (should also work with Imagewriter)
 #	bj10e	Canon BubbleJet BJ10e
 #	bj200	Canon BubbleJet BJ200; also good for BJ300 in ProPrinter mode
 #		(see comments in source code)
@@ -55,7 +51,6 @@ CONTRIB_MAK=$(DEVSRC)contrib.mak
 #	cljet5c  H-P Color LaserJet 5/5M (see below for some notes)
 #	coslw2p  CoStar LabelWriter II II/Plus
 #	coslwxl  CoStar LabelWriter XL
-#	cp50	Mitsubishi CP50 color printer
 #	declj250  alternate DEC LJ250 driver
 #	djet500c  H-P DeskJet 500C alternate driver
 #		(does not work on 550C or 560C)
@@ -70,9 +65,6 @@ CONTRIB_MAK=$(DEVSRC)contrib.mak
 #		also usable with the MFC6550MC Fax Machine.
 #	ibmpro  IBM 9-pin Proprinter
 #	imagen	Imagen ImPress printers
-#	iwhi	Apple Imagewriter in high-resolution mode
-#	iwlo	Apple Imagewriter in low-resolution mode
-#	iwlq	Apple Imagewriter LQ in 320 x 216 dpi mode
 #	jetp3852  IBM Jetprinter ink-jet color printer (Model #3852)
 #	lbp8	Canon LBP-8II laser printer
 #	lips3	Canon LIPS III laser printer in English (CaPSL) mode
@@ -97,7 +89,6 @@ CONTRIB_MAK=$(DEVSRC)contrib.mak
 #		also good for PaintJet 1200C and CopyJet
 #	r4081	Ricoh 4081 laser printer
 #	sj48	StarJet 48 inkjet printer
-#	sparc	SPARCprinter
 #	st800	Epson Stylus 800 printer
 #	stcolor	Epson Stylus Color
 #	t4693d2  Tektronix 4693d color printer, 2 bits per R/G/B component
@@ -119,8 +110,6 @@ CONTRIB_MAK=$(DEVSRC)contrib.mak
 #	mgrgray8  8-bit gray scale MGR devices
 #	mgr4	4-bit (VGA) color MGR devices
 #	mgr8	8-bit color MGR devices
-#	sgirgb	SGI RGB pixmap format
-#	sunhmono  Harlequin variant of 1-bit Sun raster file
 
 # If you add drivers, it would be nice if you kept each list
 # in alphabetical order.
@@ -129,39 +118,18 @@ CONTRIB_MAK=$(DEVSRC)contrib.mak
 
 ###### ------------------- MS-DOS display devices ------------------- ######
 
-### ------------------- The Hercules Graphics display ------------------- ###
-
-herc_=$(DEVOBJ)gdevherc.$(OBJ)
-$(DD)herc.dev : $(herc_) $(MAKEDIRS)
-	$(SETDEV) $(DD)herc $(herc_)
-
-$(DEVOBJ)gdevherc.$(OBJ) : $(DEVSRC)gdevherc.c $(GDEV) $(dos__h)\
- $(gsmatrix_h) $(gxbitmap_h) $(MAKEDIRS)
-	$(DEVCC) $(DEVO_)gdevherc.$(OBJ) $(C_) $(DEVSRC)gdevherc.c
-
 ### ---------------------- The Private Eye display ---------------------- ###
 ### Note: this driver was contributed by a user:                          ###
 ###   please contact narf@media-lab.media.mit.edu if you have questions.  ###
 
 pe_=$(DEVOBJ)gdevpe.$(OBJ)
-$(DD)pe.dev : $(pe_) $(MAKEDIRS)
+$(DD)pe.dev : $(pe_) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETDEV) $(DD)pe $(pe_)
 
-$(DEVOBJ)gdevpe.$(OBJ) : $(DEVSRC)gdevpe.c $(GDEV) $(memory__h) $(MAKEDIRS)
+$(DEVOBJ)gdevpe.$(OBJ) : $(DEVSRC)gdevpe.c $(GDEV) $(memory__h) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevpe.$(OBJ) $(C_) $(DEVSRC)gdevpe.c
 
 ###### ----------------------- Other displays ------------------------ ######
-
-### -------------- The AT&T 3b1 Unixpc monochrome display --------------- ###
-### Note: this driver was contributed by a user: please contact           ###
-###       Andy Fyfe (andy@cs.caltech.edu) if you have questions.          ###
-
-att3b1_=$(DEVOBJ)gdev3b1.$(OBJ)
-$(DD)att3b1.dev : $(att3b1_) $(MAKEDIRS)
-	$(SETDEV) $(DD)att3b1 $(att3b1_)
-
-$(DEVOBJ)gdev3b1.$(OBJ) : $(DEVSRC)gdev3b1.c $(GDEV) $(MAKEDIRS)
-	$(DEVCC) $(DEVO_)gdev3b1.$(OBJ) $(C_) $(DEVSRC)gdev3b1.c
 
 ### ------------------- Sony NeWS frame buffer device ------------------ ###
 ### Note: this driver was contributed by a user: please contact          ###
@@ -169,64 +137,25 @@ $(DEVOBJ)gdev3b1.$(OBJ) : $(DEVSRC)gdev3b1.c $(GDEV) $(MAKEDIRS)
 
 # This is implemented as a 'printer' device.
 sonyfb_=$(DEVOBJ)gdevsnfb.$(OBJ)
-$(DD)sonyfb.dev : $(sonyfb_) $(DD)page.dev $(MAKEDIRS)
+$(DD)sonyfb.dev : $(sonyfb_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)sonyfb $(sonyfb_)
 
-$(DEVOBJ)gdevsnfb.$(OBJ) : $(DEVSRC)gdevsnfb.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevsnfb.$(OBJ) : $(DEVSRC)gdevsnfb.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevsnfb.$(OBJ) $(C_) $(DEVSRC)gdevsnfb.c
 
-### ------------------------ The SunView device ------------------------ ###
-### Note: this driver is maintained by a user: if you have questions,    ###
-###       please contact Andreas Stolcke (stolcke@icsi.berkeley.edu).    ###
-
-sunview_=$(DEVOBJ)gdevsun.$(OBJ)
-$(DD)sunview.dev : $(sunview_) $(MAKEDIRS)
-	$(SETDEV) $(DD)sunview $(sunview_)
-	$(ADDMOD) $(DEVGENDIR)sunview -lib suntool sunwindow pixrect
-
-$(DEVOBJ)gdevsun.$(OBJ) : $(DEVSRC)gdevsun.c $(GDEV) $(malloc__h)\
- $(gscdefs_h) $(gserrors_h) $(gsmatrix_h) $(MAKEDIRS)
-	$(DEVCC) $(DEVO_)gdevsun.$(OBJ) $(C_) $(DEVSRC)gdevsun.c
-
 ###### --------------- Memory-buffered printer devices --------------- ######
-
-### --------------------- The Apple printer devices --------------------- ###
-### Note: these drivers were contributed by users.                        ###
-###   If you have questions about the DMP driver, please contact          ###
-###	Mark Wedel (master@cats.ucsc.edu).                                ###
-###   If you have questions about the Imagewriter drivers, please contact ###
-###	Jonathan Luckey (luckey@rtfm.mlb.fl.us).                          ###
-###   If you have questions about the Imagewriter LQ driver, please       ###
-###	contact Scott Barker (barkers@cuug.ab.ca).                        ###
-
-appledmp_=$(DEVOBJ)gdevadmp.$(OBJ)
-
-$(DEVOBJ)gdevadmp.$(OBJ) : $(DEVSRC)gdevadmp.c $(PDEVH) $(MAKEDIRS)
-	$(DEVCC) $(DEVO_)gdevadmp.$(OBJ) $(C_) $(DEVSRC)gdevadmp.c
-
-$(DD)appledmp.dev : $(appledmp_) $(DD)page.dev $(MAKEDIRS)
-	$(SETPDEV) $(DD)appledmp $(appledmp_)
-
-$(DD)iwhi.dev : $(appledmp_) $(DD)page.dev $(MAKEDIRS)
-	$(SETPDEV) $(DD)iwhi $(appledmp_)
-
-$(DD)iwlo.dev : $(appledmp_) $(DD)page.dev $(MAKEDIRS)
-	$(SETPDEV) $(DD)iwlo $(appledmp_)
-
-$(DD)iwlq.dev : $(appledmp_) $(DD)page.dev $(MAKEDIRS)
-	$(SETPDEV) $(DD)iwlq $(appledmp_)
 
 ### ------------ The Canon BubbleJet BJ10e and BJ200 devices ------------ ###
 
 bj10e_=$(DEVOBJ)gdevbj10.$(OBJ)
 
-$(DD)bj10e.dev : $(bj10e_) $(DD)page.dev $(MAKEDIRS)
+$(DD)bj10e.dev : $(bj10e_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)bj10e $(bj10e_)
 
-$(DD)bj200.dev : $(bj10e_) $(DD)page.dev $(MAKEDIRS)
+$(DD)bj200.dev : $(bj10e_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)bj200 $(bj10e_)
 
-$(DEVOBJ)gdevbj10.$(OBJ) : $(DEVSRC)gdevbj10.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevbj10.$(OBJ) : $(DEVSRC)gdevbj10.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevbj10.$(OBJ) $(C_) $(DEVSRC)gdevbj10.c
 
 ### ------------- The CalComp Raster Format ----------------------------- ###
@@ -235,10 +164,10 @@ $(DEVOBJ)gdevbj10.$(OBJ) : $(DEVSRC)gdevbj10.c $(PDEVH) $(MAKEDIRS)
 ###       questions.                                                      ###
 
 ccr_=$(DEVOBJ)gdevccr.$(OBJ)
-$(DD)ccr.dev : $(ccr_) $(DD)page.dev $(MAKEDIRS)
+$(DD)ccr.dev : $(ccr_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)ccr $(ccr_)
 
-$(DEVOBJ)gdevccr.$(OBJ) : $(DEVSRC)gdevccr.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevccr.$(OBJ) : $(DEVSRC)gdevccr.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevccr.$(OBJ) $(C_) $(DEVSRC)gdevccr.c
 
 ### The H-P DeskJet, PaintJet, and DesignJet family color printer devices.###
@@ -257,48 +186,48 @@ $(DEVOBJ)gdevccr.$(OBJ) : $(DEVSRC)gdevccr.c $(PDEVH) $(MAKEDIRS)
 
 cdeskjet_=$(DEVOBJ)gdevcdj.$(OBJ) $(HPPCL)
 
-$(DD)cdeskjet.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)cdeskjet.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)cdeskjet $(cdeskjet_)
 
-$(DD)cdjcolor.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)cdjcolor.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)cdjcolor $(cdeskjet_)
 
-$(DD)cdjmono.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)cdjmono.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)cdjmono $(cdeskjet_)
 
-$(DD)cdj500.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)cdj500.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)cdj500 $(cdeskjet_)
 
-$(DD)cdj550.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)cdj550.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)cdj550 $(cdeskjet_)
 
-$(DD)declj250.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)declj250.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)declj250 $(cdeskjet_)
 
-$(DD)dnj650c.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)dnj650c.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)dnj650c $(cdeskjet_)
 
-$(DD)lj4dith.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)lj4dith.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)lj4dith $(cdeskjet_)
 
-$(DD)pj.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)pj.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)pj $(cdeskjet_)
 
-$(DD)pjxl.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)pjxl.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)pjxl $(cdeskjet_)
 
 # Note: the pjxl300 driver also works for the CopyJet.
-$(DD)pjxl300.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)pjxl300.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)pjxl300 $(cdeskjet_)
 
 # Note: the BJC600 driver also works for the BJC4000.
-$(DD)bjc600.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)bjc600.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)bjc600 $(cdeskjet_)
 
-$(DD)bjc800.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)bjc800.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)bjc800 $(cdeskjet_)
 
-$(DD)escp.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)escp.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)escp $(cdeskjet_)
 
 # NB: you can also customise the build if required, using
@@ -309,15 +238,15 @@ gdevbjc_h=$(DEVSRC)gdevbjc.h
 
 $(DEVOBJ)gdevcdj.$(OBJ) : $(DEVSRC)gdevcdj.c $(std_h) $(PDEVH)\
  $(gsparam_h) $(gsstate_h) $(gxlum_h)\
- $(gdevbjc_h) $(gdevpcl_h) $(MAKEDIRS)
+ $(gdevbjc_h) $(gdevpcl_h) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevcdj.$(OBJ) $(C_) $(DEVSRC)gdevcdj.c
 
 djet500c_=$(DEVOBJ)gdevdjtc.$(OBJ) $(HPPCL)
-$(DD)djet500c.dev : $(djet500c_) $(DD)page.dev $(MAKEDIRS)
+$(DD)djet500c.dev : $(djet500c_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)djet500c $(djet500c_)
 
 $(DEVOBJ)gdevdjtc.$(OBJ) : $(DEVSRC)gdevdjtc.c $(PDEVH) $(malloc__h) $(gdevpcl_h) \
- $(MAKEDIRS)
+ $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevdjtc.$(OBJ) $(C_) $(DEVSRC)gdevdjtc.c
 
 ### -------------------- The H-P Color LaserJet 5/5M -------------------- ###
@@ -333,24 +262,24 @@ $(DEVOBJ)gdevdjtc.$(OBJ) : $(DEVSRC)gdevdjtc.c $(PDEVH) $(malloc__h) $(gdevpcl_h
 
 cljet5_=$(DEVOBJ)gdevclj.$(OBJ) $(HPPCL)
 
-$(DD)cljet5.dev : $(DEVS_MAK) $(cljet5_) $(GLD)page.dev $(MAKEDIRS)
+$(DD)cljet5.dev : $(DEVS_MAK) $(cljet5_) $(GLD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)cljet5 $(cljet5_)
 
 # The cljet5pr driver has hacks for trying to handle page rotation.
 # The hacks only work with one special PCL interpreter.  Don't use it!
-$(DD)cljet5pr.dev : $(DEVS_MAK) $(cljet5_) $(GLD)page.dev $(MAKEDIRS)
+$(DD)cljet5pr.dev : $(DEVS_MAK) $(cljet5_) $(GLD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)cljet5pr $(cljet5_)
 
 $(DEVOBJ)gdevclj.$(OBJ) : $(DEVSRC)gdevclj.c $(math__h) $(PDEVH)\
- $(gx_h) $(gsparam_h) $(gdevpcl_h) $(MAKEDIRS)
+ $(gx_h) $(gsparam_h) $(gdevpcl_h) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevclj.$(OBJ) $(C_) $(DEVSRC)gdevclj.c
 
 cljet5c_=$(DEVOBJ)gdevcljc.$(OBJ) $(HPPCL)
-$(DD)cljet5c.dev : $(DEVS_MAK) $(cljet5c_) $(GLD)page.dev $(MAKEDIRS)
+$(DD)cljet5c.dev : $(DEVS_MAK) $(cljet5c_) $(GLD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)cljet5c $(cljet5c_)
 
 $(DEVOBJ)gdevcljc.$(OBJ) : $(DEVSRC)gdevcljc.c $(math__h) $(PDEVH) $(gdevpcl_h) \
- $(MAKEDIRS)
+ $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevcljc.$(OBJ) $(C_) $(DEVSRC)gdevcljc.c
 
 ### --------------- The H-P LaserJet 3100 software device --------------- ###
@@ -362,17 +291,17 @@ $(DEVOBJ)gdevcljc.$(OBJ) : $(DEVSRC)gdevcljc.c $(math__h) $(PDEVH) $(gdevpcl_h) 
 ###       Ulrich Schmid (uschmid@mail.hh.provi.de) if you have questions. ###
 
 lj3100sw_=$(DEVOBJ)gdevl31s.$(OBJ) $(DEVOBJ)gdevmeds.$(OBJ)
-$(DD)lj3100sw.dev : $(lj3100sw_) $(DD)page.dev $(MAKEDIRS)
+$(DD)lj3100sw.dev : $(lj3100sw_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)lj3100sw $(lj3100sw_)
 
-gdevmeds_h=$(DEVSRC)gdevmeds.h $(gdevprn_h)
+gdevmeds_h=$(DEVSRC)gdevmeds.h
 
 $(DEVOBJ)gdevl31s.$(OBJ) : $(DEVSRC)gdevl31s.c $(gdevmeds_h) $(PDEVH) \
- $(MAKEDIRS)
+ $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevl31s.$(OBJ) $(C_) $(DEVSRC)gdevl31s.c
 
 $(DEVOBJ)gdevmeds.$(OBJ) : $(DEVSRC)gdevmeds.c $(AK) $(gdevmeds_h) \
- $(MAKEDIRS)
+ $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevmeds.$(OBJ) $(C_) $(DEVSRC)gdevmeds.c
 
 ### ------ CoStar LabelWriter II II/Plus device ------ ###
@@ -380,25 +309,14 @@ $(DEVOBJ)gdevmeds.$(OBJ) : $(DEVSRC)gdevmeds.c $(AK) $(gdevmeds_h) \
 
 coslw_=$(DEVOBJ)gdevcslw.$(OBJ)
 
-$(DD)coslw2p.dev : $(coslw_) $(DD)page.dev $(MAKEDIRS)
+$(DD)coslw2p.dev : $(coslw_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)coslw2p $(coslw_)
 
-$(DD)coslwxl.dev : $(coslw_) $(DD)page.dev $(MAKEDIRS)
+$(DD)coslwxl.dev : $(coslw_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)coslwxl $(coslw_)
 
-$(DEVOBJ)gdevcslw.$(OBJ) : $(DEVSRC)gdevcslw.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevcslw.$(OBJ) : $(DEVSRC)gdevcslw.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevcslw.$(OBJ) $(C_) $(DEVSRC)gdevcslw.c
-
-### -------------------- The Mitsubishi CP50 printer -------------------- ###
-### Note: this driver was contributed by a user: please contact           ###
-###       Michael Hu (michael@ximage.com) if you have questions.          ###
-
-cp50_=$(DEVOBJ)gdevcp50.$(OBJ)
-$(DD)cp50.dev : $(cp50_) $(DD)page.dev $(MAKEDIRS)
-	$(SETPDEV) $(DD)cp50 $(cp50_)
-
-$(DEVOBJ)gdevcp50.$(OBJ) : $(DEVSRC)gdevcp50.c $(PDEVH) $(MAKEDIRS)
-	$(DEVCC) $(DEVO_)gdevcp50.$(OBJ) $(C_) $(DEVSRC)gdevcp50.c
 
 ### ----------------- The generic Epson printer device ----------------- ###
 ### Note: most of this code was contributed by users.  Please contact    ###
@@ -409,21 +327,21 @@ $(DEVOBJ)gdevcp50.$(OBJ) : $(DEVSRC)gdevcp50.c $(PDEVH) $(MAKEDIRS)
 
 epson_=$(DEVOBJ)gdevepsn.$(OBJ)
 
-$(DD)epson.dev : $(epson_) $(DD)page.dev $(MAKEDIRS)
+$(DD)epson.dev : $(epson_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)epson $(epson_)
 
-$(DD)eps9mid.dev : $(epson_) $(DD)page.dev $(MAKEDIRS)
+$(DD)eps9mid.dev : $(epson_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)eps9mid $(epson_)
 
-$(DD)eps9high.dev : $(epson_) $(DD)page.dev $(MAKEDIRS)
+$(DD)eps9high.dev : $(epson_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)eps9high $(epson_)
 
-$(DEVOBJ)gdevepsn.$(OBJ) : $(DEVSRC)gdevepsn.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevepsn.$(OBJ) : $(DEVSRC)gdevepsn.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevepsn.$(OBJ) $(C_) $(DEVSRC)gdevepsn.c
 
 ### ----------------- The IBM Proprinter printer device ---------------- ###
 
-$(DD)ibmpro.dev : $(epson_) $(DD)page.dev $(MAKEDIRS)
+$(DD)ibmpro.dev : $(epson_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)ibmpro $(epson_)
 
 ### -------------- The Epson LQ-2550 color printer device -------------- ###
@@ -431,10 +349,10 @@ $(DD)ibmpro.dev : $(epson_) $(DD)page.dev $(MAKEDIRS)
 ###       Dave St. Clair (dave@exlog.com) if you have questions.         ###
 
 epsonc_=$(DEVOBJ)gdevepsc.$(OBJ)
-$(DD)epsonc.dev : $(epsonc_) $(DD)page.dev $(MAKEDIRS)
+$(DD)epsonc.dev : $(epsonc_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)epsonc $(epsonc_)
 
-$(DEVOBJ)gdevepsc.$(OBJ) : $(DEVSRC)gdevepsc.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevepsc.$(OBJ) : $(DEVSRC)gdevepsc.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevepsc.$(OBJ) $(C_) $(DEVSRC)gdevepsc.c
 
 ### ------------- The Epson ESC/P 2 language printer devices ------------- ###
@@ -446,36 +364,36 @@ $(DEVOBJ)gdevepsc.$(OBJ) : $(DEVSRC)gdevepsc.c $(PDEVH) $(MAKEDIRS)
 
 ESCP2=$(DEVOBJ)gdevescp.$(OBJ)
 
-$(DEVOBJ)gdevescp.$(OBJ) : $(DEVSRC)gdevescp.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevescp.$(OBJ) : $(DEVSRC)gdevescp.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevescp.$(OBJ) $(C_) $(DEVSRC)gdevescp.c
 
-$(DD)ap3250.dev : $(ESCP2) $(DD)page.dev $(MAKEDIRS)
+$(DD)ap3250.dev : $(ESCP2) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)ap3250 $(ESCP2)
 
-$(DD)st800.dev : $(ESCP2) $(DD)page.dev $(MAKEDIRS)
+$(DD)st800.dev : $(ESCP2) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)st800 $(ESCP2)
 
 stcolor1_=$(DEVOBJ)gdevstc.$(OBJ) $(DEVOBJ)gdevstc1.$(OBJ) $(DEVOBJ)gdevstc2.$(OBJ)
 stcolor2_=$(DEVOBJ)gdevstc3.$(OBJ) $(DEVOBJ)gdevstc4.$(OBJ)
-$(DD)stcolor.dev : $(stcolor1_) $(stcolor2_) $(DD)page.dev $(MAKEDIRS)
+$(DD)stcolor.dev : $(stcolor1_) $(stcolor2_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)stcolor $(stcolor1_)
 	$(ADDMOD) $(DD)stcolor -obj $(stcolor2_)
 
-gdevstc_h=$(DEVSRC)gdevstc.h $(gdevprn_h) $(gsparam_h) $(gsstate_h)
+gdevstc_h=$(DEVSRC)gdevstc.h
 
-$(DEVOBJ)gdevstc.$(OBJ) : $(DEVSRC)gdevstc.c $(gdevstc_h) $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevstc.$(OBJ) : $(DEVSRC)gdevstc.c $(gdevstc_h) $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevstc.$(OBJ) $(C_) $(DEVSRC)gdevstc.c
 
-$(DEVOBJ)gdevstc1.$(OBJ) : $(DEVSRC)gdevstc1.c $(gdevstc_h) $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevstc1.$(OBJ) : $(DEVSRC)gdevstc1.c $(gdevstc_h) $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevstc1.$(OBJ) $(C_) $(DEVSRC)gdevstc1.c
 
-$(DEVOBJ)gdevstc2.$(OBJ) : $(DEVSRC)gdevstc2.c $(gdevstc_h) $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevstc2.$(OBJ) : $(DEVSRC)gdevstc2.c $(gdevstc_h) $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevstc2.$(OBJ) $(C_) $(DEVSRC)gdevstc2.c
 
-$(DEVOBJ)gdevstc3.$(OBJ) : $(DEVSRC)gdevstc3.c $(gdevstc_h) $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevstc3.$(OBJ) : $(DEVSRC)gdevstc3.c $(gdevstc_h) $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevstc3.$(OBJ) $(C_) $(DEVSRC)gdevstc3.c
 
-$(DEVOBJ)gdevstc4.$(OBJ) : $(DEVSRC)gdevstc4.c $(gdevstc_h) $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevstc4.$(OBJ) : $(DEVSRC)gdevstc4.c $(gdevstc_h) $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevstc4.$(OBJ) $(C_) $(DEVSRC)gdevstc4.c
 
 ### --------------- Ugly/Update -> Unified Printer Driver ---------------- ###
@@ -483,10 +401,10 @@ $(DEVOBJ)gdevstc4.$(OBJ) : $(DEVSRC)gdevstc4.c $(gdevstc_h) $(PDEVH) $(MAKEDIRS)
 ###        Gunther Hess (gunther@elmos.de)                                 ###
 
 uniprint_=$(DEVOBJ)gdevupd.$(OBJ)
-$(DD)uniprint.dev : $(uniprint_) $(DD)page.dev $(MAKEDIRS)
+$(DD)uniprint.dev : $(uniprint_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)uniprint $(uniprint_)
 
-$(DEVOBJ)gdevupd.$(OBJ) : $(DEVSRC)gdevupd.c $(PDEVH) $(gsparam_h) $(MAKEDIRS)
+$(DEVOBJ)gdevupd.$(OBJ) : $(DEVSRC)gdevupd.c $(PDEVH) $(gsparam_h) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevupd.$(OBJ) $(C_) $(DEVSRC)gdevupd.c
 
 ### ------------ The H-P PaintJet color printer device ----------------- ###
@@ -497,16 +415,16 @@ $(DEVOBJ)gdevupd.$(OBJ) : $(DEVSRC)gdevupd.c $(PDEVH) $(gsparam_h) $(MAKEDIRS)
 
 PJET=$(DEVOBJ)gdevpjet.$(OBJ) $(HPPCL)
 
-$(DEVOBJ)gdevpjet.$(OBJ) : $(DEVSRC)gdevpjet.c $(PDEVH) $(gdevpcl_h) $(MAKEDIRS)
+$(DEVOBJ)gdevpjet.$(OBJ) : $(DEVSRC)gdevpjet.c $(PDEVH) $(gdevpcl_h) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevpjet.$(OBJ) $(C_) $(DEVSRC)gdevpjet.c
 
-$(DD)lj250.dev : $(PJET) $(DD)page.dev $(MAKEDIRS)
+$(DD)lj250.dev : $(PJET) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)lj250 $(PJET)
 
-$(DD)paintjet.dev : $(PJET) $(DD)page.dev $(MAKEDIRS)
+$(DD)paintjet.dev : $(PJET) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)paintjet $(PJET)
 
-$(DD)pjetxl.dev : $(PJET) $(DD)page.dev $(MAKEDIRS)
+$(DD)pjetxl.dev : $(PJET) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)pjetxl $(PJET)
 
 ###--------------------- The Brother HL 7x0 printer --------------------- ### 
@@ -517,10 +435,10 @@ $(DD)pjetxl.dev : $(PJET) $(DD)page.dev $(MAKEDIRS)
 ###         for questions about usage with the MFC6550MC Fax Machine.     ###
 
 hl7x0_=$(DEVOBJ)gdevhl7x.$(OBJ)
-$(DD)hl7x0.dev : $(hl7x0_) $(DD)page.dev $(MAKEDIRS)
+$(DD)hl7x0.dev : $(hl7x0_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)hl7x0 $(hl7x0_)
 
-$(DEVOBJ)gdevhl7x.$(OBJ) : $(DEVSRC)gdevhl7x.c $(PDEVH) $(gdevpcl_h) $(MAKEDIRS)
+$(DEVOBJ)gdevhl7x.$(OBJ) : $(DEVSRC)gdevhl7x.c $(PDEVH) $(gdevpcl_h) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevhl7x.$(OBJ) $(C_) $(DEVSRC)gdevhl7x.c
 
 ### -------------- Imagen ImPress Laser Printer device ----------------- ###
@@ -531,13 +449,13 @@ $(DEVOBJ)gdevhl7x.$(OBJ) : $(DEVSRC)gdevhl7x.c $(PDEVH) $(gdevpcl_h) $(MAKEDIRS)
 ### You may also add -DA4 if needed for A4 paper.			 ###
 
 imagen_=$(DEVOBJ)gdevimgn.$(OBJ)
-$(DD)imagen.dev : $(imagen_) $(DD)page.dev $(MAKEDIRS)
+$(DD)imagen.dev : $(imagen_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)imagen $(imagen_)
 
 # Uncomment the first line for the ipr spooler, the second line for parallel.
 IMGN_OPT=
 #IMGN_OPT=-DUSE_BYTE_STREAM
-$(DEVOBJ)gdevimgn.$(OBJ) : $(DEVSRC)gdevimgn.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevimgn.$(OBJ) : $(DEVSRC)gdevimgn.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(IMGN_OPT) $(DEVO_)gdevimgn.$(OBJ) $(C_) $(DEVSRC)gdevimgn.c
 
 ### ------- The IBM 3852 JetPrinter color inkjet printer device -------- ###
@@ -548,10 +466,10 @@ $(DEVOBJ)gdevimgn.$(OBJ) : $(DEVSRC)gdevimgn.c $(PDEVH) $(MAKEDIRS)
 ###   width of the jetprinter itself.)                                   ###
 
 jetp3852_=$(DEVOBJ)gdev3852.$(OBJ)
-$(DD)jetp3852.dev : $(jetp3852_) $(DD)page.dev $(MAKEDIRS)
+$(DD)jetp3852.dev : $(jetp3852_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)jetp3852 $(jetp3852_)
 
-$(DEVOBJ)gdev3852.$(OBJ) : $(DEVSRC)gdev3852.c $(PDEVH) $(gdevpcl_h) $(MAKEDIRS)
+$(DEVOBJ)gdev3852.$(OBJ) : $(DEVSRC)gdev3852.c $(PDEVH) $(gdevpcl_h) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdev3852.$(OBJ) $(C_) $(DEVSRC)gdev3852.c
 
 ### ---------- The Canon LBP-8II and LIPS III printer devices ---------- ###
@@ -560,13 +478,13 @@ $(DEVOBJ)gdev3852.$(OBJ) : $(DEVSRC)gdev3852.c $(PDEVH) $(gdevpcl_h) $(MAKEDIRS)
 ###       Lauri Paatero, lauri.paatero@paatero.pp.fi                     ###
 
 lbp8_=$(DEVOBJ)gdevlbp8.$(OBJ)
-$(DD)lbp8.dev : $(lbp8_) $(DD)page.dev $(MAKEDIRS)
+$(DD)lbp8.dev : $(lbp8_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)lbp8 $(lbp8_)
 
-$(DD)lips3.dev : $(lbp8_) $(DD)page.dev $(MAKEDIRS)
+$(DD)lips3.dev : $(lbp8_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)lips3 $(lbp8_)
 
-$(DEVOBJ)gdevlbp8.$(OBJ) : $(DEVSRC)gdevlbp8.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevlbp8.$(OBJ) : $(DEVSRC)gdevlbp8.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevlbp8.$(OBJ) $(C_) $(DEVSRC)gdevlbp8.c
 
 ### -------------- The Epson LP-8000 laser printer device -------------- ###
@@ -574,10 +492,10 @@ $(DEVOBJ)gdevlbp8.$(OBJ) : $(DEVSRC)gdevlbp8.c $(PDEVH) $(MAKEDIRS)
 ###       Oleg Fat'yanov <faty1@rlem.titech.ac.jp> if you have questions.###
 
 lp8000_=$(DEVOBJ)gdevlp8k.$(OBJ)
-$(DD)lp8000.dev : $(lp8000_) $(DD)page.dev $(MAKEDIRS)
+$(DD)lp8000.dev : $(lp8000_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)lp8000 $(lp8000_)
 
-$(DEVOBJ)gdevlp8k.$(OBJ) : $(DEVSRC)gdevlp8k.c $(PDEVH)  $(MAKEDIRS)
+$(DEVOBJ)gdevlp8k.$(OBJ) : $(DEVSRC)gdevlp8k.c $(PDEVH)  $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevlp8k.$(OBJ) $(C_) $(DEVSRC)gdevlp8k.c
 
 ### -------------- The C.Itoh M8510 printer device --------------------- ###
@@ -585,10 +503,10 @@ $(DEVOBJ)gdevlp8k.$(OBJ) : $(DEVSRC)gdevlp8k.c $(PDEVH)  $(MAKEDIRS)
 ###       Smith <bob@snuffy.penfield.ny.us> if you have questions.       ###
 
 m8510_=$(DEVOBJ)gdev8510.$(OBJ)
-$(DD)m8510.dev : $(m8510_) $(DD)page.dev $(MAKEDIRS)
+$(DD)m8510.dev : $(m8510_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)m8510 $(m8510_)
 
-$(DEVOBJ)gdev8510.$(OBJ) : $(DEVSRC)gdev8510.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdev8510.$(OBJ) : $(DEVSRC)gdev8510.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdev8510.$(OBJ) $(C_) $(DEVSRC)gdev8510.c
 
 ### -------------- 24pin Dot-matrix printer with 360DPI ---------------- ###
@@ -599,13 +517,13 @@ $(DEVOBJ)gdev8510.$(OBJ) : $(DEVSRC)gdev8510.c $(PDEVH) $(MAKEDIRS)
 ###      questions about the Epson LQ850.                                ###
 
 dm24_=$(DEVOBJ)gdevdm24.$(OBJ)
-$(DD)necp6.dev : $(dm24_) $(DD)page.dev $(MAKEDIRS)
+$(DD)necp6.dev : $(dm24_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)necp6 $(dm24_)
 
-$(DD)lq850.dev : $(dm24_) $(DD)page.dev $(MAKEDIRS)
+$(DD)lq850.dev : $(dm24_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)lq850 $(dm24_)
 
-$(DEVOBJ)gdevdm24.$(OBJ) : $(DEVSRC)gdevdm24.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevdm24.$(OBJ) : $(DEVSRC)gdevdm24.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevdm24.$(OBJ) $(C_) $(DEVSRC)gdevdm24.c
 
 ### ----------------- Lexmark 5700 printer ----------------------------- ###
@@ -613,10 +531,10 @@ $(DEVOBJ)gdevdm24.$(OBJ) : $(DEVSRC)gdevdm24.c $(PDEVH) $(MAKEDIRS)
 ###   Stephen Taylor (setaylor@ma.ultranet.com) if you have questions.   ###
 
 lxm5700m_=$(DEVOBJ)gdevlxm.$(OBJ)
-$(DD)lxm5700m.dev : $(lxm5700m_) $(DD)page.dev $(MAKEDIRS)
+$(DD)lxm5700m.dev : $(lxm5700m_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)lxm5700m $(lxm5700m_)
 
-$(DEVOBJ)gdevlxm.$(OBJ) : $(DEVSRC)gdevlxm.c $(PDEVH) $(gsparams_h) $(MAKEDIRS)
+$(DEVOBJ)gdevlxm.$(OBJ) : $(DEVSRC)gdevlxm.c $(PDEVH) $(gsparams_h) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevlxm.$(OBJ) $(C_) $(DEVSRC)gdevlxm.c
 
 ### ----------------- The Okidata MicroLine 182 device ----------------- ###
@@ -624,10 +542,10 @@ $(DEVOBJ)gdevlxm.$(OBJ) : $(DEVSRC)gdevlxm.c $(PDEVH) $(gsparams_h) $(MAKEDIRS)
 ###       Maarten Koning (smeg@bnr.ca) if you have questions.            ###
 
 oki182_=$(DEVOBJ)gdevo182.$(OBJ)
-$(DD)oki182.dev : $(oki182_) $(DD)page.dev $(MAKEDIRS)
+$(DD)oki182.dev : $(oki182_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)oki182 $(oki182_)
 
-$(DEVOBJ)gdevo182.$(OBJ) : $(DEVSRC)gdevo182.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevo182.$(OBJ) : $(DEVSRC)gdevo182.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevo182.$(OBJ) $(C_) $(DEVSRC)gdevo182.c
 
 ### ------------- The Okidata IBM compatible printer device ------------ ###
@@ -635,10 +553,10 @@ $(DEVOBJ)gdevo182.$(OBJ) : $(DEVSRC)gdevo182.c $(PDEVH) $(MAKEDIRS)
 ###       Charles Mack (chasm@netcom.com) if you have questions.         ###
 
 okiibm_=$(DEVOBJ)gdevokii.$(OBJ)
-$(DD)okiibm.dev : $(okiibm_) $(DD)page.dev $(MAKEDIRS)
+$(DD)okiibm.dev : $(okiibm_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)okiibm $(okiibm_)
 
-$(DEVOBJ)gdevokii.$(OBJ) : $(DEVSRC)gdevokii.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevokii.$(OBJ) : $(DEVSRC)gdevokii.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevokii.$(OBJ) $(C_) $(DEVSRC)gdevokii.c
 
 ### ------------------ The Epson Stylus Photo devices ------------------ ###
@@ -646,10 +564,10 @@ $(DEVOBJ)gdevokii.$(OBJ) : $(DEVSRC)gdevokii.c $(PDEVH) $(MAKEDIRS)
 ###	Zoltan Kocsi (zoltan@bendor.com.au) if you have questions.       ###
 
 photoex_=$(DEVOBJ)gdevphex.$(OBJ)
-$(DD)photoex.dev : $(photoex_) $(DD)page.dev $(MAKEDIRS)
+$(DD)photoex.dev : $(photoex_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)photoex $(photoex_)
 
-$(DEVOBJ)gdevphex.$(OBJ) : $(DEVSRC)gdevphex.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevphex.$(OBJ) : $(DEVSRC)gdevphex.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevphex.$(OBJ) $(C_) $(DEVSRC)gdevphex.c
 
 ### ------------- The Ricoh 4081 laser printer device ------------------ ###
@@ -657,11 +575,11 @@ $(DEVOBJ)gdevphex.$(OBJ) : $(DEVSRC)gdevphex.c $(PDEVH) $(MAKEDIRS)
 ###       please contact kdw@oasis.icl.co.uk if you have questions.      ###
 
 r4081_=$(DEVOBJ)gdev4081.$(OBJ)
-$(DD)r4081.dev : $(r4081_) $(DD)page.dev $(MAKEDIRS)
+$(DD)r4081.dev : $(r4081_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)r4081 $(r4081_)
 
 
-$(DEVOBJ)gdev4081.$(OBJ) : $(DEVSRC)gdev4081.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdev4081.$(OBJ) : $(DEVSRC)gdev4081.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdev4081.$(OBJ) $(C_) $(DEVSRC)gdev4081.c
 
 ### -------------------- Sony NWP533 printer device -------------------- ###
@@ -669,24 +587,11 @@ $(DEVOBJ)gdev4081.$(OBJ) : $(DEVSRC)gdev4081.c $(PDEVH) $(MAKEDIRS)
 ###       Kivinen (kivinen@joker.cs.hut.fi) if you have questions.       ###
 
 nwp533_=$(DEVOBJ)gdevn533.$(OBJ)
-$(DD)nwp533.dev : $(nwp533_) $(DD)page.dev $(MAKEDIRS)
+$(DD)nwp533.dev : $(nwp533_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)nwp533 $(nwp533_)
 
-$(DEVOBJ)gdevn533.$(OBJ) : $(DEVSRC)gdevn533.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevn533.$(OBJ) : $(DEVSRC)gdevn533.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevn533.$(OBJ) $(C_) $(DEVSRC)gdevn533.c
-
-### ------------------------- The SPARCprinter ------------------------- ###
-### Note: this driver was contributed by users: please contact Martin    ###
-###       Schulte (schulte@thp.uni-koeln.de) if you have questions.      ###
-###       He would also like to hear from anyone using the driver.       ###
-### Please consult the source code for additional documentation.         ###
-
-sparc_=$(DEVOBJ)gdevsppr.$(OBJ)
-$(DD)sparc.dev : $(sparc_) $(DD)page.dev $(MAKEDIRS)
-	$(SETPDEV) $(DD)sparc $(sparc_)
-
-$(DEVOBJ)gdevsppr.$(OBJ) : $(DEVSRC)gdevsppr.c $(PDEVH) $(MAKEDIRS)
-	$(DEVCC) $(DEVO_)gdevsppr.$(OBJ) $(C_) $(DEVSRC)gdevsppr.c
 
 ### ----------------- The StarJet SJ48 device -------------------------- ###
 ### Note: this driver was contributed by a user: if you have questions,  ###
@@ -694,7 +599,7 @@ $(DEVOBJ)gdevsppr.$(OBJ) : $(DEVSRC)gdevsppr.c $(PDEVH) $(MAKEDIRS)
 ###       please contact Mats Akerblom (f86ma@dd.chalmers.se).           ###
 
 sj48_=$(DEVOBJ)gdevsj48.$(OBJ)
-$(DD)sj48.dev : $(sj48_) $(DD)page.dev $(MAKEDIRS)
+$(DD)sj48.dev : $(sj48_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)sj48 $(sj48_)
 
 $(DEVOBJ)gdevsj48.$(OBJ) : $(DEVSRC)gdevsj48.c $(PDEVH)
@@ -706,16 +611,16 @@ $(DEVOBJ)gdevsj48.$(OBJ) : $(DEVSRC)gdevsj48.c $(PDEVH)
 ###       if you have questions.                                         ###
 
 t4693d_=$(DEVOBJ)gdev4693.$(OBJ)
-$(DD)t4693d2.dev : $(t4693d_) $(DD)page.dev $(MAKEDIRS)
+$(DD)t4693d2.dev : $(t4693d_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)t4693d2 $(t4693d_)
 
-$(DD)t4693d4.dev : $(t4693d_) $(DD)page.dev $(MAKEDIRS)
+$(DD)t4693d4.dev : $(t4693d_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)t4693d4 $(t4693d_)
 
-$(DD)t4693d8.dev : $(t4693d_) $(DD)page.dev $(MAKEDIRS)
+$(DD)t4693d8.dev : $(t4693d_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)t4693d8 $(t4693d_)
 
-$(DEVOBJ)gdev4693.$(OBJ) : $(DEVSRC)gdev4693.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdev4693.$(OBJ) : $(DEVSRC)gdev4693.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdev4693.$(OBJ) $(C_) $(DEVSRC)gdev4693.c
 
 ### -------------------- Tektronix ink-jet printers -------------------- ###
@@ -723,10 +628,10 @@ $(DEVOBJ)gdev4693.$(OBJ) : $(DEVSRC)gdev4693.c $(PDEVH) $(MAKEDIRS)
 ###       Karsten Spang (spang@nbivax.nbi.dk) if you have questions.     ###
 
 tek4696_=$(DEVOBJ)gdevtknk.$(OBJ)
-$(DD)tek4696.dev : $(tek4696_) $(DD)page.dev $(MAKEDIRS)
+$(DD)tek4696.dev : $(tek4696_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)tek4696 $(tek4696_)
 
-$(DEVOBJ)gdevtknk.$(OBJ) : $(DEVSRC)gdevtknk.c $(PDEVH) $(malloc__h) $(MAKEDIRS)
+$(DEVOBJ)gdevtknk.$(OBJ) : $(DEVSRC)gdevtknk.c $(PDEVH) $(malloc__h) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevtknk.$(OBJ) $(C_) $(DEVSRC)gdevtknk.c
 
 ###### ------------------------- Fax devices ------------------------- ######
@@ -737,12 +642,12 @@ $(DEVOBJ)gdevtknk.$(OBJ) : $(DEVSRC)gdevtknk.c $(PDEVH) $(malloc__h) $(MAKEDIRS)
 
 cfax_=$(DEVOBJ)gdevcfax.$(OBJ)
 
-$(DD)cfax.dev : $(cfax_) $(DD)fax.dev $(MAKEDIRS)
+$(DD)cfax.dev : $(cfax_) $(DD)fax.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETDEV) $(DD)cfax $(cfax_)
 	$(ADDMOD) $(DD)cfax -include $(DD)fax
 
 $(DEVOBJ)gdevcfax.$(OBJ) : $(DEVSRC)gdevcfax.c $(PDEVH)\
- $(gdevfax_h) $(scfx_h) $(strimpl_h) $(MAKEDIRS)
+ $(gdevfax_h) $(scfx_h) $(strimpl_h) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevcfax.$(OBJ) $(C_) $(DEVSRC)gdevcfax.c
 
 ### ------------------------- The DigiFAX device ------------------------ ###
@@ -754,16 +659,16 @@ $(DEVOBJ)gdevcfax.$(OBJ) : $(DEVSRC)gdevcfax.c $(PDEVH)\
 
 dfax_=$(DEVOBJ)gdevdfax.$(OBJ)
 
-$(DD)dfaxlow.dev : $(dfax_) $(DD)tfax.dev $(MAKEDIRS)
+$(DD)dfaxlow.dev : $(dfax_) $(DD)tfax.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETDEV) $(DD)dfaxlow $(dfax_)
 	$(ADDMOD) $(DEVGEN)dfaxlow -include $(DD)tfax
 
-$(DD)dfaxhigh.dev : $(dfax_) $(DD)tfax.dev $(MAKEDIRS)
+$(DD)dfaxhigh.dev : $(dfax_) $(DD)tfax.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETDEV) $(DD)dfaxhigh $(dfax_)
 	$(ADDMOD) $(DEVGEN)dfaxhigh -include $(DD)tfax
 
 $(DEVOBJ)gdevdfax.$(OBJ) : $(DEVSRC)gdevdfax.c $(PDEVH)\
- $(gdevfax_h) $(gdevtfax_h) $(scfx_h) $(strimpl_h) $(MAKEDIRS)
+ $(gdevfax_h) $(gdevtfax_h) $(scfx_h) $(strimpl_h) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevdfax.$(OBJ) $(C_) $(DEVSRC)gdevdfax.c
 
 ###### --------------------- Raster file formats --------------------- ######
@@ -773,10 +678,10 @@ $(DEVOBJ)gdevdfax.$(OBJ) : $(DEVSRC)gdevdfax.c $(PDEVH)\
 ###       Frederic Petrot (petrot@masi.ibp.fr) if you have questions.    ###
 
 cif_=$(DEVOBJ)gdevcif.$(OBJ)
-$(DD)cif.dev : $(cif_) $(DD)page.dev $(MAKEDIRS)
+$(DD)cif.dev : $(cif_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)cif $(cif_)
 
-$(DEVOBJ)gdevcif.$(OBJ) : $(DEVSRC)gdevcif.c $(PDEVH) $(MAKEDIRS)
+$(DEVOBJ)gdevcif.$(OBJ) : $(DEVSRC)gdevcif.c $(PDEVH) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevcif.$(OBJ) $(C_) $(DEVSRC)gdevcif.c
 
 ### ------------------------- Inferno bitmaps -------------------------- ###
@@ -784,11 +689,11 @@ $(DEVOBJ)gdevcif.$(OBJ) : $(DEVSRC)gdevcif.c $(PDEVH) $(MAKEDIRS)
 ###       Russ Cox <rsc@plan9.bell-labs.com> if you have questions.      ###
 
 inferno_=$(DEVOBJ)gdevifno.$(OBJ)
-$(DD)inferno.dev : $(inferno_) $(DD)page.dev $(MAKEDIRS)
+$(DD)inferno.dev : $(inferno_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)inferno $(inferno_)
 
 $(DEVOBJ)gdevifno.$(OBJ) : $(DEVSRC)gdevifno.c $(PDEVH)\
- $(gsparam_h) $(MAKEDIRS)
+ $(gsparam_h) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevifno.$(OBJ) $(C_) $(DEVSRC)gdevifno.c
 
 ### --------------------------- MGR devices ---------------------------- ###
@@ -797,52 +702,29 @@ $(DEVOBJ)gdevifno.$(OBJ) : $(DEVSRC)gdevifno.c $(PDEVH)\
 
 MGR=$(DEVOBJ)gdevmgr.$(OBJ) $(DEVOBJ)gdevpccm.$(OBJ)
 
-gdevmgr_h= $(DEVSRC)gdevmgr.h
+gdevmgr_h=$(DEVSRC)gdevmgr.h
 
 $(DEVOBJ)gdevmgr.$(OBJ) : $(DEVSRC)gdevmgr.c $(PDEVH)\
- $(gdevmgr_h) $(gdevpccm_h) $(MAKEDIRS)
+ $(gdevmgr_h) $(gdevpccm_h) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(DEVCC) $(DEVO_)gdevmgr.$(OBJ) $(C_) $(DEVSRC)gdevmgr.c
 
-$(DD)mgrmono.dev : $(MGR) $(DD)page.dev $(MAKEDIRS)
+$(DD)mgrmono.dev : $(MGR) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)mgrmono $(MGR)
 
-$(DD)mgrgray2.dev : $(MGR) $(DD)page.dev $(MAKEDIRS)
+$(DD)mgrgray2.dev : $(MGR) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)mgrgray2 $(MGR)
 
-$(DD)mgrgray4.dev : $(MGR) $(DD)page.dev $(MAKEDIRS)
+$(DD)mgrgray4.dev : $(MGR) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)mgrgray4 $(MGR)
 
-$(DD)mgrgray8.dev : $(MGR) $(DD)page.dev $(MAKEDIRS)
+$(DD)mgrgray8.dev : $(MGR) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)mgrgray8 $(MGR)
 
-$(DD)mgr4.dev : $(MGR) $(DD)page.dev $(MAKEDIRS)
+$(DD)mgr4.dev : $(MGR) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)mgr4 $(MGR)
 
-$(DD)mgr8.dev : $(MGR) $(DD)page.dev $(MAKEDIRS)
+$(DD)mgr8.dev : $(MGR) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)mgr8 $(MGR)
-
-### -------------------------- SGI RGB pixmaps -------------------------- ###
-
-sgirgb_=$(DEVOBJ)gdevsgi.$(OBJ)
-$(DD)sgirgb.dev : $(sgirgb_) $(DD)page.dev $(MAKEDIRS)
-	$(SETPDEV) $(DD)sgirgb $(sgirgb_)
-
-gdevsgi_h=$(DEVSRC)gdevsgi.h
-
-$(DEVOBJ)gdevsgi.$(OBJ) : $(DEVSRC)gdevsgi.c $(PDEVH) $(gdevsgi_h) $(MAKEDIRS)
-	$(DEVCC) $(DEVO_)gdevsgi.$(OBJ) $(C_) $(DEVSRC)gdevsgi.c
-
-### ---------------- Sun raster files ---------------- ###
-
-sunr_=$(DEVOBJ)gdevsunr.$(OBJ)
-
-# Harlequin variant, 1-bit
-$(DD)sunhmono.dev : $(sunr_) $(DD)page.dev $(MAKEDIRS)
-	$(SETPDEV) $(DD)sunhmono $(sunr_)
-
-$(DEVOBJ)gdevsunr.$(OBJ) : $(DEVSRC)gdevsunr.c $(PDEVH) $(MAKEDIRS)
-	$(DEVCC) $(DEVO_)gdevsunr.$(OBJ) $(C_) $(DEVSRC)gdevsunr.c
-
 
 #########################################################################
 ### --------------------Japanese printer addons --------------------- ###
@@ -851,16 +733,326 @@ $(DEVOBJ)gdevsunr.$(OBJ) : $(DEVSRC)gdevsunr.c $(PDEVH) $(MAKEDIRS)
 ### These drivers are based on patches on existing device drivers in the
 ### src/ directory, therefore they are not in addons/
 
-$(DD)ljet4pjl.dev : $(HPMONO) $(DD)page.dev $(MAKEDIRS)
+$(DD)ljet4pjl.dev : $(HPMONO) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)ljet4pjl $(HPMONO)
 
-$(DD)lj4dithp.dev : $(cdeskjet_) $(DD)page.dev $(MAKEDIRS)
+$(DD)lj4dithp.dev : $(cdeskjet_) $(DD)page.dev $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)lj4dithp $(cdeskjet_)
 
-$(DD)dj505j.dev : $(cdeskjet_) $(MAKEDIRS)
+$(DD)dj505j.dev : $(cdeskjet_) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)dj505j $(cdeskjet_)
 
-$(DD)picty180.dev : $(cdeskjet_) $(MAKEDIRS)
+$(DD)picty180.dev : $(cdeskjet_) $(DCONTRIB_MAK) $(MAKEDIRS)
 	$(SETPDEV) $(DD)picty180 $(cdeskjet_)
 
 #########################################################################
+# Dependencies:
+$(DEVSRC)gdevmeds.h:$(GLSRC)gdevprn.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)string_.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsstrtok.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxclthrd.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxclpage.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxclist.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxgstate.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxline.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gstrans.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsht1.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)math_.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gdevp14.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxcolor2.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxpcolor.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gdevdevn.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsequivc.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gx.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxblend.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxclipsr.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxcomp.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxdcolor.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gdebug.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxmatrix.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxbitfmt.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxdevbuf.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxband.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gscolor2.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gscindex.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxdevice.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsht.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxcpath.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxdevmem.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxdevcli.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxpcache.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsptype1.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxtext.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gscie.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gstext.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsnamecl.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gstparam.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxstate.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gspcolor.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxfcache.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxcspace.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsropt.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsfunc.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsmalloc.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxrplane.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxctable.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsuid.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxcmap.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsimage.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsdcolor.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxdda.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxcvalue.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsfont.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxfmap.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxiclass.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxftype.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxfrac.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gscms.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gscspace.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxpath.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxbcache.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsdevice.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxarith.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxstdio.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gspenum.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxhttile.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsrect.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gslparam.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsxfont.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxclio.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsiparam.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsdsrc.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsio.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxbitmap.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsmatrix.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gscpm.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxfixed.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsrefct.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsparam.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gp.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsccolor.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsstruct.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxsync.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsutil.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsstrl.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gdbflags.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)srdline.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gserrors.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)scommon.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)memento.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)vmsmath.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gscsel.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsbitmap.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsfname.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsstype.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)stat_.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxtmap.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsmemory.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gpsync.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)memory_.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gpgetenv.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gslibctx.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gscdefs.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gs_dll_call.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)stdio_.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gscompt.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gxcindex.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsgstate.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)stdint_.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gssprintf.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gsccode.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)std.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)gstypes.h
+$(DEVSRC)gdevmeds.h:$(GLSRC)stdpre.h
+$(DEVSRC)gdevmeds.h:$(GLGEN)arch.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gdevprn.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsstate.h
+$(DEVSRC)gdevstc.h:$(GLSRC)string_.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsstrtok.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsovrc.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxclthrd.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxclpage.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxclist.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxgstate.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxline.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gstrans.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gscolor.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsht1.h
+$(DEVSRC)gdevstc.h:$(GLSRC)math_.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gdevp14.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxcolor2.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxpcolor.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gdevdevn.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsequivc.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gx.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxblend.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxclipsr.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxcomp.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsline.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxdcolor.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gdebug.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxmatrix.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxbitfmt.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxdevbuf.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxband.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gscolor2.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gscindex.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxdevice.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsht.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxcpath.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxdevmem.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxdevcli.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxpcache.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsptype1.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxtext.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gscie.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gstext.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsnamecl.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gstparam.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxstate.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gspcolor.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxfcache.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxcspace.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsropt.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsfunc.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsmalloc.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxrplane.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxctable.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsuid.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxcmap.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsimage.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsdcolor.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxdda.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxcvalue.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsfont.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxfmap.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxiclass.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxftype.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxfrac.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gscms.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gscspace.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxpath.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxbcache.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsdevice.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxarith.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxstdio.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gspenum.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxhttile.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsrect.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gslparam.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsxfont.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxclio.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsiparam.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsdsrc.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsio.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxbitmap.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsmatrix.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gscpm.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxfixed.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsrefct.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsparam.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gp.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsccolor.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsstruct.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxsync.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsutil.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsstrl.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gdbflags.h
+$(DEVSRC)gdevstc.h:$(GLSRC)srdline.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gserrors.h
+$(DEVSRC)gdevstc.h:$(GLSRC)scommon.h
+$(DEVSRC)gdevstc.h:$(GLSRC)memento.h
+$(DEVSRC)gdevstc.h:$(GLSRC)vmsmath.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gscsel.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsbitmap.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsfname.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsstype.h
+$(DEVSRC)gdevstc.h:$(GLSRC)stat_.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxtmap.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsmemory.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gpsync.h
+$(DEVSRC)gdevstc.h:$(GLSRC)memory_.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gpgetenv.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gslibctx.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gscdefs.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gs_dll_call.h
+$(DEVSRC)gdevstc.h:$(GLSRC)stdio_.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gscompt.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gxcindex.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsgstate.h
+$(DEVSRC)gdevstc.h:$(GLSRC)stdint_.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gssprintf.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gsccode.h
+$(DEVSRC)gdevstc.h:$(GLSRC)std.h
+$(DEVSRC)gdevstc.h:$(GLSRC)gstypes.h
+$(DEVSRC)gdevstc.h:$(GLSRC)stdpre.h
+$(DEVSRC)gdevstc.h:$(GLGEN)arch.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxdevcli.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxtext.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gstext.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsnamecl.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gstparam.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxfcache.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxcspace.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsropt.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsfunc.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxrplane.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsuid.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxcmap.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsimage.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsdcolor.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxdda.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxcvalue.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsfont.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxfmap.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxftype.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxfrac.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gscms.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gscspace.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxpath.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxbcache.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsdevice.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxarith.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gspenum.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxhttile.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsrect.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gslparam.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsxfont.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsiparam.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsdsrc.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxbitmap.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsmatrix.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gscpm.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxfixed.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsrefct.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsparam.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gp.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsccolor.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsstruct.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxsync.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)srdline.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)scommon.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)memento.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gscsel.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsbitmap.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsstype.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)stat_.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxtmap.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsmemory.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gpsync.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)memory_.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gpgetenv.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gslibctx.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gscdefs.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gs_dll_call.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)stdio_.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gscompt.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gxcindex.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsgstate.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)stdint_.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gssprintf.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gsccode.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)std.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)gstypes.h
+$(DEVSRC)gdevmgr.h:$(GLSRC)stdpre.h
+$(DEVSRC)gdevmgr.h:$(GLGEN)arch.h

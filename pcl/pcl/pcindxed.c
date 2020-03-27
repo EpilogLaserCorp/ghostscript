@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -125,6 +125,7 @@ alloc_indexed_cspace(pcl_cs_indexed_t ** ppindexed,
     if (code < 0) {
         free_indexed_cspace(pmem, pindexed,
                             "allocate pcl indexed color space");
+        gs_free_object(pmem, bp, "allocate pcl indexed color space");
         return code;
     }
 
@@ -207,8 +208,18 @@ unshare_indexed_cspace(pcl_cs_indexed_t ** ppindexed)
            pindexed->palette.size);
     memcpy(pnew->pen_widths, pindexed->pen_widths,
            num_entries * sizeof(float));
-    memcpy(pnew->norm, pindexed->norm, 3 * sizeof(pindexed->norm[0]));
-    memcpy(pnew->Decode, pindexed->Decode, 6 * sizeof(float));
+
+    /* Coverity thinks next memcpy() might need to be memmove(), so we
+    explicitly check for the buffers being equal. */
+    if (pnew->norm != pindexed->norm) {
+        memcpy(pnew->norm, pindexed->norm, 3 * sizeof(pindexed->norm[0]));
+    }
+
+    /* Coverity thinks next memcpy() might need to be memmove(), so we
+    explicitly check for the buffers being equal. */
+    if (pnew->Decode != pindexed->Decode) {
+        memcpy(pnew->Decode, pindexed->Decode, 6 * sizeof(float));
+    }
 
     return 0;
 }
@@ -986,13 +997,17 @@ pcl_cs_indexed_build_cspace(pcl_state_t * pcs,
             }
         }
     }
-    pcl_cs_indexed_set_norm_and_Decode(ppindexed,
+    code = pcl_cs_indexed_set_norm_and_Decode(ppindexed,
                                        wht_ref[0], wht_ref[1], wht_ref[2],
                                        blk_ref[0], blk_ref[1], blk_ref[2]
         );
+    if (code < 0)
+        return code;
 
     /* set the palette size and the default palette entries */
-    pcl_cs_indexed_set_num_entries(ppindexed, 1L << bits, gl2);
+    code = pcl_cs_indexed_set_num_entries(ppindexed, 1L << bits, gl2);
+    if (code < 0)
+        return code;
 
     /* now can indicate if the palette is fixed */
     pindexed->pfixed = pfixed;
@@ -1060,10 +1075,13 @@ pcl_cs_indexed_build_special(pcl_cs_indexed_t ** ppindexed,
     pindexed->cid = cid;
     pindexed->num_entries = 2;
     /* set up the normalization information - not strictly necessary */
-    pcl_cs_indexed_set_norm_and_Decode(ppindexed,
+    code = pcl_cs_indexed_set_norm_and_Decode(ppindexed,
                                        wht_ref[0], wht_ref[1], wht_ref[2],
                                        blk_ref[0], blk_ref[1], blk_ref[2]
         );
+    if (code < 0)
+        return code;
+
     pindexed->Decode[1] = 1;
 
     for (i = 0; i < 3; i++) {
@@ -1097,7 +1115,17 @@ pcl_cs_indexed_install(pcl_cs_indexed_t ** ppindexed, pcl_state_t * pcs)
             return code;
         pindexed = *ppindexed;
     }
-
+    /* Really, to be consistent with the other interpreter's usage of the graphics library,
+     * we should call gs_setcolorspace(pindexed->pcspace->base_space), but if we do that
+     * we get a lot of differences in halftoned output. Just calling the 'install' procedure
+     * for the base space doesn't modify pgs->color[0].ccolor elements for RGB, which
+     * gs_setcolorspace() does. I think it would be worthwhile someone investigating why this is
+     * one day, some of the differences looked like progressions.
+     */
+    code = (*pindexed->pcspace->base_space->type->install_cspace)
+        (pindexed->pcspace->base_space, pcs->pgs);
+    if (code < 0)
+        return code;
     return gs_setcolorspace(pcs->pgs, pindexed->pcspace);
 }
 

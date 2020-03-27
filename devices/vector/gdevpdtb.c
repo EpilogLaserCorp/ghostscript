@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -113,9 +113,12 @@ const char *pdf_find_base14_name(const byte *str, uint size)
 {
     const pdf_base14_font_info_t *ppsf;
 
-    for (ppsf = base14_font_info; ppsf->urwname; ++ppsf)
-      if (!memcmp(ppsf->urwname, (const char *)str, size))
-          return ppsf->stdname;
+    for (ppsf = base14_font_info; ppsf->urwname; ++ppsf) {
+        if (strlen(ppsf->urwname) == size) {
+            if (!memcmp(ppsf->urwname, (const char *)str, size))
+                return ppsf->stdname;
+        }
+    }
     return NULL;
 }
 
@@ -422,11 +425,22 @@ int
 pdf_base_font_copy_glyph(pdf_base_font_t *pbfont, gs_glyph glyph,
                          gs_font_base *font)
 {
-    int code =
-        gs_copy_glyph_options((gs_font *)font, glyph,
+    int code;
+
+    /* If we're a TrueType CIDFont, check teh GSUB table for replacement glyphs.
+     * Bug #691574
+     */
+    if (font->FontType == ft_CID_TrueType) {
+        code =
+            gs_copy_glyph_options((gs_font *)font, glyph,
+                              (gs_font *)pbfont->copied,
+                              (pbfont->is_standard ? COPY_GLYPH_NO_NEW : COPY_GLYPH_USE_GSUB));
+    } else {
+        code =
+            gs_copy_glyph_options((gs_font *)font, glyph,
                               (gs_font *)pbfont->copied,
                               (pbfont->is_standard ? COPY_GLYPH_NO_NEW : 0));
-
+    }
     if (code < 0)
         return code;
     if (pbfont->CIDSet != 0 &&
@@ -495,7 +509,7 @@ pdf_write_FontFile_entry(gx_device_pdf *pdev, pdf_base_font_t *pbfont)
         FontFile_key = "/FontFile2";
         break;
     default:			/* Type 1/2, CIDFontType 0 */
-        if (pdev->ResourcesBeforeUsage)
+        if (!pdev->HaveCFF)
             FontFile_key = "/FontFile";
         else
             FontFile_key = "/FontFile3";

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -332,9 +332,10 @@ cube_build_func0(const ref * pdict, gs_function_Sd_params_t * params,
         }
         else {			/* Size array specified - verify valid */
             if (code != params->m || !valid_cube_size(params->m, params->n,
-                                        params->BitsPerSample, params->Size))
-                code = gs_note_error(gs_error_rangecheck);
-                goto fail;
+                params->BitsPerSample, params->Size)) {
+                    code = gs_note_error(gs_error_rangecheck);
+                    goto fail;
+            }
         }
     }
     /*
@@ -519,8 +520,10 @@ sampled_data_continue(i_ctx_t *i_ctx_p)
         double rmax = params->Range[2 * i + 1];
 
         code = real_param(op + i - num_out + 1, &value);
-        if (code < 0)
+        if (code < 0) {
+            esp -= estack_storage;
             return code;
+        }
         if (value < rmin)
             value = rmin;
         else if (value > rmax)
@@ -574,13 +577,17 @@ sampled_data_finish(i_ctx_t *i_ctx_p)
     ref cref;			/* closure */
     int code = gs_function_Sd_init(&pfn, params, imemory);
 
-    if (code < 0)
+    if (code < 0) {
+        esp -= estack_storage;
         return code;
+    }
 
     code = ialloc_ref_array(&cref, a_executable | a_execute, 2,
                             "sampled_data_finish(cref)");
-    if (code < 0)
+    if (code < 0) {
+        esp -= estack_storage;
         return code;
+    }
 
     make_istruct_new(cref.value.refs, a_executable | a_execute, pfn);
     make_oper_new(cref.value.refs + 1, 0, zexecfunction);

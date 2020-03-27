@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,8 +19,9 @@
 #ifndef ifont_INCLUDED
 #  define ifont_INCLUDED
 
-#include "gsccode.h"		/* for gs_glyph, NUM_KNOWN_ENCODINGS */
-#include "gsstype.h"		/* for extern_st */
+#include "gxfont.h"
+#include "iref.h"
+#include "gsfont.h"
 
 /* The external definition of fonts is given in the PostScript manual, */
 /* pp. 91-93. */
@@ -90,11 +91,6 @@ extern_st(st_font_data);
 int font_bbox_param(const gs_memory_t *mem, const ref *pfdict, double bbox[4]);
 
 /* ---------------- Exported by zfont.c ---------------- */
-
-#ifndef gs_font_DEFINED
-#  define gs_font_DEFINED
-typedef struct gs_font_s gs_font;
-#endif
 
 /*
  * Check a parameter that should be a valid font dictionary, and return

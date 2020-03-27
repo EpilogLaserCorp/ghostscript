@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -24,18 +24,6 @@
 /* Include the architecture definitions. */
 #include "arch.h"
 
-/*
- * Define lower-case versions of the architecture parameters for backward
- * compatibility.
- */
-#define arch_log2_sizeof_short ARCH_LOG2_SIZEOF_SHORT
-#define arch_log2_sizeof_int ARCH_LOG2_SIZEOF_INT
-#define arch_log2_sizeof_long ARCH_LOG2_SIZEOF_LONG
-#define arch_sizeof_ptr ARCH_SIZEOF_PTR
-#define arch_sizeof_float ARCH_SIZEOF_FLOAT
-#define arch_sizeof_double ARCH_SIZEOF_DOUBLE
-#define arch_is_big_endian ARCH_IS_BIG_ENDIAN
-#define arch_arith_rshift ARCH_ARITH_RSHIFT
 /*
  * Define the alignment that the memory manager must preserve.
  * We assume all alignment moduli are powers of 2.
@@ -52,16 +40,10 @@
 #define ARCH_SIZEOF_LONG (1 << ARCH_LOG2_SIZEOF_LONG)
 #define ARCH_SIZEOF_LONG_LONG (1 << ARCH_LOG2_SIZEOF_LONG_LONG)
 #define ARCH_INTS_ARE_SHORT (ARCH_SIZEOF_INT == ARCH_SIZEOF_SHORT)
-/* Backward compatibility */
-#define arch_sizeof_short ARCH_SIZEOF_SHORT
-#define arch_sizeof_int ARCH_SIZEOF_INT
-#define arch_sizeof_long ARCH_SIZEOF_LONG
 
 /* Define whether we are on a large- or small-memory machine. */
 /* Currently, we assume small memory and 16-bit ints are synonymous. */
 #define ARCH_SMALL_MEMORY (ARCH_SIZEOF_INT <= 2)
-/* Backward compatibility */
-#define arch_small_memory ARCH_SMALL_MEMORY
 
 /* Define unsigned 16- and 32-bit types.  These are needed in */
 /* a surprising number of places that do bit manipulation. */
@@ -78,11 +60,11 @@ typedef ulong bits32;
 
 /* Minimum and maximum values for the signed types. */
 /* Avoid casts, to make them acceptable to strict ANSI compilers. */
-#define min_short (-1 << (arch_sizeof_short * 8 - 1))
+#define min_short (-1 << (ARCH_SIZEOF_SHORT * 8 - 1))
 #define max_short (~min_short)
-#define min_int (-1 << (arch_sizeof_int * 8 - 1))
+#define min_int (-1 << (ARCH_SIZEOF_INT * 8 - 1))
 #define max_int (~min_int)
-#define min_long (-1L << (arch_sizeof_long * 8 - 1))
+#define min_long (-1L << (ARCH_SIZEOF_LONG * 8 - 1))
 #define max_long (~min_long)
 
 #define min_int64_t (-((int64_t)1) << (sizeof(int64_t) * 8 - 1))
@@ -103,6 +85,7 @@ typedef ulong bits32;
 #define max_ushort ARCH_MAX_USHORT
 #define max_uint ARCH_MAX_UINT
 #define max_ulong ARCH_MAX_ULONG
+#define max_size_t ARCH_MAX_SIZE_T
 
 /* Minimum and maximum values for pointers. */
 #if ARCH_PTRS_ARE_SIGNED
@@ -116,11 +99,11 @@ typedef ulong bits32;
 /* Define a reliable arithmetic right shift. */
 /* Must use arith_rshift_1 for a shift by a literal 1. */
 #define arith_rshift_slow(x,n) ((x) < 0 ? ~(~(x) >> (n)) : (x) >> (n))
-#if arch_arith_rshift == 2
+#if ARCH_ARITH_RSHIFT == 2
 #  define arith_rshift(x,n) ((x) >> (n))
 #  define arith_rshift_1(x) ((x) >> 1)
 #else
-#if arch_arith_rshift == 1      /* OK except for n=1 */
+#if ARCH_ARITH_RSHIFT == 1      /* OK except for n=1 */
 #  define arith_rshift(x,n) ((x) >> (n))
 #  define arith_rshift_1(x) arith_rshift_slow(x,1)
 #else
@@ -424,6 +407,7 @@ void eprintf_program_ident(const char *program_name, long revision_number);
 void emprintf_program_ident(const gs_memory_t *mem,
                             const char *program_name,
                             long revision_number);
+const char *gs_program_family_name(void);
 const char *gs_program_name(void);
 long gs_revision_number(void);
 
@@ -588,14 +572,6 @@ void lprintf_file_only(const gs_memory_t *,const char *);
   (_eplm(mem) epfm(mem,str, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9))
 #define mlprintf10(mem,str,arg1,arg2,arg3,arg4,arg5,arg6,arg7,arg8,arg9,arg10)\
   (_eplm(mem) epfm(mem,str, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10))
-/*
- * Define the prototype for module initialization procedures.  This is not
- * a very good place to define this, but we can't find a better one.
- */
-#ifndef gs_memory_DEFINED
-#  define gs_memory_DEFINED
-typedef struct gs_memory_s gs_memory_t;
-#endif
 #define init_proc(proc)\
   int proc(gs_memory_t *)
 

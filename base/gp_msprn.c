@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -56,16 +56,19 @@
  */
 
 static iodev_proc_init(mswin_printer_init);
+static iodev_proc_finit(mswin_printer_finit);
 static iodev_proc_fopen(mswin_printer_fopen);
 static iodev_proc_fclose(mswin_printer_fclose);
 const gx_io_device gs_iodev_printer = {
     "%printer%", "FileSystem",
-    {mswin_printer_init, iodev_no_open_device,
+    {mswin_printer_init, mswin_printer_finit, iodev_no_open_device,
      NULL /*iodev_os_open_file */ , mswin_printer_fopen, mswin_printer_fclose,
      iodev_no_delete_file, iodev_no_rename_file, iodev_no_file_status,
      iodev_no_enumerate_files, NULL, NULL,
      iodev_no_get_params, iodev_no_put_params
-    }
+    },
+    NULL,
+    NULL
 };
 
 typedef struct tid_s {
@@ -144,9 +147,17 @@ mswin_printer_init(gx_io_device * iodev, gs_memory_t * mem)
     return 0;
 }
 
+static void
+mswin_printer_finit(gx_io_device * iodev, gs_memory_t * mem)
+{
+    gs_free_object(mem, iodev->state, "mswin_printer_finit");
+    iodev->state = NULL;
+    return;
+}
+
 static int
 mswin_printer_fopen(gx_io_device * iodev, const char *fname, const char *access,
-           FILE ** pfile, char *rfname, uint rnamelen)
+                    gp_file ** pfile, char *rfname, uint rnamelen, gs_memory_t *mem)
 {
     DWORD version = GetVersion();
     HANDLE hprinter;
@@ -155,6 +166,34 @@ mswin_printer_fopen(gx_io_device * iodev, const char *fname, const char *access,
     HANDLE hthread;
     char pname[gp_file_name_sizeof];
     unsigned long *ptid = &((tid_t *)(iodev->state))->tid;
+    gs_lib_ctx_t *ctx = mem->gs_lib_ctx;
+    gs_fs_list_t *fs = ctx->core->fs;
+
+    if (gp_validate_path(mem, fname, access) != 0)
+        return gs_error_invalidfileaccess;
+
+    /* First we try the open_printer method. */
+    /* Note that the loop condition here ensures we don't
+     * trigger on the last registered fs entry (our standard
+     * 'file' one). */
+    if (access[0] == 'w' || access[0] == 'a')
+    {
+        *pfile = NULL;
+        for (fs = ctx->core->fs; fs != NULL && fs->next != NULL; fs = fs->next)
+        {
+            int code = 0;
+            if (fs->fs.open_printer)
+                code = fs->fs.open_printer(mem, fs->secret, fname, 1, pfile);
+            if (code < 0)
+                return code;
+            if (*pfile != NULL)
+                return code;
+        }
+    } else
+        return gs_error_invalidfileaccess;
+
+    /* If nothing claimed that, then continue with the
+     * standard MS way of working. */
 
     /* Win32s supports neither pipes nor Win32 printers. */
     if (((HIWORD(version) & 0x8000) != 0) &&
@@ -166,12 +205,19 @@ mswin_printer_fopen(gx_io_device * iodev, const char *fname, const char *access,
         return_error(gs_error_invalidfileaccess);
     ClosePrinter(hprinter);
 
-    /* Create a pipe to connect a FILE pointer to a Windows printer. */
-    if (_pipe(pipeh, 4096, _O_BINARY) != 0)
-        return_error(gs_fopen_errno_to_code(errno));
+    *pfile = gp_file_FILE_alloc(mem);
+    if (*pfile == NULL)
+        return_error(gs_error_VMerror);
 
-    *pfile = fdopen(pipeh[1], (char *)access);
-    if (*pfile == NULL) {
+    /* Create a pipe to connect a FILE pointer to a Windows printer. */
+    if (_pipe(pipeh, 4096, _O_BINARY) != 0) {
+        gp_file_dealloc(*pfile);
+        *pfile = NULL;
+        return_error(gs_fopen_errno_to_code(errno));
+    }
+
+    if (gp_file_FILE_set(*pfile, fdopen(pipeh[1], (char *)access), NULL)) {
+        *pfile = NULL;
         close(pipeh[0]);
         close(pipeh[1]);
         return_error(gs_fopen_errno_to_code(errno));
@@ -180,7 +226,8 @@ mswin_printer_fopen(gx_io_device * iodev, const char *fname, const char *access,
     /* start a thread to read the pipe */
     tid = _beginthread(&mswin_printer_thread, 32768, (void *)(pipeh[0]));
     if (tid == -1) {
-        fclose(*pfile);
+        gp_fclose(*pfile);
+        *pfile = NULL;
         close(pipeh[0]);
         return_error(gs_error_invalidfileaccess);
     }
@@ -191,7 +238,8 @@ mswin_printer_fopen(gx_io_device * iodev, const char *fname, const char *access,
     if (!DuplicateHandle(GetCurrentProcess(), (HANDLE)tid,
         GetCurrentProcess(), &hthread,
         0, FALSE, DUPLICATE_SAME_ACCESS)) {
-        fclose(*pfile);
+        gp_fclose(*pfile);
+        *pfile = NULL;
         return_error(gs_error_invalidfileaccess);
     }
     *ptid = (unsigned long)hthread;
@@ -201,17 +249,17 @@ mswin_printer_fopen(gx_io_device * iodev, const char *fname, const char *access,
      * synchronisation code.
      */
     strncpy(pname, fname, sizeof(pname));
-    fwrite(pname, 1, sizeof(pname), *pfile);
+    gp_fwrite(pname, 1, sizeof(pname), *pfile);
 
     return 0;
 }
 
 static int
-mswin_printer_fclose(gx_io_device * iodev, FILE * file)
+mswin_printer_fclose(gx_io_device * iodev, gp_file * file)
 {
     unsigned long *ptid = &((tid_t *)(iodev->state))->tid;
     HANDLE hthread;
-    fclose(file);
+    gp_fclose(file);
     if (*ptid != -1) {
         /* Wait until the print thread finishes before continuing */
         hthread = (HANDLE)*ptid;

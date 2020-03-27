@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* 24-bit-per-pixel "memory" (stored bitmap) device */
@@ -19,7 +19,6 @@
 #include "gxdevice.h"
 #include "gxdevmem.h"		/* semi-public definitions */
 #include "gdevmem.h"		/* private definitions */
-#include "vdtrace.h"
 
 #define mem_true24_strip_copy_rop mem_gray8_rgb24_strip_copy_rop
 
@@ -83,7 +82,7 @@ mem_full_alpha_device("image24", 24, 0, mem_open,
         *(bits32 *)(ptr) = (wxyz)
 /* Load the 3-word 24-bit-color cache. */
 /* Free variables: [m]dev, rgbr, gbrg, brgb. */
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
 #  define set_color24_cache(crgb, r, g, b)\
         mdev->color24.rgbr = rgbr = ((bits32)(crgb) << 8) | (r),\
         mdev->color24.gbrg = gbrg = (rgbr << 8) | (g),\
@@ -374,11 +373,9 @@ mem_true24_copy_mono(gx_device * dev,
                 if (sbyte & bit) {
                     if (one != gx_no_color_index) {
                         put3(pptr, r1, g1, b1);
-                        vd_pixel(int2fixed((pptr - mdev->line_ptrs[y]) / 3), int2fixed(y), RGB(r1, g1, b1));
                     }
                 } else {
                     put3(pptr, r0, g0, b0);
-                    vd_pixel(int2fixed((pptr - mdev->line_ptrs[y]) / 3), int2fixed(y), RGB(r0, g0, b0));
                 }
 
                 pptr += 3;
@@ -508,20 +505,31 @@ mem_true24_copy_alpha(gx_device * dev, const byte * base, int sourcex,
         for (sx = sourcex; sx < sourcex + w; ++sx, pptr += 3) {
             int alpha2, alpha;
 
-            if (depth == 2)	/* map 0 - 3 to 0 - 15 */
+            switch(depth)
+            {
+            case 2:	/* map 0 - 3 to 0 - 255 */
                 alpha =
-                    ((line[sx >> 2] >> ((3 - (sx & 3)) << 1)) & 3) * 5;
-            else
-                alpha2 = line[sx >> 1],
-                    alpha = (sx & 1 ? alpha2 & 0xf : alpha2 >> 4);
-            if (alpha == 15) {	/* Just write the new color. */
+                    ((line[sx >> 2] >> ((3 - (sx & 3)) << 1)) & 3) * 85;
+                break;
+            case 4:
+                alpha2 = line[sx >> 1];
+                alpha = (sx & 1 ? alpha2 & 0xf : alpha2 >> 4) * 17;
+                break;
+            case 8:
+                alpha = line[sx];
+                break;
+            default:
+                return_error(gs_error_rangecheck);
+            }
+            if (alpha == 255) {	/* Just write the new color. */
                 put3(pptr, r, g, b);
             } else if (alpha != 0) {	/* Blend RGB values. */
-#define make_shade(old, clr, alpha, amax) \
-  (old) + (((int)(clr) - (int)(old)) * (alpha) / (amax))
-                pptr[0] = make_shade(pptr[0], r, alpha, 15);
-                pptr[1] = make_shade(pptr[1], g, alpha, 15);
-                pptr[2] = make_shade(pptr[2], b, alpha, 15);
+                alpha += alpha>>7;
+#define make_shade(old, clr, alpha) \
+  ((((old)<<8) + ((int)(clr) - (int)(old)) * (alpha))>>8)
+                pptr[0] = make_shade(pptr[0], r, alpha);
+                pptr[1] = make_shade(pptr[1], g, alpha);
+                pptr[2] = make_shade(pptr[2], b, alpha);
 #undef make_shade
             }
         }
@@ -536,7 +544,7 @@ mem_true24_copy_alpha(gx_device * dev, const byte * base, int sourcex,
 /* Note that on a big-endian machine, this is the same as the */
 /* standard byte-oriented-device. */
 
-#if !arch_is_big_endian
+#if !ARCH_IS_BIG_ENDIAN
 
 /* Procedures */
 declare_mem_procs(mem24_word_copy_mono, mem24_word_copy_color, mem24_word_fill_rectangle);
@@ -609,4 +617,4 @@ mem24_word_copy_color(gx_device * dev,
     return 0;
 }
 
-#endif /* !arch_is_big_endian */
+#endif /* !ARCH_IS_BIG_ENDIAN */

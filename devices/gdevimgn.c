@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /*
@@ -173,13 +173,13 @@
    imPress swatches are 4 bytes wide, so type must align on a 4-byte
    boundary.  Swatch interleaving restricts the copy to 4 bytes in a row.
    Type must be numeric where value is zero when all bytes in it are zero. */
-#if arch_sizeof_long == 4
+#if ARCH_SIZEOF_LONG == 4
 #  define BIGTYPE unsigned long int
 #else
-#  if arch_sizeof_short == 4
+#  if ARCH_SIZEOF_SHORT == 4
 #    define BIGTYPE unsigned short int
 #  else
-#    if arch_sizeof_short == 2
+#    if ARCH_SIZEOF_SHORT == 2
 #      define BIGTYPE unsigned short
 #    endif
 #  endif
@@ -248,7 +248,7 @@ const gx_device_printer far_data gs_imagen_device =
 
 /*-------------------------------------------*/
 static void
-iWrite(FILE *Out, byte Val)
+iWrite(gp_file *Out, byte Val)
 { /* iWrite */
   const char *hexList = "0123456789ABCDEF";
 
@@ -260,18 +260,18 @@ iWrite(FILE *Out, byte Val)
      (   Val == QUOTE_CHAR   || Val == EOF_CHAR
       || Val == EXTRA_QUOTE1 || Val == EXTRA_QUOTE2
       || Val == EXTRA_QUOTE3 || Val == EXTRA_QUOTE4 ) ) {
-    fputc (QUOTE_CHAR, Out);
-    fputc ((char) hexList[Val / 0x10], Out);
-    fputc ((char) hexList[Val % 0x10], Out);
+    gp_fputc (QUOTE_CHAR, Out);
+    gp_fputc ((char) hexList[Val / 0x10], Out);
+    gp_fputc ((char) hexList[Val % 0x10], Out);
   } else { /* quoted char */
     /* Not doing quoting, just send it out */
-    fputc(Val, Out);
+    gp_fputc(Val, Out);
   } /* quoted char */
 } /* iWrite */
 
 /* Write out 16bit, high byte first */
 static void
-iWrite2(FILE *Out, int Val)
+iWrite2(gp_file *Out, int Val)
 { /* iWrite2 */
   iWrite(Out,(byte) (Val >> 8) & 0x00FF );
   iWrite(Out,(byte) Val        & 0x00FF );
@@ -304,7 +304,7 @@ imagen_prn_open(gx_device *pdev)
     impHeader = IMPRESSHEADER ;
   } /* if impHeader */
 
-  fprintf(ppdev->file,"@document(language impress, %s)",impHeader);
+  gp_fprintf(ppdev->file,"@document(language impress, %s)",impHeader);
 
   code = gdev_prn_close_printer(pdev);
   if ( code < 0 ) return code;
@@ -332,10 +332,10 @@ imagen_prn_close(gx_device *pdev)
   /* And byte stream end of file */
   if (BYTE_STREAM) {
     /* DON'T use iWrite because actual EOF should not be quoted! */
-    fputc(EOF_CHAR,ppdev->file);
+    gp_fputc(EOF_CHAR,ppdev->file);
   } /* if byte stream */
 
-  fflush(ppdev->file);
+  gp_fflush(ppdev->file);
 
   code = gdev_prn_close_printer(pdev);
   if ( code < 0 ) return code;
@@ -350,7 +350,7 @@ imagen_prn_close(gx_device *pdev)
 /*-------------------------------------------*/
 /* Send the page to the printer. */
 static int
-imagen_print_page(gx_device_printer *pdev, FILE *prn_stream)
+imagen_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
   int line_size = gdev_mem_bytes_per_scan_line((gx_device *)pdev);
   const int align_size = obj_align_round((line_size/BIGSIZE)+1);
@@ -379,6 +379,7 @@ imagen_print_page(gx_device_printer *pdev, FILE *prn_stream)
   /* page totals */
   int totalBlankSwatches;
   int totalGreySwatches;
+  int code = 0;
 
   /* ----------------------------------------- */
   /* Start of routine                          */
@@ -406,8 +407,8 @@ imagen_print_page(gx_device_printer *pdev, FILE *prn_stream)
   swatchMap = (byte *)gs_malloc(pdev->memory, BIGSIZE,swatchCount / BIGSIZE + 1,
         "imagen_print_page(swatchMap)" );
 
-  if ( in == 0 || out == 0 )
-    return -1;
+  if ( in == 0 || out == 0 || swatchMap == 0)
+    goto xit;
 
   /* Initialize the page */
   iWrite(prn_stream,iPAGE);
@@ -450,7 +451,9 @@ imagen_print_page(gx_device_printer *pdev, FILE *prn_stream)
       } /* for temp */
 
       /* get one line */
-      gdev_prn_copy_scan_lines(pdev, lnum + swatchLine, in, line_size);
+      code = gdev_prn_copy_scan_lines(pdev, lnum + swatchLine, in, line_size);
+      if (code < 0)
+          goto xit;
       DebugMsg(5,"Got scan line %d ", lnum + swatchLine);
       DebugMsg(5,"line %d \n", swatchLine);
 
@@ -551,8 +554,9 @@ imagen_print_page(gx_device_printer *pdev, FILE *prn_stream)
   /* Eject the page */
   iWrite(prn_stream,iENDPAGE);
 
-  fflush(prn_stream);
+  gp_fflush(prn_stream);
 
+xit:
   gs_free(pdev->memory, (char *)out, TotalBytesPerSw, swatchCount+1, "imagen_print_page(out)");
   gs_free(pdev->memory, (char *)swatchMap, BIGSIZE, swatchCount / BIGSIZE + 1,
         "imagen_print_page(swatchMap)" );
@@ -564,6 +568,6 @@ imagen_print_page(gx_device_printer *pdev, FILE *prn_stream)
   DebugMsg(1,"%s\n","End of imagen_print_page");
 
   /* ----------------------------------------- */
-  return 0;
+  return code;
 
 } /* imagen_print_page */

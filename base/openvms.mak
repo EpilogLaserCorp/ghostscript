@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2012 Artifex Software, Inc.
+# Copyright (C) 2001-2019 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 # of the license contained in the file LICENSE in this distribution.
 #
 # Refer to licensing information at http://www.artifex.com or contact
-# Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-# CA  94903, U.S.A., +1(415)492-9861, for further information.
+# Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+# CA 94945, U.S.A., +1(415)492-9861, for further information.
 #
 # makefile for OpenVMS VAX and Alpha
 #
@@ -128,10 +128,10 @@ JBIG2SRCDIR=[.jbig2dec]
 
 # Define the jpeg2k library and source location.
 
-# Define the directory where the lcms source is stored.
-# See lcms.mak for more information
+# Define the directory where the lcms2mt source is stored.
+# See lcms2mt.mak for more information
 
-LCMSSRCDIR=[.lcms]
+LCMS2MTSRCDIR=[.lcms2mt]
 
 
 # Define the directory where the lcms2 source is stored.
@@ -140,9 +140,9 @@ LCMSSRCDIR=[.lcms]
 LCMS2SRCDIR=[.lcms2]
 
 # Which CMS are we using?
-# Options are currently lcms or lcms2
+# Options are currently lcms2mt or lcms2
 
-WHICH_CMS=lcms2
+WHICH_CMS=lcms2mt
 
 # IJS has not been ported to OpenVMS. If you do the port,
 # you'll need to set these values. You'll also need to
@@ -187,7 +187,7 @@ endif
 
 COMP:=$(COMP)/DECC/PREFIX=ALL/NESTED_INCLUDE=PRIMARY/NAMES=SHORTENED
 
-# Define any other compilation flags. 
+# Define any other compilation flags.
 # Including defines for A4 paper size
 
 ifdef A4_PAPER
@@ -245,7 +245,7 @@ DEVICE_DEVS21=
 
 # Choose the language feature(s) to include.  See gs.mak for details.
 
-FEATURE_DEVS=$(PSD)psl3.dev $(PSD)pdf.dev $(PSD)dpsnext.dev $(PSD)ttfont.dev $(PSD)epsf.dev $(PSD)fapi.dev
+FEATURE_DEVS=$(PSD)psl3.dev $(PSD)pdf.dev $(PSD)ttfont.dev $(PSD)epsf.dev $(PSD)fapi.dev
 
 # Choose whether to compile the .ps initialization files into the executable.
 # See gs.mak for details.
@@ -266,11 +266,6 @@ BAND_LIST_COMPRESSOR=zlib
 # See gs.mak and sfxfd.c for more details.
 
 FILE_IMPLEMENTATION=stdio
-
-# Choose the implementation of stdio: '' for file I/O and 'c' for callouts
-# See gs.mak and ziodevs.c/ziodevsc.c for more details.
-
-STDIO_IMPLEMENTATION=c
 
 # Define the platform name.
 
@@ -453,7 +448,7 @@ $(GS_XE) : openvms $(GLOBJDIR)gs.$(OBJ) $(INT_ALL) $(LIB_ALL)
 
 # OpenVMS.dev
 
-openvms__=$(GLOBJ)gp_getnv.$(OBJ) $(GLOBJ)gp_paper.$(OBJ) $(GLOBJ)gp_vms.$(OBJ) $(GLOBJ)gp_stdia.$(OBJ)
+openvms__=$(GLOBJ)gp_getnv.$(OBJ) $(GLOBJ)gp_paper.$(OBJ) $(GLOBJ)gp_vms.$(OBJ) $(GLOBJ)gp_stdia.$(OBJ) $(GLOBJ)gp_nxpsprn.$(OBJ)
 $(GLGEN)openvms_.dev : $(openvms__) $(GLGEN)nosync.dev
 	$(SETMOD) $(GLGEN)openvms_ $(openvms__) -include $(GLGEN)nosync
 
@@ -465,7 +460,7 @@ $(GLOBJ)gp_stdia.$(OBJ): $(GLSRC)gp_stdia.c $(AK) $(stdio__h) $(time__h) $(unist
 
 # Interpreter AUX programs
 
-$(ECHOGS_XE) :  $(GLOBJ)echogs.$(OBJ) 
+$(ECHOGS_XE) :  $(GLOBJ)echogs.$(OBJ)
 	LINK/EXE=$@ $(GLOBJ)echogs.$(OBJ)
 
 $(GLOBJ)echogs.$(OBJ) :  $(GLSRC)echogs.c

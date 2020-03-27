@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -18,6 +18,8 @@
 
 #ifndef gxfont0_INCLUDED
 #  define gxfont0_INCLUDED
+
+#include "gxfont.h"
 
 /* Define the composite font mapping types. */
 /* These numbers must be the same as the values of FMapType */
@@ -39,10 +41,6 @@ typedef enum {
   ((fmt) == fmap_escape || (fmt) == fmap_double_escape || (fmt) == fmap_shift)
 
 /* This is the type-specific information for a type 0 (composite) gs_font. */
-#ifndef gs_cmap_DEFINED
-#  define gs_cmap_DEFINED
-typedef struct gs_cmap_s gs_cmap_t;
-#endif
 typedef struct gs_type0_data_s {
     fmap_type FMapType;
     byte EscChar, ShiftIn, ShiftOut;
@@ -58,10 +56,7 @@ typedef struct gs_type0_data_s {
 
 #define gs_type0_data_max_ptrs 3
 
-#ifndef gs_font_type0_DEFINED
-#  define gs_font_type0_DEFINED
 typedef struct gs_font_type0_s gs_font_type0;
-#endif
 
 struct gs_font_type0_s {
     gs_font_common;

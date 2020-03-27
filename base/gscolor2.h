@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -22,6 +22,7 @@
 
 #include "gscindex.h"
 #include "gsptype1.h"
+#include "gscie.h"
 
 /* ---------------- Graphics state ---------------- */
 
@@ -32,12 +33,12 @@
  */
 
 /* General color routines */
-gs_color_space *gs_currentcolorspace(const gs_state *);
-int gs_setcolorspace(gs_state *, gs_color_space *);
-int gs_setcolorspace_only(gs_state *, gs_color_space *);
-const gs_client_color *gs_currentcolor(const gs_state *);
-int gs_setcolor(gs_state *, const gs_client_color *);
-const gx_device_color *gs_currentdevicecolor(const gs_state *);
+gs_color_space *gs_currentcolorspace(const gs_gstate *);
+int gs_setcolorspace(gs_gstate *, gs_color_space *);
+int gs_setcolorspace_only(gs_gstate *, gs_color_space *);
+const gs_client_color *gs_currentcolor(const gs_gstate *);
+int gs_setcolor(gs_gstate *, const gs_client_color *);
+const gx_device_color *gs_currentdevicecolor(const gs_gstate *);
 
 /* Look up with restriction */
 int
@@ -49,14 +50,10 @@ extern const gs_color_space_type gs_color_space_type_Indexed;
 extern const gs_color_space_type gs_color_space_type_Indexed_Named;
 
 /* CIE-specific routines */
-#ifndef gs_cie_render_DEFINED
-#  define gs_cie_render_DEFINED
-typedef struct gs_cie_render_s gs_cie_render;
-#endif
-const gs_cie_render *gs_currentcolorrendering(const gs_state *);
-int gs_setcolorrendering(gs_state *, gs_cie_render *);
+const gs_cie_render *gs_currentcolorrendering(const gs_gstate *);
+int gs_setcolorrendering(gs_gstate *, gs_cie_render *);
 
 /* High level device support */
-int gs_includecolorspace(gs_state * pgs, const byte *res_name, int name_length);
+int gs_includecolorspace(gs_gstate * pgs, const byte *res_name, int name_length);
 
 #endif /* gscolor2_INCLUDED */

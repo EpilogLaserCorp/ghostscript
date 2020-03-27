@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -70,10 +70,12 @@ hpgl_AC(hpgl_args_t * pargs, hpgl_state_t * pgls)
 int
 hpgl_FT(hpgl_args_t * pargs, hpgl_state_t * pgls)
 {
-    int type = hpgl_FT_pattern_solid_pen1;
+    int type;
     hpgl_hatch_params_t *params;
 
-    hpgl_arg_int(pgls->memory, pargs, &type);
+    if (!hpgl_arg_int(pgls->memory, pargs, &type))
+        type = hpgl_FT_pattern_solid_pen1;
+    
     switch (type) {
 
         case hpgl_FT_pattern_solid_pen1:       /* 1 */
@@ -522,7 +524,7 @@ hpgl_RF_build_mask(byte * data, uint index, uint height, uint width,
     mask.size.y = height;
     mask.id = 0;
     mask.num_comps = 1;
-    code = pcl_pattern_RF(-index, &mask, pgls);
+    code = pcl_pattern_RF(-(int)index, &mask, pgls);
     if (code < 0)
         gs_free_object(pgls->memory, mdata, "hpgl_RF_build_mask");
     return code;
@@ -540,15 +542,13 @@ hpgl_RF(hpgl_args_t * pargs, hpgl_state_t * pgls)
     if (pargs->phase == 0) {
 
         if (!hpgl_arg_c_int(pgls->memory, pargs, (int *)&index)) {
-            hpgl_default_all_fill_patterns(pgls);
-            return 0;
+            return hpgl_default_all_fill_patterns(pgls);
         }
         if ((index < 1) || (index > 8))
             return e_Range;
 
         if (!hpgl_arg_c_int(pgls->memory, pargs, (int *)&width)) {
-            pcl_pattern_RF(index, NULL, pgls);
-            return 0;
+            return pcl_pattern_RF(index, NULL, pgls);
         }
         if ((width < 1) ||
             (width > 255) ||
@@ -623,7 +623,7 @@ hpgl_RF(hpgl_args_t * pargs, hpgl_state_t * pgls)
         if (is_mask) {
             /* if a mask was built, realease it.  We ignore the return
                value since we are already in an error state. */
-            pcl_pattern_RF(-index, NULL, pgls);
+            pcl_pattern_RF(-(int)index, NULL, pgls);
         }
     }
     pgls->g.raster_fill.data = 0;
@@ -878,7 +878,7 @@ hpgl_WU(hpgl_args_t * pargs, hpgl_state_t * pgls)
     }
     pgls->g.pen.width_relative = mode;
     hpgl_args_setup(pargs);
-    hpgl_PW(pargs, pgls);
+    hpgl_call(hpgl_PW(pargs, pgls));
     return 0;
 }
 

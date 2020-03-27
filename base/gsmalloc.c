@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -52,6 +52,8 @@ static gs_memory_proc_free_string(gs_heap_free_string);
 static gs_memory_proc_register_root(gs_heap_register_root);
 static gs_memory_proc_unregister_root(gs_heap_unregister_root);
 static gs_memory_proc_enable_free(gs_heap_enable_free);
+static gs_memory_proc_set_object_type(gs_heap_set_object_type);
+static gs_memory_proc_defer_frees(gs_heap_defer_frees);
 static const gs_memory_procs_t gs_malloc_memory_procs =
 {
     /* Raw memory procedures */
@@ -78,7 +80,9 @@ static const gs_memory_procs_t gs_malloc_memory_procs =
     gs_heap_free_string,
     gs_heap_register_root,
     gs_heap_unregister_root,
-    gs_heap_enable_free
+    gs_heap_enable_free,
+    gs_heap_set_object_type,
+    gs_heap_defer_frees
 };
 
 /* We must make sure that malloc_blocks leave the block aligned. */
@@ -86,7 +90,7 @@ static const gs_memory_procs_t gs_malloc_memory_procs =
 #define malloc_block_data\
         gs_malloc_block_t *next;\
         gs_malloc_block_t *prev;\
-        uint size;\
+        size_t size;\
         gs_memory_type_ptr_t type;\
         client_name_t cname
 struct malloc_block_data_s {
@@ -115,7 +119,7 @@ gs_malloc_memory_init(void)
     mem->stable_memory = 0;	/* just for tidyness, never referenced */
     mem->procs = gs_malloc_memory_procs;
     mem->allocated = 0;
-    mem->limit = max_long;
+    mem->limit = max_size_t;
     mem->used = 0;
     mem->max_used = 0;
     mem->gs_lib_ctx = 0;
@@ -123,7 +127,11 @@ gs_malloc_memory_init(void)
     mem->thread_safe_memory = (gs_memory_t *)mem;	/* this allocator is thread safe */
     /* Allocate a monitor to serialize access to structures within */
     mem->monitor = NULL;	/* prevent use during initial allocation */
-    mem->monitor = gx_monitor_alloc((gs_memory_t *)mem);
+    mem->monitor = gx_monitor_label(gx_monitor_alloc((gs_memory_t *)mem), "heap");
+    if (mem->monitor == NULL) {
+        free(mem);
+        return NULL;
+    }
 
     return mem;
 }
@@ -144,8 +152,8 @@ heap_available()
     for (n = 0; n < max_malloc_probes; n++) {
         if ((probes[n] = malloc(malloc_probe_size)) == 0)
             break;
-        if_debug2('a', "[a]heap_available probe[%d]=0x%lx\n",
-                  n, (ulong) probes[n]);
+        if_debug2('a', "[a]heap_available probe[%d]="PRI_INTPTR"\n",
+                  n, (intptr_t) probes[n]);
         avail += malloc_probe_size;
     }
     while (n)
@@ -155,7 +163,7 @@ heap_available()
 
 /* Allocate various kinds of blocks. */
 static byte *
-gs_heap_alloc_bytes(gs_memory_t * mem, uint size, client_name_t cname)
+gs_heap_alloc_bytes(gs_memory_t * mem, size_t size, client_name_t cname)
 {
     gs_malloc_memory_t *mmem = (gs_malloc_memory_t *) mem;
     byte *ptr = 0;
@@ -176,9 +184,9 @@ gs_heap_alloc_bytes(gs_memory_t * mem, uint size, client_name_t cname)
         /* Definitely too large to allocate; also avoids overflow. */
         set_msg("exceeded limit");
     } else {
-        uint added = size + sizeof(gs_malloc_block_t);
+        size_t added = size + sizeof(gs_malloc_block_t);
 
-        if (added <= size || mmem->limit - added < mmem->used)
+        if (added <= size || added > mmem->limit || mmem->limit - added < mmem->used)
             set_msg("exceeded limit");
         else if ((ptr = (byte *) Memento_label(malloc(added), cname)) == 0)
             set_msg("failed");
@@ -213,8 +221,8 @@ gs_heap_alloc_bytes(gs_memory_t * mem, uint size, client_name_t cname)
         gs_alloc_fill(ptr, gs_alloc_fill_alloc, size);
 #ifdef DEBUG
     if (gs_debug_c('a') || msg != ok_msg)
-        dmlprintf6(mem, "[a+]gs_malloc(%s)(%u) = 0x%lx: %s, used=%ld, max=%ld\n",
-                   client_name_string(cname), size, (ulong) ptr, msg, mmem->used, mmem->max_used);
+        dmlprintf6(mem, "[a+]gs_malloc(%s)(%"PRIuSIZE") = "PRI_INTPTR": %s, used=%"PRIuSIZE", max=%"PRIuSIZE"\n",
+                   client_name_string(cname), size, (intptr_t)ptr, msg, mmem->used, mmem->max_used);
 #endif
     return ptr;
 #undef set_msg
@@ -232,17 +240,17 @@ gs_heap_alloc_struct(gs_memory_t * mem, gs_memory_type_ptr_t pstype,
     return ptr;
 }
 static byte *
-gs_heap_alloc_byte_array(gs_memory_t * mem, uint num_elements, uint elt_size,
+gs_heap_alloc_byte_array(gs_memory_t * mem, size_t num_elements, size_t elt_size,
                          client_name_t cname)
 {
-    ulong lsize = (ulong) num_elements * elt_size;
+    size_t lsize = (size_t) num_elements * elt_size;
 
-    if (lsize != (uint) lsize)
+    if (elt_size != 0 && lsize/elt_size != num_elements)
         return 0;
-    return gs_heap_alloc_bytes(mem, (uint) lsize, cname);
+    return gs_heap_alloc_bytes(mem, (size_t) lsize, cname);
 }
 static void *
-gs_heap_alloc_struct_array(gs_memory_t * mem, uint num_elements,
+gs_heap_alloc_struct_array(gs_memory_t * mem, size_t num_elements,
                            gs_memory_type_ptr_t pstype, client_name_t cname)
 {
     void *ptr =
@@ -255,14 +263,14 @@ gs_heap_alloc_struct_array(gs_memory_t * mem, uint num_elements,
     return ptr;
 }
 static void *
-gs_heap_resize_object(gs_memory_t * mem, void *obj, uint new_num_elements,
+gs_heap_resize_object(gs_memory_t * mem, void *obj, size_t new_num_elements,
                       client_name_t cname)
 {
     gs_malloc_memory_t *mmem = (gs_malloc_memory_t *) mem;
     gs_malloc_block_t *ptr = (gs_malloc_block_t *) obj - 1;
     gs_memory_type_ptr_t pstype = ptr->type;
-    uint old_size = gs_object_size(mem, obj) + sizeof(gs_malloc_block_t);
-    uint new_size =
+    size_t old_size = gs_object_size(mem, obj) + sizeof(gs_malloc_block_t);
+    size_t new_size =
         gs_struct_type_size(pstype) * new_num_elements +
         sizeof(gs_malloc_block_t);
     gs_malloc_block_t *new_ptr;
@@ -271,9 +279,18 @@ gs_heap_resize_object(gs_memory_t * mem, void *obj, uint new_num_elements,
         return obj;
     if (mmem->monitor)
         gx_monitor_enter(mmem->monitor);	/* Exclusive access */
-    new_ptr = (gs_malloc_block_t *) gs_realloc(ptr, old_size, new_size);
-    if (new_ptr == 0)
+    if (new_size > mmem->limit - sizeof(gs_malloc_block_t)) {
+        /* too large to allocate; also avoids overflow. */
+        if (mmem->monitor)
+            gx_monitor_leave(mmem->monitor);	/* Done with exclusive access */
         return 0;
+    }
+    new_ptr = (gs_malloc_block_t *) gs_realloc(ptr, old_size, new_size);
+    if (new_ptr == 0) {
+        if (mmem->monitor)
+            gx_monitor_leave(mmem->monitor);	/* Done with exclusive access */
+        return 0;
+    }
     if (new_ptr->prev)
         new_ptr->prev->next = new_ptr;
     else
@@ -290,7 +307,7 @@ gs_heap_resize_object(gs_memory_t * mem, void *obj, uint new_num_elements,
                       gs_alloc_fill_alloc, new_size - old_size);
     return new_ptr + 1;
 }
-static uint
+static size_t
 gs_heap_object_size(gs_memory_t * mem, const void *ptr)
 {
     return ((const gs_malloc_block_t *)ptr)[-1].size;
@@ -308,17 +325,17 @@ gs_heap_free_object(gs_memory_t * mem, void *ptr, client_name_t cname)
     gs_memory_type_ptr_t pstype;
     struct_proc_finalize((*finalize));
 
-    if_debug3m('a', mem, "[a-]gs_free(%s) 0x%lx(%u)\n",
-               client_name_string(cname), (ulong) ptr,
+    if_debug3m('a', mem, "[a-]gs_free(%s) "PRI_INTPTR"(%"PRIuSIZE")\n",
+               client_name_string(cname), (intptr_t)ptr,
                (ptr == 0 ? 0 : ((gs_malloc_block_t *) ptr)[-1].size));
     if (ptr == 0)
         return;
     pstype = ((gs_malloc_block_t *) ptr)[-1].type;
     finalize = pstype->finalize;
     if (finalize != 0) {
-        if_debug3m('u', mem, "[u]finalizing %s 0x%lx (%s)\n",
+        if_debug3m('u', mem, "[u]finalizing %s "PRI_INTPTR" (%s)\n",
                    struct_type_name_string(pstype),
-                   (ulong) ptr, client_name_string(cname));
+                   (intptr_t)ptr, client_name_string(cname));
         (*finalize) (mem, ptr);
     }
     if (mmem->monitor)
@@ -337,7 +354,8 @@ gs_heap_free_object(gs_memory_t * mem, void *ptr, client_name_t cname)
         bp->next->prev = bp->prev;
     if (bp == mmem->allocated) {
         mmem->allocated = bp->next;
-        mmem->allocated->prev = NULL;
+        if (mmem->allocated)
+            mmem->allocated->prev = NULL;
     }
     mmem->used -= bp->size + sizeof(gs_malloc_block_t);
     if (mmem->monitor)
@@ -385,35 +403,35 @@ gs_heap_free_object(gs_memory_t * mem, void *ptr, client_name_t cname)
         }
         if (mmem->monitor)
             gx_monitor_leave(mmem->monitor);	/* Done with exclusive access */
-        lprintf2("%s: free 0x%lx not found!\n",
-                 client_name_string(cname), (ulong) ptr);
+        lprintf2("%s: free "PRI_INTPTR" not found!\n",
+                 client_name_string(cname), (intptr_t) ptr);
         free((char *)((gs_malloc_block_t *) ptr - 1));
     }
 #endif
 }
 static byte *
-gs_heap_alloc_string(gs_memory_t * mem, uint nbytes, client_name_t cname)
+gs_heap_alloc_string(gs_memory_t * mem, size_t nbytes, client_name_t cname)
 {
     return gs_heap_alloc_bytes(mem, nbytes, cname);
 }
 static byte *
-gs_heap_resize_string(gs_memory_t * mem, byte * data, uint old_num, uint new_num,
+gs_heap_resize_string(gs_memory_t * mem, byte * data, size_t old_num, size_t new_num,
                       client_name_t cname)
 {
     if (gs_heap_object_type(mem, data) != &st_bytes)
-        lprintf2("%s: resizing non-string 0x%lx!\n",
-                 client_name_string(cname), (ulong) data);
+        lprintf2("%s: resizing non-string "PRI_INTPTR"!\n",
+                 client_name_string(cname), (intptr_t)data);
     return gs_heap_resize_object(mem, data, new_num, cname);
 }
 static void
-gs_heap_free_string(gs_memory_t * mem, byte * data, uint nbytes,
+gs_heap_free_string(gs_memory_t * mem, byte * data, size_t nbytes,
                     client_name_t cname)
 {
     /****** SHOULD CHECK SIZE IF DEBUGGING ******/
     gs_heap_free_object(mem, data, cname);
 }
 static int
-gs_heap_register_root(gs_memory_t * mem, gs_gc_root_t * rp,
+gs_heap_register_root(gs_memory_t * mem, gs_gc_root_t ** rp,
                       gs_ptr_type_t ptype, void **up, client_name_t cname)
 {
     return 0;
@@ -441,6 +459,7 @@ gs_heap_status(gs_memory_t * mem, gs_memory_status_t * pstat)
 
     pstat->allocated = mmem->used + heap_available();
     pstat->used = mmem->used;
+    pstat->max_used = mmem->max_used;
     pstat->is_thread_safe = true;	/* this allocator has a mutex (monitor) and IS thread safe */
 }
 static void
@@ -452,6 +471,19 @@ gs_heap_enable_free(gs_memory_t * mem, bool enable)
     else
         mem->procs.free_object = gs_ignore_free_object,
             mem->procs.free_string = gs_ignore_free_string;
+}
+
+static void gs_heap_set_object_type(gs_memory_t *mem, void *ptr, gs_memory_type_ptr_t type)
+{
+    gs_malloc_block_t *bp = (gs_malloc_block_t *) ptr;
+
+    if (ptr == 0)
+        return;
+    bp[-1].type = type;
+}
+
+static void gs_heap_defer_frees(gs_memory_t *mem, int defer)
+{
 }
 
 /* Release all memory acquired by this allocator. */
@@ -478,8 +510,8 @@ gs_heap_free_all(gs_memory_t * mem, uint free_mask, client_name_t cname)
 
         for (; bp != 0; bp = np) {
             np = bp->next;
-            if_debug3m('a', mem, "[a]gs_heap_free_all(%s) 0x%lx(%u)\n",
-                       client_name_string(bp->cname), (ulong) (bp + 1),
+            if_debug3m('a', mem, "[a]gs_heap_free_all(%s) "PRI_INTPTR"(%"PRIuSIZE")\n",
+                       client_name_string(bp->cname), (intptr_t)(bp + 1),
                        bp->size);
             gs_alloc_fill(bp + 1, gs_alloc_fill_free, bp->size);
             free(bp);
@@ -509,14 +541,12 @@ gs_malloc_wrap(gs_memory_t **wrapped, gs_malloc_memory_t *contents)
                                      sizeof(gs_memory_retrying_t),
                                      "gs_malloc_wrap(retrying)");
         if (rmem == 0) {
-            gs_memory_locked_release(lmem);
             gs_free_object(cmem, lmem, "gs_malloc_wrap(locked)");
             return_error(gs_error_VMerror);
         }
         code = gs_memory_retrying_init(rmem, (gs_memory_t *)lmem);
         if (code < 0) {
             gs_free_object((gs_memory_t *)lmem, rmem, "gs_malloc_wrap(retrying)");
-            gs_memory_locked_release(lmem);
             gs_free_object(cmem, lmem, "gs_malloc_wrap(locked)");
             return code;
         }
@@ -559,14 +589,22 @@ gs_malloc_unwrap(gs_memory_t *wrapped)
 gs_memory_t *
 gs_malloc_init(void)
 {
+    return gs_malloc_init_with_context(NULL);
+}
+
+gs_memory_t *
+gs_malloc_init_with_context(gs_lib_ctx_t *ctx)
+{
     gs_malloc_memory_t *malloc_memory_default = gs_malloc_memory_init();
     gs_memory_t *memory_t_default;
 
     if (malloc_memory_default == NULL)
         return NULL;
 
-    if (gs_lib_ctx_init((gs_memory_t *)malloc_memory_default) != 0)
+    if (gs_lib_ctx_init(ctx, (gs_memory_t *)malloc_memory_default) != 0) {
+        gs_malloc_release((gs_memory_t *)malloc_memory_default);
         return NULL;
+    }
 
 #if defined(USE_RETRY_MEMORY_WRAPPER)
     gs_malloc_wrap(&memory_t_default, malloc_memory_default);
@@ -585,17 +623,6 @@ gs_malloc_release(gs_memory_t *mem)
 
     if (mem == NULL)
         return;
-
-    /* Use gs_debug['a'] if gs_debug[':'] is set to dump the heap stats */
-    if (gs_debug[':']) {
-        void *temp;
-        char save_debug_a = gs_debug['a'];
-
-        gs_debug['a'] = 1;
-        temp = (char *)gs_alloc_bytes_immovable(mem, 8, "gs_malloc_release");
-        gs_debug['a'] = save_debug_a;
-        gs_free_object(mem, temp, "gs_malloc_release");
-    }
 
 #ifdef USE_RETRY_MEMORY_WRAPPER
     malloc_memory_default = gs_malloc_unwrap(mem);

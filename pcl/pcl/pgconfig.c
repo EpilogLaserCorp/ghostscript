@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -110,7 +110,8 @@ hpgl_ZZ(hpgl_args_t * pargs, hpgl_state_t * pgls)
             pargs->source.ptr = p;
             return 0;
         } else {
-            gs_debug[(int)ch] = 1;
+            if (ch < 128)
+                gs_debug[(int)ch] = 1;
         }
     }
     pargs->source.ptr = p;
@@ -124,23 +125,23 @@ hpgl_reset_overlay(hpgl_state_t * pgls)
     hpgl_args_t args;
 
     hpgl_args_setup(&args);
-    hpgl_AC(&args, pgls);
+    hpgl_call(hpgl_AC(&args, pgls));
     hpgl_args_setup(&args);
     pgls->g.font_selected = 0;
-    hpgl_AD(&args, pgls);
+    hpgl_call(hpgl_AD(&args, pgls));
     hpgl_args_setup(&args);
-    hpgl_SD(&args, pgls);
+    hpgl_call(hpgl_SD(&args, pgls));
     hpgl_args_setup(&args);
-    hpgl_CF(&args, pgls);
+    hpgl_call(hpgl_CF(&args, pgls));
     hpgl_args_setup(&args);
     hpgl_args_add_int(&args, 1);
     hpgl_args_add_int(&args, 0);
-    hpgl_DI(&args, pgls);
+    hpgl_call(hpgl_DI(&args, pgls));
     /* HAS -- Figure out some way to do this so that it is consistant */
     pgls->g.label.terminator = 3;
     pgls->g.label.print_terminator = false;
     hpgl_args_setup(&args);
-    hpgl_DV(&args, pgls);
+    hpgl_call(hpgl_DV(&args, pgls));
     hpgl_args_setup(&args);
     hpgl_ES(&args, pgls);
     pgls->g.label.write_vertical = false;
@@ -148,7 +149,7 @@ hpgl_reset_overlay(hpgl_state_t * pgls)
     hpgl_args_setup(&args);
     hpgl_LM(&args, pgls);
     hpgl_args_set_int(&args, 1);
-    hpgl_LO(&args, pgls);
+    hpgl_call(hpgl_LO(&args, pgls));
     /* we do this instead of calling SC directly */
     if (pgls->g.scaling_type != hpgl_scaling_none) {
         gs_point dpt, pt;       /* device point and user point */
@@ -162,12 +163,12 @@ hpgl_reset_overlay(hpgl_state_t * pgls)
     }
     pgls->g.fill_type = hpgl_even_odd_rule;
     hpgl_args_set_int(&args, 0);
-    hpgl_PM(&args, pgls);
+    hpgl_call(hpgl_PM(&args, pgls));
     hpgl_args_set_int(&args, 2);
-    hpgl_PM(&args, pgls);
+    hpgl_call(hpgl_PM(&args, pgls));
     pgls->g.bitmap_fonts_allowed = 0;
     hpgl_args_setup(&args);
-    hpgl_SI(&args, pgls);
+    hpgl_call(hpgl_SI(&args, pgls));
     hpgl_args_setup(&args);
     hpgl_SL(&args, pgls);
     /* We initialize symbol mode directly because hpgl_SM parses
@@ -176,17 +177,17 @@ hpgl_reset_overlay(hpgl_state_t * pgls)
     hpgl_args_setup(&args);
     hpgl_SS(&args, pgls);
     hpgl_args_set_int(&args, 1);
-    hpgl_TR(&args, pgls);
+    hpgl_call(hpgl_TR(&args, pgls));
     hpgl_args_setup(&args);
-    hpgl_TD(&args, pgls);
+    hpgl_call(hpgl_TD(&args, pgls));
     hpgl_args_setup(&args);
-    hpgl_MC(&args, pgls);
+    hpgl_call(hpgl_MC(&args, pgls));
 #ifdef LJ6_COMPAT
     /* LJ6 seems to reset PP with an IN command the Color Laserjet
        does not.  NB this needs to be handled with dynamic
        configuration */
     hpgl_args_setup(&args);
-    hpgl_PP(&args, pgls);
+    hpgl_call(hpgl_PP(&args, pgls));
 #endif
     return 0;
 }
@@ -200,21 +201,21 @@ hpgl_DF(hpgl_args_t * pargs, hpgl_state_t * pgls)
     hpgl_call(hpgl_reset_overlay(pgls));
 
     hpgl_args_setup(&args);
-    hpgl_FT(&args, pgls);
+    hpgl_call(hpgl_FT(&args, pgls));
     hpgl_args_setup(&args);
-    hpgl_IW(&args, pgls);
+    hpgl_call(hpgl_IW(&args, pgls));
     hpgl_set_line_attribute_defaults(pgls);
     hpgl_args_setup(&args);
-    hpgl_LA(&args, pgls);
+    hpgl_call(hpgl_LA(&args, pgls));
     hpgl_set_line_pattern_defaults(pgls);
     hpgl_args_setup(&args);
-    hpgl_RF(&args, pgls);
+    hpgl_call(hpgl_RF(&args, pgls));
     hpgl_args_set_int(&args, 0);
-    hpgl_SV(&args, pgls);
+    hpgl_call(hpgl_SV(&args, pgls));
     hpgl_args_setup(&args);
-    hpgl_UL(&args, pgls);
+    hpgl_call(hpgl_UL(&args, pgls));
     hpgl_args_setup(&args);
-    hpgl_SB(&args, pgls);
+    hpgl_call(hpgl_SB(&args, pgls));
     return 0;
 }
 
@@ -241,21 +242,21 @@ hpgl_IN_implicit(hpgl_state_t * pgls)
     /* cancel rotation */
     pgls->g.rotation = 0;
     /* restore defaults */
-    hpgl_DF(&args, pgls);
+    hpgl_call(hpgl_DF(&args, pgls));
 
     /* if in RTL mode provided initial values for PS */
     if (pgls->personality == rtl) {
         hpgl_args_setup(&args);
-        hpgl_PS(&args, pgls);
+        hpgl_call(hpgl_PS(&args, pgls));
     }
 
     /* defaults P1 and P2 */
     hpgl_args_setup(&args);
-    hpgl_IP(&args, pgls);
+    hpgl_call(hpgl_IP(&args, pgls));
 
     /* pen width units - metric, also resets pen widths.   */
     hpgl_args_setup(&args);
-    hpgl_WU(&args, pgls);
+    hpgl_call(hpgl_WU(&args, pgls));
 
     /*
      * pen up-absolute position and set gl/2 current positon to
@@ -264,9 +265,9 @@ hpgl_IN_implicit(hpgl_state_t * pgls)
      * do not want to create a live gs path.
      */
     hpgl_args_set_real2(&args, 0.0, 0.0);
-    hpgl_PU(&args, pgls);
+    hpgl_call(hpgl_PU(&args, pgls));
     hpgl_args_set_real2(&args, 0.0, 0.0);
-    hpgl_PA(&args, pgls);
+    hpgl_call(hpgl_PA(&args, pgls));
     hpgl_call(hpgl_clear_current_path(pgls));
 
     return 0;
@@ -278,19 +279,17 @@ hpgl_IN_implicit(hpgl_state_t * pgls)
 int
 hpgl_IN(hpgl_args_t * pargs, hpgl_state_t * pgls)
 {
-    int code = 0;
     hpgl_args_t args;
 
     /* handle the work or an implicit reset */
-    code = hpgl_IN_implicit(pgls);
+    hpgl_call(hpgl_IN_implicit(pgls));
 
     /* set up the default palette (8 entries, not-fixed) */
-    if (code == 0)
-        code = pcl_palette_IN(pgls);
+    hpgl_call(pcl_palette_IN(pgls));
 
     /* default color range */
     hpgl_args_setup(&args);
-    hpgl_CR(&args, pgls);
+    hpgl_call(hpgl_CR(&args, pgls));
 
     /* pen width units - metric, also reset pen widths.  This is also
        done in hpgl_IN_implicit() above but we have to set the pen
@@ -298,9 +297,9 @@ hpgl_IN(hpgl_args_t * pargs, hpgl_state_t * pgls)
        default width values in a fresh palette do not account for
        scaling effects of the hpgl/2 picture frame. */
     hpgl_args_setup(&args);
-    hpgl_WU(&args, pgls);
+    hpgl_call(hpgl_WU(&args, pgls));
 
-    return code;
+    return 0;
 }
 
 /* derive the current picture frame coordinates */
@@ -491,10 +490,7 @@ hpgl_PG(hpgl_args_t * pargs, hpgl_state_t * pgls)
         /* with parameter always feed, without parameter feed if marked */
         if (pcl_page_marked(pgls)
             || hpgl_arg_c_int(pgls->memory, pargs, &dummy)) {
-            int code = pcl_do_FF(pgls);
-
-            if (code < 0)
-                return code;
+            hpgl_call(pcl_do_FF(pgls));
         }
     }
     return 0;
@@ -642,7 +638,7 @@ hpgl_SC(hpgl_args_t * pargs, hpgl_state_t * pgls)
             return e_Range;
         case 4:
             type = hpgl_scaling_anisotropic;
-            hpgl_arg_c_int(pgls->memory, pargs, &type);
+            (void) hpgl_arg_c_int(pgls->memory, pargs, &type);
             switch (type) {
                 case hpgl_scaling_anisotropic: /* 0 */
                     if (xy[0] == xy[1] || xy[2] == xy[3])
@@ -744,7 +740,7 @@ hpgl_BP(hpgl_args_t * pargs, hpgl_state_t * pgls)
     }
 
     hpgl_args_setup(&args);
-    hpgl_IN(&args, pgls);
+    hpgl_call(hpgl_IN(&args, pgls));
     return 0;
 }
 

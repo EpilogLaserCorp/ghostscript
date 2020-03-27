@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -24,6 +24,8 @@
  *  FILL_DIRECT - See LOOP_FILL_RECTANGLE_DIRECT.
  *  TEMPLATE_spot_into_scanlines - the name of the procedure to generate.
 */
+
+#if defined(TEMPLATE_spot_into_scanlines) && defined(INCR) && defined(LOOP_FILL_RECTANGLE_DIRECT)
 
 static int
 TEMPLATE_spot_into_scanlines (line_list *ll, fixed band_mask)
@@ -149,9 +151,8 @@ TEMPLATE_spot_into_scanlines (line_list *ll, fixed band_mask)
                  ) {
                 int x0 = pcr->rmin, x1 = pcr->rmax;
 
-                if_debug4m('Q', ll->memory, "[Qr]draw 0x%lx: [%d,%d),%d\n", (ulong)pcr,
-                           x0, x1, y0);
-                VD_RECT(x0, y0, x1 - x0, 1, VD_TRAP_COLOR);
+                if_debug4m('Q', ll->memory, "[Qr]draw "PRI_INTPTR": [%d,%d),%d\n",
+                           (intptr_t)pcr, x0, x1, y0);
                 code = LOOP_FILL_RECTANGLE_DIRECT(&fo, x0, y0, x1 - x0, 1);
                 if_debug3m('F', ll->memory, "[F]drawing [%d:%d),%d\n", x0, x1, y0);
                 if (code < 0)
@@ -239,3 +240,7 @@ TEMPLATE_spot_into_scanlines (line_list *ll, fixed band_mask)
     range_list_free(&rlist);
     return code;
 }
+
+#else
+int dummy;
+#endif

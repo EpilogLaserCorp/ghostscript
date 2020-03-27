@@ -1,4 +1,4 @@
-/* Copyright (C) 2014-2015 Artifex Software, Inc.
+/* Copyright (C) 2014-2018 Artifex Software, Inc.
 All Rights Reserved.
 
 This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@ modified or distributed except as expressly authorized under the terms
 of the license contained in the file LICENSE in this distribution.
 
 Refer to licensing information at http://www.artifex.com or contact
-Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-CA  94903, U.S.A., +1(415)492-9861, for further information.
+Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Methods for decoding and unpacking image data.  Used for color
@@ -28,11 +28,11 @@ get_unpack_proc(gx_image_enum_common_t *pie, image_decode_t *imd,
     static sample_unpack_proc_t procs[2][6] = {
         { sample_unpack_1, sample_unpack_2,
         sample_unpack_4, sample_unpack_8,
-        0, 0
+        sample_unpack_12, sample_unpackicc_16
         },
         { sample_unpack_1_interleaved, sample_unpack_2_interleaved,
         sample_unpack_4_interleaved, sample_unpack_8_interleaved,
-        0, 0
+        sample_unpack_12, sample_unpackicc_16
         } };
     int num_planes = pie->num_planes;
     bool interleaved = (num_planes == 1 && pie->plane_depths[0] != imd->bps);
@@ -54,8 +54,6 @@ get_unpack_proc(gx_image_enum_common_t *pie, image_decode_t *imd,
         imd->spread = 0;
     }
 
-    procs[0][4] = procs[1][4] = sample_unpack_12_proc;
-    procs[0][5] = procs[1][5] = sample_unpackicc_16_proc;
     if (interleaved) {
         int num_components = pie->plane_depths[0] / imd->bps;
 

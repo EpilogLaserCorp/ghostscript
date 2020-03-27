@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -71,23 +71,34 @@ pcl_execute_macro(const pcl_macro_t * pmac, pcl_state_t * pcs,
 
     if (before) {
         memcpy(&saved, pcs, sizeof(*pcs));
-        do_copies(&saved, pcs, before);
+        code = do_copies(&saved, pcs, before);
+        if (code < 0)
+            return code;
         pcs->saved = &saved;
     }
-    if (reset)
-        pcl_do_resets(pcs, reset);
+    if (reset) {
+        code = pcl_do_resets(pcs, reset);
+        if (code < 0)
+            return code;
+    }
     state.definitions = pcs->pcl_commands;
     state.hpgl_parser_state = &gstate;
-    pcl_process_init(&state);
+    code = pcl_process_init(&state, pcs);
+    if (code < 0)
+        return code;
     r.ptr = (const byte *)(pmac + 1) - 1;
     r.limit = (const byte *)pmac + (gs_object_size(pcs->memory, pmac) - 1);
     pcs->macro_level++;
     code = pcl_process(&state, pcs, &r);
     pcs->macro_level--;
     if (after) {
-        do_copies(&saved, pcs, after);
+        int errcode = do_copies(&saved, pcs, after);
+        if (errcode < 0)
+            return errcode;
         memcpy(pcs, &saved, sizeof(*pcs));
     }
+    if (code < 0)
+        return code;
 #ifdef DEBUG
     if (gs_debug_c('i')) {
         pcl_dump_current_macro(pcs, "Finished macro execution");
@@ -268,10 +279,12 @@ pcmacros_do_registration(pcl_parser_state_t * pcl_parser_state,
                             pca_neg_error | pca_big_error)},
         END_CLASS return 0;
 }
-static void
+static int
 pcmacros_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
     if (type & (pcl_reset_initial | pcl_reset_printer)) {
+        int code = 0;
+
         pcs->overlay_enabled = false;
         pcs->macro_level = 0;
         pcs->defining_macro = false;
@@ -284,10 +297,12 @@ pcmacros_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
             pcl_args_t args;
 
             arg_set_uint(&args, macro_delete_temporary);
-            pcl_macro_control(&args, pcs);
+            code = pcl_macro_control(&args, pcs);
             if (pcs->alpha_macro_id.id != 0)
                 gs_free_object(pcs->memory,
                                pcs->alpha_macro_id.id, "pcmacros_do_reset");
+            if (code < 0)
+                return code;
         }
     }
 
@@ -299,8 +314,12 @@ pcmacros_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
         id_set_value(pcs->macro_id, 0);
         pcs->alpha_macro_id.id = 0;
     }
-    if (type & pcl_reset_permanent)
+    if (type & pcl_reset_permanent) {
+        gs_free_object(pcs->memory, pcs->macro_definition, "begin macro definition");
         pl_dict_release(&pcs->macros);
+    }
+
+    return 0;
 }
 static int
 pcmacros_do_copy(pcl_state_t * psaved, const pcl_state_t * pcs,

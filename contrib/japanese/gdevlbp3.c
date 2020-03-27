@@ -66,13 +66,13 @@ static	const struct	ppi PaperInfo[] =
         };
 
 static void BoundImage(gx_device_printer *, struct bounding *);
-static long CompressImage(gx_device_printer *, struct bounding *, FILE *, const char *);
+static long CompressImage(gx_device_printer *, struct bounding *, gp_file *, const char *);
 
 static int
-lbp310PrintPage(gx_device_printer *pDev, FILE *fp)
+lbp310PrintPage(gx_device_printer *pDev, gp_file *fp)
 {
         int	i;
-        byte	Buf[10];
+        char	Buf[10];
         long	DataSize;
         struct	bounding	Box;
 
@@ -81,20 +81,20 @@ lbp310PrintPage(gx_device_printer *pDev, FILE *fp)
         DataSize = CompressImage(pDev, &Box, fp, "\x1b[1;%d;%d;11;%d;.r");
 
         /* ----==== Set size ====---- */
-        gs_sprintf((char *)Buf, "0%ld", DataSize);
+        gs_sprintf(Buf, "0%ld", DataSize);
         i = (DataSize+strlen(Buf)+1)&1;
         /* ----==== escape to LIPS ====---- */
-        fprintf(fp, "\x80%s\x80\x80\x80\x80\x0c",Buf+i);
-        fprintf(fp, "\x1bP0J\x1b\\");
+        gp_fprintf(fp, "\x80%s\x80\x80\x80\x80\x0c",Buf+i);
+        gp_fprintf(fp, "\x1bP0J\x1b\\");
 
         return(0);
 }
 
 static int
-lbp320PrintPage(gx_device_printer *pDev, FILE *fp)
+lbp320PrintPage(gx_device_printer *pDev, gp_file *fp)
 {
         int	i;
-        byte	Buf[16];
+        char	Buf[16];
         long	DataSize;
         struct	bounding	Box;
 
@@ -105,17 +105,17 @@ lbp320PrintPage(gx_device_printer *pDev, FILE *fp)
         Box.Right |= 1;
 
         /* ----==== JOB start ??? ====---- */
-        fprintf(fp, "\x1b%%-12345X@PJL CJLMODE\n@PJL JOB\n");
+        gp_fprintf(fp, "\x1b%%-12345X@PJL CJLMODE\n@PJL JOB\n");
 
         DataSize = CompressImage(pDev, &Box, fp, "\x1b[1;%d;%d;11;%d;.&r");
 
         /* ----==== Set size ====---- */
-        gs_sprintf((char *)Buf, "000%ld", DataSize);
+        gs_sprintf(Buf, "000%ld", DataSize);
         i = (DataSize+strlen(Buf)+1)&3;
         /* ----==== escape to LIPS ====---- */
-        fprintf(fp, "\x80%s\x80\x80\x80\x80\x0c",Buf+i);
-        fprintf(fp, "\x1bP0J\x1b\\");
-        fprintf(fp, "\x1b%%-12345X@PJL CJLMODE\n@PJL EOJ\n\x1b%%-12345X");
+        gp_fprintf(fp, "\x80%s\x80\x80\x80\x80\x0c",Buf+i);
+        gp_fprintf(fp, "\x1bP0J\x1b\\");
+        gp_fprintf(fp, "\x1b%%-12345X@PJL CJLMODE\n@PJL EOJ\n\x1b%%-12345X");
 
         return(0);
 }
@@ -137,8 +137,8 @@ BoundImage(gx_device_printer *pDev, struct bounding *pBox)
                 height*10/Yres < 98 ? a5 :\
                 height*10/Yres < 109 ? b5 :\
                 height*10/Yres < 116 ? letter : a4;
-        Xsize = Xres * mm_to_inch(PaperInfo[paper].w-100) / 160;
-        Ysize = Yres * mm_to_inch(PaperInfo[paper].h-100) / 10;
+        Xsize = (int)(Xres * mm_to_inch(PaperInfo[paper].w-100) / 160);
+        Ysize = (int)(Yres * mm_to_inch(PaperInfo[paper].h-100) / 10);
         /* ----==== Allocate momory ====---- */
         if (LineSize < Xsize*2+1) {
                 LineSize = Xsize*2+1;
@@ -176,38 +176,38 @@ BoundImage(gx_device_printer *pDev, struct bounding *pBox)
 }
 
 static long
-CompressImage(gx_device_printer *pDev, struct bounding *pBox, FILE *fp, const char *format)
+CompressImage(gx_device_printer *pDev, struct bounding *pBox, gp_file *fp, const char *format)
 {
         int	x, y, i, count = 255;
         int	Xres = (int)pDev->x_pixels_per_inch;
         int	LineSize = gdev_mem_bytes_per_scan_line((gx_device *)pDev);
-        byte	*Buf, oBuf[128], c_prev, c_cur, c_tmp;
+        byte	*Buf, oBuf[128], c_prev = 0, c_cur, c_tmp;
         long	DataSize = 0;
 
         /* ----==== Printer initialize ====---- */
         /* ----==== start TEXT mode ====---- */
-        fprintf(fp, "\x1b%%@");
+        gp_fprintf(fp, "\x1b%%@");
         /* ----==== job start ====---- */
-        fprintf(fp, "\x1bP35;%d;1J;GhostScript\x1b\\", Xres);
+        gp_fprintf(fp, "\x1bP35;%d;1J;GhostScript\x1b\\", Xres);
         /* ----==== soft reset ====---- */
-        fprintf(fp, "\x1b<");
+        gp_fprintf(fp, "\x1b<");
         /* ----==== select size as dot ====---- */
-        fprintf(fp, "\x1b[7 I");
+        gp_fprintf(fp, "\x1b[7 I");
         /* ----==== ??? ====---- */
-        fprintf(fp, "\x1b[;1;'v");
+        gp_fprintf(fp, "\x1b[;1;'v");
         /* ----==== set paper size ====---- */
-        fprintf(fp, "\x1b[%d;;p", PaperInfo[pBox->paper].id);
+        gp_fprintf(fp, "\x1b[%d;;p", PaperInfo[pBox->paper].id);
         /* ----==== select sheet feeder ====---- */
-        fprintf(fp, "\x1b[1q");
+        gp_fprintf(fp, "\x1b[1q");
         /* ----==== disable automatic FF ====---- */
-        fprintf(fp, "\x1b[?2h");
+        gp_fprintf(fp, "\x1b[?2h");
         /* ----==== set number of copies ====---- */
-        fprintf(fp, "\x1b[%dv", 1);
+        gp_fprintf(fp, "\x1b[%dv", 1);
         /* ----==== move CAP location ====---- */
-        fprintf(fp, "\x1b[%d;%df", pBox->Top, pBox->Left*16);
+        gp_fprintf(fp, "\x1b[%d;%df", pBox->Top, pBox->Left*16);
         /* ----==== draw raster image ====---- */
-        fprintf(fp, format, pBox->Right-pBox->Left+1,
-                Xres, pBox->Bottom-pBox->Top+1);
+        gp_fprintf(fp, format, pBox->Right-pBox->Left+1,
+                   Xres, pBox->Bottom-pBox->Top+1);
 
         /* ----==== Allocate momory ====---- */
         Buf = (byte *)gs_malloc(pDev->memory->non_gc_memory, 1, LineSize, "LineBuffer");
@@ -230,7 +230,7 @@ CompressImage(gx_device_printer *pDev, struct bounding *pBox, FILE *fp, const ch
                                         count--;
                                         continue;
                                 } else {
-                                        fprintf(fp, "%c%c", count, c_prev);
+                                        gp_fprintf(fp, "%c%c", count, c_prev);
                                         DataSize += 2;
                                 }
                         } else if (count == 0) {
@@ -243,8 +243,8 @@ CompressImage(gx_device_printer *pDev, struct bounding *pBox, FILE *fp, const ch
                         continue;
                         } else if (count < 127) {
                                 if (c_prev == c_cur) {
-                                        fprintf(fp, "%c", count-1);
-                                        fwrite(oBuf, 1, count, fp);
+                                        gp_fprintf(fp, "%c", count-1);
+                                        gp_fwrite(oBuf, 1, count, fp);
                                         DataSize += (count+1);
                                         count = -1;
                                 } else {
@@ -253,8 +253,8 @@ CompressImage(gx_device_printer *pDev, struct bounding *pBox, FILE *fp, const ch
                                 }
                         continue;
                         } else if (count == 127) {
-                                fprintf(fp, "%c", count);
-                                fwrite(oBuf, 1, count+1, fp);
+                                gp_fprintf(fp, "%c", count);
+                                gp_fwrite(oBuf, 1, count+1, fp);
                                 DataSize += (count+2);
                         }
                         c_prev = *oBuf = c_cur;
@@ -264,11 +264,11 @@ CompressImage(gx_device_printer *pDev, struct bounding *pBox, FILE *fp, const ch
 
         /* ----==== flush data ====---- */
         if (count < 0) {
-                fprintf(fp, "%c%c", count, c_prev);
+                gp_fprintf(fp, "%c%c", count, c_prev);
                 DataSize += 2;
         } else {
-                fprintf(fp, "%c", count);
-                fwrite(oBuf, 1, count+1, fp);
+                gp_fprintf(fp, "%c", count);
+                gp_fwrite(oBuf, 1, count+1, fp);
                 DataSize += (count+2);
         }
 

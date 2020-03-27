@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,14 +9,15 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
 /* file system stuff for MS-Windows WIN32 and MS-Windows NT */
 /* hacked from gp_dosfs.c by Russell Lang */
 
+#include "windows_.h"
 #include "stdio_.h"
 #include <fcntl.h>
 #include <io.h>
@@ -29,7 +30,6 @@
 #include "gp.h"
 #include "gpmisc.h"
 #include "gsutil.h"
-#include "windows_.h"
 
 /* ------ Printer accessing ------ */
 
@@ -56,7 +56,7 @@ gp_set_file_binary(int prnfno, int binary)
 
 /* Set a file into binary or text mode. */
 int
-gp_setmode_binary(FILE * pfile, bool binary)
+gp_setmode_binary_impl(FILE * pfile, bool binary)
 {
     /* Use non-standard fileno that almost all NT compilers offer. */
 #if defined(__STDC__) && !defined(__WATCOMC__)
@@ -75,7 +75,7 @@ const char gp_file_name_list_separator = ';';
 
 /* Define the string to be concatenated with the file mode */
 /* for opening files without end-of-line conversion. */
-const char gp_fmode_binary_suffix[] = "b";
+const char* gp_fmode_binary_suffix = "b";
 
 /* Define the file modes for binary reading or writing. */
 const char gp_fmode_rb[] = "rb";
@@ -84,11 +84,7 @@ const char gp_fmode_wb[] = "wb";
 /* ------ File enumeration ------ */
 
 struct directory_enum_s {
-#ifdef GS_NO_UTF8
-    WIN32_FIND_DATA find_data;
-#else
     WIN32_FIND_DATAW find_data;
-#endif
     HANDLE find_handle;
     char *pattern;		/* orig pattern + modified pattern */
     int patlen;			/* orig pattern length */
@@ -156,7 +152,7 @@ static int enumerate_directory_init(gs_memory_t *mem, directory_enum *pden, cons
 /* don't work with the OS call currently used. The '\' escape	*/
 /* character is removed for the 'Find...File' function.		*/
 file_enum *
-gp_enumerate_files_init(const char *pat, uint patlen, gs_memory_t * mem)
+gp_enumerate_files_init_impl(gs_memory_t * mem, const char *pat, uint patlen)
 {
     directory_enum *pden;
     file_enum *pfen;
@@ -230,26 +226,20 @@ gp_enumerate_files_init(const char *pat, uint patlen, gs_memory_t * mem)
 
 /* Enumerate the next file. */
 uint
-gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
+gp_enumerate_files_next_impl(gs_memory_t * mem, file_enum * pfen, char *ptr, uint maxlen)
 {
     directory_enum *new_denum = NULL, *pden = pfen->current;
     int code = 0;
     uint len;
-#ifdef GS_NO_UTF8
-    char *outfname;
-#else
     char outfname[(sizeof(pden->find_data.cFileName)*3+1)/2];
-#endif
+
     if (pfen->illegal) {
-        gp_enumerate_files_close(pfen);
+        gp_enumerate_files_close(mem, pfen);
         return ~(uint) 0;
     }
 
     for(;;) {
         if (pden->first_time) {
-#ifdef GS_NO_UTF8
-            pden->find_handle = FindFirstFile(pden->pattern, &(pden->find_data));
-#else
             wchar_t *pat;
             pat = malloc(utf8_to_wchar(NULL, pden->pattern)*sizeof(wchar_t));
             if (pat == NULL) {
@@ -263,14 +253,13 @@ gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
             pden->find_handle = FindFirstFileW(pat, &(pden->find_data));
 #endif
             free(pat);
-#endif
             if (pden->find_handle == INVALID_HANDLE_VALUE) {
                 if (pden->previous) {
                     FindClose(pden->find_handle);
                     gs_free_object(pden->memory, pden->pattern,
-                       "gp_enumerate_files_close(pattern)");
+                       "gp_enumerate_files_next(pattern)");
                     new_denum = pden->previous;
-                    gs_free_object(pden->memory, pden, "gp_enumerate_files_close");
+                    gs_free_object(pden->memory, pden, "gp_enumerate_files_next");
                     pden = new_denum;
                     pfen->current = pden;
                     continue;
@@ -281,15 +270,11 @@ gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
             }
             pden->first_time = 0;
         } else {
-#ifdef GS_NO_UTF8
-            if (!FindNextFile(pden->find_handle, &(pden->find_data))) {
-#else
             if (!FindNextFileW(pden->find_handle, &(pden->find_data))) {
-#endif
                 if (pden->previous) {
                     FindClose(pden->find_handle);
                     gs_free_object(pden->memory, pden->pattern,
-                       "gp_enumerate_files_close(pattern)");
+                       "gp_enumerate_files_next(pattern)");
                     new_denum = pden->previous;
                     gs_free_object(pden->memory, pden, "gp_enumerate_files_close");
                     pden = new_denum;
@@ -301,26 +286,6 @@ gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
                 }
             }
         }
-#ifdef GS_NO_UTF8
-        if ( strcmp(".",  pden->find_data.cFileName)
-            && strcmp("..", pden->find_data.cFileName)) {
-                if (pden->find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY){
-                    new_denum = gs_alloc_struct(pden->memory, directory_enum, &st_directory_enum, "gp_enumerate_files");
-                    if (new_denum != 0) {
-                        if (enumerate_directory_init(pden->memory, new_denum, pden->pattern, pden->head_size,
-                            pden->find_data.cFileName, &pden->pattern[pden->head_size], pden->pat_size - pden->head_size) < 0)
-                        {
-                            gs_free_object(pden->memory, new_denum, "free directory enumerator on error");
-                        }
-                        new_denum->previous = pden;
-                        pden = new_denum;
-                        pfen->current = pden;
-                    }
-                }
-                else
-                    break;
-        }
-#else
         if ( wcscmp(L".",  pden->find_data.cFileName)
             && wcscmp(L"..", pden->find_data.cFileName)) {
                 if (pden->find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
@@ -347,18 +312,13 @@ gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
                 else
                     break;
         }
-#endif
     }
 
     if (code != 0) {		/* All done, clean up. */
-        gp_enumerate_files_close(pfen);
+        gp_enumerate_files_close(mem, pfen);
         return ~(uint) 0;
     }
-#ifdef GS_NO_UTF8
-    outfname = pden->find_data.cFileName;
-#else
     wchar_to_utf8(outfname, pden->find_data.cFileName);
-#endif
     len = strlen(outfname);
 
     if (pden->head_size + len < maxlen) {
@@ -372,23 +332,24 @@ gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
 
 /* Clean up the file enumeration. */
 void
-gp_enumerate_files_close(file_enum * pfen)
+gp_enumerate_files_close_impl(gs_memory_t * mem, file_enum * pfen)
 {
     directory_enum *ptenum, *pden = pfen->current;
-    gs_memory_t *mem = pden->memory;
+    gs_memory_t *mem2 = pden->memory;
+    (void)mem;
 
     while (pden) {
         if (pden->find_handle != INVALID_HANDLE_VALUE)
             FindClose(pden->find_handle);
-        gs_free_object(mem, pden->pattern,
+        gs_free_object(mem2, pden->pattern,
                    "gp_enumerate_files_close(pattern)");
         ptenum = pden->previous;
-        gs_free_object(mem, pden, "gp_enumerate_files_close");
+        gs_free_object(mem2, pden, "gp_enumerate_files_close");
         pden = ptenum;
     };
-    gs_free_object(mem, pfen->pattern,
+    gs_free_object(mem2, pfen->pattern,
          "gp_enumerate_files_close(pattern)");
-    gs_free_object(mem, pfen, "gp_enumerate_files_close");
+    gs_free_object(mem2, pfen, "gp_enumerate_files_close");
 }
 
 /* -------------- Helpers for gp_file_name_combine_generic ------------- */

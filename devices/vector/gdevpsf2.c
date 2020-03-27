@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -822,9 +822,9 @@ cff_write_CharStrings_offsets(cff_writer_t *pcw, psf_glyph_enum_t *penum,
 
     s_init(&poss, NULL);
     psf_enumerate_glyphs_reset(penum);
-    for (glyph = gs_no_glyph, count = 0, offset = 1;
+    for (glyph = GS_NO_GLYPH, count = 0, offset = 1;
          (code = psf_enumerate_glyphs_next(penum, &glyph)) != 1;
-         ++count) {
+         ) {
         gs_glyph_data_t gdata;
         gs_font_type1 *pfd;
         int gcode;
@@ -846,8 +846,9 @@ cff_write_CharStrings_offsets(cff_writer_t *pcw, psf_glyph_enum_t *penum,
                     offset += gdata.bits.size - extra_lenIV;
             }
             gs_glyph_data_free(&gdata, "cff_write_CharStrings_offsets");
+            put_offset(pcw, offset);
+            count++;
         }
-        put_offset(pcw, offset);
     }
     *pcount = count;
     return offset - 1;
@@ -864,7 +865,7 @@ cff_write_CharStrings(cff_writer_t *pcw, psf_glyph_enum_t *penum,
     cff_put_Index_header(pcw, charstrings_count, charstrings_size);
     cff_write_CharStrings_offsets(pcw, penum, &ignore_count);
     psf_enumerate_glyphs_reset(penum);
-    for (glyph = gs_no_glyph;
+    for (glyph = GS_NO_GLYPH;
          (code = psf_enumerate_glyphs_next(penum, &glyph)) != 1;
          ) {
         gs_glyph_data_t gdata;
@@ -937,13 +938,38 @@ cff_write_Subrs(cff_writer_t *pcw, uint subrs_count, uint subrs_size,
 /* ------ Encoding/charset ------ */
 
 static uint
-cff_Encoding_size(int num_encoded, int num_encoded_chars)
+cff_Encoding_size(cff_writer_t *pcw, cff_glyph_subset_t *pgsub)
 {
-    int n = min(num_encoded, 255);
+    int j, code, max_enc = 0, nsupp = 0;
+    gs_font_type1 *pfont = (gs_font_type1 *)pcw->pfont;
+    byte used[255];
+    gs_const_string str;
 
-    return 2 + n +
-        (num_encoded_chars > n ?
-         1 + (num_encoded_chars - n) * 3 : 0);
+    memset(used, 0, 255);
+    for (j = 0; j < 256; ++j) {
+        gs_glyph glyph = pfont->procs.encode_char((gs_font *)pfont,
+                                                  (gs_char)j,
+                                                  GLYPH_SPACE_NAME);
+        int i;
+
+        if (glyph == GS_NO_GLYPH || glyph == pgsub->glyphs.notdef)
+            continue;
+        i = psf_sorted_glyphs_index_of(pgsub->glyphs.subset_data + 1,
+                                       pgsub->num_encoded, glyph);
+        if (i < 0)
+            continue;		/* encoded but not in subset */
+        code = pcw->pfont->procs.glyph_name((gs_font *)pcw->pfont, glyph, &str);
+        if (code < 0)
+            continue;
+        if (i >= sizeof(used) || used[i])
+            nsupp++;
+        else {
+            used[i] = 1;
+            if (i > max_enc)
+                max_enc = i;
+        }
+    }
+    return 2 + (max_enc+1) + (3 * nsupp) + (nsupp > 0 ? 1 : 0);
 }
 
 static int
@@ -955,28 +981,38 @@ cff_write_Encoding(cff_writer_t *pcw, cff_glyph_subset_t *pgsub)
     byte used[255], index[255], supplement[256];
     int num_enc = min(pgsub->num_encoded, sizeof(index));
     int nsupp = 0;
-    int j;
+    int j, code;
+    int max_enc = 0;
+    gs_const_string str;
 
     memset(used, 0, num_enc);
+    memset(index, 0, sizeof(index));
     for (j = 0; j < 256; ++j) {
         gs_glyph glyph = pfont->procs.encode_char((gs_font *)pfont,
                                                   (gs_char)j,
                                                   GLYPH_SPACE_NAME);
         int i;
 
-        if (glyph == gs_no_glyph || glyph == pgsub->glyphs.notdef)
+        if (glyph == GS_NO_GLYPH || glyph == pgsub->glyphs.notdef)
             continue;
         i = psf_sorted_glyphs_index_of(pgsub->glyphs.subset_data + 1,
                                        pgsub->num_encoded, glyph);
         if (i < 0)
             continue;		/* encoded but not in subset */
+        code = pcw->pfont->procs.glyph_name((gs_font *)pcw->pfont, glyph, &str);
+        if (code < 0)
+            continue;
         if (i >= sizeof(used) || used[i])
             supplement[nsupp++] = j;
-        else
-            index[i] = j, used[i] = 1;
+        else {
+            index[i] = j;
+            used[i] = 1;
+            if (i > max_enc)
+                max_enc = i;
+        }
     }
     sputc(s, (byte)(nsupp ? 0x80 : 0));
-    sputc(s, (byte)num_enc);
+    sputc(s, (byte)max_enc+1);
 #ifdef DEBUG
     {	int num_enc_chars = pgsub->num_encoded_chars;
 
@@ -989,7 +1025,7 @@ cff_write_Encoding(cff_writer_t *pcw, cff_glyph_subset_t *pgsub)
                          pgsub->glyphs.subset_data[j + 1]);
     }
 #endif
-    put_bytes(s, index, num_enc);
+    put_bytes(s, index, max_enc+1);
     if (nsupp) {
         /* Write supplementary entries for multiply-encoded glyphs. */
         sputc(s, (byte)nsupp);
@@ -1010,11 +1046,15 @@ cff_write_Encoding(cff_writer_t *pcw, cff_glyph_subset_t *pgsub)
 static int
 cff_write_charset(cff_writer_t *pcw, cff_glyph_subset_t *pgsub)
 {
-    int j;
+    int j, code;
 
     sputc(pcw->strm, 0);
-    for (j = 1; j < pgsub->glyphs.subset_size; ++j)
-        put_card16(pcw, cff_glyph_sid(pcw, pgsub->glyphs.subset_data[j]));
+    for (j = 1; j < pgsub->glyphs.subset_size; j++) {
+        code = cff_glyph_sid(pcw, pgsub->glyphs.subset_data[j]);
+        if (code < 0)
+            continue;
+        put_card16(pcw, code);
+    }
     return 0;
 }
 static int
@@ -1027,8 +1067,8 @@ cff_write_cidset(cff_writer_t *pcw, psf_glyph_enum_t *penum)
     psf_enumerate_glyphs_reset(penum);
     while ((code = psf_enumerate_glyphs_next(penum, &glyph)) == 0) {
         /* Skip glyph 0 (the .notdef glyph), which is always first. */
-        if (glyph != gs_min_cid_glyph)
-            put_card16(pcw, (uint)(glyph - gs_min_cid_glyph));
+        if (glyph != GS_MIN_CID_GLYPH)
+            put_card16(pcw, (uint)(glyph - GS_MIN_CID_GLYPH));
     }
     return min(code, 0);
 }
@@ -1133,7 +1173,8 @@ psf_write_type2_font(stream *s, gs_font_type1 *pfont, int options,
     stream poss;
     uint charstrings_count, charstrings_size;
     uint subrs_count, subrs_size;
-    uint gsubrs_count, gsubrs_size, encoding_size, charset_size;
+    uint gsubrs_count, gsubrs_size, encoding_size;
+    int charset_size = -1;
     uint number_of_glyphs = 0, number_of_strings;
     /*
      * Set the offsets and sizes to the largest reasonable values
@@ -1176,7 +1217,7 @@ psf_write_type2_font(stream *s, gs_font_type1 *pfont, int options,
                               subset_size);
     if (code < 0)
         return code;
-    if (subset.glyphs.notdef == gs_no_glyph)
+    if (subset.glyphs.notdef == GS_NO_GLYPH)
         return_error(gs_error_rangecheck); /* notdef is required */
 
     /* If we're writing Type 2 CharStrings, don't encrypt them. */
@@ -1211,7 +1252,7 @@ psf_write_type2_font(stream *s, gs_font_type1 *pfont, int options,
         for (j = 0, num_enc_chars = 0; j < 256; ++j) {
             glyph = pfont->procs.encode_char((gs_font *)pfont, (gs_char)j,
                                              GLYPH_SPACE_NAME);
-            if (glyph != gs_no_glyph && glyph != subset.glyphs.notdef &&
+            if (glyph != GS_NO_GLYPH && glyph != subset.glyphs.notdef &&
                 (subset.glyphs.subset_glyphs == 0 ||
                  psf_sorted_glyphs_include(subset.glyphs.subset_data,
                                             subset.glyphs.subset_size, glyph)))
@@ -1275,7 +1316,7 @@ psf_write_type2_font(stream *s, gs_font_type1 *pfont, int options,
     cff_string_table_init(&writer.std_strings, std_string_items,
                           MAX_CFF_STD_STRINGS);
     for (j = 0; (glyph = gs_c_known_encode((gs_char)j,
-                                ENCODING_INDEX_CFFSTRINGS)) != gs_no_glyph;
+                                ENCODING_INDEX_CFFSTRINGS)) != GS_NO_GLYPH;
          ++j) {
         gs_const_string str;
         int ignore;
@@ -1298,8 +1339,11 @@ psf_write_type2_font(stream *s, gs_font_type1 *pfont, int options,
     while ((code = psf_enumerate_glyphs_next(&genum, &glyph)) != 1)
         if (code == 0) {
             code = cff_glyph_sid(&writer, glyph);
+            if (code == gs_error_undefined)
+                continue;
             if (code < 0)
                 return code;
+            charset_size += 2;
         }
 
     /*
@@ -1326,14 +1370,7 @@ psf_write_type2_font(stream *s, gs_font_type1 *pfont, int options,
      * the Encoding in an "inverted" form, we need to count the number of
      * glyphs that occur at more than one place in the Encoding.
      */
-    encoding_size = cff_Encoding_size(subset.num_encoded,
-                                      subset.num_encoded_chars);
-
-    /*
-     * Compute the size of the charset.  For simplicity, we currently
-     * always store the charset explicitly.
-     */
-    charset_size = 1 + (subset.glyphs.subset_size - 1) * 2;
+    encoding_size = cff_Encoding_size(&writer, &subset);
 
     /* Compute the size of the CharStrings Index. */
     code = cff_write_CharStrings_offsets(&writer, &genum, &charstrings_count);
@@ -1494,7 +1531,7 @@ static int
 offset_error(const char *msg)
 {
     if_debug1('l', "[l]%s offset error\n", msg);
-    return gs_error_rangecheck;
+    return_error(gs_error_rangecheck);
 }
 #else
 #  define offset_error(msg) gs_error_rangecheck
@@ -1551,6 +1588,9 @@ psf_write_cid0_font(stream *s, gs_font_cid0 *pfont, int options,
     uint offset;
     int num_fonts = pfont->cidata.FDArray_size;
     int code;
+
+    memset(&subrs_count, 0x00, 256 * sizeof(uint));
+    memset(&subrs_size, 0x00, 256 * sizeof(uint));
 
     /* Initialize the enumeration of the glyphs. */
     psf_enumerate_cids_begin(&genum, (gs_font *)pfont, subset_cids,

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* XPS interpreter - path (vector drawing) support */
@@ -85,6 +85,9 @@ xps_fill(xps_context_t *ctx)
  * line segments. We cannot use the gs_arc function because they only draw
  * circular arcs, we need to transform the line to make them elliptical but
  * without transforming the line width.
+ *
+ * We are guaranteed that on entry the point is at the point that would be
+ * calculated by th0, and on exit, a point is generated for us at th0.
  */
 static inline void
 xps_draw_arc_segment(xps_context_t *ctx, gs_matrix *mtx, float th0, float th1, int iscw)
@@ -93,34 +96,26 @@ xps_draw_arc_segment(xps_context_t *ctx, gs_matrix *mtx, float th0, float th1, i
     gs_point p;
 
     while (th1 < th0)
-        th1 += M_PI * 2.0;
+        th1 += (float)(M_PI * 2.0);
 
-    d = 1 * (M_PI / 180.0); /* 1-degree precision */
+    d = (float)(1 * (M_PI / 180.0)); /* 1-degree precision */
 
     if (iscw)
     {
-        gs_point_transform(cos(th0), sin(th0), mtx, &p);
-        gs_lineto(ctx->pgs, p.x, p.y);
-        for (t = th0; t < th1; t += d)
+        for (t = th0 + d; t < th1 - d/2; t += d)
         {
             gs_point_transform(cos(t), sin(t), mtx, &p);
             gs_lineto(ctx->pgs, p.x, p.y);
         }
-        gs_point_transform(cos(th1), sin(th1), mtx, &p);
-        gs_lineto(ctx->pgs, p.x, p.y);
     }
     else
     {
-        th0 += M_PI * 2;
-        gs_point_transform(cos(th0), sin(th0), mtx, &p);
-        gs_lineto(ctx->pgs, p.x, p.y);
-        for (t = th0; t > th1; t -= d)
+        th0 += (float)(M_PI * 2);
+        for (t = th0 - d; t > th1 + d/2; t -= d)
         {
             gs_point_transform(cos(t), sin(t), mtx, &p);
             gs_lineto(ctx->pgs, p.x, p.y);
         }
-        gs_point_transform(cos(th1), sin(th1), mtx, &p);
-        gs_lineto(ctx->pgs, p.x, p.y);
     }
 }
 
@@ -179,7 +174,7 @@ xps_draw_arc(xps_context_t *ctx,
     /* F.6.6.1 -- ensure radii are positive and non-zero */
     rx = fabsf(rx);
     ry = fabsf(ry);
-    if (rx < 0.001 || ry < 0.001)
+    if (rx < 0.001 || ry < 0.001 || (x1 == x2 && y1 == y2))
     {
         gs_lineto(ctx->pgs, x2, y2);
         return;
@@ -289,8 +284,7 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
         }
     }
 
-    pargs[0] = s;
-    pargs[1] = 0;
+    *pargs = s;
 
     n = pargs - args;
     i = 0;
@@ -683,7 +677,6 @@ xps_parse_poly_line_segment(xps_context_t *ctx, xps_item_t *root, int stroking, 
     char *points_att = xps_att(root, "Points");
     char *is_stroked_att = xps_att(root, "IsStroked");
     int is_stroked;
-    float x, y;
     float xy[2];
     char *s;
 
@@ -890,11 +883,10 @@ xps_parse_path(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, xps_ite
     gs_line_join linejoin;
     float linewidth;
     float miterlimit;
-    float samples[32];
-    gs_color_space *colorspace;
+    float samples[XPS_MAX_COLORS];
 
     bool opacity_pushed = false;
-    bool uses_stroke;
+    bool uses_stroke = false;
 
     gs_gsave(ctx->pgs);
 
@@ -1014,6 +1006,16 @@ xps_parse_path(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, xps_ite
                 s++;
         }
 
+        if (dash_count > 0)
+        {
+            float phase_len = 0;
+            int i;
+            for (i = 0; i < dash_count; ++i)
+                phase_len += dash_array[i];
+            if (phase_len == 0)
+                dash_count = 0;
+        }
+
         gs_setdash(ctx->pgs, dash_array, dash_count, dash_offset);
     }
     else
@@ -1063,6 +1065,8 @@ xps_parse_path(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, xps_ite
     }
     if (fill_att)
     {
+        gs_color_space *colorspace;
+
         if (data_att)
             xps_parse_abbreviated_geometry(ctx, data_att);
         if (data_tag)
@@ -1078,8 +1082,9 @@ xps_parse_path(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, xps_ite
         /* Color must be set *after* we begin opacity */
         xps_parse_color(ctx, base_uri, fill_att, &colorspace, samples);
         if (fill_opacity_att)
-            samples[0] = atof(fill_opacity_att);
+            samples[0] *= atof(fill_opacity_att);
         xps_set_color(ctx, colorspace, samples);
+        rc_decrement(colorspace, "xps_parse_path");
 
         opacity_pushed = true;
         xps_fill(ctx);
@@ -1113,6 +1118,8 @@ xps_parse_path(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, xps_ite
 
     if (stroke_att)
     {
+        gs_color_space *colorspace;
+
         if (data_att)
             xps_parse_abbreviated_geometry(ctx, data_att);
         if (data_tag)
@@ -1131,8 +1138,9 @@ xps_parse_path(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, xps_ite
         /* Color must be set *after* the group is pushed */
         xps_parse_color(ctx, base_uri, stroke_att, &colorspace, samples);
         if (stroke_opacity_att)
-            samples[0] = atof(stroke_opacity_att);
+            samples[0] *= atof(stroke_opacity_att);
         xps_set_color(ctx, colorspace, samples);
+        rc_decrement(colorspace, "xps_parse_path");
 
         gs_stroke(ctx->pgs);
     }

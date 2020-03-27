@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -29,11 +29,7 @@
  */
 
 #include "gsalloc.h"
-
-#ifndef gs_ref_memory_DEFINED
-#  define gs_ref_memory_DEFINED
-typedef struct gs_ref_memory_s gs_ref_memory_t;
-#endif
+#include "gsmemory.h"
 
         /* Allocate a ref array. */
 
@@ -60,7 +56,7 @@ int gs_alloc_string_ref(gs_ref_memory_t * mem, ref * psref,
 /* Register a ref root.  This just calls gs_register_root. */
 /* Note that ref roots are a little peculiar: they assume that */
 /* the ref * that they point to points to a *statically* allocated ref. */
-int gs_register_ref_root(gs_memory_t *mem, gs_gc_root_t *root,
+int gs_register_ref_root(gs_memory_t *mem, gs_gc_root_t **root,
                          void **pp, client_name_t cname);
 
 /*
@@ -77,10 +73,8 @@ int gs_register_ref_root(gs_memory_t *mem, gs_gc_root_t *root,
  * instances must not be stored anywhere that might persist across a
  * garbage collection.
  */
-#ifndef gs_dual_memory_DEFINED
-#  define gs_dual_memory_DEFINED
 typedef struct gs_dual_memory_s gs_dual_memory_t;
-#endif
+
 struct gs_dual_memory_s {
     gs_ref_memory_t *current;	/* = ...global or ...local */
     vm_spaces spaces;		/* system, global, local */

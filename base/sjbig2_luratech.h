@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -54,9 +54,9 @@ extern const stream_template s_jbig2decode_template;
 
 /* call in to process the JBIG2Globals parameter */
 int
-s_jbig2decode_make_global_data(byte *data, uint size, void **result);
+s_jbig2decode_make_global_data(gs_memory_t *mem, byte *data, uint size, void **result);
 int
-s_jbig2decode_set_global_data(stream_state *ss, s_jbig2_global_data_t *gs);
+s_jbig2decode_set_global_data(stream_state *ss, s_jbig2_global_data_t *gs, void *global_ctx);
 void
 s_jbig2decode_free_global_data(void *data);
 

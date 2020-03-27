@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -29,6 +29,8 @@ xps_set_color(xps_context_t *ctx, gs_color_space *cs, float *samples)
     if (ctx->opacity_only)
     {
         gs_setopacityalpha(ctx->pgs, 1.0);
+        gs_setfillconstantalpha(ctx->pgs, 1.0);
+        gs_setstrokeconstantalpha(ctx->pgs, 1.0);
         gs_setgray(ctx->pgs, samples[0]);
     }
     else
@@ -39,6 +41,8 @@ xps_set_color(xps_context_t *ctx, gs_color_space *cs, float *samples)
             cc.paint.values[i] = samples[i + 1];
 
         gs_setopacityalpha(ctx->pgs, samples[0]);
+        gs_setfillconstantalpha(ctx->pgs, samples[0]);
+        gs_setstrokeconstantalpha(ctx->pgs, samples[0]);
         gs_setcolorspace(ctx->pgs, cs);
         gs_setcolor(ctx->pgs, &cc);
     }
@@ -64,57 +68,61 @@ static int count_commas(char *s)
 
 void
 xps_parse_color(xps_context_t *ctx, char *base_uri, char *string,
-        gs_color_space **csp, float *samples)
+                gs_color_space **csp, float *samples)
 {
     char *p;
     int i, n;
     char buf[1024];
     char *profile;
-
-    *csp = ctx->srgb;
+    gs_color_space *cs;
 
     samples[0] = 1.0;
     samples[1] = 0.0;
     samples[2] = 0.0;
     samples[3] = 0.0;
 
+    if (csp)
+        *csp = NULL;
+
     if (string[0] == '#')
     {
         if (strlen(string) == 9)
         {
-            samples[0] = unhex(string[1]) * 16 + unhex(string[2]);
-            samples[1] = unhex(string[3]) * 16 + unhex(string[4]);
-            samples[2] = unhex(string[5]) * 16 + unhex(string[6]);
-            samples[3] = unhex(string[7]) * 16 + unhex(string[8]);
+            samples[0] = (float)(unhex(string[1]) * 16 + unhex(string[2]));
+            samples[1] = (float)(unhex(string[3]) * 16 + unhex(string[4]));
+            samples[2] = (float)(unhex(string[5]) * 16 + unhex(string[6]));
+            samples[3] = (float)(unhex(string[7]) * 16 + unhex(string[8]));
         }
         else
         {
             samples[0] = 255.0;
-            samples[1] = unhex(string[1]) * 16 + unhex(string[2]);
-            samples[2] = unhex(string[3]) * 16 + unhex(string[4]);
-            samples[3] = unhex(string[5]) * 16 + unhex(string[6]);
+            samples[1] = (float)(unhex(string[1]) * 16 + unhex(string[2]));
+            samples[2] = (float)(unhex(string[3]) * 16 + unhex(string[4]));
+            samples[3] = (float)(unhex(string[5]) * 16 + unhex(string[6]));
         }
 
         samples[0] /= 255.0;
         samples[1] /= 255.0;
         samples[2] /= 255.0;
         samples[3] /= 255.0;
-    }
 
+        cs = ctx->srgb;
+        rc_increment(cs);
+    }
     else if (string[0] == 's' && string[1] == 'c' && string[2] == '#')
     {
-        *csp = ctx->scrgb;
+        cs = ctx->scrgb;
+        rc_increment(cs);
 
         if (count_commas(string) == 2)
             sscanf(string, "sc#%g,%g,%g", samples + 1, samples + 2, samples + 3);
         if (count_commas(string) == 3)
             sscanf(string, "sc#%g,%g,%g,%g", samples, samples + 1, samples + 2, samples + 3);
     }
-
     else if (strstr(string, "ContextColor ") == string)
     {
         /* Crack the string for profile name and sample values */
-        strcpy(buf, string);
+        gs_strlcpy(buf, string, sizeof buf);
 
         profile = strchr(buf, ' ');
         if (!profile)
@@ -133,7 +141,13 @@ xps_parse_color(xps_context_t *ctx, char *base_uri, char *string,
 
         *p++ = 0;
         n = count_commas(p) + 1;
+        if (n > XPS_MAX_COLORS)
+        {
+            gs_warn("too many color components; ignoring extras");
+            n = XPS_MAX_COLORS;
+        }
         i = 0;
+        /* TODO: check for buffer overflow! */
         while (i < n)
         {
             samples[i++] = atof(p);
@@ -149,19 +163,29 @@ xps_parse_color(xps_context_t *ctx, char *base_uri, char *string,
             samples[i++] = 0.0;
         }
 
-        *csp = xps_read_icc_colorspace(ctx, base_uri, profile);
-        if (!*csp)
+        cs = xps_read_icc_colorspace(ctx, base_uri, profile);
+        if (!cs)
         {
             /* Default fallbacks if the ICC stuff fails */
             switch (n)
             {
-            case 2: *csp = ctx->gray; break; /* alpha + tint */
-            case 4: *csp = ctx->srgb; break; /* alpha + RGB */
-            case 5: *csp = ctx->cmyk; break; /* alpha + CMYK */
-            default: *csp = ctx->gray; break;
+            case 2: cs = ctx->gray; break; /* alpha + tint */
+            case 4: cs = ctx->srgb; break; /* alpha + RGB */
+            case 5: cs = ctx->cmyk; break; /* alpha + CMYK */
+            default: cs = ctx->gray; break;
             }
+            rc_increment(cs);
         }
     }
+    else
+    {
+        cs = ctx->srgb;
+        rc_increment(cs);
+    }
+    if (csp)
+        *csp = cs;
+    else
+        rc_decrement(cs, "xps_parse_color");
 }
 
 gs_color_space *
@@ -171,6 +195,7 @@ xps_read_icc_colorspace(xps_context_t *ctx, char *base_uri, char *profilename)
     cmm_profile_t *profile;
     xps_part_t *part;
     char partname[1024];
+    int code;
 
     /* Find ICC colorspace part */
     xps_absolute_path(partname, base_uri, profilename, sizeof partname);
@@ -196,28 +221,37 @@ xps_read_icc_colorspace(xps_context_t *ctx, char *base_uri, char *profilename)
         profile->buffer = part->data;
         profile->buffer_size = part->size;
 
+        /* Steal the buffer data before freeing the part */
+        part->data = NULL;
+        xps_free_part(ctx, part);
+
         /* Parse */
-        gsicc_init_profile_info(profile);
+        code = gsicc_init_profile_info(profile);
 
         /* Problem with profile.  Don't fail, just use the default */
-        if (profile->profile_handle == NULL)
+        if (code < 0)
         {
-            gsicc_profile_reference(profile, -1);
+            gsicc_adjust_profile_rc(profile, -1, "xps_read_icc_colorspace");
             gs_warn1("there was a problem with the profile: %s", partname);
             return NULL;
         }
 
         /* Create a new colorspace and associate with the profile */
-        gs_cspace_build_ICC(&space, NULL, ctx->memory);
+        if (gs_cspace_build_ICC(&space, NULL, ctx->memory) < 0)
+        {
+            /* FIXME */
+            return NULL;
+        }
         space->cmm_icc_profile_data = profile;
 
-        /* Steal the buffer data before freeing the part */
-        part->data = NULL;
-        xps_free_part(ctx, part);
-
         /* Add colorspace to xps color cache. */
-        xps_hash_insert(ctx, ctx->colorspace_table, xps_strdup(ctx, partname), space);
+        if (xps_hash_insert(ctx, ctx->colorspace_table, xps_strdup(ctx, partname), space) < 0)
+        {
+            /* FIXME */
+            return NULL;
+        }
     }
+    rc_increment(space);
 
     return space;
 }
@@ -228,12 +262,11 @@ xps_parse_solid_color_brush(xps_context_t *ctx, char *base_uri, xps_resource_t *
     char *opacity_att;
     char *color_att;
     gs_color_space *colorspace;
-    float samples[32];
+    float samples[XPS_MAX_COLORS];
 
     color_att = xps_att(node, "Color");
     opacity_att = xps_att(node, "Opacity");
 
-    colorspace = ctx->srgb;
     samples[0] = 1.0;
     samples[1] = 0.0;
     samples[2] = 0.0;
@@ -241,11 +274,17 @@ xps_parse_solid_color_brush(xps_context_t *ctx, char *base_uri, xps_resource_t *
 
     if (color_att)
         xps_parse_color(ctx, base_uri, color_att, &colorspace, samples);
+    else
+    {
+        colorspace = ctx->srgb;
+        rc_increment(colorspace);
+    }
 
     if (opacity_att)
         samples[0] = atof(opacity_att);
 
     xps_set_color(ctx, colorspace, samples);
+    rc_decrement(colorspace, "xps_parse_solid_color_brush");
 
     xps_fill(ctx);
 

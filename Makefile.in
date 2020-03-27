@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2015 Artifex Software, Inc.
+# Copyright (C) 2001-2020 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 # of the license contained in the file LICENSE in this distribution.
 #
 # Refer to licensing information at http://www.artifex.com or contact
-# Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-# CA  94903, U.S.A., +1(415)492-9861, for further information.
+# Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+# CA 94945, U.S.A., +1(415)492-9861, for further information.
 #
 # makefile template for/from the autoconf build.
 # @configure_input@
@@ -23,9 +23,11 @@
 # source, generated intermediate file, and object directories
 # for the graphics library (GL) and the PostScript/PDF interpreter (PS).
 
+PACKAGE=ghostscript
 BINDIR=./$(BUILDDIRPREFIX)bin
 GLSRCDIR=@srcdir@/base
 DEVSRCDIR=@srcdir@/devices
+GENORDERED_SRCDIR=@srcdir@/toolbin/halftone/gen_ordered
 GLGENDIR=./$(BUILDDIRPREFIX)@OBJDIR_BSDMAKE_WORKAROUND@
 GLOBJDIR=./$(BUILDDIRPREFIX)@OBJDIR_BSDMAKE_WORKAROUND@
 DEVGENDIR=./$(BUILDDIRPREFIX)@OBJDIR_BSDMAKE_WORKAROUND@
@@ -57,6 +59,9 @@ GPDLSRCDIR=@srcdir@/gpdl
 GPDLGENDIR=./$(BUILDDIRPREFIX)@OBJDIR_BSDMAKE_WORKAROUND@
 GPDLOBJDIR=./$(BUILDDIRPREFIX)@OBJDIR_BSDMAKE_WORKAROUND@
 
+URFSRCDIR=@srcdir@/urf
+URFGENDIR=./$(BUILDDIRPREFIX)@OBJDIR_BSDMAKE_WORKAROUND@
+URFOBJDIR=./$(BUILDDIRPREFIX)@OBJDIR_BSDMAKE_WORKAROUND@
 
 CONTRIBDIR=@srcdir@/contrib
 
@@ -80,6 +85,7 @@ INSTALL_DATA = $(INSTALL) -m 644
 INSTALL_SHARED = @INSTALL_SHARED@
 
 prefix = @prefix@
+datarootdir = @datarootdir@
 exec_prefix = @exec_prefix@
 bindir = @bindir@
 scriptdir = $(bindir)
@@ -89,16 +95,15 @@ mandir = @mandir@
 man1ext = 1
 man1dir = $(mandir)/man$(man1ext)
 datadir = @datadir@
-datarootdir = @datarootdir@
+docdir = @docdir@@VERSIONED_PATH@
 
 # The following must be substituted using @datadir@ and @libdir@
 # to avoid adding RPM generation paths (CUPS STR #1112)
 gsdir = @datadir@/ghostscript
-gsdatadir = $(gsdir)/$(GS_DOT_VERSION)
-gssharedir = @libdir@/ghostscript/$(GS_DOT_VERSION)
+gsdatadir = $(gsdir)@VERSIONED_PATH@
+gssharedir = @libdir@/ghostscript@VERSIONED_PATH@
 gsincludedir = @includedir@/ghostscript/
 
-docdir=$(gsdatadir)/doc
 exdir=$(gsdatadir)/examples
 GS_DOCDIR=$(docdir)
 
@@ -138,6 +143,7 @@ TARGET_ARCH_FILE=@ARCH_CONF_HEADER@
 #	  are set.
 
 GENOPT=
+GENOPTAUX=
 
 # Choose capability options.
 
@@ -164,28 +170,58 @@ GENOPT=
 # -DHAVE_SSE2
 #       use sse2 intrinsics
 
-CAPOPT= @HAVE_MKSTEMP@ @HAVE_FILE64@ @HAVE_FSEEKO@ @HAVE_MKSTEMP64@ @HAVE_FONTCONFIG@ @HAVE_LIBIDN@ @HAVE_SETLOCALE@ @HAVE_SSE2@ @HAVE_DBUS@ @HAVE_BSWAP32@ @HAVE_BYTESWAP_H@ @HAVE_STRERROR@ @HAVE_PREAD_PWRITE@ @RECURSIVE_MUTEXATTR@
+CAPOPT= @HAVE_MKSTEMP@ @HAVE_FILE64@ @HAVE_FSEEKO@ @HAVE_MKSTEMP64@ @HAVE_FONTCONFIG@ @HAVE_LIBIDN@ @HAVE_SETLOCALE@ @HAVE_SSE2@ @HAVE_DBUS@ @HAVE_BSWAP32@ @HAVE_BYTESWAP_H@ @HAVE_STRERROR@ @HAVE_ISNAN@ @HAVE_ISINF@ @HAVE_FPCLASSIFY@ @HAVE_PREAD_PWRITE@ @RECURSIVE_MUTEXATTR@
 
 # Define the name of the executable file.
 
 GS=@GS@
 GS_SO_BASE=@GS@
+GS_SONAME=@GS_SONAME@
+GS_SONAME_MAJOR=@GS_SONAME_MAJOR@
+GS_SONAME_MAJOR_MINOR=@GS_SONAME_MAJOR_MINOR@
 
 PCL=@PCL@
+PCL_SO_BASE=@PCL@
+PCL_SONAME=@PCL_SONAME@
+PCL_SONAME_MAJOR=@PCL_SONAME_MAJOR@
+PCL_SONAME_MAJOR_MINOR=@PCL_SONAME_MAJOR_MINOR@
+
 XPS=@XPS@
+XPS_SO_BASE=@XPS@
+XPS_SONAME=@XPS_SONAME@
+XPS_SONAME_MAJOR=@XPS_SONAME_MAJOR@
+XPS_SONAME_MAJOR_MINOR=@XPS_SONAME_MAJOR_MINOR@
+
 GPDL=@GPDL@
+GPDL_SO_BASE=@GPDL@
+GPDL_SONAME=@GPDL_SONAME@
+GPDL_SONAME_MAJOR=@GPDL_SONAME_MAJOR@
+GPDL_SONAME_MAJOR_MINOR=@GPDL_SONAME_MAJOR_MINOR@
 
 XE=@EXEEXT@
-XEAUX=@EXEEXT@
+XEAUX=@AUXEXEEXT@
 
-PCL_XPS_TARGETS=@PCL_TARGET@ @XPS_TARGET@ @GPDL_TARGET@
+PCL_TARGET=@PCL_TARGET@
+XPS_TARGET=@XPS_TARGET@
+GPDL_TARGET=@GPDL_TARGET@
+
+PCL_XPS_PDL_TARGETS=$(PCL_TARGET) $(XPS_TARGET) $(GPDL_TARGET)
 
 # Define the directories for debugging and profiling binaries, relative to
 # the standard binaries.
 
 DEBUGDIRPREFIX=debug
 MEMENTODIRPREFIX=mem
+SANITIZEDIRPREFIX=san
 PGDIRPREFIX=pg
+
+# Are we include the CAL library?
+WITH_CAL=@WITH_CAL@
+CALSRCDIR=@CALSRCDIR@
+CAL_CFLAGS=@CAL_CFLAGS@
+CAL_SSE4_2_CFLAGS=@CAL_SSE4_2_CFLAGS@
+CAL_AVX2_CFLAGS=@CAL_AVX2_CFLAGS@
+CAL_NEON_CFLAGS=@CAL_NEON_CFLAGS@
 
 # Define whether to compile in the FreeType library, and if so, where
 # the source tree is location. Otherwise, what library name to use
@@ -194,7 +230,7 @@ PGDIRPREFIX=pg
 FT_BRIDGE=@FT_BRIDGE@
 SHARE_FT=@SHARE_FT@
 FTSRCDIR=@FTSRCDIR@
-FT_CFLAGS=@FT_CFLAGS@
+FT_CFLAGS=@FT_CFLAGS@ -DSHARE_FT=@SHARE_FT@
 FT_LIBS=@FT_LIBS@
 FT_CONFIG_SYSTEM_ZLIB=@FT_SYS_ZLIB@
 
@@ -249,6 +285,8 @@ TIFFCONFDIR=@LIBTIFFCONFDIR@
 TIFFPLATFORM=unix
 TIFFCONFIG_SUFFIX=
 LIBTIFF_NAME=tiff
+TIFF_CFLAGS=@TIFFCFLAGS@
+ENABLE_TIFF=@ENABLETIFF@
 
 # Define the directory where the zlib sources are stored.
 # See zlib.mak for more information.
@@ -257,6 +295,7 @@ SHARE_ZLIB=@SHARE_ZLIB@
 ZSRCDIR=@ZLIBDIR@
 #ZLIB_NAME=gz
 ZLIB_NAME=z
+ZLIB_CFLAGS=@ZLIBCFLAGS@
 
 # Choose shared or compiled in libjbig2dec and source location
 # JBIG2_LIB=jbig2dec
@@ -280,7 +319,7 @@ JBIG2_CFLAGS=@JBIG2_AUTOCONF_CFLAGS@
 JPX_LIB=@JPX_DECODER@
 SHARE_JPX=@SHARE_JPX@
 JPXSRCDIR=@JPXDIR@
-JPX_CFLAGS=@JPX_AUTOCONF_CFLAGS@
+JPX_CFLAGS=-DSHARE_JPX=$(SHARE_JPX) @JPX_AUTOCONF_CFLAGS@ @JPX_SSE_CFLAGS@
 
 # uncomment the following three lines and one of the last two to
 # compile in the Luratech lwf_jp2 codec
@@ -299,19 +338,26 @@ JPX_CFLAGS=@JPX_AUTOCONF_CFLAGS@
 # options for lcms color management library
 SHARE_LCMS=@SHARELCMS@
 LCMS2SRCDIR=@LCMS2DIR@
+LCMS2MTSRCDIR=@LCMS2MTDIR@
 LCMS2_CFLAGS=-DSHARE_LCMS=$(SHARE_LCMS) @LCMS2_ENDIAN@ @SQRTF_SUBST@  @LCMS2_PTR_ALIGNMENT@
 
 # Which CMS are we using?
 # Options are currently lcms or lcms2
 WHICH_CMS=@WHICHLCMS@
 
+# Do we have URF support?
+ENABLE_URF=@ENABLEURF@
+GPDL_URF_TOP_OBJ=@GPDL_URF_TOP_OBJ@
+URF_INCLUDE=@URF_INCLUDE@
+URF_DEV=@URF_DEV@
+SURFX_H=@SURFX_H@
 
-EXPATSRCDIR=@SRCDIR@/expat
-EXPAT_CFLAGS=-DHAVE_MEMMOVE
+EXPATSRCDIR=@EXPATDIR@
+EXPAT_CFLAGS=@EXPAT_CFLAGS@
 EXPATGENDIR=$(GLGENDIR)
 EXPATOBJDIR=$(GLOBJDIR)
 EXPATINCDIR = $(EXPATSRCDIR)$(D)lib
-SHARE_EXPAT=0
+SHARE_EXPAT=@SHARE_EXPAT@
 
 JPEGXR_SRCDIR=@SRCDIR@/jpegxr
 SHARE_JPEGXR=0
@@ -321,7 +367,7 @@ JPEGXR_OBJDIR=$(GLOBJDIR)
 # Define the directory where the ijs source is stored,
 # and the process forking method to use for the server.
 # See ijs.mak for more information.
- 
+
 SHARE_IJS=@SHAREIJS@
 IJS_NAME=@IJSLIB@
 IJSSRCDIR=@IJSDIR@
@@ -354,13 +400,15 @@ CUPSCFLAGS=@CUPSCFLAGS@ -DSHARE_LCUPS=$(SHARE_LCUPS) -DSHARE_LCUPSI=$(SHARE_LCUP
 AR=ar
 ARFLAGS=qc
 RANLIB=@RANLIB@
+STRIP_XE=@STRIP_XE@
+STRIP_XE_OPTS=
 
 # ------ Platform-specific options ------ #
 
 # Define the name of the C compiler (target and host (AUX))
 
 CC=@CC@
-CCAUX=@CC@
+CCAUX=@CCAUX@
 
 # Define the name of the linker for the final link step.
 # Normally this is the same as the C compiler.
@@ -369,15 +417,25 @@ CCLD=$(CC)
 CCAUXLD=$(CCAUX)
 
 # Define the default gcc flags.
-GCFLAGS=@CPPFLAGS@ @GCFLAGS@ @CFLAGS@
+GCFLAGS=@CPPFLAGS@ @GCFLAGS@ @CFLAGS@ @HAVE_POPEN_PROTO@
+GCFLAGSAUX=@GCFLAGSAUX@ @CFLAGSAUX@ @HAVE_POPEN_PROTO@
 
-# Define the added flags for standard, debugging, profiling 
+# Define the added flags for standard, debugging, profiling
 # and shared object builds.
 
 CFLAGS_STANDARD=@OPT_CFLAGS@
 CFLAGS_DEBUG=@DBG_CFLAGS@
 CFLAGS_PROFILE=-pg @OPT_CFLAGS@
 CFLAGS_SO=@DYNAMIC_CFLAGS@
+
+CFLAGSAUX_STANDARD=@CFLAGSAUX_STANDARD@
+CFLAGSAUX_DEBUG=@CFLAGSAUX_DEBUG@
+CFLAGSAUX_PROFILE=-pg @CFLAGSAUX_STANDARD@
+
+# Define the extra flags added for address sanitizer builds
+
+CFLAGS_SANITIZE=@CFLAGS_SANITIZE@
+LDFLAGS_SANITIZE=$(CFLAGS_SANITIZE)
 
 # Define the other compilation flags.  Add at most one of the following:
 #	-DBSD4_2 for 4.2bsd systems.
@@ -404,7 +462,8 @@ DBUS_LIBS=@DBUS_LIBS@
 # defines from autoconf; note that we don't use all of these at present.
 ACDEFS=@DEFS@
 
-CFLAGS=$(CFLAGS_STANDARD) $(GCFLAGS) $(AC_CFLAGS) $(XCFLAGS)
+CFLAGS=$(CFLAGS_STANDARD) $(GCFLAGS) $(AC_CFLAGS) $(XCFLAGS) @CLUSTER_CFLAGS@
+CFLAGSAUX=$(CFLAGSAUX_STANDARD) $(GCFLAGSAUX) $(XCFLAGSAUX)
 
 # Define platform flags for ld.
 # SunOS 4.n may need -Bstatic.
@@ -418,7 +477,17 @@ AC_LDFLAGS=@X_LDFLAGS@
 
 LDFLAGS=@LDFLAGS@ $(AC_LDFLAGS) $(XLDFLAGS)
 
-LDFLAGS_SO=@DYNAMIC_LDFLAGS@
+LDFLAGSAUX=@LDFLAGSAUX@
+
+GS_LDFLAGS=$(LDFLAGS)
+PCL_LDFLAGS=$(LDFLAGS)
+XPS_LDFLAGS=$(LDFLAGS)
+PDL_LDFLAGS=$(LDFLAGS)
+
+GS_LDFLAGS_SO=@GS_DYNAMIC_LDFLAGS@
+PCL_LDFLAGS_SO=@PCL_DYNAMIC_LDFLAGS@
+XPS_LDFLAGS_SO=@XPS_DYNAMIC_LDFLAGS@
+PDL_LDFLAGS_SO=@PDL_DYNAMIC_LDFLAGS@
 
 # Define any extra libraries to link into the executable.
 # ISC Unix 2.2 wants -linet.
@@ -427,8 +496,8 @@ LDFLAGS_SO=@DYNAMIC_LDFLAGS@
 # Solaris may need -lnsl -lsocket -lposix4.
 # (Libraries required by individual drivers are handled automatically.)
 
-EXTRALIBS=$(XTRALIBS) @LIBS@ @DYNAMIC_LIBS@ @FONTCONFIG_LIBS@ @FT_LIBS@
-AUXEXTRALIBS=$(XTRALIBS) @LIBS@ @DYNAMIC_LIBS@ @FONTCONFIG_LIBS@ @FT_LIBS@ @AUX_SHARED_ZLIB@
+EXTRALIBS=$(XTRALIBS) @LIBS@ @DYNAMIC_LIBS@ @FONTCONFIG_LIBS@ @FT_LIBS@ @JPX_AUTOCONF_LIBS@ @EXPAT_LIBS@
+AUXEXTRALIBS=@AUXEXTRALIBS@ @AUX_SHARED_ZLIB@
 
 # Define the standard libraries to search at the end of linking.
 # Most platforms require -lpthread for the POSIX threads library;
@@ -457,7 +526,7 @@ XINCLUDE=@X_CFLAGS@
 #XLIBS=Xt SM ICE Xext X11
 
 # We use the autoconf macro AC_PATH_XTRA which defines X_LIBS with
-# the -L (or whatever). It also defines X_PRE_LIBS and X_EXTRA_LIBS 
+# the -L (or whatever). It also defines X_PRE_LIBS and X_EXTRA_LIBS
 # all three of which are stripped and slotted into XLIBS below.
 # Usually however, all but X_LIBS are empty on modern platforms.
 XLIBDIRS=@X_LDFLAGS@
@@ -492,13 +561,16 @@ SO_LIB_VERSION_SEPARATOR=@SO_LIB_VERSION_SEPARATOR@
 #CAIRO_CFLAGS	=	@CAIRO_CFLAGS@
 #CAIRO_LIBS	=	@CAIRO_LIBS@
 
+# AUX Tools flags
+MKROMFS_FLAGS=@MKROMFS_FLAGS@
+
 # ------ Devices and features ------ #
 
 # Choose the language feature(s) to include.  See gs.mak for details.
 
 # if it's included, $(PSD)gs_pdfwr.dev should always be one of the last in the list
-PSI_FEATURE_DEVS=$(PSD)psl3.dev $(PSD)pdf.dev $(PSD)dpsnext.dev $(PSD)epsf.dev $(PSD)ttfont.dev \
-                 @UTF8DEVS@ $(PSD)fapi_ps.dev $(PSD)jpx.dev $(PSD)rasterop.dev $(PSD)jbig2.dev $(PSD)gs_pdfwr.dev
+PSI_FEATURE_DEVS=$(PSD)psl3.dev $(PSD)pdf.dev $(PSD)epsf.dev $(PSD)ttfont.dev \
+                 @UTF8DEVS@ $(PSD)fapi_ps.dev $(PSD)jpx.dev $(PSD)jbig2.dev $(PSD)gs_pdfwr.dev
 
 
 PCL_FEATURE_DEVS=$(PLOBJDIR)/pl.dev $(PLOBJDIR)/pjl.dev $(PXLOBJDIR)/pxl.dev $(PCL5OBJDIR)/pcl5c.dev \
@@ -508,18 +580,16 @@ XPS_FEATURE_DEVS=$(XPSOBJDIR)/pl.dev $(XPSOBJDIR)/xps.dev
 
 FEATURE_DEVS=$(GLD)pipe.dev $(GLD)gsnogc.dev $(GLD)htxlib.dev $(GLD)psl3lib.dev $(GLD)psl2lib.dev \
              $(GLD)dps2lib.dev $(GLD)path1lib.dev $(GLD)patlib.dev $(GLD)psl2cs.dev $(GLD)rld.dev $(GLD)gxfapiu$(UFST_BRIDGE).dev\
-             $(GLD)ttflib.dev  $(GLD)cielib.dev $(GLD)pipe.dev $(GLD)htxlib.dev $(GLD)sdctd.dev $(GLD)libpng.dev\
+             $(GLD)ttflib.dev  $(GLD)cielib.dev $(GLD)pipe.dev $(GLD)htxlib.dev $(GLD)sdct.dev $(GLD)libpng.dev\
 	     $(GLD)seprlib.dev $(GLD)translib.dev $(GLD)cidlib.dev $(GLD)psf0lib.dev $(GLD)psf1lib.dev\
              $(GLD)psf2lib.dev $(GLD)lzwd.dev $(GLD)sicclib.dev \
-             $(GLD)sjbig2.dev $(GLD)sjpx.dev $(GLD)ramfs.dev
-
-
-
+             $(GLD)sjbig2.dev $(GLD)sjpx.dev $(GLD)ramfs.dev \
+             $(GLD)pwgd.dev $(GLD)siscale.dev $(URF_DEV)
 
 #FEATURE_DEVS=$(PSD)psl3.dev $(PSD)pdf.dev
-#FEATURE_DEVS=$(PSD)psl3.dev $(PSD)pdf.dev $(PSD)dpsnext.dev $(PSD)ttfont.dev $(PSD)rasterop.dev $(GLD)pipe.dev
+#FEATURE_DEVS=$(PSD)psl3.dev $(PSD)pdf.dev $(PSD)ttfont.dev $(GLD)pipe.dev
 # The following is strictly for testing.
-FEATURE_DEVS_ALL=$(PSD)psl3.dev $(PSD)pdf.dev $(PSD)dpsnext.dev $(PSD)ttfont.dev $(PSD)rasterop.dev $(PSD)double.dev $(PSD)trapping.dev $(PSD)stocht.dev $(GLD)pipe.dev $(GLD)gsnogc.dev $(GLD)htxlib.dev @JBIG2DEVS@ @JPXDEVS@ @UTF8DEVS@ $(GLD)ramfs.dev
+FEATURE_DEVS_ALL=$(PSD)psl3.dev $(PSD)pdf.dev $(PSD)ttfont.dev $(PSD)double.dev $(PSD)trapping.dev $(PSD)stocht.dev $(GLD)pipe.dev $(GLD)gsnogc.dev $(GLD)htxlib.dev @JBIG2DEVS@ @JPXDEVS@ @UTF8DEVS@ $(GLD)ramfs.dev
 #FEATURE_DEVS=$(FEATURE_DEVS_ALL)
 
 # The list of resources to be included in the %rom% file system.
@@ -541,16 +611,11 @@ BAND_LIST_COMPRESSOR=zlib
 
 FILE_IMPLEMENTATION=stdio
 
-# Choose the implementation of stdio: '' for file I/O and 'c' for callouts
-# See gs.mak and ziodevs.c/ziodevsc.c for more details.
-
-STDIO_IMPLEMENTATION=c
-
-# List of default devices, in order of priority. They need not be 
+# List of default devices, in order of priority. They need not be
 # present in the actual build.
 GS_DEV_DEFAULT="x11alpha bbox"
 
-# Fallback default device.  This is set to 'display' by 
+# Fallback default device.  This is set to 'display' by
 # unix-dll.mak when building a shared object.
 DISPLAY_DEV=$(DD)bbox.dev
 
@@ -589,7 +654,7 @@ DEVICE_DEVS1=@F_DEVS@
 DEVICE_DEVS2=@P_DEVS@
 DEVICE_DEVS3=@CUPS_DEVS@
 DEVICE_DEVS4=@IJS_DEVS@
-DEVICE_DEVS5=@OMNIDEVS@
+DEVICE_DEVS5=
 DEVICE_DEVS6=@PNG_DEVS@
 DEVICE_DEVS7=@JBIG2_DEVS@
 DEVICE_DEVS8=
@@ -619,6 +684,10 @@ GS_SHARED_OBJS=@DYNAMIC_DEVS@
 MAKEFILE=Makefile
 TOP_MAKEFILES=$(MAKEFILE) $(GLSRCDIR)/unixhead.mak
 
+# for use in unix-dll.mak and unix-end.mak
+# if you rename the Makefile, you *must* also set this to the new name
+SUB_MAKE_OPTION=@SUB_MAKE_OPTION@
+
 # Define the auxiliary program dependency. We don't use this.
 
 AK=
@@ -627,8 +696,11 @@ AK=
 
 CCFLAGS=$(GENOPT) $(CAPOPT) $(CFLAGS)
 CC_=$(CC) $(CCFLAGS)
-CCAUX_=$(CCAUX) $(CFLAGS)
 CC_LEAF=$(CC_)
+
+CCFLAGSAUX=$(GENOPTAUX) $(CAPOPTAUX) $(CFLAGSAUX)
+CCAUX_=$(CCAUX) $(CCFLAGSAUX)
+
 # note gcc can't use -fomit-frame-pointer with -pg.
 CC_LEAF_PG=$(CC_)
 # These are the specific warnings we have to turn off to compile those
@@ -679,8 +751,8 @@ include $(GLSRCDIR)/jbig2.mak
 include $(GLSRCDIR)/ldf_jb2.mak
 include $(GLSRCDIR)/lwf_jp2.mak
 include $(GLSRCDIR)/openjpeg.mak
+include $(GLSRCDIR)/cal.mak
 
-# FIXME: use configure to pull in
 include $(GLSRCDIR)/jpegxr.mak
 include $(GLSRCDIR)/expat.mak
 
@@ -702,7 +774,7 @@ include $(GLSRCDIR)/unixinst.mak
 distclean : clean config-clean soclean pgclean debugclean mementoclean
 	-$(RM_) -r $(BINDIR) $(GLOBJDIR) $(PSOBJDIR) $(AUXDIR)
 	-$(RM_) -r autom4te.cache
-	-$(RM_) config.log config.status
+	-$(RM_) config.log config.status configaux.log @ARCH_AUTOCONF_HEADER@
 	-$(RM_) -r $(TIFFCONFDIR)
 	-$(RM_) Makefile
 
@@ -716,4 +788,3 @@ maintainer-clean : distclean
 
 check : default
 	$(NO_OP)
-

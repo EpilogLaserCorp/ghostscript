@@ -97,7 +97,7 @@ typedef struct pagedata_s
         /* Data pointers */
         byte *outdata;    /* Buffer to output data codes for one full stripe */
         byte *scanbuf;    /* Buffer to contain the rasterized scanlines */
-        FILE *stream;     /* Output stream */
+        gp_file *stream;     /* Output stream */
         lxm_device *dev;  /* Pointer to our device */
 
         /* Buffer data */
@@ -138,9 +138,9 @@ static int qualify_buffer(pagedata *gendata);
 static int roll_buffer(pagedata *gendata);
 static void calclinemargins(pagedata *gendata, byte *data, int mask, int *left, int *right);
 static void calcbufmargins(pagedata *gendata,int head);
-static void print_color_page(pagedata *gendata);
+static int print_color_page(pagedata *gendata);
 static void print_mono_page(pagedata *gendata);
-static void print_photo_page(pagedata *gendata);
+static int print_photo_page(pagedata *gendata);
 
 /* Codes for the color indexes. */
 #define WHITE        0x00  /* Pure white */
@@ -239,12 +239,12 @@ static void print_photo_page(pagedata *gendata);
  * it's quite hard to know, from inside a printer driver, if we are
  * printing on envelopes or on standard paper, so we just ignore that.
  */
-#define LXM3200_TOP_MARGIN           0.070
-#define LXM3200_BOTTOM_MARGIN        0.200
-#define LXM3200_A4_LEFT_MARGIN       0.135
-#define LXM3200_LETTER_LEFT_MARGIN   0.250
-#define LXM3200_A4_RIGHT_MARGIN      0.135
-#define LXM3200_LETTER_RIGHT_MARGIN  0.250
+#define LXM3200_TOP_MARGIN           0.070f
+#define LXM3200_BOTTOM_MARGIN        0.200f
+#define LXM3200_A4_LEFT_MARGIN       0.135f
+#define LXM3200_LETTER_LEFT_MARGIN   0.250f
+#define LXM3200_A4_RIGHT_MARGIN      0.135f
+#define LXM3200_LETTER_RIGHT_MARGIN  0.250f
 
 /* Offsets for the top and bootom start of the printing frame. */
 #define LXM3200_A4_TOPOFFSET       84
@@ -561,8 +561,9 @@ lxm3200_map_color_rgb(gx_device *dev, gx_color_index color,
  * depending on the selected printing mode.
  */
 static int
-lxm3200_print_page(gx_device_printer *pdev, FILE *prn_stream)
+lxm3200_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
+	int code = 0;
 	lxm_device *dev = (lxm_device *)pdev;
 	pagedata *gendata;
 
@@ -757,8 +758,8 @@ lxm3200_print_page(gx_device_printer *pdev, FILE *prn_stream)
         }
 
         /* Send initialization sequence to the printer */
-        if(gendata->modelprint==1) fwrite(z12_init_sequence, sizeof(z12_init_sequence), 1, prn_stream);
-        else fwrite(init_sequence, sizeof(init_sequence), 1, prn_stream);
+        if(gendata->modelprint==1) gp_fwrite(z12_init_sequence, sizeof(z12_init_sequence), 1, prn_stream);
+        else gp_fwrite(init_sequence, sizeof(init_sequence), 1, prn_stream);
 
         /* Choose the right page printing routine
          * depending on the printing mode.
@@ -766,11 +767,13 @@ lxm3200_print_page(gx_device_printer *pdev, FILE *prn_stream)
         switch(gendata->rendermode)
         {
                 case LXM3200_P:
-                        print_photo_page(gendata);
+                        code = print_photo_page(gendata);
+                        if (code < 0)   goto end;
                         break;
 
                 case LXM3200_C:
-                        print_color_page(gendata);
+                        code = print_color_page(gendata);
+                        if (code < 0)   goto end;
                         break;
 
                 case LXM3200_M:
@@ -782,11 +785,13 @@ lxm3200_print_page(gx_device_printer *pdev, FILE *prn_stream)
         /* Output the end-of-page epilogue */
         outputepilogue(gendata);
 
+        end:
+
         /* Free the allocated resources */
         freeresources(dev);
 
         /* Done. Bye bye, see you on next page. */
-        return(0);
+        return code;
 }
 
 /* Function that Ghostscript calls to ask the driver
@@ -1032,7 +1037,7 @@ outputepilogue(pagedata *gendata)
         trailer[22] = 0x00;
         trailer[23] = 0x33;
 
-        fwrite(trailer, 8, 3, gendata->stream);
+        gp_fwrite(trailer, 8, 3, gendata->stream);
 }
 
 /* Output a "page forward" escape sequence,
@@ -1069,7 +1074,7 @@ skiplines(pagedata *gendata, int skiprow, int skipin)
         /* Adjust the number of lines still inside the printer */
         gendata->linetoeject -= vskip;
 
-        fwrite(escape, 8, 1, gendata->stream);
+        gp_fwrite(escape, 8, 1, gendata->stream);
 }
 
 /* Fill a stripe header with data.
@@ -1086,7 +1091,8 @@ fillheader(pagedata *gendata, int head, int numcol, int firstcol, int bytes)
 {
         int len, offs1, startabs;
         int endabs, select, fwd;
-        int back, nabspos, sep;
+        int back, nabspos;
+        /* int sep;*/
         byte *header;
 
         header = gendata->header;
@@ -1109,11 +1115,11 @@ fillheader(pagedata *gendata, int head, int numcol, int firstcol, int bytes)
          */
         if(head == LEFT)
         {
-                sep = (gendata->bwsep * 2) / gendata->xrmul;
+                /* sep = (gendata->bwsep * 2) / gendata->xrmul;*/
         }
         else
         {
-                sep = (gendata->colsep * 2) / gendata->xrmul;
+                /* sep = (gendata->colsep * 2) / gendata->xrmul; */
                 select |= 0x80;
         }
 
@@ -1242,8 +1248,13 @@ finalizeheader(pagedata *gendata, int vskip, int newhead)
          */
         dir = (header[2] & 0x01 ? LEFT : RIGHT);
 
-        /* Retrieve the horizontal offset for the next stripe */
-        offs2 = gendata->dev->hoffset[newhead][gendata->direction];
+        /* Retrieve the horizontal offset for the next stripe. We don't do this
+        if newhead is negative, because otherwise we would be out of bounds in
+        gendata->dev->hoffset[]; offs2 isn't actually used in this case anyway.
+        */
+        if (newhead >= 0) {
+            offs2 = gendata->dev->hoffset[newhead][gendata->direction];
+        }
 
         /* Calculate the separation adjust in 1200ths of an inch */
         if(newhead == LEFT)
@@ -1262,7 +1273,9 @@ finalizeheader(pagedata *gendata, int vskip, int newhead)
         vskip *= gendata->yrmul;
 
         /* Calculate absolute starting position of new stripe */
-        nstartabs = newstart + offs2;
+        if (newhead >= 0) {
+            nstartabs = newstart + offs2;
+        }
 
         /* Calculate absolute ending position of this stripe
          * by summing (with proper sign) the starting position
@@ -1407,8 +1420,8 @@ finalizeheader(pagedata *gendata, int vskip, int newhead)
         /* Now output the data, signalling that the output
          * buffer is now empty.
          */
-        fwrite(header, 3, 8, gendata->stream);
-        fwrite(gendata->outdata, gendata->stripebytes, 1, gendata->stream);
+        gp_fwrite(header, 3, 8, gendata->stream);
+        gp_fwrite(gendata->outdata, gendata->stripebytes, 1, gendata->stream);
         gendata->fullflag = FALSE;
 }
 
@@ -1725,6 +1738,19 @@ encode_bw_buf(pagedata *gendata)
                 left = gendata->left - csep;
                 right = gendata->right + 2*csep;
         }
+        /* Make sure we don't try to write data to the left of 0, or the right of the
+         * media. In the absence of a physical pritner to try this on, we'll have to
+         * hope the comment above is correct and we can simply not bother with the
+         * optimisation for accelerating the print head. The right edge one seems
+         * bonkers, why would we care about accelerating the head when we have
+         * already started printing ?
+         * This is to fix bug #701905, accessing beyond the end of gendata->outdata
+         * in 'convbuf' because right - left > number bytes in scan line.
+         */
+        if (left < 0)
+            left = 0;
+        if (right > gendata->numbytes)
+            right = gendata->numbytes;
 
         /* Number of columns in a full row */
         numcols = right - left;
@@ -1762,8 +1788,8 @@ encode_bw_buf(pagedata *gendata)
                  */
                 if(gendata->fullflag)
                 {
-                        fwrite(gendata->header, 3, 8, gendata->stream);
-                        fwrite(gendata->outdata, gendata->stripebytes, 1, gendata->stream);
+                        gp_fwrite(gendata->header, 3, 8, gendata->stream);
+                        gp_fwrite(gendata->outdata, gendata->stripebytes, 1, gendata->stream);
                         gendata->fullflag = FALSE;
                 }
 
@@ -2042,8 +2068,8 @@ encode_col_buf(pagedata *gendata, int head)
                  */
                 if(gendata->fullflag)
                 {
-                        fwrite(gendata->header, 3, 8, gendata->stream);
-                        fwrite(gendata->outdata, gendata->stripebytes, 1, gendata->stream);
+                        gp_fwrite(gendata->header, 3, 8, gendata->stream);
+                        gp_fwrite(gendata->outdata, gendata->stripebytes, 1, gendata->stream);
                         gendata->fullflag = FALSE;
                 }
 
@@ -2219,7 +2245,7 @@ static int
 fill_mono_buffer(pagedata *gendata, int vline)
 {
         byte *in_data, *data;
-        int i, ret, ofs;
+        int i, ret, ofs, code = 0;
 
         /* Initialize the "data" pointer, that will be used to
          * scan all the lines in the buffer, and the "ofs" pointer
@@ -2241,8 +2267,10 @@ fill_mono_buffer(pagedata *gendata, int vline)
         while(vline < gendata->numvlines)
         {
                 /* Ask Ghostscript for one rasterized line */
-                gdev_prn_get_bits((gx_device_printer *)gendata->dev,
+                code = gdev_prn_get_bits((gx_device_printer *)gendata->dev,
                                                                                         vline, data+ofs, &in_data);
+                if (code < 0)
+                    return code;
 
                 /* And check if it's all zero: if not, break out of
                  * the loop. This nice trick with memcpy it's by Stephen
@@ -2300,8 +2328,10 @@ fill_mono_buffer(pagedata *gendata, int vline)
                         /* If we are not at the end of the page, copy one more
                          * scanline into the buffer.
                          */
-                        gdev_prn_get_bits((gx_device_printer *)gendata->dev,
+                        code = gdev_prn_get_bits((gx_device_printer *)gendata->dev,
                                                                                                 vline, data+ofs, &in_data);
+                        if (code < 0)
+                            return code;
                         if(in_data != data+ofs)memcpy(data+ofs, in_data, gendata->numrbytes);
                 }
 
@@ -2332,7 +2362,7 @@ static int
 init_buffer(pagedata *gendata)
 {
         byte *in_data, *data;
-        int i, ret, p1, p2, ofs;
+        int i, ret, p1, p2, ofs, code = 0;
 
         data = gendata->scanbuf;
         ofs = gendata->goffset;
@@ -2374,8 +2404,11 @@ init_buffer(pagedata *gendata)
 
                 if(i < gendata->numvlines)
                 {
-                        gdev_prn_get_bits((gx_device_printer *)gendata->dev,
+                        code = gdev_prn_get_bits((gx_device_printer *)gendata->dev,
                                                                                                 i, data+ofs, &in_data);
+                        if (code < 0)
+                            return code;
+
                         if(in_data != data+ofs)memcpy(data+ofs, in_data, gendata->numrbytes);
                 }
 
@@ -2561,8 +2594,10 @@ roll_buffer(pagedata *gendata)
                 memset(data, 0, gendata->numbytes);
                 if(vl < gendata->numvlines)
                 {
-                        gdev_prn_get_bits((gx_device_printer *)gendata->dev,
-                                                                                                vl, data+ofs, &in_data);
+                        int code = gdev_prn_get_bits((gx_device_printer *)gendata->dev, vl, data+ofs, &in_data);
+                        if (code < 0) {
+                            return code;
+                        }
                         if(in_data != data+ofs)memcpy(data+ofs, in_data, gendata->numrbytes);
                 }
                 vl++;
@@ -2713,7 +2748,7 @@ calcbufmargins(pagedata *gendata, int head)
  * This is the main routine that prints in
  * standard color mode.
  */
-static void
+static int
 print_color_page(pagedata *gendata)
 {
         int res, lline, cmask;
@@ -2734,12 +2769,15 @@ print_color_page(pagedata *gendata)
          */
         res = init_buffer(gendata);
         while(res == 0)res = roll_buffer(gendata);
+        if (res < 0) {
+            return res;
+        }
 
         /* If this buffer happens to be the last one,
          * and empty as well, we had a blank page.
          * Just exit without ado.
          */
-        if(res == LAST)return;
+        if(res == LAST)return 0;
 
         /* This is the first non-blank line of the
          * page: issue a vertical skip command to
@@ -3081,6 +3119,8 @@ print_color_page(pagedata *gendata)
          * by the trailing sequence).
          */
         finalizeheader(gendata, 0, -1);
+
+        return 0;
 }
 
 /* This is the equivalent of print_color_page()
@@ -3188,7 +3228,7 @@ print_mono_page(pagedata *gendata)
  * no need to care for different heights of the
  * printing pens (i.e.: no "lastblack" tricks).
  */
-static void
+static int
 print_photo_page(pagedata *gendata)
 {
         int res, lline;
@@ -3196,7 +3236,11 @@ print_photo_page(pagedata *gendata)
         res = init_buffer(gendata);
         while(res == 0)res = roll_buffer(gendata);
 
-        if(res == LAST)return;
+        if (res < 0)    {
+            return res;
+        }
+
+        if(res == LAST)return 0;
 
         skiplines(gendata, gendata->curvline, COLTOPSTART);
         lline = gendata->curvline;
@@ -3255,6 +3299,9 @@ print_photo_page(pagedata *gendata)
         }
 
         res = roll_buffer(gendata);
+        if (res < 0) {
+            return res;
+        }
 
         while(!(res & LAST))
         {
@@ -3314,6 +3361,9 @@ print_photo_page(pagedata *gendata)
                 }
 
                 res = roll_buffer(gendata);
+                if (res < 0) {
+                    return res;
+                }
         }
 
         switch(res)
@@ -3330,6 +3380,7 @@ print_photo_page(pagedata *gendata)
                                 encode_col_buf(gendata, LEFT);
                                 lline++;
                         }
+                        break;
 
                 case RHDATA:
                         calcbufmargins(gendata, RIGHT);
@@ -3368,4 +3419,5 @@ print_photo_page(pagedata *gendata)
         }
 
         finalizeheader(gendata, 0, -1);
+        return 0;
 }

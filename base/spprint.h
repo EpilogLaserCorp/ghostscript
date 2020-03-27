@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,11 +19,8 @@
 #ifndef spprint_INCLUDED
 #  define spprint_INCLUDED
 
-/* Define an opaque type for streams. */
-#ifndef stream_DEFINED
-#  define stream_DEFINED
-typedef struct stream_s stream;
-#endif
+#include "stdpre.h"
+#include "scommon.h"
 
 /* Put a character on a stream. */
 #define stream_putc(s, c) spputc(s, c)
@@ -69,6 +66,18 @@ const char *pprintld1(stream * s, const char *format, long v);
 const char *pprintld2(stream * s, const char *format, long v1, long v2);
 const char *pprintld3(stream * s, const char *format,
                       long v1, long v2, long v3);
+
+/* Print a size_t value using a format. */
+const char *pprintzd1(stream *s, const char *format, size_t v);
+const char *pprintzd2(stream *s, const char *format, size_t v1, size_t v2);
+const char *pprintzd3(stream *s, const char *format,
+                      size_t v1, size_t v2, size_t v3);
+
+/* Print an int64_t value using a format. */
+const char *pprinti64d1(stream *s, const char *format, int64_t v);
+const char *pprinti64d2(stream *s, const char *format, int64_t v1, int64_t v2);
+const char *pprinti64d3(stream *s, const char *format,
+                        int64_t v1, int64_t v2, int64_t v3);
 
 /* Print (a) string(s) using a format. */
 const char *pprints1(stream * s, const char *format, const char *str);

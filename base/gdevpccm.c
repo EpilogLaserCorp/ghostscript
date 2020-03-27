@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Support routines for PC color mapping */
@@ -101,7 +101,7 @@ pc_8bit_map_color_rgb(gx_device * dev, gx_color_index color,
 
 /* Write a palette on a file. */
 int
-pc_write_palette(gx_device * dev, uint max_index, FILE * file)
+pc_write_palette(gx_device * dev, uint max_index, gp_file * file)
 {
     uint i, c;
     gx_color_value rgb[3];
@@ -111,7 +111,7 @@ pc_write_palette(gx_device * dev, uint max_index, FILE * file)
         for (c = 0; c < 3; c++) {
             byte b = rgb[c] >> (gx_color_value_bits - 8);
 
-            fputc(b, file);
+            gp_fputc(b, file);
         }
     }
     return 0;

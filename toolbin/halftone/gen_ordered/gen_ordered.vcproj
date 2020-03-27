@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="Windows-1252"?>
 <VisualStudioProject
 	ProjectType="Visual C++"
-	Version="9.00"
+	Version="8.00"
 	Name="gen_ordered"
 	ProjectGUID="{1B4597C2-DFF0-486D-8912-DECB44D25085}"
 	RootNamespace="gen_ordered"
@@ -40,6 +40,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
+				AdditionalIncludeDirectories="$(SolutionDir)\..\..\..\base"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="3"
@@ -162,7 +163,11 @@
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
 			>
 			<File
-				RelativePath=".\gen_ordered.c"
+				RelativePath="..\..\..\base\gen_ordered.c"
+				>
+			</File>
+			<File
+				RelativePath=".\gen_ordered_main.c"
 				>
 			</File>
 		</Filter>
@@ -177,6 +182,10 @@
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav"
 			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
 			>
+			<File
+				RelativePath="..\..\..\base\gen_ordered.h"
+				>
+			</File>
 		</Filter>
 	</Files>
 	<Globals>

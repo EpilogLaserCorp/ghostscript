@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -18,9 +18,12 @@
 
 #include "memory_.h"
 #include "math_.h"
-
+#include "string_.h"
 #include <stdlib.h>
 #include <ctype.h> /* for toupper() */
+
+/* Include zlib early to avoid offsetof redef problems on windows */
+#include "zlib.h"
 
 #include "gp.h"
 
@@ -61,7 +64,7 @@
 #include "gxfont1.h"
 #include "gxfont42.h"
 #include "gxfcache.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 
 #include "gzstate.h"
 #include "gzpath.h"
@@ -70,8 +73,9 @@
 #include "gsicc_manage.h"
 #include "gscms.h"
 #include "gsicc_cache.h"
+#include "gxpcolor.h"
 
-#include "zlib.h"
+#include "gxdevsop.h"       /* For special ops */
 
 #include "xpsfapi.h"
 
@@ -98,10 +102,18 @@ typedef struct xps_context_s xps_context_t;
 #define REL_REQUIRED_RESOURCE_RECURSIVE \
     "http://schemas.microsoft.com/xps/2005/06/required-resource#recursive"
 
+/* Open xps */
+#define REL_START_PART_OXPS \
+	"http://schemas.openxps.org/oxps/v1.0/fixedrepresentation"
+#define REL_DOC_STRUCTURE_OXPS \
+	"http://schemas.openxps.org/oxps/v1.0/documentstructure"
+
 #define ZIP_LOCAL_FILE_SIG 0x04034b50
 #define ZIP_DATA_DESC_SIG 0x08074b50
 #define ZIP_CENTRAL_DIRECTORY_SIG 0x02014b50
 #define ZIP_END_OF_CENTRAL_DIRECTORY_SIG 0x06054b50
+
+#define ZIP_ENCRYPTED_FLAG 0x1
 
 /*
  * Memory, and string functions.
@@ -118,9 +130,7 @@ void * xps_realloc_imp(xps_context_t *ctx, void *ptr, int size, const char *func
 #define xps_free(ctx, ptr) \
     gs_free_object(ctx->memory, ptr, __func__)
 
-size_t xps_strlcpy(char *destination, const char *source, size_t size);
-size_t xps_strlcat(char *destination, const char *source, size_t size);
-int xps_strcasecmp(char *a, char *b);
+int xps_strcasecmp(const char *a, const char *b);
 char *xps_strdup_imp(xps_context_t *ctx, const char *str, const char *function);
 void xps_absolute_path(char *output, char *base_uri, char *path, int output_size);
 
@@ -154,8 +164,8 @@ struct xps_part_s
     byte *data;
 };
 
-xps_part_t *xps_new_part(xps_context_t *ctx, char *name, int size);
-xps_part_t *xps_read_part(xps_context_t *ctx, char *partname);
+xps_part_t *xps_new_part(xps_context_t *ctx, const char *name, int size);
+xps_part_t *xps_read_part(xps_context_t *ctx, const char *partname);
 void xps_free_part(xps_context_t *ctx, xps_part_t *part);
 
 /*
@@ -257,13 +267,14 @@ void xps_free_font(xps_context_t *ctx, xps_font_t *font);
 
 int xps_count_font_encodings(xps_font_t *font);
 void xps_identify_font_encoding(xps_font_t *font, int idx, int *pid, int *eid);
-void xps_select_font_encoding(xps_font_t *font, int idx);
+int xps_select_font_encoding(xps_font_t *font, int idx);
+int xps_decode_font_char(xps_font_t *font, int key);
 int xps_encode_font_char(xps_font_t *font, int key);
 
 void xps_measure_font_glyph(xps_context_t *ctx, xps_font_t *font, int gid, xps_glyph_metrics_t *mtx);
 
 int xps_find_sfnt_table(xps_font_t *font, const char *name, int *lengthp);
-void xps_load_sfnt_name(xps_font_t *font, char *namep);
+void xps_load_sfnt_name(xps_font_t *font, char *namep, const int buflen);
 int xps_init_truetype_font(xps_context_t *ctx, xps_font_t *font);
 int xps_init_postscript_font(xps_context_t *ctx, xps_font_t *font);
 
@@ -272,6 +283,8 @@ void xps_debug_path(xps_context_t *ctx);
 /*
  * Colorspaces and colors.
  */
+
+#define XPS_MAX_COLORS 32
 
 gs_color_space *xps_read_icc_colorspace(xps_context_t *ctx, char *base_uri, char *profile);
 void xps_parse_color(xps_context_t *ctx, char *base_uri, char *hexstring, gs_color_space **csp, float *samples);
@@ -288,6 +301,7 @@ xps_item_t * xps_next(xps_item_t *item);
 xps_item_t * xps_down(xps_item_t *item);
 char * xps_tag(xps_item_t *item);
 char * xps_att(xps_item_t *item, const char *att);
+void xps_detach_and_free_remainder(xps_context_t *ctx, xps_item_t *root, xps_item_t *item);
 void xps_free_item(xps_context_t *ctx, xps_item_t *item);
 void xps_debug_item(xps_item_t *item, int level);
 
@@ -316,6 +330,8 @@ void xps_debug_resource_dictionary(xps_context_t *ctx, xps_resource_t *dict);
 /*
  * Fixed page/graphics parsing.
  */
+
+xps_item_t *xps_lookup_alternate_content(xps_item_t *node);
 
 int xps_parse_fixed_page(xps_context_t *ctx, xps_part_t *part);
 int xps_parse_canvas(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, xps_item_t *node);
@@ -346,7 +362,7 @@ char * xps_get_point(char *s_in, float *x, float *y);
 void xps_clip(xps_context_t *ctx);
 void xps_fill(xps_context_t *ctx);
 void xps_bounds_in_user_space(xps_context_t *ctx, gs_rect *user);
-void xps_bounds_in_user_space_path_clip(xps_context_t *ctx, gs_rect *ubox, bool use_path, bool is_stroke);
+int xps_bounds_in_user_space_path_clip(xps_context_t *ctx, gs_rect *ubox, bool use_path, bool is_stroke);
 
 int xps_element_has_transparency(xps_context_t *ctx, char *base_uri, xps_item_t *node);
 int xps_resource_dictionary_has_transparency(xps_context_t *ctx, char *base_uri, xps_item_t *node);
@@ -370,7 +386,7 @@ struct xps_context_s
 {
     void *instance;
     gs_memory_t *memory;
-    gs_state *pgs;
+    gs_gstate *pgs;
     gs_font_dir *fontdir;
     int preserve_tr_mode; /* for avoiding charpath with pdfwrite */
 
@@ -381,7 +397,7 @@ struct xps_context_s
     gs_color_space *cmyk;
 
     char *directory;
-    FILE *file;
+    gp_file *file;
     int zip_count;
     xps_entry_t *zip_table;
 
@@ -399,8 +415,8 @@ struct xps_context_s
     xps_hash_table_t *colorspace_table;
 
     /* Global toggle for transparency */
-    int use_transparency;
-    int has_transparency;
+    bool use_transparency;
+    bool has_transparency;
 
     /* Hack to workaround ghostscript's lack of understanding
      * the pdf 1.4 specification of Alpha only transparency groups.
@@ -416,7 +432,28 @@ struct xps_context_s
     int fill_rule;
 };
 
-int xps_process_file(xps_context_t *ctx, char *filename);
+int xps_process_file(xps_context_t *ctx, const char *filename);
 
 /* end of page device callback foo */
 int xps_show_page(xps_context_t *ctx, int num_copies, int flush);
+
+unsigned int
+xps_crc32(unsigned int crc, unsigned char *buf, int len);
+
+int xps_high_level_pattern(xps_context_t *ctx);
+
+#ifdef XPS_INDIRECTED_FILE_ACCESS
+gp_file *xps_fopen(const char *filename, const char *access);
+gs_offset_t xps_ftell(gp_file *file);
+int xps_fseek(gp_file *file, gs_offset_t offset, int whence);
+int xps_getc(gp_file *file);
+size_t xps_fread(void *ptr, size_t size, size_t n, gp_file *file);
+int xps_fclose(gp_file *file);
+#else
+#define xps_fopen gp_fopen
+#define xps_ftell gp_ftell
+#define xps_fseek gp_fseek
+#define xps_getc gp_fgetc
+#define xps_fread gp_fread
+#define xps_fclose gp_fclose
+#endif

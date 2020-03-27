@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* HP DeskJet 500C driver */
@@ -53,7 +53,7 @@ const gx_device_printer far_data gs_djet500c_device =
     3, djet500c_print_page);
 
 /* Forward references */
-static int djet500c_print_page(gx_device_printer *, FILE *);
+static int djet500c_print_page(gx_device_printer *, gp_file *);
 
 static int mode2compress(byte *row, byte *end_row, byte *compressed);
 
@@ -67,7 +67,7 @@ static int mode2compress(byte *row, byte *end_row, byte *compressed);
 /* The DeskJet Color can compress (mode 2) */
 
 static int
-djet500c_print_page(gx_device_printer *pdev, FILE *fprn)
+djet500c_print_page(gx_device_printer *pdev, gp_file *fprn)
 {
     byte *bitData=NULL;
     byte *plane1=NULL;
@@ -75,51 +75,57 @@ djet500c_print_page(gx_device_printer *pdev, FILE *fprn)
     byte *plane3=NULL;
     int bitSize=0;
     int planeSize=0;
+    int code = 0;
 
     /* select the most compressed mode available & clear tmp storage */
     /* put printer in known state */
-    fputs("\033E",fprn);
+    gp_fputs("\033E",fprn);
 
     /* ends raster graphics to set raster graphics resolution */
-    fputs("\033*rbC", fprn);	/*  was \033*rB  */
+    gp_fputs("\033*rbC", fprn);	/*  was \033*rB  */
 
     /* set raster graphics resolution -- 300 dpi */
-    fputs("\033*t300R", fprn);
+    gp_fputs("\033*t300R", fprn);
 
     /* A4, skip perf, def. paper tray */
-    fputs("\033&l26a0l1H", fprn);
+    gp_fputs("\033&l26a0l1H", fprn);
 
     /* RGB Mode */
-    fputs("\033*r3U", fprn);
+    gp_fputs("\033*r3U", fprn);
 
     /* set depletion level */
-    fprintf(fprn, "\033*o%dD", DEPLETION);
+    gp_fprintf(fprn, "\033*o%dD", DEPLETION);
 
     /* set shingling level */
-    fprintf(fprn, "\033*o%dQ", SHINGLING);
+    gp_fprintf(fprn, "\033*o%dQ", SHINGLING);
 
     /* move to top left of page & set current position */
-    fputs("\033*p0x0Y", fprn); /* cursor pos: 0,0 */
+    gp_fputs("\033*p0x0Y", fprn); /* cursor pos: 0,0 */
 
-    fputs("\033*b2M", fprn);	/*  mode 2 compression for now  */
+    gp_fputs("\033*b2M", fprn);	/*  mode 2 compression for now  */
 
-    fputs("\033*r0A", fprn);  /* start graf. left */
+    gp_fputs("\033*r0A", fprn);  /* start graf. left */
 
     /* Send each scan line in turn */
        {    int lnum;
         int num_blank_lines = 0;
         int lineSize = gdev_mem_bytes_per_scan_line((gx_device *)pdev);
-        if (lineSize>bitSize)
-        {
-            if (bitData) free(bitData);
-            bitSize=lineSize;
-            bitData=(byte*)malloc(bitSize+16);
-        }
+
+        if (lineSize <= 0)
+            return_error(gs_error_rangecheck);
+
+        bitSize=lineSize;
+        bitData=(byte*)malloc(bitSize+16);
+        if (bitData == 0)
+            return_error(gs_error_VMerror);
+
         for (lnum=0; lnum<pdev->height; lnum++)
         {
             byte *endData;
 
-            gdev_prn_copy_scan_lines(pdev, lnum, bitData, lineSize);
+            code = gdev_prn_copy_scan_lines(pdev, lnum, bitData, lineSize);
+            if (code < 0)
+                goto xit;
 
             /* Identify and skip blank lines */
             endData = bitData + lineSize;
@@ -146,6 +152,10 @@ djet500c_print_page(gx_device_printer *pdev, FILE *fprn)
                     plane1=(byte*)malloc(planeSize+8);
                     plane2=(byte*)malloc(planeSize+8);
                     plane3=(byte*)malloc(planeSize+8);
+                    if (plane1 == NULL || plane2 == NULL || plane3 == NULL) {
+                        code = gs_error_VMerror;
+                        goto xit;
+                    }
                 }
                 /* Transpose the data to get pixel planes. */
                 for (k=i=0; k<lineLen; i+=8, k++)
@@ -168,7 +178,7 @@ djet500c_print_page(gx_device_printer *pdev, FILE *fprn)
                 /* Skip blank lines if any */
                 if (num_blank_lines > 0)
                 {    /* move down from current position */
-                    fprintf(fprn, "\033*b%dY", num_blank_lines);
+                    gp_fprintf(fprn, "\033*b%dY", num_blank_lines);
                     num_blank_lines = 0;
                 }
 
@@ -180,37 +190,38 @@ djet500c_print_page(gx_device_printer *pdev, FILE *fprn)
                    are different, so we are stuck with mode 2, which is good enough */
 
                 /* set the line width */
-                fprintf(fprn, "\033*r%dS", lineLen*8);
+                gp_fprintf(fprn, "\033*r%dS", lineLen*8);
 
                 count = mode2compress(plane1, plane1 + lineLen, bitData);
-                fprintf(fprn, "\033*b%dV", count);
-                fwrite(bitData, sizeof(byte), count, fprn);
+                gp_fprintf(fprn, "\033*b%dV", count);
+                gp_fwrite(bitData, sizeof(byte), count, fprn);
                 count = mode2compress(plane2, plane2 + lineLen, bitData);
-                fprintf(fprn, "\033*b%dV", count);
-                fwrite(bitData, sizeof(byte), count, fprn);
+                gp_fprintf(fprn, "\033*b%dV", count);
+                gp_fwrite(bitData, sizeof(byte), count, fprn);
                 count = mode2compress(plane3, plane3 + lineLen, bitData);
-                fprintf(fprn, "\033*b%dW", count);
-                fwrite(bitData, sizeof(byte), count, fprn);
+                gp_fprintf(fprn, "\033*b%dW", count);
+                gp_fwrite(bitData, sizeof(byte), count, fprn);
             }
         }
     }
     /* end raster graphics */
-    fputs("\033*rbC", fprn);	/*  was \033*rB  */
-    fputs("\033*r1U", fprn);	/*  back to 1 plane  */
+    gp_fputs("\033*rbC", fprn);	/*  was \033*rB  */
+    gp_fputs("\033*r1U", fprn);	/*  back to 1 plane  */
 
-       /* put printer in known state */
-    fputs("\033E",fprn);
+    /* put printer in known state */
+    gp_fputs("\033E",fprn);
 
     /* eject page */
-    fputs("\033&l0H", fprn);
+    gp_fputs("\033&l0H", fprn);
 
+xit:
     /* release allocated memory */
     if (bitData) free(bitData);
     if (plane1) free(plane1);
     if (plane2) free(plane2);
     if (plane3) free(plane3);
 
-    return 0;
+    return code;
 }
 
 /*
@@ -224,7 +235,17 @@ djet500c_print_page(gx_device_printer *pdev, FILE *fprn)
  * where N is the original byte count (end_row - row).
  * I can't use the general pcl version, because it assume even linelength's
  */
-
+/* RJW: While the worst case given above is true for correctly
+ * encoded runs, the code below does not achieve it. Take for
+ * example ABBABBABB. This will be encoded as:
+ *    <1 byte to signal literal run of 1>A
+ *    <1 byte to signal a run of two>B
+ *    Repeated 3 times.
+ *
+ * i.e. 12 bytes to encode 9. Thus the actual worse case is 4N/3+2
+ * (e.g. for ABBA). GS gets away with this because it over
+ * allocates.
+ */
 static int
 mode2compress(byte *row, byte *end_row, byte *compressed)
 {

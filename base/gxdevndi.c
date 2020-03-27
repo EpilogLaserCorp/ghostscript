@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -107,7 +107,7 @@ gx_render_device_DeviceN(frac * pcolor,
     }
 
     for (i = 0; i < num_colors; i++) {
-        unsigned long hsize = pdht ?
+        unsigned long hsize = pdht && i <= pdht->num_comp ?
                 (unsigned) pdht->components[i].corder.num_levels
                 : 1;
         unsigned long nshades = hsize * max_value[i] + 1;
@@ -144,7 +144,8 @@ gx_render_device_DeviceN(frac * pcolor,
         _color_set_c(pdevc, i, int_color[i], l_color[i]);
     gx_complete_halftone(pdevc, num_colors, pdht);
 
-    color_set_phase_mod(pdevc, ht_phase->x, ht_phase->y,
+    if (pdht)
+        color_set_phase_mod(pdevc, ht_phase->x, ht_phase->y,
                             pdht->lcm_width, pdht->lcm_height);
 
     /* Determine if we are using only one component */

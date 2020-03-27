@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,18 +20,14 @@
 #ifndef gxalloc_INCLUDED
 #  define gxalloc_INCLUDED
 
-#ifndef gs_ref_memory_DEFINED
-#  define gs_ref_memory_DEFINED
-typedef struct gs_ref_memory_s gs_ref_memory_t;
-#endif
-
 #include "gsalloc.h"
 #include "gxobj.h"
+#include "scommon.h"
 
-/* ================ Chunks ================ */
+/* ================ Clumps ================ */
 
 /*
- * We obtain memory from the operating system in `chunks'.  A chunk
+ * We obtain memory from the operating system in `clumps'.  A clump
  * may hold only a single large object (or string), or it may hold
  * many objects (allocated from the bottom up, always aligned)
  * and strings (allocated from the top down, not aligned).
@@ -50,8 +46,8 @@ typedef struct gs_ref_memory_s gs_ref_memory_t;
  */
 
 /*
- * When we do a save, we create a new 'inner' chunk out of the remaining
- * space in the currently active chunk.  Inner chunks must not be freed
+ * When we do a save, we create a new 'inner' clump out of the remaining
+ * space in the currently active clump.  Inner clumps must not be freed
  * by a restore.
  *
  * The garbage collector implements relocation for refs by scanning
@@ -64,14 +60,14 @@ typedef struct gs_ref_memory_s gs_ref_memory_t;
 
 /*
  * Strings carry some additional overhead for use by the GC.
- * At the top of the chunk is a table of relocation values for
+ * At the top of the clump is a table of relocation values for
  * 16N-character blocks of strings, where N is sizeof(uint).
  * This table is aligned, by adding padding above it if necessary.
  * Just below it is a mark table for the strings.  This table is also aligned,
  * to improve GC performance. The actual string data start below
- * the mark table.  These tables are not needed for a chunk that holds
+ * the mark table.  These tables are not needed for a clump that holds
  * a single large (non-string) object, but they are needed for all other
- * chunks, including chunks created to hold a single large string.
+ * clumps, including clumps created to hold a single large string.
  */
 
 /*
@@ -79,7 +75,7 @@ typedef struct gs_ref_memory_s gs_ref_memory_t;
  */
 typedef uint string_mark_unit;
 
-#define log2_sizeof_string_mark_unit arch_log2_sizeof_int
+#define log2_sizeof_string_mark_unit ARCH_LOG2_SIZEOF_INT
 /*
  * Define the quantum of relocation for strings, which determines
  * the quantum for reserving space.  This value must be a power of 2,
@@ -88,7 +84,7 @@ typedef uint string_mark_unit;
  */
 typedef uint string_reloc_offset;
 
-#define log2_string_data_quantum (arch_log2_sizeof_int + 4)
+#define log2_string_data_quantum (ARCH_LOG2_SIZEOF_INT + 4)
 #define string_data_quantum (1 << log2_string_data_quantum)
 /*
  * Define the quantum for reserving string space, including data,
@@ -98,10 +94,10 @@ typedef uint string_reloc_offset;
   (string_data_quantum + (string_data_quantum / 8) +\
    sizeof(string_reloc_offset))
 /*
- * Compute the amount of space needed for a chunk that holds only
+ * Compute the amount of space needed for a clump that holds only
  * a string of a given size.
  */
-#define string_chunk_space(nbytes)\
+#define string_clump_space(nbytes)\
   (((nbytes) + (string_data_quantum - 1)) / string_data_quantum *\
    string_space_quantum)
 /*
@@ -115,28 +111,28 @@ typedef uint string_reloc_offset;
 #define string_quanta_mark_size(nquanta)\
   ((nquanta) * (string_data_quantum / 8))
 /*
- * Compute the size of the string freelists for a chunk.
+ * Compute the size of the string freelists for a clump.
  */
 #define STRING_FREELIST_SPACE(cp)\
   (((cp->climit - csbase(cp) + 255) >> 8) * sizeof(*cp->sfree1))
 
 /*
- * To allow the garbage collector to combine chunks, we store in the
- * head of each chunk the address to which its contents will be moved.
+ * To allow the garbage collector to combine clumps, we store in the
+ * head of each clump the address to which its contents will be moved.
  */
-/*typedef struct chunk_head_s chunk_head_t; *//* in gxobj.h */
+/*typedef struct clump_head_s clump_head_t; *//* in gxobj.h */
 
-/* Structure for a chunk. */
-typedef struct chunk_s chunk_t;
-struct chunk_s {
-    chunk_head_t *chead;	/* chunk head, bottom of chunk; */
+/* Structure for a clump. */
+typedef struct clump_s clump_t;
+struct clump_s {
+    clump_head_t *chead;	/* clump head, bottom of clump; */
     /* csbase is an alias for chead */
 #define csbase(cp) ((byte *)(cp)->chead)
     /* Note that allocation takes place both from the bottom up */
     /* (aligned objects) and from the top down (strings). */
-    byte *cbase;		/* bottom of chunk data area */
+    byte *cbase;		/* bottom of clump data area */
     byte *int_freed_top;	/* top of most recent internal free area */
-                                /* in chunk (which may no longer be free), */
+                                /* in clump (which may no longer be free), */
                                 /* used to decide when to consolidate */
                                 /* trailing free space in allocated area */
     byte *cbot;			/* bottom of free area */
@@ -146,15 +142,16 @@ struct chunk_s {
     byte *ctop;			/* top of free area */
                                 /* (bottom of strings) */
     byte *climit;		/* top of strings */
-    byte *cend;			/* top of chunk */
-    chunk_t *cprev;		/* chain chunks together, */
-    chunk_t *cnext;		/*   sorted by address */
-    chunk_t *outer;		/* the chunk of which this is */
-                                /*   an inner chunk, if any */
-    uint inner_count;		/* number of chunks of which this is */
-                                /*   the outer chunk, if any */
-    bool has_refs;		/* true if any refs in chunk */
-    bool c_alone;               /* this chunk is for a single allocation */
+    byte *cend;			/* top of clump */
+    clump_t *parent;            /* splay tree parent clump */
+    clump_t *left;		/* splay tree left clump */
+    clump_t *right;		/* splay tree right clump */
+    clump_t *outer;		/* the clump of which this is */
+                                /*   an inner clump, if any */
+    uint inner_count;		/* number of clumps of which this is */
+                                /*   the outer clump, if any */
+    bool has_refs;		/* true if any refs in clump */
+    bool c_alone;               /* this clump is for a single allocation */
     /*
      * Free lists for single bytes in blocks of 1 to 2*N-1 bytes, one per
      * 256 bytes in [csbase..climit), where N is sizeof(uint). The chain
@@ -186,15 +183,15 @@ struct chunk_s {
     byte *rescan_top;		/* top of range ditto */
 };
 
-/* The chunk descriptor is exported only for isave.c. */
-extern_st(st_chunk);
-#define public_st_chunk()	/* in ialloc.c */\
-  gs_public_st_ptrs2(st_chunk, chunk_t, "chunk_t",\
-    chunk_enum_ptrs, chunk_reloc_ptrs, cprev, cnext)
+/* The clump descriptor is exported only for isave.c. */
+extern_st(st_clump);
+#define public_st_clump()	/* in ialloc.c */\
+  gs_public_st_ptrs3(st_clump, clump_t, "clump_t",\
+    clump_enum_ptrs, clump_reloc_ptrs, left, right, parent)
 
 /*
- * Macros for scanning a chunk linearly, with the following schema:
- *      SCAN_CHUNK_OBJECTS(cp)                  << declares pre, size >>
+ * Macros for scanning a clump linearly, with the following schema:
+ *      SCAN_CLUMP_OBJECTS(cp)                  << declares pre, size >>
  *              << code for all objects -- size not set yet >>
  *      DO_ALL
  *              << code for all objects -- size is set >>
@@ -202,7 +199,7 @@ extern_st(st_chunk);
  *
  * NB on error END_OBJECTS_SCAN calls gs_abort in debug systems.
  */
-#define SCAN_CHUNK_OBJECTS(cp)\
+#define SCAN_CLUMP_OBJECTS(cp)\
         {	obj_header_t *pre = (obj_header_t *)((cp)->cbase);\
                 obj_header_t *end = (obj_header_t *)((cp)->cbot);\
                 uint size;\
@@ -223,8 +220,8 @@ extern_st(st_chunk);
                         }\
                 }\
                 if ( pre != end )\
-                {	lprintf2("Chunk parsing error, 0x%lx != 0x%lx\n",\
-                                 (ulong)pre, (ulong)end);\
+                {	lprintf2("Clump parsing error, "PRI_INTPTR" != "PRI_INTPTR"\n",\
+                                 (intptr_t)pre, (intptr_t)end);\
                     /*gs_abort((const gs_memory_t *)NULL);*/	\
                 }\
         }
@@ -232,61 +229,62 @@ extern_st(st_chunk);
 #  define END_OBJECTS_SCAN END_OBJECTS_SCAN_NO_ABORT
 #endif
 
-/* Initialize a chunk. */
+/* Initialize a clump. */
 /* This is exported for save/restore. */
-void alloc_init_chunk(chunk_t *, byte *, byte *, bool, chunk_t *);
+void alloc_init_clump(clump_t *, byte *, byte *, bool, clump_t *);
 
-/* Initialize the string freelists in a chunk. */
-void alloc_init_free_strings(chunk_t *);
+/* Initialize the string freelists in a clump. */
+void alloc_init_free_strings(clump_t *);
 
-/* Find the chunk for a pointer. */
-/* Note that ptr_is_within_chunk returns true even if the pointer */
-/* is in an inner chunk of the chunk being tested. */
-#define ptr_is_within_chunk(ptr, cp)\
+/* Find the clump for a pointer. */
+/* Note that ptr_is_within_clump returns true even if the pointer */
+/* is in an inner clump of the clump being tested. */
+#define ptr_is_within_clump(ptr, cp)\
   PTR_BETWEEN((const byte *)(ptr), (cp)->cbase, (cp)->cend)
-#define ptr_is_in_inner_chunk(ptr, cp)\
+#define ptr_is_in_inner_clump(ptr, cp)\
   ((cp)->inner_count != 0 &&\
    PTR_BETWEEN((const byte *)(ptr), (cp)->cbot, (cp)->ctop))
-#define ptr_is_in_chunk(ptr, cp)\
-  (ptr_is_within_chunk(ptr, cp) && !ptr_is_in_inner_chunk(ptr, cp))
-typedef struct chunk_locator_s {
-    const gs_ref_memory_t *memory;	/* for head & tail of chain */
-    chunk_t *cp;		/* one-element cache */
-} chunk_locator_t;
-bool chunk_locate_ptr(const void *, chunk_locator_t *);
+#define ptr_is_in_clump(ptr, cp)\
+  (ptr_is_within_clump(ptr, cp) && !ptr_is_in_inner_clump(ptr, cp))
+typedef struct clump_locator_s {
+    gs_ref_memory_t *memory;	/* for head & tail of chain */
+    clump_t *cp;		/* one-element cache */
+} clump_locator_t;
+bool clump_locate_ptr(const void *, clump_locator_t *);
+bool ptr_is_within_mem_clumps(const void *ptr, gs_ref_memory_t *mem);
 
-#define chunk_locate(ptr, clp)\
-  (((clp)->cp != 0 && ptr_is_in_chunk(ptr, (clp)->cp)) ||\
-   chunk_locate_ptr(ptr, clp))
+#define clump_locate(ptr, clp)\
+  (((clp)->cp != 0 && ptr_is_in_clump(ptr, (clp)->cp)) ||\
+   clump_locate_ptr(ptr, clp))
 
-/* Close up the current chunk. */
+/* Close up the current clump. */
 /* This is exported for save/restore and for the GC. */
-void alloc_close_chunk(gs_ref_memory_t * mem);
+void alloc_close_clump(gs_ref_memory_t * mem);
 
-/* Reopen the current chunk after a GC. */
-void alloc_open_chunk(gs_ref_memory_t * mem);
+/* Reopen the current clump after a GC. */
+void alloc_open_clump(gs_ref_memory_t * mem);
 
-/* Insert or remove a chunk in the address-ordered chain. */
+/* Insert or remove a clump in the address-ordered chain. */
 /* These are exported for the GC. */
-void alloc_link_chunk(chunk_t *, gs_ref_memory_t *);
-void alloc_unlink_chunk(chunk_t *, gs_ref_memory_t *);
+void alloc_link_clump(clump_t *, gs_ref_memory_t *);
+void alloc_unlink_clump(clump_t *, gs_ref_memory_t *);
 
-/* Free a chunk.  This is exported for save/restore and for the GC. */
-void alloc_free_chunk(chunk_t *, gs_ref_memory_t *);
+/* Free a clump.  This is exported for save/restore and for the GC. */
+void alloc_free_clump(clump_t *, gs_ref_memory_t *);
 
-/* Print a chunk debugging message. */
+/* Print a clump debugging message. */
 /* Unfortunately, the ANSI C preprocessor doesn't allow us to */
 /* define the list of variables being printed as a macro. */
-#define dprintf_chunk_format\
-  "%s 0x%lx (0x%lx..0x%lx, 0x%lx..0x%lx..0x%lx)\n"
-#define dmprintf_chunk(mem, msg, cp)\
-  dmprintf7(mem, dprintf_chunk_format,\
-            msg, (ulong)(cp), (ulong)(cp)->cbase, (ulong)(cp)->cbot,\
-            (ulong)(cp)->ctop, (ulong)(cp)->climit, (ulong)(cp)->cend)
-#define if_debug_chunk(c, mem, msg, cp)\
-  if_debug7m(c, mem,dprintf_chunk_format,\
-             msg, (ulong)(cp), (ulong)(cp)->cbase, (ulong)(cp)->cbot,\
-             (ulong)(cp)->ctop, (ulong)(cp)->climit, (ulong)(cp)->cend)
+#define dprintf_clump_format\
+  "%s "PRI_INTPTR" ("PRI_INTPTR".."PRI_INTPTR", "PRI_INTPTR".."PRI_INTPTR".."PRI_INTPTR")\n"
+#define dmprintf_clump(mem, msg, cp)\
+  dmprintf7(mem, dprintf_clump_format,\
+            msg, (intptr_t)(cp), (intptr_t)(cp)->cbase, (intptr_t)(cp)->cbot,\
+            (intptr_t)(cp)->ctop, (intptr_t)(cp)->climit, (intptr_t)(cp)->cend)
+#define if_debug_clump(c, mem, msg, cp)\
+  if_debug7m(c, mem,dprintf_clump_format,\
+             msg, (intptr_t)(cp), (intptr_t)(cp)->cbase, (intptr_t)(cp)->cbot,\
+             (intptr_t)(cp)->ctop, (intptr_t)(cp)->climit, (intptr_t)(cp)->cend)
 
 /* ================ Allocator state ================ */
 
@@ -294,23 +292,11 @@ void alloc_free_chunk(chunk_t *, gs_ref_memory_t *);
 struct alloc_save_s;
 struct alloc_change_s;
 
-/* Stream structure, only needed for the streams member of the state. */
-#ifndef stream_DEFINED
-#  define stream_DEFINED
-typedef struct stream_s stream;
-#endif
-
 /*
  * Ref (PostScript object) type, only needed for the binary_token_names
- * member of the state.  This really shouldn't be visible at this level at
- * all: we include it here only to avoid splitting gs_ref_memory_t two
- * levels, which would be architecturally better but would involve too much
- * work at this point.
+ * member of the state.
  */
-#ifndef ref_DEFINED
 typedef struct ref_s ref;
-#  define ref_DEFINED
-#endif
 
 /*
  * Define the number of freelists.  The index in the freelist array
@@ -333,9 +319,9 @@ typedef struct ref_s ref;
 struct gs_ref_memory_s {
     /* The following are set at initialization time. */
     gs_memory_common;
-    uint chunk_size;
-    uint large_size;		/* min size to give large object */
-                                /* its own chunk: must be */
+    size_t clump_size;
+    size_t large_size;		/* min size to give large object */
+                                /* its own clump: must be */
                                 /* 1 mod obj_align_mod */
     uint space;			/* a_local, a_global, a_system */
 #   if IGC_PTR_STABILITY_CHECK
@@ -346,23 +332,21 @@ struct gs_ref_memory_s {
     gs_memory_gc_status_t gc_status;
     /* The following are updated dynamically. */
     bool is_controlled;		/* if true, this allocator doesn't manage */
-                                /* its own chunks */
-    ulong limit;		/* signal a VMerror when total */
+                                /* its own clumps */
+    size_t limit;		/* signal a VMerror when total */
                                 /* allocated exceeds this */
-    chunk_t *cfirst;		/* head of chunk list */
-    chunk_t *clast;		/* tail of chunk list */
-    chunk_t cc;			/* current chunk */
-    chunk_t *pcc;		/* where to store cc */
-    chunk_locator_t cfreed;	/* chunk where last object freed */
-    ulong allocated;		/* total size of all chunks */
+    clump_t *root;		/* root of clump splay tree */
+    clump_t *cc;		/* current clump */
+    clump_locator_t cfreed;	/* clump where last object freed */
+    size_t allocated;		/* total size of all clumps */
                                 /* allocated at this save level */
-    ulong gc_allocated;		/* value of (allocated + */
+    size_t gc_allocated;	/* value of (allocated + */
                                 /* previous_status.allocated) after last GC */
     struct lost_ {		/* space freed and 'lost' (not put on a */
                                 /* freelist) */
-        ulong objects;
-        ulong refs;
-        ulong strings;
+        size_t objects;
+        size_t refs;
+        size_t strings;
     } lost;
     /*
      * The following are for the interpreter's convenience: the
@@ -385,7 +369,7 @@ struct gs_ref_memory_s {
     struct alloc_save_s *reloc_saved;	/* for GC */
     gs_memory_status_t previous_status;		/* total allocated & used */
                                 /* in outer save levels */
-    uint largest_free_size;	/* largest (aligned) size on large block list */
+    size_t largest_free_size;	/* largest (aligned) size on large block list */
     /* We put the freelists last to keep the scalar offsets small. */
     obj_header_t *freelists[num_freelists];
 };
@@ -403,16 +387,17 @@ extern_st(st_ref_memory);
 extern const gs_memory_procs_t gs_ref_memory_procs;
 
 /*
- * Scan the chunks of an allocator:
- *      SCAN_MEM_CHUNKS(mem, cp)
- *              << code to process chunk cp >>
- *      END_CHUNKS_SCAN
+ * Scan the clumps of an allocator:
+ *      SCAN_MEM_CLUMPS(mem, cp)
+ *              << code to process clump cp >>
+ *      END_CLUMPS_SCAN
  */
-#define SCAN_MEM_CHUNKS(mem, cp)\
-        {	chunk_t *cp = (mem)->cfirst;\
-                for ( ; cp != 0; cp = cp->cnext )\
+#define SCAN_MEM_CLUMPS(mem, cp)\
+        {	clump_splay_walker sw;\
+                clump_t *cp;\
+                for (cp = clump_splay_walk_init(&sw, mem); cp != 0; cp = clump_splay_walk_fwd(&sw))\
                 {
-#define END_CHUNKS_SCAN\
+#define END_CLUMPS_SCAN\
                 }\
         }
 
@@ -454,12 +439,12 @@ extern const dump_control_t dump_control_all;
 /* contents. */
 void debug_print_object(const gs_memory_t *mem, const void *obj, const dump_control_t * control);
 
-/* Print the contents of a chunk with the given options. */
+/* Print the contents of a clump with the given options. */
 /* Relevant options: all. */
-void debug_dump_chunk(const gs_memory_t *mem, const chunk_t * cp, const dump_control_t * control);
-void debug_print_chunk(const gs_memory_t *mem, const chunk_t * cp);	/* default options */
+void debug_dump_clump(const gs_memory_t *mem, const clump_t * cp, const dump_control_t * control);
+void debug_print_clump(const gs_memory_t *mem, const clump_t * cp);	/* default options */
 
-/* Print the contents of all chunks managed by an allocator. */
+/* Print the contents of all clumps managed by an allocator. */
 /* Relevant options: all. */
 void debug_dump_memory(const gs_ref_memory_t *mem,
                        const dump_control_t *control);
@@ -471,6 +456,76 @@ void debug_dump_allocator(const gs_ref_memory_t *mem);
 /* Find all the objects that contain a given pointer. */
 void debug_find_pointers(const gs_ref_memory_t *mem, const void *target);
 
+/* Dump the splay tree of clumps */
+void debug_dump_clump_tree(const gs_ref_memory_t *mem);
+
 #endif /* DEBUG */
+
+/* Routines for walking/manipulating the splay tree of clumps */
+typedef enum {
+    SPLAY_APP_CONTINUE = 0,
+    SPLAY_APP_STOP = 1
+} splay_app_result_t;
+
+/* Apply function 'fn' to every node in the clump splay tree.
+ * These are applied in depth first order, which means that
+ * 'fn' is free to perform any operation it likes on the subtree
+ * rooted at the current node, as long as it doesn't affect
+ * any nodes higher in the tree than the current node. The
+ * classic example of this is deletion, which can cause the
+ * subtree to be rrarranged. */
+clump_t *clump_splay_app(clump_t *root, gs_ref_memory_t *imem, splay_app_result_t (*fn)(clump_t *, void *), void *arg);
+
+typedef enum
+{
+    /* As we step, keep track of where we just stepped from. */
+    SPLAY_FROM_ABOVE = 0,
+    SPLAY_FROM_LEFT = 1,
+    SPLAY_FROM_RIGHT = 2
+} splay_dir_t;
+
+/* Structure to contain details of a 'walker' for the clump
+ * splay tree. Treat this as opaque. Only defined at this
+ * public level to avoid the need for mallocs.
+ * No user servicable parts inside. */
+typedef struct
+{
+    /* The direction we most recently moved in the
+     * splay tree traversal. */
+    splay_dir_t from;
+    /* The current node in the splay tree traversal. */
+    clump_t *cp;
+    /* The node that marks the end of the splay tree traversal.
+     * (NULL for top of tree). */
+    clump_t *end;
+} clump_splay_walker;
+
+/* Prepare a splay walker for walking forwards.
+ * It will perform an in-order traversal of the entire tree,
+ * starting at min and stopping after max with NULL. */
+clump_t *clump_splay_walk_init(clump_splay_walker *sw, const gs_ref_memory_t *imem);
+
+/* Prepare a splay walker for walking forwards,
+ * starting from a point somewhere in the middle of the tree.
+ * The traveral starts at cp, proceeds in-order to max, then
+ * restarts at min, stopping with NULL after reaching mid again.
+ */
+clump_t *clump_splay_walk_init_mid(clump_splay_walker *sw, clump_t *cp);
+
+/* Return the next node in the traversal of the clump
+ * splay tree as set up by clump_splay_walk_init{,_mid}.
+ * Will return NULL at the end point. */
+clump_t *clump_splay_walk_fwd(clump_splay_walker *sw);
+
+/* Prepare a splay walker for walking backwards.
+ * It will perform a reverse-in-order traversal of the
+ * entire tree, starting at max, and stopping after min
+ * with NULL. */
+clump_t *clump_splay_walk_bwd_init(clump_splay_walker *sw, const gs_ref_memory_t *imem);
+
+/* Return the next node in the traversal of the clump
+ * splay tree as set up by clump_splay_walk_bwd_init.
+ * Will return NULL at the end point. */
+clump_t *clump_splay_walk_bwd(clump_splay_walker *sw);
 
 #endif /* gxalloc_INCLUDED */

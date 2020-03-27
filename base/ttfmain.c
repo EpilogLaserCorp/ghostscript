@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -276,6 +276,8 @@ FontError ttfFont__Open(ttfInterpreter *tti, ttfFont *self, ttfReader *r,
     self->nFlags = ttfReader__UShort(r);
     r->Seek(r, self->t_head.nPos + offset_of(sfnt_FontHeader, unitsPerEm));
     self->nUnitsPerEm = ttfReader__UShort(r);
+    if (self->nUnitsPerEm <= 0)
+        self->nUnitsPerEm = 1024;
     r->Seek(r, self->t_head.nPos + offset_of(sfnt_FontHeader, indexToLocFormat));
     self->nIndexToLocFormat = ttfReader__UShort(r);
     r->Seek(r, self->t_maxp.nPos + offset_of(sfnt_maxProfileTable, numGlyphs));
@@ -704,11 +706,11 @@ retry:
                 else if (code == TT_Err_Invalid_Engine)
                     error = fPatented;
                 else {
-                    /* We have a range or errors that can be caused by
+                    /* We have a range of errors that can be caused by
                      * bad bytecode
                      */
-                    if (error >= TT_Err_Invalid_Opcode
-                     || error <= TT_Err_Invalid_Displacement) {
+                    if ((int)code >= TT_Err_Invalid_Opcode
+                     && (int)code <= TT_Err_Invalid_Displacement) {
                         error = fBadInstruction;
                     }
                     else {
@@ -734,11 +736,11 @@ retry:
         for (i = 0; i < gOutline->contourCount; i++)
             endPoints[i] = ttfReader__Short(r);
         for (i = 1; i < gOutline->contourCount; i++)
-            if (endPoints[i - 1] >= endPoints[i]) {
+            if (endPoints[i - 1] < 0 || endPoints[i - 1] >= endPoints[i]) {
                 error = fBadFontData; goto ex;
             }
         nPoints = gOutline->pointCount = endPoints[gOutline->contourCount - 1] + 1;
-        if (self->nPointsTotal + nPoints + 2 > exec->n_points) {
+        if (nPoints < 0 || self->nPointsTotal + nPoints + 2 > exec->n_points) {
             error = fBadFontData; goto ex;
         }
         n_ins = ttfReader__Short(r);
@@ -882,11 +884,11 @@ void ttfOutliner__DrawGlyphOutline(ttfOutliner *self)
     ttfFont *pFont = self->pFont;
     ttfExport *exp = self->exp;
     TExecution_Context *exec = pFont->exec;
-    TGlyph_Zone *pts = &exec->pts;
-    short* endP = pts->contours;
-    byte* onCurve = pts->touch;
-    F26Dot6* x = pts->org_x;
-    F26Dot6* y = pts->org_y;
+    TGlyph_Zone *epts = &exec->pts;
+    short* endP = epts->contours;
+    byte* onCurve = epts->touch;
+    F26Dot6* x = epts->org_x;
+    F26Dot6* y = epts->org_y;
     F26Dot6 px, py;
     short sp, ctr;
     FloatPoint p0, p1, p2, p3;
@@ -1040,7 +1042,5 @@ FontError ttfOutliner__Outline(ttfOutliner *self, int glyphIndex,
         self->post_transform.c /= pFont->nUnitsPerEm;
         self->post_transform.d /= pFont->nUnitsPerEm;
     }
-    if (error != fNoError && error != fPatented)
-        return error;
     return error;
 }

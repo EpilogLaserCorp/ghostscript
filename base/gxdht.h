@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -26,6 +26,9 @@
 #include "gscspace.h"
 #include "gxcindex.h"
 #include "gxfrac.h"
+#include "gxtmap.h"
+#include "gsdcolor.h"
+#include "gxht.h"
 
 /*
  * We represent a halftone tile as a rectangular super-cell consisting of
@@ -153,14 +156,6 @@ typedef ht_mask_t ht_sample_t;
  * See gxbitmap.h for more details about strip halftones.
  */
 typedef struct gx_ht_cache_s gx_ht_cache;
-#ifndef gx_ht_order_DEFINED
-#  define gx_ht_order_DEFINED
-typedef struct gx_ht_order_s gx_ht_order;
-#endif
-#ifndef gx_ht_tile_DEFINED
-#  define gx_ht_tile_DEFINED
-typedef struct gx_ht_tile_s gx_ht_tile;
-#endif
 typedef struct gx_ht_order_procs_s {
 
     /* Define the size of each element of bit_data. */
@@ -222,7 +217,7 @@ struct gx_ht_order_s {
     gx_transfer_map *transfer;	/* TransferFunction or 0 */
     gx_ht_order_screen_params_t screen_params;
     byte *threshold;
-    bool threshold_inverts;
+    bool threshold_inverted;
 };
 
 #define ht_order_is_complete(porder)\
@@ -276,14 +271,9 @@ extern_st(st_ht_order_component_element);
     "gx_ht_order_component[]", ht_order_element_enum_ptrs,\
     ht_order_element_reloc_ptrs, st_ht_order_component)
 
-#ifndef gx_device_halftone_DEFINED
-#  define gx_device_halftone_DEFINED
-typedef struct gx_device_halftone_s gx_device_halftone;
-#endif
-
 /*
  * Device Halftone Structure definition.  See comments before
- * gx_imager_dev_ht_install() for more information on this structure and its
+ * gx_gstate_dev_ht_install() for more information on this structure and its
  * fields.
  */
 struct gx_device_halftone_s {
@@ -292,7 +282,7 @@ struct gx_device_halftone_s {
     gs_id id;			/* the id changes whenever the data change */
     /*
      * We have to keep the halftone type so that we can pass it
-     * through the band list for gx_imager_dev_ht_install.
+     * through the band list for gx_gstate_dev_ht_install.
      */
     gs_halftone_type type;
     gx_ht_order_component *components;

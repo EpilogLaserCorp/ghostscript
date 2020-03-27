@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -22,12 +22,48 @@
 #include "ghostxps.h"
 
 static int xps_brush_has_transparency(xps_context_t *ctx, char *base_uri, xps_item_t *root);
+static int xps_glyphs_has_transparency(xps_context_t *ctx, char *base_uri, xps_item_t *root);
 
 static int
 xps_remote_resource_dictionary_has_transparency(xps_context_t *ctx, char *base_uri, char *source_att)
 {
-    //dmputs(ctx->memory, "page has transparency: uses a remote resource; not parsed; being conservative\n");
-    return 1;
+    char part_name[1024];
+    char part_uri[1024];
+    xps_part_t *part;
+    xps_item_t *xml;
+    char *s;
+    int has_transparency;
+
+    xps_absolute_path(part_name, base_uri, source_att, sizeof part_name);
+    part = xps_read_part(ctx, part_name);
+    if (!part)
+    {
+        return gs_throw1(-1, "cannot find remote resource part '%s'", part_name);
+    }
+
+    xml = xps_parse_xml(ctx, part->data, part->size);
+    if (!xml)
+    {
+        xps_free_part(ctx, part);
+        return gs_rethrow(-1, "cannot parse xml");
+    }
+
+    if (strcmp(xps_tag(xml), "ResourceDictionary"))
+    {
+        xps_free_item(ctx, xml);
+        xps_free_part(ctx, part);
+        return gs_throw1(-1, "expected ResourceDictionary element (found %s)", xps_tag(xml));
+    }
+
+    gs_strlcpy(part_uri, part_name, sizeof part_uri);
+    s = strrchr(part_uri, '/');
+    if (s)
+        s[1] = 0;
+
+    has_transparency = xps_resource_dictionary_has_transparency(ctx, part_uri, xml);
+    xps_free_item(ctx, xml);
+    xps_free_part(ctx, part);
+    return has_transparency;
 }
 
 int
@@ -49,6 +85,9 @@ xps_resource_dictionary_has_transparency(xps_context_t *ctx, char *base_uri, xps
                 !strcmp(xps_tag(node), "ImageBrush"))
             if (xps_brush_has_transparency(ctx, base_uri, node))
                 return 1;
+        if (!strcmp(xps_tag(node), "Glyphs"))
+            if (xps_glyphs_has_transparency(ctx, base_uri, node))
+                return 1;
     }
 
     return 0;
@@ -58,9 +97,8 @@ static int
 xps_gradient_stops_have_transparency(xps_context_t *ctx, char *base_uri, xps_item_t *root)
 {
     xps_item_t *node;
-    gs_color_space *colorspace;
     char *color_att;
-    float samples[32];
+    float samples[XPS_MAX_COLORS];
 
     for (node = xps_down(root); node; node = xps_next(node))
     {
@@ -69,7 +107,7 @@ xps_gradient_stops_have_transparency(xps_context_t *ctx, char *base_uri, xps_ite
             color_att = xps_att(node, "Color");
             if (color_att)
             {
-                xps_parse_color(ctx, base_uri, color_att, &colorspace, samples);
+                xps_parse_color(ctx, base_uri, color_att, NULL, samples);
                 if (samples[0] < 1.0)
                 {
                     //dmputs(ctx->memory, "page has transparency: GradientStop has alpha\n");
@@ -122,8 +160,7 @@ xps_brush_has_transparency(xps_context_t *ctx, char *base_uri, xps_item_t *root)
     char *color_att;
     xps_item_t *node;
 
-    gs_color_space *colorspace;
-    float samples[32];
+    float samples[XPS_MAX_COLORS];
 
     if (!strcmp(xps_tag(root), "SolidColorBrush"))
     {
@@ -141,7 +178,7 @@ xps_brush_has_transparency(xps_context_t *ctx, char *base_uri, xps_item_t *root)
         color_att = xps_att(root, "Color");
         if (color_att)
         {
-            xps_parse_color(ctx, base_uri, color_att, &colorspace, samples);
+            xps_parse_color(ctx, base_uri, color_att, NULL, samples);
             if (samples[0] < 1.0 && samples[0] != 0.0)
             {
                 //dmputs(ctx->memory, "page has transparency: SolidColorBrush Color has alpha\n");
@@ -278,13 +315,12 @@ xps_element_has_transparency(xps_context_t *ctx, char *base_uri, xps_item_t *nod
     char *stroke_att;
     char *fill_att;
 
-    gs_color_space *colorspace;
-    float samples[32];
+    float samples[XPS_MAX_COLORS];
 
     stroke_att = xps_att(node, "Stroke");
     if (stroke_att)
     {
-        xps_parse_color(ctx, base_uri, stroke_att, &colorspace, samples);
+        xps_parse_color(ctx, base_uri, stroke_att, NULL, samples);
         if (samples[0] < 1.0 && samples[0] != 0.0)
         {
             //dmprintf1(ctx->memory, "page has transparency: Stroke alpha=%g\n", samples[0]);
@@ -295,7 +331,7 @@ xps_element_has_transparency(xps_context_t *ctx, char *base_uri, xps_item_t *nod
     fill_att = xps_att(node, "Fill");
     if (fill_att)
     {
-        xps_parse_color(ctx, base_uri, fill_att, &colorspace, samples);
+        xps_parse_color(ctx, base_uri, fill_att, NULL, samples);
         if (samples[0] < 1.0 && samples[0] != 0.0)
         {
             //dmprintf1(ctx->memory, "page has transparency: Fill alpha=%g\n", samples[0]);

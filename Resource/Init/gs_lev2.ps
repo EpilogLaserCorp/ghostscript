@@ -1,4 +1,4 @@
-% Copyright (C) 2001-2012 Artifex Software, Inc.
+% Copyright (C) 2001-2019 Artifex Software, Inc.
 % All Rights Reserved.
 %
 % This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 % of the license contained in the file LICENSE in this distribution.
 %
 % Refer to licensing information at http://www.artifex.com or contact
-% Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-% CA  94903, U.S.A., +1(415)492-9861, for further information.
+% Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+% CA 94945, U.S.A., +1(415)492-9861, for further information.
 %
 
 % Initialization file for Level 2 functions.
@@ -64,7 +64,7 @@ level2dict begin
       pop
     } ifelse pop pop
   } forall pop pop
-} .bind def	% not odef, shouldn't reset stacks
+} .bind def
 
 % currentuser/systemparams creates and returns a dictionary in the
 % current VM.  The easiest way to make this work is to copy any composite
@@ -101,7 +101,7 @@ level2dict begin
     1 index length string exch .setglobal
     copy exch not { readonly } if
   } if
-} .bind def
+} .bind odef
 
 % Some user parameters are managed entirely at the PostScript level.
 % We take care of that here.
@@ -117,7 +117,7 @@ counttomark 2 idiv {
 } repeat pop
 /.definepsuserparam {		% <name> <value> .definepsuserparam -
   psuserparams 3 copy pop
-  type cvlit /.checkparamtype cvx 2 packedarray cvx put
+  type cvlit //.checkparamtype /exec load 3 packedarray cvx put
   userparams 3 1 roll put
 } .bind def
 end
@@ -129,7 +129,7 @@ end
 /.setuserparams2 {
         % Check that we will be able to set the PostScript-level
         % user parameters.
-  /setuserparams /psuserparams .systemvar .checksetparams
+  /setuserparams /psuserparams .systemvar //.checksetparams exec
         % Set the C-level user params.  If this succeeds, we know that
         % the password check succeeded.
   dup .setuserparams
@@ -154,18 +154,21 @@ end
       % protect top level of parameters that we copied
       dup type dup /arraytype eq exch /stringtype eq or { readonly } if
       /userparams .systemvar 3 1 roll .forceput  % userparams is read-only
-    } {
+    } executeonly
+    {
       pop pop
     } ifelse
-  } forall
+  } executeonly forall
         % A context switch might have occurred during the above loop,
         % causing the interpreter-level parameters to be reset.
         % Set them again to the new values.  From here on, we are safe,
         % since a context switch will consult userparams.
   .setuserparams
-} .bind def
+} .bind executeonly odef % must be bound and hidden for .forceput
+
 /setuserparams {		% <dict> setuserparams -
-    .setuserparams2
+    {.setuserparams2} stopped
+    {/setuserparams load $error /errorname get signalerror} if
 } .bind odef
 % Initialize user parameters managed here.
 /JobName () .definepsuserparam
@@ -208,8 +211,8 @@ end
      } forall
    } if
    /setsystemparams //pssystemparams mark exch {
-     type cvlit /.checkparamtype cvx 2 packedarray cvx
-   } forall .dicttomark .checksetparams
+     type cvlit //.checkparamtype /exec load 3 packedarray cvx
+   } forall .dicttomark //.checksetparams exec
         % Set the C-level system params.  If this succeeds, we know that
         % the password check succeeded.
    dup .setsystemparams
@@ -222,13 +225,13 @@ end
          % protect top level parameters that we copied
          dup type dup /arraytype eq exch /stringtype eq or { readonly } if
          //pssystemparams 3 1 roll .forceput	% pssystemparams is read-only
-       }
+       } executeonly
        { pop pop
        }
       ifelse
-    }
+    } executeonly
    forall pop
-} .bind odef
+} .bind executeonly odef
 
 % Initialize the passwords.
 % NOTE: the names StartJobPassword and SystemParamsPassword are known to
@@ -301,31 +304,30 @@ end
     psuserparams exch /.checkFilePermitparams load put
   .setglobal
 
-pssystemparams begin
-  /CurDisplayList 0 .forcedef
-  /CurFormCache 0 .forcedef
-  /CurInputDevice () .forcedef
-  /CurOutlineCache 0 .forcedef
-  /CurOutputDevice () .forcedef
-  /CurPatternCache 0 .forcedef
-  /CurUPathCache 0 .forcedef
-  /CurScreenStorage 0 .forcedef
-  /CurSourceList 0 .forcedef
-  /DoPrintErrors //false .forcedef
-  /JobTimeout 0 .forcedef
-  /LicenseID (LN-001) .forcedef     % bogus
-  /MaxDisplayList 140000 .forcedef
-  /MaxFormCache 100000 .forcedef
-  /MaxImageBuffer 524288 .forcedef
-  /MaxOutlineCache 65000 .forcedef
-  /MaxPatternCache 100000 .forcedef
-  /MaxUPathCache 300000 .forcedef
-  /MaxScreenStorage 84000 .forcedef
-  /MaxSourceList 25000 .forcedef
-  /PrinterName product .forcedef
-  /RamSize 4194304 .forcedef
-  /WaitTimeout 40 .forcedef
-end
+pssystemparams
+dup /CurDisplayList 0 .forceput
+dup /CurFormCache 0 .forceput
+dup /CurInputDevice () .forceput
+dup /CurOutlineCache 0 .forceput
+dup /CurOutputDevice () .forceput
+dup /CurPatternCache 0 .forceput
+dup /CurUPathCache 0 .forceput
+dup /CurScreenStorage 0 .forceput
+dup /CurSourceList 0 .forceput
+dup /DoPrintErrors //false .forceput
+dup /JobTimeout 0 .forceput
+dup /LicenseID (LN-001) .forceput     % bogus
+dup /MaxDisplayList 140000 .forceput
+dup /MaxFormCache 100000 .forceput
+dup /MaxImageBuffer 524288 .forceput
+dup /MaxOutlineCache 65000 .forceput
+dup /MaxPatternCache 100000 .forceput
+dup /MaxUPathCache 300000 .forceput
+dup /MaxScreenStorage 84000 .forceput
+dup /MaxSourceList 25000 .forceput
+dup /PrinterName product .forceput
+dup /RamSize 4194304 .forceput
+    /WaitTimeout 40 .forceput
 
 % Define the procedures for handling comment scanning.  The names
 % %ProcessComment and %ProcessDSCComment are known to the interpreter.
@@ -342,13 +344,13 @@ end
   } ifelse
 } .bind def
 /ProcessComment //null .definepsuserparam
-psuserparams /ProcessComment {.checkprocesscomment} put
+psuserparams /ProcessComment {//.checkprocesscomment exec} put
 (%ProcessComment) cvn {
   /ProcessComment getuserparam
   dup //null eq { pop pop pop } { exec } ifelse
 } bind def
 /ProcessDSCComment //null .definepsuserparam
-psuserparams /ProcessDSCComment {.checkprocesscomment} put
+psuserparams /ProcessDSCComment {//.checkprocesscomment exec} put
 /.loadingfont //false def
 (%ProcessDSCComment) cvn {
   /ProcessDSCComment getuserparam
@@ -414,7 +416,9 @@ psuserparams /ProcessDSCComment {.checkprocesscomment} put
 
 % VMReclaim and VMThreshold are user parameters.
 /setvmthreshold {		% <int> setvmthreshold -
-  mark /VMThreshold 2 .argindex .dicttomark .setuserparams2 pop
+  mark /VMThreshold 2 .argindex .dicttomark {.setuserparams2} stopped
+  {pop /setvmthreshold load $error /errorname get signalerror}
+  {pop} ifelse
 } odef
 /vmreclaim {			% <int> vmreclaim -
   dup 0 gt {
@@ -426,9 +430,11 @@ psuserparams /ProcessDSCComment {.checkprocesscomment} put
     ifelse
   } {
     % VMReclaim userparam controls enable/disable GC
-    mark /VMReclaim 2 index .dicttomark .setuserparams2 pop
+    mark /VMReclaim 2 index .dicttomark {.setuserparams2} stopped
+    {pop /vmreclaim load $error /errorname get signalerror}
+    {pop} ifelse
   } ifelse
-} odef
+} .bind executeonly odef
 -1 setvmthreshold
 
 % ------ IODevices ------ %
@@ -486,7 +492,7 @@ end		% serverdict
   clear cleardictstack
   initgraphics
   //false setglobal
-} bind def
+} bind executeonly def
 /.startjob {			% <exit_bool> <password> <finish_proc>
                                 %   .startjob <ok_bool>
   vmstatus pop pop serverdict /.jobsavelevel get eq
@@ -507,14 +513,6 @@ end		% serverdict
     /startjob .systemvar /typecheck signalerror
   } if
   { .startnewjob //true } .startjob
-} odef
-
-% The procedure to undo the job encapsulation
-/.endjob {
-  clear cleardictstack
-  serverdict /.jobsave get dup //null eq { pop } { restore } ifelse
-  serverdict /.jobsave //null put
-  2 .vmreclaim   % recover local and global VM
 } odef
 
 systemdict begin
@@ -549,7 +547,8 @@ end		% serverdict
 % Note that statusdict must be allocated in local VM.
 % We don't bother with many of these yet.
 
-/.dict1 { exch mark 3 1 roll .dicttomark } bind def
+% convenience function to make a dictionary from an object and a key
+/.pair2dict { exch mark 3 1 roll .dicttomark } bind def
 
 currentglobal //false setglobal 25 dict exch setglobal begin
 currentsystemparams
@@ -562,11 +561,11 @@ systemdict /buildtime dup load put
 /checkpassword { .checkpassword 0 gt } bind def
 dup /DoStartPage known
  { /dostartpage { /DoStartPage getsystemparam } bind def
-   /setdostartpage { /DoStartPage .dict1 setsystemparams } bind def
+   /setdostartpage { /DoStartPage //.pair2dict exec setsystemparams } bind def
  } if
 dup /StartupMode known
  { /dosysstart { /StartupMode getsystemparam 0 ne } bind def
-   /setdosysstart { { 1 } { 0 } ifelse /StartupMode .dict1 setsystemparams } bind def
+   /setdosysstart { { 1 } { 0 } ifelse /StartupMode //.pair2dict exec setsystemparams } bind def
  } if
 %****** Setting jobname is supposed to set userparams.JobName, too.
 /jobname { /JobName getuserparam } bind def
@@ -574,7 +573,7 @@ dup /StartupMode known
 /ramsize { /RamSize getsystemparam } bind def
 /realformat 1 index /RealFormat get def
 dup /PrinterName known
- { /setprintername { /PrinterName .dict1 setsystemparams } bind def
+ { /setprintername { /PrinterName //.pair2dict exec setsystemparams } bind def
  } if
 /printername
  { currentsystemparams /PrinterName .knownget not { () } if exch copy
@@ -609,12 +608,11 @@ currentuserparams /WaitTimeout known
    .dicttomark setpagedevice
    /WaitTimeout exch mark /JobTimeout 5 2 roll .dicttomark setsystemparams
  } bind def
-/.setpagesize { 2 array astore /PageSize .dict1 setpagedevice } bind def
-/setduplexmode { /Duplex .dict1 setpagedevice } bind def
+/setduplexmode { /Duplex //.pair2dict exec setpagedevice } bind def
 /setmargins
- { exch 2 array astore /Margins .dict1 setpagedevice
+ { exch 2 array astore /Margins //.pair2dict exec setpagedevice
  } bind def
-/setpagemargin { 0 2 array astore /PageOffset .dict1 setpagedevice } bind def
+/setpagemargin { 0 2 array astore /PageOffset //.pair2dict exec setpagedevice } bind def
 /setpageparams
  { mark /PageSize 6 -2 roll
    4 index 1 and ORIENT1 { 1 } { 0 } ifelse ne { exch } if 2 array astore
@@ -623,7 +621,14 @@ currentuserparams /WaitTimeout known
    .dicttomark setpagedevice
  } bind def
 /setresolution
- { dup 2 array astore /HWResolution .dict1 setpagedevice
+ { count 1 lt { /setresolution /stackunderflow signalerror } if
+   dup type dup /integertype eq exch /realtype eq or not
+   {
+      /setresolution /typecheck signalerror
+   } if
+   dup 2 array astore /HWResolution //.pair2dict exec { setpagedevice } stopped {
+     pop /setresolution $error /errorname get signalerror
+   } if
  } bind def
 %END PAGEDEVICE
 
@@ -647,13 +652,15 @@ currentuserparams /WaitTimeout known
 } {
   % First see if the current value is valid so we don't have to guess
   mark .currentuserparams .dicttomark /ICCProfilesDir get
-  (default_gray.icc) concatstrings status {
+  (default_gray.icc) concatstrings {status} //.internalstopped exec
+  {pop //false} if
+  {
     pop pop pop pop		% current value was OK. Just clean up stack
   } {
     % Search for valid (iccprofiles) directory as a sibling to (Resource)
     % and set it as a default if found.
     LIBPATH {
-      (Resource) search {
+      (Resource) rsearch {
         exch pop exch pop (iccprofiles) concatstrings
         .file_name_separator concatstrings
         dup (default_gray.icc) concatstrings status {
@@ -687,7 +694,7 @@ pop		% currentsystemparams
 /statusdict currentdict def
 
 currentdict end
-/statusdict exch .forcedef	% statusdict is local, systemdict is global
+currentdict exch /statusdict exch .forceput	% statusdict is local, systemdict is global
 
 % The following compatibility operators are in systemdict.  They are
 % defined here, rather than in gs_init.ps, because they require the
@@ -893,34 +900,29 @@ mark
   .dicttomark
 ] def
 
+% Special type to install
+% e-sRGB ICC profile color space
+/CIEesRGBICC [ /ICCBased
+  mark
+    /N 3
+    /DataSource (esrgb)
+    /Alternate [/DeviceRGB]
+    /Name (esrgb)
+  .dicttomark
+] def
+
+% Special type to install
+% rommRGB ICC profile color space
+/CIErommRGBICC [ /ICCBased
+  mark
+    /N 3
+    /DataSource (rommrgb)
+    /Alternate [/DeviceRGB]
+    /Name (rommrgb)
+  .dicttomark
+] def
+
 % ------ Painting ------ %
-
-%% We don't want to do any high level forms stuff if the source
-%% is PDF because :
-%% 1) Transparent forms are handled separately and we don't want to ge confused
-%% 2) PDF forms are too llikely to trip over the limitations in our support
-%% 3) Its highly unusual to find a PDF file which uses forms sensibly.
-%%
-%% So we have a special PDF version of execform which doesn't do high level forms.
-
-/.PDFexecform {
-        % This is a separate operator so that the stacks will be restored
-        % properly if an error occurs.
-  dup /Matrix get concat
-  dup /BBox get aload pop
-  exch 3 index sub exch 2 index sub rectclip
-  dup /PaintProc get
-  1 index /Implementation known not {
-    1 index dup /Implementation //null .forceput readonly pop
-  } if
-  exec
-}.bind odef
-
-/PDFexecform {
-  gsave {
-    .PDFexecform
-  } stopped grestore {stop} if
-} odef
 
 % A straightforward definition of execform that doesn't actually
 % do any caching.
@@ -928,7 +930,7 @@ mark
         % This is a separate operator so that the stacks will be restored
         % properly if an error occurs.
   %% High level forms need the CTM before the Form Matrix is applied
-  /UNROLLFORMS where {/UNROLLFORMS get}{false}ifelse not
+  /UNROLLFORMS where {/UNROLLFORMS get}{//false}ifelse not
   {matrix currentmatrix exch} if
   dup /Matrix get concat
   dup /BBox get aload pop
@@ -936,8 +938,8 @@ mark
   dup /PaintProc get
   1 index /Implementation known not {
     1 index dup /Implementation //null .forceput readonly pop
-  } if
-  /UNROLLFORMS where {/UNROLLFORMS get}{false}ifelse not
+  } executeonly if
+  /UNROLLFORMS where {/UNROLLFORMS get}{//false}ifelse not
   %% [CTM] <<Form>> PaintProc .beginform -
   {
     %% First,, check to see if we have no /Implementation already defined (see above)
@@ -946,7 +948,34 @@ mark
       %% We don't, so copy the form dictionary
       1 index 4 1 roll
       %% tell devices we're starting a form, run the PaintProc, and then tell the devices we've finished
-      3 -1 roll 2 index .beginform exec .endform
+      3 -1 roll 2 index
+      .beginform exec
+
+      %% This is all horrible code to deal with illegal forms which leave junk on the operand stack
+      %% Starting from 1 (not 0, we don't want to look at the loop count) and going up to the
+      %% number of objects on the stack, check each object to see if its the Form dict (it is
+      %% *supposed* to be the top object after executing the PaintProc). I don't currently check to see if
+      %% the PaintProc ate the dict, but if there are extra objects, remove them and tell
+      %% the user.
+      %%
+      count 1 1 3 -1 roll {
+        dup index
+        dup type /dicttype eq {
+          /Implementation known {
+            2 sub 0 1 3 -1 roll {
+              QUIET not {
+                 (\n  WARNING - Form PaintProc left operands on the stack after execution.\n        This is technically illegal and these have been removed, \n        if output is incorrect run again with -dUNROLLFORMS.\n) =
+              } if
+              pop pop
+            } for
+            exit
+          }if
+        } {
+          pop pop
+        }ifelse
+      } for
+
+      .endform
       %% Ask devices if they have cached the form, and what ID to use if so
       %% returning -1 means 'no ID'
       .get_form_id dup -1 eq
@@ -956,7 +985,7 @@ mark
         %% Form dictioanry using the /Implementation key).
         1 dict dup /FormID 4 -1 roll put
         1 index exch /Implementation exch .forceput readonly pop
-      }
+      } executeonly
       ifelse
     }
     {
@@ -1021,7 +1050,7 @@ def
 
 % The following functions emulate the actions of findcmykcustomcolor and
 % setcustomcolor.  These functions are described in Adobe's TN 5044.  That
-% same document also says "The following �operators� are not defined in the
+% same document also says "The following "operators" are not defined in the
 % PostScript Language Reference Manual, but should be used as pseudo-operators
 % in your PostScript language output. Separation applications from Adobe
 % Systems and other vendors will redefine these convention operators to
@@ -1032,6 +1061,10 @@ def
 % "QuarkXPress: pictwpstops filter 1.0" which produce bad shading dictionaries
 % if these operators are not defined.
 
+% Also we add a findrgbcustomcolor that was discovered in Adobe Illustrator
+% AI5 (Adobe Illustrator (R) Version 7.0 Full Prolog) ProcSet that allows
+% us to create Separation colorspace with a /DeviceRGB tint transform.
+
 % Conditionally disable the TN 5044 psuedo-ops if NO_TN5044 specified
 /NO_TN5044 where { pop (%END TN 5044 psuedo-ops) .skipeof } if
 
@@ -1039,22 +1072,59 @@ def
 % the values given into an array.  This is consistent with what we see when
 % testing with Adobe Distiller 6.0.
 %   <cyan> <magenta> <yellow> <black> <key> findcmykcustomcolor <array>
-/findcmykcustomcolor { 5 array astore } bind def
+/findcmykcustomcolor { 5 array astore } bind executeonly def
+% The following isn't documented by Adobe, but was found in Adobe Illustrator (R)
+% Version 7.0 Full Prolog
+/findrgbcustomcolor { 4 array astore } bind executeonly def
 
 % Build a tint transform function for use by setcustomcolor.  This function
-% is for a Separation color space which has a DeviceCMYK base color space
-% (i.e. 1 input and 4 outputs).  The input to buildcustomtinttransform is the
-% array created by findcmykcustomcolor.  The resulting function is:
+% is for a Separation color space which has either a DeviceCMYK base color space
+% (i.e. 1 input and 4 outputs) or a DeviceRGB colorspace (1 in, 3 out).
+% The input to buildcustomtinttransform is the array created by findcmykcustomcolor
+% and the length of the array is used to determine the alternate colorspace.
+% The resulting function for CMYK is:
 %   { dup cyan mul exch dup magenta mul exch dup yellow mul exch black mul }
 %   Where cyan, magenta, yellow, and black are values from the array.
+% For RGB, since the resulting function is:
+%    { dup red mul exch dup green mul exch blue mul }
 /buildcustomtinttransform	% <array> buildcustomtinttransform <function>
-{ [ /dup load 2 index 0 get /mul load
-  /exch load /dup load 6 index 1 get /mul load
-  /exch load /dup load 10 index 2 get /mul load
-  /exch load 13 index 3 get /mul load
-  ] cvx bind
-  exch pop			% Remove the input array
-} bind def
+{
+  dup length 5 eq {
+  % CMYK
+    [ /dup load 2 index 0 get /mul load
+      /exch load /dup load 6 index 1 get /mul load
+      /exch load /dup load 10 index 2 get /mul load
+      /exch load 13 index 3 get /mul load
+    ]
+  } {
+    % RGB is assumed
+    [ /dup load 2 index 0 get /mul load
+      /exch load /dup load 6 index 1 get /mul load
+      /exch load 9 index 2 get /mul load
+    ]
+  } ifelse
+  cvx bind exch pop		%  Make executable and remove the input array
+} bind executeonly def
+
+% Construct the colorspace array to be used by setcolorspace from the array
+% result of either findcmykcustomcolor or findrgbcustomcolor.
+/buildcolorspacearray	% <array> buildcustomtinttransform <colorspace_array>
+{ % as with buildcustomtinttransform, the length of the array is used to
+  % determine the alternate colorspace
+  dup length 5 eq {
+    % Start building Separation colorspace with CMYK alternate
+    [ /Separation 2 index 4 get	% Get separation name from array's key
+      /DeviceCMYK
+      4 index //buildcustomtinttransform exec % build the tint transform function
+    ]
+  } {
+    [ /Separation 2 index 3 get	% Get separation name from array's key
+      /DeviceRGB
+      4 index //buildcustomtinttransform exec % build the tint transform function
+    ]
+  } ifelse
+  exch pop		% remove the input array
+} bind executeonly def
 
 % Set a custom color based upon a tint and array which describes the custom
 % color.  See findcmykcustomcolor.  First we create and then set a Separation
@@ -1063,18 +1133,51 @@ def
 % for some reason, so an alternate operational mode is tolerated:
 % 					    null setcustomcolor -
 /setcustomcolor			% <array> <tint> setcustomcolor -
-{ dup //null ne {
-    % Start building Separation colorspace
-    [ /Separation 3 index 4 get	% Get separation name from array's key
-    /DeviceCMYK
-    5 index //buildcustomtinttransform exec] % build the tint transform function
+{
+  dup //null eq {
+    pop pop
+  }{
+    % Check that the tint is a number between 0 and 1
+    dup type dup /integertype eq exch /realtype eq or not {
+      /setcustomcolor /typecheck cvx signalerror
+    } if
+    dup 1 le not {
+      /setcustomcolor /rangecheck cvx signalerror
+    } if
+    dup 0 ge not {
+      /setcustomcolor /rangecheck cvx signalerror
+    } if
+
+    % The array is supposed to be the result of fundcmykcustomcolor. Our
+    % implementation just pushes all the arguments into the array and that's
+    % what buildcolorspacearray expects. So check that now.
+    % Starting with the first N-1 elemenst which must be numbers where 0 <= x <= 1
+    1 index
+    0 1 2 index length 2 sub
+    {
+      1 index exch get dup
+      type dup /integertype eq exch /realtype eq or not {
+        /setcustomcolor /typecheck cvx signalerror
+      } if
+      dup
+      1 le not {
+        /setcustomcolor /rangecheck cvx signalerror
+      } if
+      0 ge not {
+        /setcustomcolor /rangecheck cvx signalerror
+      } if
+    } for
+
+    % Finally, check the last element of the array, which must be a string.
+    dup length 1 sub get type /stringtype eq not {
+      /setcustomcolor /typecheck cvx signalerror
+    } if
+
+    exch //buildcolorspacearray exec
     setcolorspace			% Set the Separation color space as current
     setcolor			% Set the tint as the current color
-    pop				% Remove the input array
-  }
-  { pop }	% 'null' as the tint is ignored
-  ifelse
-} bind def
+  } ifelse
+} bind executeonly def
 
 % This proc is supposed to implement a version of overprinting. TN 5044 says
 % that this proc is not used by any shipping host-based application. We have
@@ -1110,7 +1213,7 @@ def
 % <width> <height> <bits/sample> <matrix> <proc> <array> customcolorimage -
 /customcolorimage {
   gsave
-  [ /Separation 2 index 4 get /DeviceCMYK 5 -1 roll //buildcustomtinttransform exec] setcolorspace
+  //buildcolorspacearray exec setcolorspace
   //args2dict exec image
   grestore
 } bind def
@@ -1124,9 +1227,19 @@ def
   grestore
 } bind def
 
-{ /buildcustomtinttransform /separation_all /args2dict }
+{ /buildcustomtinttransform /buildcolorspacearray /separation_all /args2dict }
 { currentdict exch undef } forall
 
 %END TN 5044 psuedo-ops
 
 end				% level2dict
+
+% undefine things defined in this file and not referenced elsewhere
+[
+    /.checkprocesscomment
+    /.pair2dict
+    /.setcolorrendering1
+    /.checkparamtype
+    /.checksetparams
+] dup level2dict .undefinternalnames
+systemdict .undefinternalnames

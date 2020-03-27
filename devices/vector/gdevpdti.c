@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -55,7 +55,7 @@ struct pdf_char_proc_ownership_s {
     pdf_font_resource_t *font;
     gs_char char_code;                /* Character code in PDF font. */
     gs_glyph glyph;                /* Glyph id in Postscript font. */
-    gs_const_string char_name;
+    gs_string char_name;
     bool duplicate_char_name;
 };
 gs_private_st_strings1_ptrs4(st_pdf_char_proc_ownership, pdf_char_proc_ownership_t,
@@ -291,8 +291,12 @@ pdf_attach_charproc(gx_device_pdf * pdev, pdf_font_resource_t *pdfont, pdf_char_
     if (gnstr == NULL) {
         pcpo->char_name.data = 0;
         pcpo->char_name.size = 0;
-    } else
-        pcpo->char_name = *gnstr;
+    } else {
+        pcpo->char_name.data = gs_alloc_bytes(pdev->pdf_memory->non_gc_memory, gnstr->size, "storage for charproc name");
+        memcpy(pcpo->char_name.data, gnstr->data, gnstr->size);
+        pcpo->char_name.size = gnstr->size;
+//        pcpo->char_name = *gnstr;
+    }
     pcpo->duplicate_char_name = duplicate_char_name;
     return 0;
 }
@@ -305,6 +309,7 @@ pdf_free_charproc_ownership(gx_device_pdf * pdev, pdf_resource_t *pres)
     while (pcpo) {
         next = pcpo->char_next;
         if(pcpo->char_name.size != 0 && pcpo->char_name.data) {
+            gs_free_object(pdev->pdf_memory->non_gc_memory, pcpo->char_name.data, "free storage for charproc naem");
             /* This causes PCL some trouble, don't know why yet FIXME-MEMORY
             gs_free_string(pdev->pdf_memory, (byte *)pcpo->char_name.data, pcpo->char_name.size, "Free CharProc name");*/
             pcpo->char_name.data = (byte *)0L;
@@ -350,6 +355,7 @@ pdf_begin_char_proc(gx_device_pdf * pdev, int w, int h, int x_width,
      * go back to collecting the bitmap into our fallback font.
      */
     if ((show_enum->current_font->FontType == ft_user_defined ||
+        show_enum->current_font->FontType == ft_PDF_user_defined ||
         show_enum->current_font->FontType == ft_PCL_user_defined ||
         show_enum->current_font->FontType == ft_MicroType ||
         show_enum->current_font->FontType == ft_GL2_stick_user_defined ||
@@ -362,6 +368,9 @@ pdf_begin_char_proc(gx_device_pdf * pdev, int w, int h, int x_width,
         code = pdf_attached_font_resource(pdev, show_enum->current_font, &font, NULL, NULL, NULL, NULL);
         if (code < 0)
             return code;
+        if (font == NULL)
+            return_error(gs_error_invalidfont);
+
         /* The text processing will have run past the glyph, so we need to 'back up'
          * by one and get it again in order to get the character code and glyph, and update
          * the pointer correctly.
@@ -375,7 +384,7 @@ pdf_begin_char_proc(gx_device_pdf * pdev, int w, int h, int x_width,
          * a type 3 font, then set pet to NULL, this means we will fall back to
          * the 'collection' font, as pet is checked below.
          */
-        if (char_code >= 0 && char_code <= 255) {
+        if ((int)char_code >= 0 && (int)char_code <= 255) {
             pet = &font->u.simple.Encoding[char_code];
             if (pet) {
                 /* Check to see if we *already* have this glyph in this font. If
@@ -503,6 +512,7 @@ pdf_mark_glyph_names(const pdf_font_resource_t *pdfont, const gs_memory_t *memor
                 pdfont->mark_glyph(memory, pdfont->u.simple.Encoding[i].glyph, pdfont->mark_glyph_data);
      }
     if (pdfont->FontType == ft_user_defined ||
+        pdfont->FontType == ft_PDF_user_defined ||
         pdfont->FontType == ft_PCL_user_defined ||
         pdfont->FontType == ft_MicroType ||
         pdfont->FontType == ft_GL2_stick_user_defined ||
@@ -531,7 +541,7 @@ pdf_do_char_image(gx_device_pdf * pdev, const pdf_char_proc_t * pcp,
     values.pdfont = pdfont;
     values.size = 1;
     values.matrix = *pimat;
-    values.render_mode = pdev->pte->pis->text_rendering_mode;
+    values.render_mode = pdev->pte->pgs->text_rendering_mode;
     values.word_spacing = 0;
     pdf_set_text_state_values(pdev, &values);
     pdf_bitmap_char_update_bbox(pdev, pcp->x_offset, pcp->y_offset, pcp->real_width.x, pcp->real_width.y);
@@ -585,9 +595,9 @@ pdf_start_charproc_accum(gx_device_pdf *pdev)
     int code = pdf_enter_substream(pdev, resourceCharProc, id,
                                    &pres, false, pdev->CompressFonts);
 
-    pres->rid = id;
     if (code < 0)
        return code;
+    pres->rid = id;
     pcp = (pdf_char_proc_t *)pres;
     pcp->owner_fonts = NULL;
     return 0;
@@ -678,7 +688,7 @@ pdf_open_aside(gx_device_pdf *pdev, pdf_resource_type_t rtype,
 
     pdev->streams.save_strm = pdev->strm;
 
-    if (rtype > NUM_RESOURCE_TYPES)
+    if (rtype >= NUM_RESOURCE_TYPES)
         rtype = resourceOther;
     code = pdf_alloc_aside(pdev, PDF_RESOURCE_CHAIN(pdev, rtype, id),
                 pdf_resource_type_structs[rtype], &pres, reserve_object_id ? 0 : -1);
@@ -721,6 +731,9 @@ pdf_close_aside(gx_device_pdf *pdev)
     pdev->strm = pdev->streams.save_strm;
     if (status < 0)
          return(gs_note_error(gs_error_ioerror));
+
+    if (!pcs)
+        return gs_note_error(gs_error_ioerror);
 
     pcs->is_open = false;
     return 0;
@@ -789,7 +802,12 @@ pdf_enter_substream(gx_device_pdf *pdev, pdf_resource_type_t rtype,
     /* Do not alter type3charpath, inherit the current value. We need to know if */
     /* we are inside a charpath operation, and only reset this when the charpath */
     /* is complete */
-    pdf_reset_graphics(pdev);
+    if (rtype != resourceXObject)
+        pdf_reset_graphics(pdev);
+    else {
+        if (pdev->vg_initial_set)
+            pdev->state.blend_mode = pdev->vg_initial.blend_mode;
+    }
     *ppres = pres;
     return 0;
 }

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -51,6 +51,7 @@
 #include "plchar.h"
 /* include the prototype for pixmap_high_level_pattern */
 #include "gsptype1.h"
+#include "gsgstate.h"
 
 /* Define whether to cache TrueType characters. */
 /* This would only be disabled for debugging. */
@@ -183,7 +184,7 @@ bits_merge(byte * dest, const byte * src, uint nbytes)
 {
     long *dp = (long *)dest;
     const long *sp = (const long *)src;
-    uint n = (nbytes + sizeof(long) - 1) >> arch_log2_sizeof_long;
+    uint n = (nbytes + sizeof(long) - 1) >> ARCH_LOG2_SIZEOF_LONG;
 
     for (; n >= 4; sp += 4, dp += 4, n -= 4)
         dp[0] |= sp[0], dp[1] |= sp[1], dp[2] |= sp[2], dp[3] |= sp[3];
@@ -240,7 +241,7 @@ bits_smear_horizontally(byte * dest, const byte * src, uint width,
                         *dp++ = 0xff;
                         bits_on += 8 -
                             byte_count_bits[(*zp & (zmask - 1)) +
-                                            (zp[1] & -zmask)];
+                                            (zp[1] & -(int)zmask)];
                         ++zp;
                         i += 8;
                         goto on;
@@ -287,7 +288,7 @@ bits_smear_horizontally(byte * dest, const byte * src, uint width,
 int
 pl_image_bitmap_char(gs_image_enum * ienum, const gs_image_t * pim,
                      const byte * bitmap_data, uint sraster, int bold,
-                     byte * bold_lines, gs_state * pgs)
+                     byte * bold_lines, gs_gstate * pgs)
 {
     uint dest_bytes = (pim->Width + 7) >> 3;
     gx_device *dev = pgs->device;
@@ -301,7 +302,7 @@ pl_image_bitmap_char(gs_image_enum * ienum, const gs_image_t * pim,
     if (code != 0)
         return code;
     code = (*dev_proc(dev, begin_image))
-        (dev, (const gs_imager_state *)pgs, pim, gs_image_format_chunky,
+        (dev, (const gs_gstate *)pgs, pim, gs_image_format_chunky,
          NULL, gs_currentdevicecolor_inline(pgs), pgs->clip_path,
          pgs->memory, (gx_image_enum_common_t **) & iinfo);
     if (code < 0)
@@ -379,7 +380,7 @@ pl_image_bitmap_char(gs_image_enum * ienum, const gs_image_t * pim,
 /* Render a character for a bitmap font. */
 /* This handles both format 0 (PCL XL) and format 4 (PCL5 bitmap). */
 static int
-pl_bitmap_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
+pl_bitmap_build_char(gs_show_enum * penum, gs_gstate * pgs, gs_font * pfont,
                      gs_char chr, gs_glyph glyph)
 {
     pl_font_t *plfont = (pl_font_t *) pfont->client_data;
@@ -519,11 +520,15 @@ pl_tt_string_proc(gs_font_type42 * pfont, ulong offset, uint length,
 
     *pdata = plfont->header + plfont->offsets.GT +
         (plfont->large_sizes ? 6 : 4) + offset;
+
+    if (*pdata > plfont->header + plfont->header_size)
+        return_error(gs_error_invalidfont);
+
     return 0;
 }
 
 /* Return the vertical substitute for a glyph, if it has one; */
-/* otherwise return gs_no_glyph. */
+/* otherwise return GS_NO_GLYPH. */
 gs_glyph
 pl_font_vertical_glyph(gs_glyph glyph, const pl_font_t * plfont)
 {
@@ -532,7 +537,7 @@ pl_font_vertical_glyph(gs_glyph glyph, const pl_font_t * plfont)
     uint i, len;
 
     if (VT < 0)
-        return gs_no_glyph;
+        return GS_NO_GLYPH;
     vtseg = plfont->header + VT;
     if (plfont->large_sizes)
         len = pl_get_uint32(vtseg + 2), i = 6;
@@ -542,21 +547,18 @@ pl_font_vertical_glyph(gs_glyph glyph, const pl_font_t * plfont)
     for (; i < len; i += 4)
         if (glyph == pl_get_uint16(vtseg + i))
             return pl_get_uint16(vtseg + i + 2);
-    return gs_no_glyph;
+    return GS_NO_GLYPH;
 }
 
-/* get metrics with support for XL tt class 1 and 2
- * pl overrides gstype42_default_get_metrics
- */
-
-static int
-pl_tt_get_metrics(gs_font_type42 * pfont, uint glyph_index,
-                  gs_type42_metrics_options_t options, float *sbw)
+/* retrieve lsb and width metrics for Format 1 Class 2 glyphs */
+int
+pl_tt_f1c2_get_metrics(gs_font_type42 * pfont, uint glyph_index,
+                  int wmode, float *sbw)
 {
+    int code = gs_error_undefined;
     pl_font_t *plfont = pfont->client_data;
     const pl_font_glyph_t *pfg = 0;
     const byte *cdata = 0;
-    int wmode = gs_type42_metrics_options_wmode(options);
 
     if (plfont->glyphs.table != 0) {
         /* at least one caller calls before the glyph.table is valid, no chars yet
@@ -586,8 +588,24 @@ pl_tt_get_metrics(gs_font_type42 * pfont, uint glyph_index,
                 sbw[0] = lsb * factor, sbw[1] = 0;
                 sbw[2] = width * factor, sbw[3] = 0;
             }
-            return 0;           /* tt class 1,2 */
+            code = 0;           /* tt class 1,2 */
         }
+    }
+    return code;
+}
+
+/* get metrics with support for XL tt class 1 and 2
+ * pl overrides gstype42_default_get_metrics
+ */
+static int
+pl_tt_get_metrics(gs_font_type42 * pfont, uint glyph_index,
+                  gs_type42_metrics_options_t options, float *sbw)
+{
+    int wmode = gs_type42_metrics_options_wmode(options);
+    int code;
+
+    if ((code = pl_tt_f1c2_get_metrics (pfont, glyph_index, wmode, sbw)) != gs_error_undefined) {
+        return code;
     }
     /* else call default implementation for tt class 0, incomplete font */
     /* first check for a vertical substitute if writing mode is
@@ -600,7 +618,7 @@ pl_tt_get_metrics(gs_font_type42 * pfont, uint glyph_index,
         if (plfont->allow_vertical_substitutes) {
             gs_glyph vertical = pl_font_vertical_glyph(glyph_index, plfont);
 
-            if (vertical != gs_no_glyph)
+            if (vertical != GS_NO_GLYPH)
                 glyph_index = vertical;
         }
     }
@@ -639,6 +657,9 @@ pl_tt_get_outline(gs_font_type42 * pfont, uint index, gs_glyph_data_t * pdata)
             (*cdata == 15 ? cdata[2] /* PCL5 */ : 0 /* PCL XL */ );
         uint data_size = pl_get_uint16(cdata + 2 + desc_size);
 
+        if (data_size > pfg->data_len)
+            data_size = pfg->data_len;
+
         if (data_size <= 4) {
             /* empty outline */
             gs_glyph_data_from_null(pdata);
@@ -669,11 +690,17 @@ tt_find_table(gs_font_type42 * pfont, const char *tname, uint * plen)
     const byte *TableDirectory;
     uint i;
     ulong table_dir_offset = 0;
+    int code;
 
-    access(0, 12, OffsetTable);
-    access(table_dir_offset, 12, OffsetTable);
+    if (((code = access(0, 12, OffsetTable)) < 0) ||
+        ((code = access(table_dir_offset, 12, OffsetTable)) < 0))
+        return 0;
+
     numTables = pl_get_uint16(OffsetTable + 4);
-    access(table_dir_offset + 12, numTables * 16, TableDirectory);
+
+    if (access(table_dir_offset + 12, numTables * 16, TableDirectory) < 0)
+        return 0;
+
     for (i = 0; i < numTables; ++i) {
         const byte *tab = TableDirectory + i * 16;
 
@@ -685,17 +712,6 @@ tt_find_table(gs_font_type42 * pfont, const char *tname, uint * plen)
     }
     return 0;
 }
-
-#ifndef gs_imager_state_DEFINED
-#  define gs_imager_state_DEFINED
-typedef struct gs_imager_state_s gs_imager_state;
-#endif
-
-/* Opaque type for a path */
-#ifndef gx_path_DEFINED
-#  define gx_path_DEFINED
-typedef struct gx_path_s gx_path;
-#endif
 
 /*
  * Map a key through a cmap sub-table.  We export this so we can use
@@ -816,7 +832,7 @@ pl_tt_cmap_encode_char(gs_font_type42 * pfont, ulong cmap_offset,
         access(offset, cmap_offset + cmap_len - offset, table);
     }
     code = pl_cmap_lookup((uint) chr, table, &value);
-    return (code < 0 ? gs_no_glyph : value);
+    return (code < 0 ? GS_NO_GLYPH : value);
 }
 
 /* Encode a character using the map built for downloaded TrueType fonts. */
@@ -826,7 +842,7 @@ pl_tt_dynamic_encode_char(const gs_font_type42 * pfont, gs_char chr)
     pl_font_t *plfont = pfont->client_data;
     const pl_tt_char_glyph_t *ptcg = pl_tt_lookup_char(plfont, chr);
 
-    return (ptcg->chr == gs_no_char ? gs_no_glyph : ptcg->glyph);
+    return (ptcg->chr == gs_no_char ? GS_NO_GLYPH : ptcg->glyph);
 }
 
 /* Return the galley character for a character code, if any; */
@@ -865,7 +881,7 @@ pl_font_galley_character(gs_char chr, const pl_font_t * plfont)
 
 /* Encode a character for a TrueType font. */
 /* What we actually return is the TT glyph index.  Note that */
-/* we may return either gs_no_glyph or 0 for an undefined character. */
+/* we may return either GS_NO_GLYPH or 0 for an undefined character. */
 gs_glyph
 pl_tt_encode_char(gs_font * pfont_generic, gs_char chr,
                   gs_glyph_space_t not_used)
@@ -880,9 +896,6 @@ pl_tt_encode_char(gs_font * pfont_generic, gs_char chr,
                                              chr));
     pl_font_t *plfont = pfont->client_data;
     pl_font_glyph_t *pfg;
-
-    /* This is used by pl_decode_glyph in plfont.c */
-    plfont->last_char = chr;
 
     if (plfont->offsets.GC < 0)
         return glyph;           /* no substitute */
@@ -907,10 +920,10 @@ static int
 pl_tt_char_metrics(const pl_font_t * plfont, const void *pgs,
                    gs_char char_code, float metrics[4])
 {
-    gs_glyph unused_glyph = gs_no_glyph;
+    gs_glyph unused_glyph = GS_NO_GLYPH;
     gs_glyph glyph =
         pl_tt_encode_char(plfont->pfont, char_code, unused_glyph);
-    if (glyph == gs_no_glyph) {
+    if (glyph == GS_NO_GLYPH) {
         return 1;
     }
     return gs_type42_get_metrics((gs_font_type42 *) plfont->pfont,
@@ -924,7 +937,7 @@ pl_tt_char_width(const pl_font_t * plfont, const void *pgs, gs_char char_code,
 {
     gs_font *pfont = plfont->pfont;
     gs_char chr = char_code;
-    gs_glyph unused_glyph = gs_no_glyph;
+    gs_glyph unused_glyph = GS_NO_GLYPH;
     gs_glyph glyph = pl_tt_encode_char(pfont, chr, unused_glyph);
     int code;
     float sbw[4];
@@ -935,12 +948,12 @@ pl_tt_char_width(const pl_font_t * plfont, const void *pgs, gs_char char_code,
     if (pfont->WMode & 1) {
         gs_glyph vertical = pl_font_vertical_glyph(glyph, plfont);
 
-        if (vertical != gs_no_glyph)
+        if (vertical != GS_NO_GLYPH)
             glyph = vertical;
     }
 
     /* undefined character */
-    if (glyph == 0xffff || glyph == gs_no_glyph)
+    if (glyph == 0xffff || glyph == GS_NO_GLYPH)
         return 1;
 
     code = gs_type42_get_metrics((gs_font_type42 *) pfont, glyph, sbw);
@@ -953,7 +966,7 @@ pl_tt_char_width(const pl_font_t * plfont, const void *pgs, gs_char char_code,
 
 /* Render a TrueType character. */
 static int
-pl_tt_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
+pl_tt_build_char(gs_show_enum * penum, gs_gstate * pgs, gs_font * pfont,
                  gs_char chr, gs_glyph orig_glyph)
 {
     gs_glyph glyph = orig_glyph;
@@ -965,9 +978,11 @@ pl_tt_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
     float bold_fraction =
         gs_show_in_charpath(penum) != cpm_show ? 0.0 : plfont->bold_fraction;
     uint bold_added;
-    double scale;
+    double scale = 1.0;
     float sbw[4], w2[6];
-    int ipx, ipy, iqx, iqy;
+    int ipx = 0;
+    int ipy = 0;
+    int iqx, iqy;
     gx_device_memory *pmdev;
     bool ctm_modified = false;
     bool bold_device_created = false;
@@ -982,7 +997,7 @@ pl_tt_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
      gs_setcharwidth(penum, pgs, w2[0], w2[1]);
 #endif
     /* undefined */
-    if (glyph == gs_no_glyph)
+    if (glyph == GS_NO_GLYPH)
         return 0;
     /* Get the metrics and set the cache device. */
     code = gs_type42_get_metrics(pfont42, glyph, sbw);
@@ -1016,7 +1031,7 @@ pl_tt_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
             pl_font_t *plfont = pfont->client_data;
             gs_glyph vertical = pl_font_vertical_glyph(glyph, plfont);
 
-            if (vertical != gs_no_glyph) {
+            if (vertical != GS_NO_GLYPH) {
                 glyph = vertical;
             }
         }
@@ -1028,7 +1043,7 @@ pl_tt_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
             /* save the ctm */
             gs_currentmatrix(pgs, &save_ctm);
             ctm_modified = true;
-            /* magic numbers - we don't completelely understand
+            /* magic numbers - we don't completely understand
                the translation magic used by HP.  This provides a
                good approximation */
             gs_translate(pgs, 1.0 / 1.15, -(1.0 - 1.0 / 1.15));
@@ -1059,11 +1074,15 @@ pl_tt_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
         gs_make_scaling(scale, scale, &smat);
         sbox.p.x = w2[2], sbox.p.y = w2[3];
         sbox.q.x = w2[4], sbox.q.y = w2[5];
-        gs_bbox_transform(&sbox, &smat, &sbox);
+        code = gs_bbox_transform(&sbox, &smat, &sbox);
+        if (code < 0)
+            return code;
         ipx = (int)sbox.p.x, ipy = (int)sbox.p.y;
         iqx = (int)ceil(sbox.q.x), iqy = (int)ceil(sbox.q.y);
         /* Set up the memory device for the bitmap.  NB should check code. */
-        gs_make_mem_mono_device_with_copydevice(&pmdev, pgs->memory, pgs->device);
+        code = gs_make_mem_mono_device_with_copydevice(&pmdev, pgs->memory, pgs->device);
+        if (code < 0)
+            return code;
 
         bold_device_created = true;
         /* due to rounding, bold added (integer) can be zero while
@@ -1096,11 +1115,15 @@ pl_tt_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
             cbox.p.x = cbox.p.y = fixed_0;
             cbox.q.x = int2fixed(pmdev->width);
             cbox.q.y = int2fixed(pmdev->height);
-            gx_clip_to_rectangle(pgs, &cbox);
+            code = gx_clip_to_rectangle(pgs, &cbox);
+            if (code < 0)
+                return code;
         }
         /* Make sure we clear the entire bitmap. */
         memset(pmdev->base, 0, bitmap_raster(pmdev->width) * pmdev->height);
-        gx_set_device_color_1(pgs);     /* write 1's */
+        code = gx_set_device_color_1(pgs);     /* write 1's */
+        if (code < 0)
+            return code;
         smat.tx = (float)(-ipx);
         smat.ty = (float)(-ipy);
         gs_setmatrix(pgs, &smat);
@@ -1122,8 +1145,8 @@ pl_tt_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
     }
     if (ctm_modified)
         gs_setmatrix(pgs, &save_ctm);
-    if (bold_added)
-        gs_grestore(pgs);
+    if (bold_added && (code >= 0))
+        code = gs_grestore(pgs);
 
     if (code < 0 || !bold_added)
         return (code < 0 ? code : 0);
@@ -1229,17 +1252,18 @@ pl_intelli_merge_box(float wbox[6], const pl_font_t * plfont, gs_glyph glyph)
 /* Do the work for rendering an Intellifont character. */
 /* The caller has done the setcachedevice. */
 static int
-pl_intelli_show_char(gs_state * pgs, const pl_font_t * plfont, gs_glyph glyph)
+pl_intelli_show_char(gs_gstate * pgs, const pl_font_t * plfont, gs_glyph glyph)
 {
     int code;
-    const byte *cdata;
+    const byte *cdata, *cdata_end;
     pl_font_glyph_t *font_glyph;
     const intelli_metrics_t *metrics;
-    int *xBuffer, *yBuffer;
+    int *xBuffer = NULL, *yBuffer = NULL;
     client_name_t cname = (client_name_t) "pl_intelli_show_char";
 
     font_glyph = pl_font_lookup_glyph(plfont, glyph);
     cdata = font_glyph->data;
+    cdata_end = cdata + font_glyph->data_len;
 
     if (cdata == 0) {
         if_debug1m('1', pgs->memory, "[1] no character data for glyph %ld\n",
@@ -1274,6 +1298,9 @@ pl_intelli_show_char(gs_state * pgs, const pl_font_t * plfont, gs_glyph glyph)
 
         cdata += 4;             /* skip PCL character header */
         outlines = cdata + pl_get_uint16(cdata + 6);
+        if (outlines >= cdata_end)
+            return 0;
+
         num_loops = pl_get_uint16(outlines);
 
         if_debug2m('1', pgs->memory, "[1]ifont glyph %lu: loops=%u\n",
@@ -1295,12 +1322,22 @@ pl_intelli_show_char(gs_state * pgs, const pl_font_t * plfont, gs_glyph glyph)
             int pointBufferSize;
             uint sz;
 
+            if ((outlines + 4 + i * 8) >= cdata_end) {
+                code = gs_note_error(gs_error_invalidfont);
+                break;
+            }
             num_points = pl_get_uint16(xyc);
             num_aux_points = pl_get_uint16(xyc + 2);
 
             x_coords = xyc + 4;
             y_coords = x_coords + num_points * 2;
             x_coords_last = y_coords;
+
+            if (x_coords_last >= cdata_end
+                || (y_coords + num_points * 2) >= cdata_end) {
+                code = 0;
+                break;
+            }
 
             metrics =
                 (const intelli_metrics_t *)(cdata + pl_get_uint16(cdata + 2));
@@ -1315,6 +1352,24 @@ pl_intelli_show_char(gs_state * pgs, const pl_font_t * plfont, gs_glyph glyph)
                 x_aux_coords = y_coords + num_points * 2;
                 y_aux_coords = x_aux_coords + num_aux_points;
                 x_aux_coords_last = y_coords;
+                if ((y_aux_coords + num_aux_points * 2) >= cdata_end) {
+                    if (x_aux_coords_last >= cdata_end) {
+                        pointBufferSize -= num_aux_points;
+                        num_aux_points = 0xffff;
+                        x_aux_coords = NULL;
+                        y_aux_coords = NULL;
+                        x_aux_coords_last = NULL;
+                    }
+                    else {
+                        /* if we don't have enough data for all the declared points
+                         * use as much as we have.
+                         */
+                        pointBufferSize -= num_aux_points;
+                        num_aux_points = (cdata_end - y_aux_coords) / 2;
+                        pointBufferSize += num_aux_points;
+                        x_aux_coords_last = x_aux_coords + num_aux_points;
+                    }
+                }
             } else {
                 x_aux_coords = NULL;
                 y_aux_coords = NULL;
@@ -1493,7 +1548,7 @@ pl_intelli_char_metrics(const pl_font_t * plfont, const void *pgs,
 
 /* Render a character for an Intellifont. */
 static int
-pl_intelli_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
+pl_intelli_build_char(gs_show_enum * penum, gs_gstate * pgs, gs_font * pfont,
                       gs_char chr, gs_glyph glyph)
 {
     const pl_font_t *plfont = (const pl_font_t *)pfont->client_data;
@@ -1722,7 +1777,7 @@ match_font_glyph(const gs_memory_t * mem, cached_char * cc, void *vpfg)
     return (cc->pair->font == pfg->font && cc->code == pfg->glyph);
 }
 int
-pl_font_add_glyph(pl_font_t * plfont, gs_glyph glyph, const byte * cdata)
+pl_font_add_glyph(pl_font_t * plfont, gs_glyph glyph, const byte * cdata, const int cdata_len)
 {
     gs_font *pfont = plfont->pfont;
     gs_glyph key = glyph;
@@ -1787,6 +1842,7 @@ pl_font_add_glyph(pl_font_t * plfont, gs_glyph glyph, const byte * cdata)
     }
     pfg->glyph = key;
     pfg->data = cdata;
+    pfg->data_len = cdata_len;
     return 0;
 }
 

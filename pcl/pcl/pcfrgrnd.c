@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -79,9 +79,13 @@ build_foreground(pcl_state_t * pcs,
 {
     pcl_frgrnd_t *pfrgrnd = *ppfrgrnd;
     const pcl_cs_indexed_t *pindexed = ppalet->pindexed;
-    int num_entries = pindexed->num_entries;
+    int num_entries;
     bool is_default = false;
     int code = 0;
+
+    if (!pindexed) {
+        return_error(gs_error_invalidaccess);
+    }
 
     /*
      * Check for a request for the default foreground. Since there are only
@@ -89,8 +93,7 @@ build_foreground(pcl_state_t * pcs,
      * is fixed and has two entries. The default foreground is black, which is
      * the second of the two entries.
      */
-    if ((pindexed != 0) &&
-        (pindexed->pfixed) && (num_entries == 2) && (pal_entry == 1)) {
+    if ((pindexed->pfixed) && (pindexed->num_entries == 2) && (pal_entry == 1)) {
         is_default = true;
         if (pcs->pdflt_frgrnd != 0) {
             pcl_frgrnd_copy_from(*ppfrgrnd, pcs->pdflt_frgrnd);
@@ -98,6 +101,8 @@ build_foreground(pcl_state_t * pcs,
         }
     }
 
+    num_entries = pindexed->num_entries;
+    
     /* release the existing foreground */
     if (pfrgrnd != 0) {
         rc_decrement(pfrgrnd, "build pcl foreground");
@@ -192,7 +197,7 @@ frgrnd_do_registration(pcl_parser_state_t * pcl_parser_state,
     }, END_CLASS return 0;
 }
 
-static void
+static int
 frgrnd_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
     if (type & (pcl_reset_permanent)) {
@@ -200,6 +205,7 @@ frgrnd_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
         rc_decrement(pcs->pdflt_frgrnd, "foreground reset pdflt_frgrnd");
         rc_decrement(pcs->pwhite_cs, "foreground reset p_white_cs");
     }
+    return 0;
 }
 
 static int

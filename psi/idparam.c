@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -225,11 +225,10 @@ dict_ints_param(const gs_memory_t *mem, const ref * pdict,
 }
 
 /* Get a float array from a dictionary. */
-/* If there are more than len elements, return over_error if it is < 0 */
-/* Otherwise, load len elements. If there are less than len elements, and */
-/* under_error < 0, return the error, otherwise return the count of elements */
-/* If the parameter is not in the dict, then if defaultvec is NULL, return 0; */
-/* if defaultvec is not NULL, copy it into fvec (len elements), and return len */
+/* Return the element count if OK, <0 if invalid. */
+/* If the parameter is missing, then if defaultvec is NULL, return 0; */
+/* if defaultvec is not NULL, copy it into fvec (maxlen elements) */
+/* and return maxlen. */
 int
 dict_float_array_check_param(const gs_memory_t *mem,
                              const ref * pdict, const char *kstr,
@@ -250,10 +249,9 @@ dict_float_array_check_param(const gs_memory_t *mem,
     if (!r_is_array(pdval))
         return_error(gs_error_typecheck);
     size = r_size(pdval);
-    if (over_error < 0 && size > len)
+    if (size > len)
         return_error(over_error);
 
-    size = min(size, len);		/* don't process more than we have room for */
     code = process_float_array(mem, pdval, size, fvec);
     return (code < 0 ? code :
             size == len || under_error >= 0 ? size :
@@ -382,7 +380,7 @@ dict_uid_param(const ref * pdict, gs_uid * puid, int defaultval,
     } else {
         if (!r_has_type(puniqueid, t_integer))
            return_error(gs_error_typecheck);
-        if (puniqueid->value.intval < 0 || puniqueid->value.intval > 0xffffff)
+        if (puniqueid->value.intval < 0 || puniqueid->value.intval > 0x7fffffff)
            return_error(gs_error_rangecheck);
         /* Apparently fonts created by Fontographer often have */
         /* a UniqueID of 0, contrary to Adobe's specifications. */

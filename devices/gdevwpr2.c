@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -53,7 +53,7 @@
  * device gets opened (and any spooling starts).
  *
  * The driver returns an additional property named "UserSettings".
- * This is a dictionary which contens are valid only after setting
+ * This is a dictionary which contents are valid only after setting
  * the QueryUser property (see below). The UserSettings dict contains
  * the following keys:
  *
@@ -119,10 +119,10 @@
  * if the Windows printer supports duplex printing.
  */
 
+#include "windows_.h"
 #include "gdevprn.h"
 #include "gdevpccm.h"
 #include "string_.h"
-#include "windows_.h"
 #include <shellapi.h>
 #include "gp_mswin.h"
 
@@ -133,9 +133,6 @@
 
 /* Make sure we cast to the correct structure type. */
 typedef struct gx_device_win_pr2_s gx_device_win_pr2;
-
-#undef wdev
-#define wdev ((gx_device_win_pr2 *)dev)
 
 /* Device procedures */
 
@@ -256,9 +253,10 @@ win_pr2_open(gx_device * dev)
     POINT offset;
     POINT size;
     float m[4];
-    FILE *pfile;
+    gp_file *pfile;
     DOCINFO docinfo;
     float ratio = 1.0;
+    gx_device_win_pr2 *wdev = (gx_device_win_pr2 *)dev;
 
     win_pr2_copy_check(wdev);
 
@@ -281,7 +279,7 @@ win_pr2_open(gx_device * dev)
         GlobalUnlock(wdev->win32_hdevnames);
 
         if (wdev->hdcprn == NULL) {
-            return gs_error_Fatal;
+	  return_error(gs_error_Fatal);
         }
 
     } else if (!win_pr2_getdc(wdev)) {
@@ -302,7 +300,7 @@ win_pr2_open(gx_device * dev)
 
         if (!PrintDlg(&pd)) {
             /* device not opened - exit ghostscript */
-            return gs_error_Fatal;	/* exit Ghostscript cleanly */
+	  return_error(gs_error_Fatal);	/* exit Ghostscript cleanly */
         }
 
         devmode = GlobalLock(pd.hDevMode);
@@ -324,7 +322,7 @@ win_pr2_open(gx_device * dev)
     if (!(GetDeviceCaps(wdev->hdcprn, RASTERCAPS) != RC_DIBTODEV)) {
         errprintf(dev->memory, "Windows printer does not have RC_DIBTODEV\n");
         DeleteDC(wdev->hdcprn);
-        return gs_error_limitcheck;
+        return_error(gs_error_limitcheck);
     }
     /* initialise printer, install abort proc */
     wdev->lpfnAbortProc = (DLGPROC) AbortProc2;
@@ -350,7 +348,7 @@ win_pr2_open(gx_device * dev)
         errprintf(dev->memory,
                   "Printer StartDoc failed (error %08x)\n", GetLastError());
         DeleteDC(wdev->hdcprn);
-        return gs_error_limitcheck;
+        return_error(gs_error_limitcheck);
     }
 
     dev->x_pixels_per_inch = (float)GetDeviceCaps(wdev->hdcprn, LOGPIXELSX);
@@ -400,7 +398,7 @@ win_pr2_open(gx_device * dev)
     pfile = gp_open_scratch_file(dev->memory,
                                  gp_scratch_file_name_prefix,
                                  wdev->fname, "wb");
-    fclose(pfile);
+    gp_fclose(pfile);
     code = gdev_prn_open(dev);
 
     /* If we subclassed the device, with a FirstPage LastPage device,
@@ -441,6 +439,7 @@ win_pr2_close(gx_device * dev)
 {
     int code;
     int aborted = FALSE;
+    gx_device_win_pr2 *wdev = (gx_device_win_pr2 *)dev;
 
     win_pr2_copy_check(wdev);
 
@@ -480,9 +479,6 @@ win_pr2_close(gx_device * dev)
 
 /* ------ Internal routines ------ */
 
-#undef wdev
-#define wdev ((gx_device_win_pr2 *)pdev)
-
 /********************************************************************************/
 
 /* ------ Private definitions ------ */
@@ -492,7 +488,7 @@ win_pr2_close(gx_device * dev)
 /* Write BMP header to memory, then send bitmap to printer */
 /* one scan line at a time */
 static int
-win_pr2_print_page(gx_device_printer * pdev, FILE * file)
+win_pr2_print_page(gx_device_printer * pdev, gp_file * file)
 {
     int raster = gdev_prn_raster(pdev);
 
@@ -509,6 +505,7 @@ win_pr2_print_page(gx_device_printer * pdev, FILE * file)
     char dlgtext[32];
     HGLOBAL hrow;
     int ratio = ((gx_device_win_pr2 *)pdev)->ratio;
+    gx_device_win_pr2 *wdev = (gx_device_win_pr2 *)pdev;
 
     struct bmi_s {
         BITMAPINFOHEADER h;
@@ -574,9 +571,12 @@ win_pr2_print_page(gx_device_printer * pdev, FILE * file)
             lines = scan_lines - y;
         else
             lines = yslice;
-        for (i = 0; i < lines; i++)
-            gdev_prn_copy_scan_lines(pdev, y + i,
+        for (i = 0; i < lines; i++) {
+            code = gdev_prn_copy_scan_lines(pdev, y + i,
                               row + (bmp_raster * (lines - 1 - i)), raster);
+            if (code < 0)
+                goto xit;
+        }
 
         if (ratio > 1) {
             StretchDIBits(wdev->hdcprn, 0, y*ratio, pdev->width*ratio, lines*ratio,
@@ -621,6 +621,7 @@ win_pr2_print_page(gx_device_printer * pdev, FILE * file)
             ShowWindow(wdev->hDlgModeless, SW_HIDE);
     }
 
+xit:
     GlobalUnlock(hrow);
     GlobalFree(hrow);
 
@@ -689,6 +690,7 @@ win_pr2_set_bpp(gx_device * dev, int depth)
 {
     int code = 0;
     gx_device_printer *pdev = (gx_device_printer *)dev;
+    gx_device_win_pr2 *wdev = (gx_device_win_pr2 *)pdev;
 
     if (depth > 8) {
         static const gx_device_color_info win_pr2_24color = dci_std_color(24);
@@ -789,19 +791,19 @@ win_pr2_set_bpp(gx_device * dev, int depth)
     wdev->selected_bpp = depth;
 
     /* copy encode/decode procedures */
-    dev->procs.encode_color = dev->procs.map_rgb_color;
-    dev->procs.decode_color = dev->procs.map_color_rgb;
+    set_dev_proc(dev, encode_color, dev_proc(dev, map_rgb_color));
+    set_dev_proc(dev, decode_color, dev_proc(dev, map_color_rgb));
     if (depth == 1) {
-        dev->procs.get_color_mapping_procs =
-            gx_default_DevGray_get_color_mapping_procs;
-        dev->procs.get_color_comp_index =
-            gx_default_DevGray_get_color_comp_index;
+        set_dev_proc(dev, get_color_mapping_procs,
+            gx_default_DevGray_get_color_mapping_procs);
+        set_dev_proc(dev, get_color_comp_index,
+            gx_default_DevGray_get_color_comp_index);
     }
     else {
-        dev->procs.get_color_mapping_procs =
-            gx_default_DevRGB_get_color_mapping_procs;
-        dev->procs.get_color_comp_index =
-            gx_default_DevRGB_get_color_comp_index;
+        set_dev_proc(dev, get_color_mapping_procs,
+            gx_default_DevRGB_get_color_mapping_procs);
+        set_dev_proc(dev, get_color_comp_index,
+            gx_default_DevRGB_get_color_comp_index);
     }
     return(code);
 }
@@ -813,6 +815,7 @@ int
 win_pr2_get_params(gx_device * pdev, gs_param_list * plist)
 {
     int code = gdev_prn_get_params(pdev, plist);
+    gx_device_win_pr2 *wdev = (gx_device_win_pr2 *)pdev;
 
     win_pr2_copy_check(wdev);
 
@@ -840,6 +843,7 @@ win_pr2_put_params(gx_device * pdev, gs_param_list * plist)
     int ecode = 0, code;
     int old_bpp = pdev->color_info.depth;
     int bpp = old_bpp;
+    gx_device_win_pr2 *wdev = (gx_device_win_pr2 *)pdev;
     bool tumble   = wdev->tumble;
     bool nocancel = wdev->nocancel;
     int queryuser = 0;
@@ -961,8 +965,6 @@ win_pr2_put_params(gx_device * pdev, gs_param_list * plist)
     return ecode;
 }
 
-#undef wdev
-
 /********************************************************************************/
 
 /* Get Device Context for printer */
@@ -1000,43 +1002,30 @@ win_pr2_getdc(gx_device_win_pr2 * wdev)
     }
 
     /* now try to match the printer name against the [Devices] section */
-#ifdef GS_NO_UTF8
-    {
-        char *devices = gs_malloc(wdev->memory, 4096, 1, "win_pr2_getdc");
-        char *p;
-        if (devices == (char *)NULL)
-            return FALSE;
-        GetProfileString("Devices", NULL, "", devices, 4096);
-        p = devices;
-        while (*p) {
-            if (stricmp(p, device) == 0)
-                break;
-            p += strlen(p) + 1;
-        }
-        if (*p == '\0')
-            p = NULL;
-        gs_free(wdev->memory, devices, 4096, 1, "win_pr2_getdc");
-        if (p == NULL)
-            return FALSE;  /* doesn't match an available printer */
-
-        /* the printer exists, get the remaining information from win.ini */
-        GetProfileString("Devices", device, "", driverbuf, sizeof(driverbuf));
-    }
-#else
     {
         wchar_t unidrvbuf[sizeof(driverbuf)];
         wchar_t *devices;
         wchar_t *p;
+        int devices_size = 128, returned_length = 0;
         wchar_t *unidev = malloc(utf8_to_wchar(NULL, device)*sizeof(wchar_t));
         if (unidev == NULL)
             return FALSE;
         utf8_to_wchar(unidev, device);
-        devices = gs_malloc(wdev->memory, 8192, 1, "win_pr2_getdc");
-        if (devices == (wchar_t *)NULL) {
-            free(unidev);
-            return FALSE;
-        }
-        GetProfileStringW(L"Devices", NULL, L"", devices, 8192);
+        do {
+            devices = gs_malloc(wdev->memory, devices_size, 1, "win_pr2_getdc");
+            if (devices == (wchar_t *)NULL) {
+                free(unidev);
+                return FALSE;
+            }
+            returned_length = GetProfileStringW(L"Devices", NULL, L"", devices, devices_size / sizeof(wchar_t));
+            returned_length *= sizeof(wchar_t);
+            if (returned_length >= devices_size - 2 * sizeof(wchar_t)) {
+                gs_free(wdev->memory, devices, devices_size, 1, "win_pr2_getdc");
+                devices_size += 4096;
+            }
+            else
+                break;
+        } while (1);
         p = devices;
         while (*p) {
             if (wcsicmp(p, unidev) == 0)
@@ -1045,7 +1034,7 @@ win_pr2_getdc(gx_device_win_pr2 * wdev)
         }
         if (*p == '\0')
             p = NULL;
-        gs_free(wdev->memory, devices, 8192, 1, "win_pr2_getdc");
+        gs_free(wdev->memory, devices, devices_size, 1, "win_pr2_getdc");
         if (p == NULL) {
             free(unidev);
             return FALSE;  /* doesn't match an available printer */
@@ -1059,9 +1048,8 @@ win_pr2_getdc(gx_device_win_pr2 * wdev)
             return FALSE;
         wchar_to_utf8(driverbuf, unidrvbuf);
     }
-#endif
     driver = gs_strtok(driverbuf, ",", &dbuflast);
-    output = gs_strtok(NULL, ",", dbuflast);
+    output = gs_strtok(NULL, ",", &dbuflast);
 
     if (!gp_OpenPrinter(device, &hprinter))
         return FALSE;
@@ -1582,6 +1570,28 @@ win_pr2_copy_check(gx_device_win_pr2 * wdev)
 
     if (wdev->original_device == wdev)
         return;
+
+    /* I have, I'm afraid, no real idea what this routine is for. Its been present
+     * since the earliest incarnation of the device I can find (in 1994). It seems
+     * to me that if this check ever fails, then things will always go badly wrong,
+     * since the Windows-specific structures (eg hdcprn) will be reset. I'm not
+     * sure if these are somehow expected to be set by calling 'open' again or
+     * something. In any event this check is completely incompatible with the
+     * device subclassing, because the device is now capable of moving around in
+     * memory. So add this check to see if the device has been subclassed. If it
+     * has, don't throw away the Windows-specific structures, we need them and
+     * they certainly won't be recreated.
+     */
+    {
+        gx_device *dev = wdev->parent;
+
+        while(dev) {
+            if ((gx_device *)wdev->original_device == dev)
+                return;
+
+            dev = dev->parent;
+        }
+    }
 
     wdev->hdcprn = NULL;
     wdev->win32_hdevmode = NULL;

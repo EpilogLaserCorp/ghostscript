@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -29,6 +29,7 @@
 #include "gdevpsdf.h"
 #include "gxdevmem.h"
 #include "sarc4.h"
+#include "gsfunc.h"
 
 #define FINE_GLYPH_USAGE 1 /* Old code = 0, new code = 1 */
 
@@ -54,6 +55,8 @@
 
 /* ================ Types and structures ================ */
 
+typedef struct pdf_base_font_s pdf_base_font_t;
+
 /* Define the possible contexts for the output stream. */
 typedef enum {
     PDF_IN_NONE,
@@ -77,15 +80,9 @@ typedef struct cos_object_procs_s cos_object_procs_t;
 typedef const cos_object_procs_t *cos_type_t;
 #define cos_types_DEFINED
 
-#ifndef pdf_text_state_DEFINED
-#  define pdf_text_state_DEFINED
 typedef struct pdf_text_state_s pdf_text_state_t;
-#endif
 
-#ifndef pdf_char_glyph_pairs_DEFINED
-#  define pdf_char_glyph_pairs_DEFINED
 typedef struct pdf_char_glyph_pairs_s pdf_char_glyph_pairs_t;
-#endif
 
 /* ---------------- Resources ---------------- */
 
@@ -329,6 +326,7 @@ typedef struct pdf_page_s {
     pdf_page_dsc_info_t dsc_info;
     bool NumCopies_set; /* ps2write only. */
     int NumCopies;      /* ps2write only. */
+    float UserUnit;     /* pdfwrite only */
 } pdf_page_t;
 #define private_st_pdf_page()        /* in gdevpdf.c */\
   gs_private_st_ptrs2(st_pdf_page, pdf_page_t, "pdf_page_t",\
@@ -340,16 +338,13 @@ typedef struct pdf_page_s {
  */
 typedef struct pdf_temp_file_s {
     char file_name[gp_file_name_sizeof];
-    FILE *file;
+    gp_file *file;
     stream *strm;
     byte *strm_buf;
     stream *save_strm;                /* save pdev->strm while writing here */
 } pdf_temp_file_t;
 
-#ifndef gx_device_pdf_DEFINED
-#  define gx_device_pdf_DEFINED
 typedef struct gx_device_pdf_s gx_device_pdf;
-#endif
 
 /* Structures and definitions for linearisation */
 typedef struct linearisation_record_s {
@@ -417,7 +412,7 @@ typedef struct share_hint_stream_s {
 } shared_hint_stream_t;
 
 typedef struct pdf_linearisation_s {
-    FILE *sfile;
+    gp_file *sfile;
     pdf_temp_file_t Lin_File;
     char HintBuffer[256];
     unsigned char HintBits;
@@ -485,8 +480,9 @@ struct pdf_font_cache_elem_s {
 typedef struct pdf_viewer_state_s {
     int transfer_not_identity;        /* bitmask */
     gs_id transfer_ids[4];
-    float opacity_alpha; /* state.opacity.alpha */
-    float shape_alpha; /* state.shape.alpha */
+    float strokeconstantalpha;
+    float fillconstantalpha;
+    bool alphaisshape;
     gs_blend_mode_t blend_mode; /* state.blend_mode */
     gs_id halftone_id;
     gs_id black_generation_id;
@@ -577,6 +573,7 @@ struct gx_device_pdf_s {
     bool ReEncodeCharacters;
     long FirstObjectNumber;
     bool CompressFonts;
+    bool CompressStreams;
     bool PrintStatistics;
     gs_param_string DocumentUUID;
     gs_param_string InstanceUUID;
@@ -600,7 +597,6 @@ struct gx_device_pdf_s {
                               a bitmap representation of a shading.
                               (Bigger shadings to be downsampled). */
     long MaxInlineImageSize;
-    gs_param_int_array DSCEncodingToUnicode;
     /* Encryption parameters */
     gs_param_string OwnerPassword;
     gs_param_string UserPassword;
@@ -624,8 +620,8 @@ struct gx_device_pdf_s {
     pdf_page_dsc_info_t page_dsc_info; /* current page */
     /* Additional graphics state */
     bool fill_overprint, stroke_overprint;
+    int rendering_intent;
     bool remap_fill_color, remap_stroke_color;
-    int overprint_mode;
     gs_id halftone_id;
     gs_id transfer_ids[4];
     int transfer_not_identity;        /* bitmask */
@@ -792,6 +788,19 @@ struct gx_device_pdf_s {
     int PatternDepth;
     gs_matrix AccumulatedPatternMatrix;
 
+    /* Normally the PDF itnerpreter doesn't call execform to pass a From XObject to
+     * pdfwrite, but it *does* create forms (and increment FormDepth) for transparent
+     * Groups, which are handled as Form XObjects. Because of the way that Pattterns work,
+     * the first pattern after a Form uses the Form co-ordinate system, but if the Pattern
+     * itself uses Patterns, then the nested Pattern needs to use the co-ordinate system
+     * of the parent Pattern. Unless, of course, we have another Form!
+     * So essentially we need to know the Pattern depth, since the last form was executed.
+     * If its 0, then we want to apply the current CTM, if its more than that then we want
+     * to undo the pdfwrite scaling (see gdevpdfv.c, pdf_store_pattern1_params() at about line
+     * 239.
+     */
+    int PatternsSinceForm;
+
     /* Accessories */
     cos_dict_t *substream_Resources;     /* Substream resources */
     gs_color_space_index pcm_color_info_index; /* Index of the ProcessColorModel space. */
@@ -850,6 +859,7 @@ struct gx_device_pdf_s {
     bool DetectDuplicateImages;
     bool AllowIncrementalCFF;
     bool WantsToUnicode;
+    bool WantsPageLabels;
     bool AllowPSRepeatFunctions;
     bool IsDistiller;
     bool PreserveSMask;
@@ -858,9 +868,6 @@ struct gx_device_pdf_s {
                                      * to fail, especially with small amounts of data.
                                      * This parameter is present only to allow
                                      * ps2write output to work on those pritners.
-                                     */
-    bool UseOldColor;               /* Use the old pdfwrite colour conversions instead of the CMS
-                                     * temporary variable
                                      */
     bool Linearise;                 /* Whether to Linearizse the file, the next 2 parameter
                                      * are only used if this is true.
@@ -881,6 +888,21 @@ struct gx_device_pdf_s {
                                      */
     bool FlattenFonts;
     int LastFormID;
+    char *ExtensionMetadata;        /* If present the non-standard pdfmark Extension_Metadata has been
+                                     * used, the content of ths string is written out as part of the
+                                     * metadata referenced by the Catalog.
+                                     */
+    char *PDFFormName;              /* If present, we are processing (or about to process) a Form XObject
+                                     * which we wish to handle as a Form XObject, not flatten. Currently
+                                     * this is only the case for Annotation Appearances. This must be NULL
+                                     * after the form is processed. The name will be used to create a
+                                     * local named object which pdfmark can reference.
+                                     */
+    stream *PassThroughWriter;      /* A copy of the stream that the image enumerator points to, if we are
+                                     * doing JPEG pass through we write the JPEG data here, and don't write
+                                     * anything in the image processing routines.
+                                     */
+    float UserUnit;
 };
 
 #define is_in_page(pdev)\
@@ -908,12 +930,13 @@ struct gx_device_pdf_s {
  m(28,sbstack) m(29,substream_Resources) m(30,font3)\
  m(31,accumulating_substream_resource) \
  m(32,pres_soft_mask_dict) m(33,PDFXTrimBoxToMediaBoxOffset.data)\
- m(34,PDFXBleedBoxToTrimBoxOffset.data) m(35, DSCEncodingToUnicode.data)\
- m(36,Identity_ToUnicode_CMaps[0]) m(37,Identity_ToUnicode_CMaps[1])\
- m(38,ResourceUsage) m(39,vgstack)\
- m(40, outline_levels) m(41, EmbeddedFiles)
- m(41, gx_device_pdf, EmbeddedFiles);
- m(42, gx_device_pdf, pdf_font_dir);*/
+ m(34,PDFXBleedBoxToTrimBoxOffset.data)
+ m(35,Identity_ToUnicode_CMaps[0]) m(36,Identity_ToUnicode_CMaps[1])\
+ m(37,vgstack)\
+ m(38, outline_levels)
+ m(39, gx_device_pdf, EmbeddedFiles);
+ m(40, gx_device_pdf, pdf_font_dir);
+ m(41, gx_device_pdf, Extension_Metadata);*/
 #define gx_device_pdf_num_ptrs 43
 #define gx_device_pdf_do_param_strings(m)\
     m(0, OwnerPassword) m(1, UserPassword) m(2, NoEncrypt)\
@@ -940,6 +963,7 @@ extern const gx_device_vector_procs pdf_vector_procs;
 dev_proc_fill_rectangle(gdev_pdf_fill_rectangle);
 dev_proc_fill_path(gdev_pdf_fill_path);
 dev_proc_stroke_path(gdev_pdf_stroke_path);
+dev_proc_fill_stroke_path(gdev_pdf_fill_stroke_path);
 dev_proc_fillpage(gdev_pdf_fillpage);
     /* In gdevpdfi.c */
 dev_proc_begin_typed_image(gdev_pdf_begin_typed_image);
@@ -975,6 +999,10 @@ void pdf_reset_text(gx_device_pdf *pdev);
 /* ---------------- Exported by gdevpdfu.c ---------------- */
 
 /* ------ Document ------ */
+
+/* Utility functions to write args into the file as comments */
+int pdfwrite_fwrite_args_comment(gx_device_pdf *pdev, gp_file *f);
+int pdfwrite_write_args_comment(gx_device_pdf *pdev, stream *s);
 
 /* Write a DSC compliant header to the file */
 int ps2write_dsc_header(gx_device_pdf * pdev, int pages);
@@ -1071,6 +1099,13 @@ pdf_resource_t *pdf_find_resource_by_gs_id(gx_device_pdf * pdev,
                                            pdf_resource_type_t rtype,
                                            gs_id rid);
 
+/* Remove a resource from a chain of resources but do not free it. The resource will
+ * have to be listed elsewhere. This is primarily useful for moving existing resources
+ * to local named resources.
+ */
+void
+pdf_drop_resource_from_chain(gx_device_pdf * pdev, pdf_resource_t *pres1, pdf_resource_type_t rtype);
+
 void pdf_drop_resources(gx_device_pdf * pdev, pdf_resource_type_t rtype,
         int (*cond)(gx_device_pdf * pdev, pdf_resource_t *pres));
 
@@ -1127,8 +1162,8 @@ int pdf_free_resource_objects(gx_device_pdf *pdev, pdf_resource_type_t rtype);
 int pdf_store_page_resources(gx_device_pdf *pdev, pdf_page_t *page, bool clear_usage);
 
 /* Copy data from a temporary file to a stream. */
-void pdf_copy_data(stream *s, FILE *file, gs_offset_t count, stream_arcfour_state *ss);
-void pdf_copy_data_safe(stream *s, FILE *file, gs_offset_t position, long count);
+int pdf_copy_data(stream *s, gp_file *file, gs_offset_t count, stream_arcfour_state *ss);
+int pdf_copy_data_safe(stream *s, gp_file *file, gs_offset_t position, long count);
 
 /* Add the encryption filter. */
 int pdf_begin_encrypt(gx_device_pdf * pdev, stream **s, gs_id object_id);
@@ -1163,6 +1198,8 @@ int pdf_write_saved_string(gx_device_pdf * pdev, gs_string * pstr);
 /* Store a copy of clipping path. */
 int pdf_remember_clip_path(gx_device_pdf * pdev, const gx_clip_path * pcpath);
 
+int pdf_check_soft_mask(gx_device_pdf * pdev, gs_gstate * pgs);
+
 /* Test whether the clip path needs updating. */
 bool pdf_must_put_clip_path(gx_device_pdf * pdev, const gx_clip_path * pcpath);
 
@@ -1179,6 +1216,7 @@ typedef struct pdf_lcvd_s {
     dev_t_proc_fill_rectangle((*std_fill_rectangle), gx_device);
     dev_t_proc_close_device((*std_close_device), gx_device);
     dev_t_proc_get_clipping_box((*std_get_clipping_box), gx_device);
+    dev_t_proc_transform_pixel_region((*std_transform_pixel_region), gx_device);
     bool mask_is_empty;
     bool path_is_empty;
     bool mask_is_clean;
@@ -1289,10 +1327,6 @@ int pdf_end_data(pdf_data_writer_t *pdw);
  * ranges[i].rmin) / (ranges[i].rmax - ranges[i].rmin).  Note that this is
  * the inverse of the scaling convention for Functions per se.
  */
-#ifndef gs_function_DEFINED
-typedef struct gs_function_s gs_function_t;
-#  define gs_function_DEFINED
-#endif
 int pdf_function(gx_device_pdf *pdev, const gs_function_t *pfn,
                  cos_value_t *pvalue);
 int pdf_function_scaled(gx_device_pdf *pdev, const gs_function_t *pfn,
@@ -1302,6 +1336,11 @@ int pdf_function_scaled(gx_device_pdf *pdev, const gs_function_t *pfn,
 int pdf_write_function(gx_device_pdf *pdev, const gs_function_t *pfn,
                        long *pid);
 
+/* If a stitching function references an array of other functions, we need
+ * to 'unreference' those before freeing the function. otherwise we end up
+ * trying to free the referenced functions twice.
+ */
+int free_function_refs(gx_device_pdf *pdev, cos_object_t *pco);
 /* ------ Fonts ------ */
 
 /* Write a FontBBox dictionary element. */
@@ -1342,8 +1381,8 @@ int pdfmark_write_article(gx_device_pdf * pdev, const pdf_article_t * part);
 bool pdf_objname_is_valid(const byte *data, uint size);
 
 /*
- * Look up a named object.  Return e_rangecheck if the syntax is invalid,
- * e_undefined if no object by that name exists.
+ * Look up a named object.  Return_error(gs_error_rangecheck if the syntax is invalid,
+ * gs_error_undefined if no object by that name exists.
  */
 int pdf_find_named(gx_device_pdf * pdev, const gs_param_string * pname,
                    cos_object_t **ppco);
@@ -1368,7 +1407,7 @@ int pdf_refer_named(gx_device_pdf *pdev, const gs_param_string *pname,
 
 /*
  * Look up a named object as for pdf_refer_named.  If the object already
- * exists and is not simply a forward reference, return e_rangecheck;
+ * exists and is not simply a forward reference, return_error(gs_error_rangecheck);
  * if it exists as a forward reference, set its type and return 0;
  * otherwise, create the object with the given type and return 1.
  * pname = 0 is allowed: in this case, simply create the object.
@@ -1380,8 +1419,8 @@ int pdf_make_named_dict(gx_device_pdf * pdev, const gs_param_string * pname,
 
 /*
  * Look up a named object as for pdf_refer_named.  If the object does not
- * exist, or is a forward reference, return e_undefined; if the object
- * exists has the wrong type, return e_typecheck.
+ * exist, or is a forward reference, return gs_error_undefined; if the object
+ * exists has the wrong type, return gs_error_typecheck.
  */
 int pdf_get_named(gx_device_pdf * pdev, const gs_param_string * pname,
                   cos_type_t cotype, cos_object_t **ppco);
@@ -1435,7 +1474,6 @@ void pdf_text_state_copy(pdf_text_state_t *pts_to, pdf_text_state_t *pts_from);
 void pdf_reset_text_page(pdf_text_data_t *ptd);
 void pdf_reset_text_state(pdf_text_data_t *ptd);
 void pdf_close_text_page(gx_device_pdf *pdev);
-int  pdf_get_stoted_text_size(pdf_text_state_t *state);
 
 /* For gdevpdfb.c */
 

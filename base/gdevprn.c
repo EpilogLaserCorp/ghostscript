@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -28,6 +28,7 @@
 #include "gdevplnx.h"
 #include "gstrans.h"
 #include "gxdownscale.h"
+#include "gsbitops.h"
 
 #include "gdevkrnlsclass.h" /* 'standard' built in subclasses, currently First/Last Page and obejct filter */
 
@@ -102,11 +103,11 @@ gdev_prn_open(gx_device * pdev)
     code = gdev_prn_allocate_memory(pdev, NULL, 0, 0);
     if (update_procs) {
         if (pdev->ObjectHandlerPushed) {
-            gx_copy_device_procs(&pdev->parent->procs, &pdev->procs, (gx_device_procs *)&gs_obj_filter_device.procs);
+            gx_copy_device_procs(pdev->parent, pdev, &gs_obj_filter_device);
             pdev = pdev->parent;
         }
         if (pdev->PageHandlerPushed)
-            gx_copy_device_procs(&pdev->parent->procs, &pdev->procs, (gx_device_procs *)&gs_flp_device.procs);
+            gx_copy_device_procs(pdev->parent, pdev, &gs_flp_device);
     }
     if (code < 0)
         return code;
@@ -125,7 +126,14 @@ prn_finish_bg_print(gx_device_printer *ppdev)
     /* close and unlink the files and free the device and its private allocator	*/
     if (ppdev->bg_print.device != NULL) {
         int closecode;
+        gx_device_printer *bgppdev = (gx_device_printer *)ppdev->bg_print.device;
         gx_semaphore_wait(ppdev->bg_print.sema);
+        /* If numcopies > 1, then the bg_print->device will have closed and reopened
+         * the output file, so the pointer in the original device is now stale,
+         * so copy it back.
+         * If numcopies == 1, this is pointless, but benign.
+         */
+        ppdev->file = bgppdev->file;
         closecode = gdev_prn_close_printer((gx_device *)ppdev);
         if (ppdev->bg_print.return_code == 0)
             ppdev->bg_print.return_code = closecode;	/* return code here iff there wasn't another error */
@@ -170,10 +178,6 @@ gdev_prn_close(gx_device * pdev)
         code = gx_device_close_output_file(pdev, ppdev->fname, ppdev->file);
         ppdev->file = NULL;
     }
-    if (ppdev->saved_pages_list != NULL) {
-        gx_saved_pages_list_free(ppdev->saved_pages_list);
-        ppdev->saved_pages_list = NULL;
-    }
     return code;
 }
 
@@ -181,10 +185,15 @@ int
 gdev_prn_forwarding_dev_spec_op(gx_device *pdev, int dev_spec_op, void *data, int size)
 {
     gx_device_printer *ppdev = (gx_device_printer *)pdev;
+    int code;
 
-    if (ppdev->orig_procs.dev_spec_op)
-        return ppdev->orig_procs.dev_spec_op(pdev, dev_spec_op, data, size);
-    return gdev_prn_dev_spec_op(pdev, dev_spec_op, data, size);
+    /* if the device is a printer device, we will get here, but allow for a printer device */
+    /* that has a non-default dev_spec_op that may want to not support saved_pages, if so  */
+    /* that device can return an error from the supports_saved_pages spec_op.              */
+    code = ppdev->orig_procs.dev_spec_op(pdev, dev_spec_op, data, size);
+    if (dev_spec_op == gxdso_supports_saved_pages)	/* printer devices support saved pages */
+        return code == 0 ? 1: code;	/*default returns 0, but we still want saved-page support */
+    return code;
 }
 
 int
@@ -202,6 +211,11 @@ gdev_prn_dev_spec_op(gx_device *pdev, int dev_spec_op, void *data, int size)
             return code;
     }
 
+#ifdef DEBUG
+    if (dev_spec_op == gxdso_debug_printer_check)
+        return 1;
+#endif
+
     return gx_default_dev_spec_op(pdev, dev_spec_op, data, size);
 }
 
@@ -212,12 +226,19 @@ gdev_prn_setup_as_command_list(gx_device *pdev, gs_memory_t *buffer_memory,
                                bool bufferSpace_is_exact)
 {
     gx_device_printer * const ppdev = (gx_device_printer *)pdev;
+    gx_device *target = pdev;
     uint space;
     int code;
     gx_device_clist *const pclist_dev = (gx_device_clist *)pdev;
     gx_device_clist_common * const pcldev = &pclist_dev->common;
     bool reallocate = *the_memory != 0;
     byte *base;
+    bool save_is_open = pdev->is_open;	/* Save around temporary failure in open_c loop */
+
+    while (target->parent != NULL) {
+        target = target->parent;
+        gx_update_from_subclass(target);
+    }
 
     /* Try to allocate based simply on param-requested buffer size */
 #ifdef DEBUGGING_HACKS
@@ -225,7 +246,7 @@ gdev_prn_setup_as_command_list(gx_device *pdev, gs_memory_t *buffer_memory,
   BEGIN\
     ulong *fp_ = (ulong *)&first_arg - 2;\
     for (; fp_ && (fp_[1] & 0xff000000) == 0x08000000; fp_ = (ulong *)*fp_)\
-        dmprintf2(buffer_memory, "  fp=0x%lx ip=0x%lx\n", (ulong)fp_, fp_[1]);\
+        dmprintf2(buffer_memory, "  fp="PRI_INTPTR" ip=0x%lx\n", (intptr_t)fp_, fp_[1]);\
   END
 dmputs(buffer_memory, "alloc buffer:\n");
 BACKTRACE(pdev);
@@ -252,13 +273,12 @@ open_c:
     ppdev->buffer_space = space;
     pclist_dev->common.is_printer = 1;
     clist_init_io_procs(pclist_dev, ppdev->BLS_force_memory);
-    clist_init_params(pclist_dev, base, space, pdev,
+    clist_init_params(pclist_dev, base, space, target,
                       ppdev->printer_procs.buf_procs,
                       space_params->band,
                       false, /* do_not_open_or_close_bandfiles */
                       (ppdev->bandlist_memory == 0 ? pdev->memory->non_gc_memory:
                        ppdev->bandlist_memory),
-                      ppdev->free_up_bandlist_memory,
                       ppdev->clist_disable_mask,
                       ppdev->page_uses_transparency);
     code = (*gs_clist_device_procs.open_device)( (gx_device *)pcldev );
@@ -269,7 +289,7 @@ open_c:
              space >= space_params->BufferSpace &&
              !bufferSpace_is_exact
              ) {
-            space <<= 1;
+            space += space / 8;
             if (reallocate) {
                 base = gs_resize_object(buffer_memory,
                                         *the_memory, space,
@@ -284,8 +304,10 @@ open_c:
                                    "cmd list buf(retry open)");
             }
             ppdev->buf = *the_memory;
-            if (base != 0)
+            if (base != 0) {
+                pdev->is_open = save_is_open;	/* allow for success when we loop */
                 goto open_c;
+            }
         }
         /* Failure. */
         if (!reallocate) {
@@ -315,22 +337,10 @@ gdev_prn_tear_down(gx_device *pdev, byte **the_memory)
         ppdev->buffer_space = 0;
         was_command_list = true;
 
+        prn_finish_bg_print(ppdev);
+
         gs_free_object(pcldev->memory->non_gc_memory, pcldev->cache_chunk, "free tile cache for clist");
         pcldev->cache_chunk = 0;
-        if (ppdev->bg_print.ocfile) {
-            (void)ppdev->bg_print.oio_procs->fclose(ppdev->bg_print.ocfile, ppdev->bg_print.ocfname, true);
-        }
-        if (ppdev->bg_print.obfile) {
-            (void)ppdev->bg_print.oio_procs->fclose(ppdev->bg_print.obfile, ppdev->bg_print.obfname, true);
-        }
-        ppdev->bg_print.ocfile = ppdev->bg_print.obfile = NULL;
-        if (ppdev->bg_print.ocfname) {
-            gs_free_object(ppdev->memory->non_gc_memory, ppdev->bg_print.ocfname, "gdev_prn_tear_down(ocfname)");
-        }
-        if (ppdev->bg_print.obfname) {
-            gs_free_object(ppdev->memory->non_gc_memory, ppdev->bg_print.obfname, "gdev_prn_tear_down(obfname)");
-        }
-        ppdev->bg_print.ocfname = ppdev->bg_print.obfname = NULL;
 
         rc_decrement(pcldev->icc_cache_cl, "gdev_prn_tear_down");
         pcldev->icc_cache_cl = NULL;
@@ -377,6 +387,7 @@ gdev_prn_allocate(gx_device *pdev, gdev_prn_space_params *new_space_params,
     gs_memory_t *buffer_memory =
         (ppdev->buffer_memory == 0 ? pdev->memory->non_gc_memory :
          ppdev->buffer_memory);
+    bool deep = device_is_deep(pdev);
 
     /* If reallocate, find allocated memory & tear down buffer device */
     if (reallocate)
@@ -417,10 +428,9 @@ gdev_prn_allocate(gx_device *pdev, gdev_prn_space_params *new_space_params,
             (&buf_space, pdev, NULL, pdev->height, false) >= 0;
         mem_space = buf_space.bits + buf_space.line_ptrs;
         if (ppdev->page_uses_transparency) {
-            pdf14_trans_buffer_size = (ESTIMATED_PDF14_ROW_SPACE(max(1, pdev->width), pdev->color_info.num_components) >> 3);
+            pdf14_trans_buffer_size = (ESTIMATED_PDF14_ROW_SPACE(max(1, pdev->width), pdev->color_info.num_components, deep ? 16 : 8) >> 3);
             if (new_height < (max_ulong - mem_space) / pdf14_trans_buffer_size) {
                 pdf14_trans_buffer_size *= pdev->height;
-                mem_space += pdf14_trans_buffer_size;
             } else {
                 size_ok = 0;
             }
@@ -431,9 +441,7 @@ gdev_prn_allocate(gx_device *pdev, gdev_prn_space_params *new_space_params,
         space_params = ppdev->space_params;
         space_params.BufferSpace = 0;
         (*ppdev->printer_procs.get_space_params)(ppdev, &space_params);
-        if (ppdev->is_async_renderer && space_params.band.BandBufferSpace != 0)
-            space_params.BufferSpace = space_params.band.BandBufferSpace;
-        else if (space_params.BufferSpace == 0) {
+        if (space_params.BufferSpace == 0) {
             if (space_params.band.BandBufferSpace > 0)
                 space_params.BufferSpace = space_params.band.BandBufferSpace;
             else {
@@ -448,21 +456,34 @@ gdev_prn_allocate(gx_device *pdev, gdev_prn_space_params *new_space_params,
         else {
             is_command_list = space_params.banding_type == BandingAlways ||
                 ppdev->saved_pages_list != NULL ||
-                mem_space >= space_params.MaxBitmap ||
+                mem_space + pdf14_trans_buffer_size >= space_params.MaxBitmap ||
                 !size_ok;	    /* too big to allocate */
         }
         if (!is_command_list) {
-            /* Try to allocate memory for full memory buffer */
-            base =
-                (reallocate ?
-                 (byte *)gs_resize_object(buffer_memory, the_memory,
-                                          (uint)mem_space, "printer buffer") :
-                 gs_alloc_bytes(buffer_memory, (uint)mem_space,
-                                "printer_buffer"));
+            byte *trans_buffer_reserve_space = NULL;
+
+            /* Try to allocate memory for full memory buffer, then allocate the
+               pdf14_trans_buffer_size to make sure we have enough space for that */
+            /* NOTE: Assumes that caller won't normally call this function if page
+               size didn't actually change, so we can free/alloc without checking
+               that the new size is different than old size.
+            */
+            if (reallocate) {
+                gs_free_object(buffer_memory, the_memory, "printer_buffer");
+            }
+            base = gs_alloc_bytes(buffer_memory, (uint)mem_space, "printer_buffer");
             if (base == 0)
                 is_command_list = true;
             else
                 the_memory = base;
+            trans_buffer_reserve_space = gs_alloc_bytes(buffer_memory, (uint)pdf14_trans_buffer_size,
+                                                        "pdf14_trans_buffer_reserve test");
+            if (trans_buffer_reserve_space == NULL) {
+                /* the pdf14 reserve test failed, switch to clist mode, the 'base' memory freed below */
+                is_command_list = true;
+            } else {
+                gs_free_object(buffer_memory, trans_buffer_reserve_space, "pdf14_trans_buffer_reserve OK");
+            }
         }
         if (!is_command_list && pass == 1 && PRN_MIN_MEMORY_LEFT != 0
             && buffer_memory == pdev->memory->non_gc_memory) {
@@ -499,13 +520,15 @@ gdev_prn_allocate(gx_device *pdev, gdev_prn_space_params *new_space_params,
             if (ecode == 0)
                 ecode = code;
 
-            if ( code >= 0 || (reallocate && pass > 1) )
+            if (code >= 0 || (reallocate && pass > 1))
                 ppdev->procs = gs_clist_device_procs;
-            /*
-             * Now the device is a clist device, we enable multi-threaded rendering.
-             * It will remain enabled, but that doesn't really cause any problems.
-             */
-            clist_enable_multi_thread_render(pdev);
+            if (code > 0) {
+                /*
+                 * Now the device is a clist device, we enable multi-threaded rendering.
+                 * It will remain enabled, but that doesn't really cause any problems.
+                 */
+                clist_enable_multi_thread_render(pdev);
+            }
         } else {
             /* Render entirely in memory. */
             gx_device *bdev = (gx_device *)pmemdev;
@@ -560,7 +583,8 @@ gdev_prn_allocate(gx_device *pdev, gdev_prn_space_params *new_space_params,
         COPY_PROC(update_spot_equivalent_colors);
         COPY_PROC(ret_devn_params);
         /* This can be set from the memory device (planar) or target */
-        fill_dev_proc(ppdev, put_image, ppdev->orig_procs.put_image);
+        if ( dev_proc(ppdev, put_image) == gx_default_put_image )
+            set_dev_proc(ppdev, put_image, ppdev->orig_procs.put_image);
 #undef COPY_PROC
         /* If using a command list, already opened the device. */
         if (is_command_list)
@@ -606,28 +630,18 @@ gdev_prn_free_memory(gx_device *pdev)
     return 0;
 }
 
-/* ------------- Stubs related only to async rendering ------- */
-
-int	/* rets 0 ok, -ve error if couldn't start thread */
-gx_default_start_render_thread(gdev_prn_start_render_params *params)
+/* for saved pages, we need to make sure and free up the saved_pages_list */
+void
+gdev_prn_finalize(gx_device *pdev)
 {
-    return gs_error_unknownerror;
+    gx_device_printer * const ppdev = (gx_device_printer *)pdev;
+
+    if (ppdev->saved_pages_list != NULL) {
+        gx_saved_pages_list_free(ppdev->saved_pages_list);
+        ppdev->saved_pages_list = NULL;
+    }
 }
 
-/* Open the renderer's copy of a device. */
-/* This is overriden in gdevprna.c */
-int
-gx_default_open_render_device(gx_device_printer *pdev)
-{
-    return gs_error_unknownerror;
-}
-
-/* Close the renderer's copy of a device. */
-int
-gx_default_close_render_device(gx_device_printer *pdev)
-{
-    return gdev_prn_close( (gx_device *)pdev );
-}
 
 /* ------ Get/put parameters ------ */
 
@@ -833,10 +847,11 @@ gdev_prn_put_params(gx_device * pdev, gs_param_list * plist)
             if ((bls.size > 1) && (bls.data[0] == 'm' ||
                  (clist_io_procs_file_global != NULL && bls.data[0] == 'f')))
                 break;
-            /* falls through */
+            /* fall through */
         default:
             ecode = code;
             param_signal_error(plist, param_name, ecode);
+            /* fall through */
         case 1:
             bls.data = 0;
             break;
@@ -853,10 +868,11 @@ gdev_prn_put_params(gx_device * pdev, gs_param_list * plist)
                 code = validate_output_file(&ofs, pdev->memory);
             if (code >= 0)
                 break;
-            /* falls through */
+            /* fall through */
         default:
             ecode = code;
             param_signal_error(plist, param_name, ecode);
+            /* fall through */
         case 1:
             ofs.data = 0;
             break;
@@ -1002,13 +1018,12 @@ gx_default_get_space_params(const gx_device_printer *printer_dev,
 /* background printing, i.e., thread safe and does not change the device.        */
 /* If the printer device is in 'saved_pages' mode, then background printing is   */
 /* irrelevant and is ignored. In this case, pages are saved to the list.         */
-static int	/* 0 ok, -ve error, or 1 if successfully upgraded to buffer_page */
+static int	/* 0 ok, -ve error                                               */
 gdev_prn_output_page_aux(gx_device * pdev, int num_copies, int flush, bool seekable, bool bg_print_ok)
 {
     gx_device_printer * const ppdev = (gx_device_printer *)pdev;
     gs_devn_params *pdevn_params;
-    int outcode = 0, closecode = 0, errcode = 0, endcode;
-    bool upgraded_copypage = false;
+    int outcode = 0, errcode = 0, endcode, closecode = 0;
     int code;
 
     prn_finish_bg_print(ppdev);		/* finish any previous background printing */
@@ -1022,13 +1037,7 @@ gdev_prn_output_page_aux(gx_device * pdev, int num_copies, int flush, bool seeka
         if ((code = gdev_prn_open_printer_seekable(pdev, 1, seekable)) < 0)
             return code;
 
-        /* If copypage request, try to do it using buffer_page */
-        if ( !flush &&
-             (*ppdev->printer_procs.buffer_page)(ppdev, ppdev->file, num_copies) >= 0) {
-            upgraded_copypage = true;
-            flush = true;
-
-        } else if (num_copies > 0) {
+        if (num_copies > 0) {
             int threads_enabled = 0;
             int print_foreground = 1;		/* default to foreground printing */
 
@@ -1045,10 +1054,7 @@ gdev_prn_output_page_aux(gx_device * pdev, int num_copies, int flush, bool seeka
                 threads_enabled = 0;	/* and allow current page to try foreground */
             }
             /* Use 'while' instead of 'if' to avoid nesting */
-            while (ppdev->bg_print_requested && threads_enabled &&
-                   /* FIXME: Don't allow bg_print if multiple rendering threads are used.  */
-                   /* TEMPORARY WORK AROUND FOR BUG 695711 */
-                   ppdev->num_render_threads_requested == 0) {
+            while (ppdev->bg_print_requested && threads_enabled) {
                 gx_device *ndev;
                 gx_device_printer *npdev;
                 gx_device_clist_reader *crdev = (gx_device_clist_reader *)ppdev;
@@ -1078,8 +1084,11 @@ gdev_prn_output_page_aux(gx_device * pdev, int num_copies, int flush, bool seeka
                 crdev->page_info.cfile = crdev->page_info.bfile = NULL;
 
                 if (ppdev->bg_print.sema == NULL)
-                    if (((ppdev->bg_print.sema = gx_semaphore_alloc(ppdev->memory->non_gc_memory)) == NULL))
+                {
+                    ppdev->bg_print.sema = gx_semaphore_label(gx_semaphore_alloc(ppdev->memory->non_gc_memory), "BGPrint");
+                    if (ppdev->bg_print.sema == NULL)
                         break;			/* couldn't create the semaphore */
+                }
 
                 ndev = setup_device_and_mem_for_thread(pdev->memory->thread_safe_memory, pdev, true, NULL);
                 if (ndev == NULL) {
@@ -1092,12 +1101,13 @@ gdev_prn_output_page_aux(gx_device * pdev, int num_copies, int flush, bool seeka
                 npdev->num_render_threads_requested = ppdev->num_render_threads_requested;
 
                 /* Now start the thread to print the page */
-                if ((code == gp_thread_start(prn_print_page_in_background,
-                                             (void *)&(ppdev->bg_print),
-                                             &(ppdev->bg_print.thread_id))) < 0) {
+                if ((code = gp_thread_start(prn_print_page_in_background,
+                                            (void *)&(ppdev->bg_print),
+                                            &(ppdev->bg_print.thread_id))) < 0) {
                     /* Did not start cleanly - clean up is in print_foreground block below */
                     break;
                 }
+                gp_thread_label(ppdev->bg_print.thread_id, "BG print thread");
                 /* Page was succesfully started in bg_print mode */
                 print_foreground = 0;
                 /* Now we need to set up the next page so it will use new clist files */
@@ -1124,11 +1134,11 @@ gdev_prn_output_page_aux(gx_device * pdev, int num_copies, int flush, bool seeka
                 /* Print the accumulated page description. */
                 outcode = (*ppdev->printer_procs.print_page_copies)(ppdev, ppdev->file,
                                                           num_copies);
-                fflush(ppdev->file);
-                errcode = (ferror(ppdev->file) ? gs_note_error(gs_error_ioerror) : 0);
+                gp_fflush(ppdev->file);
+                errcode = (gp_ferror(ppdev->file) ? gs_note_error(gs_error_ioerror) : 0);
                 /* NB: background printing does this differently in its thread */
-                if (!upgraded_copypage)
-                    closecode = gdev_prn_close_printer(pdev);
+                closecode = gdev_prn_close_printer(pdev);
+
             }
         }
     }
@@ -1148,12 +1158,11 @@ gdev_prn_output_page_aux(gx_device * pdev, int num_copies, int flush, bool seeka
         return outcode;
     if (errcode < 0)
         return errcode;
-    if (closecode < 0)
-        return closecode;
     if (endcode < 0)
         return endcode;
     endcode = gx_finish_output_page(pdev, num_copies, flush);
-    return (endcode < 0 ? endcode : upgraded_copypage ? 1 : 0);
+    code = (endcode < 0 ? endcode : closecode < 0 ? closecode : 0);
+    return code;
 }
 
 int
@@ -1182,14 +1191,14 @@ gdev_prn_bg_output_page_seekable(gx_device * pdev, int num_copies, int flush)
 
 /* Print a single copy of a page by calling print_page_copies. */
 int
-gx_print_page_single_copy(gx_device_printer * pdev, FILE * prn_stream)
+gx_print_page_single_copy(gx_device_printer * pdev, gp_file * prn_stream)
 {
     return pdev->printer_procs.print_page_copies(pdev, prn_stream, 1);
 }
 
 /* Print multiple copies of a page by calling print_page multiple times. */
 int
-gx_default_print_page_copies(gx_device_printer * pdev, FILE * prn_stream,
+gx_default_print_page_copies(gx_device_printer * pdev, gp_file * prn_stream,
                              int num_copies)
 {
     int i = 1;
@@ -1206,9 +1215,9 @@ gx_default_print_page_copies(gx_device_printer * pdev, FILE * prn_stream,
          * right thing if we're producing multiple output files.
          * Code is mostly copied from gdev_prn_output_page.
          */
-        fflush(pdev->file);
+        gp_fflush(pdev->file);
         errcode =
-            (ferror(pdev->file) ? gs_note_error(gs_error_ioerror) : 0);
+            (gp_ferror(pdev->file) ? gs_note_error(gs_error_ioerror) : 0);
         closecode = gdev_prn_close_printer((gx_device *)pdev);
         pdev->PageCount++;
         code = (errcode < 0 ? errcode : closecode < 0 ? closecode :
@@ -1222,18 +1231,6 @@ gx_default_print_page_copies(gx_device_printer * pdev, FILE * prn_stream,
     /* Print the last (or only) page. */
     pdev->PageCount -= num_copies - 1;
     return (*pdev->printer_procs.print_page) (pdev, prn_stream);
-}
-
-/*
- * Buffer a (partial) rasterized page & optionally print result multiple times.
- * The default implementation returns error, since the driver needs to override
- * this (in procedure vector) in configurations where this call may occur.
- */
-int
-gx_default_buffer_page(gx_device_printer *pdev, FILE *prn_stream,
-                       int num_copies)
-{
-    return gs_error_unknownerror;
 }
 
 /*
@@ -1251,9 +1248,9 @@ prn_print_page_in_background(void *data)
 
     code = (*ppdev->printer_procs.print_page_copies)(ppdev, ppdev->file,
                                                           num_copies);
-    fflush(ppdev->file);
+    gp_fflush(ppdev->file);
 
-    errcode = (ferror(ppdev->file) ? gs_note_error(gs_error_ioerror) : 0);
+    errcode = (gp_ferror(ppdev->file) ? gs_note_error(gs_error_ioerror) : 0);
     bg_print->return_code = code < 0 ? code : errcode;
 
     /* Finally, release the foreground that may be waiting */
@@ -1336,8 +1333,8 @@ gdev_prn_open_printer_seekable(gx_device *pdev, bool binary_mode,
 
         if (seekable && !gp_fseekable(ppdev->file)) {
             errprintf(pdev->memory, "I/O Error: Output File \"%s\" must be seekable\n", ppdev->fname);
-            if (!IS_LIBCTX_STDOUT(pdev->memory, ppdev->file)
-              && !IS_LIBCTX_STDERR(pdev->memory ,ppdev->file)) {
+            if (!IS_LIBCTX_STDOUT(pdev->memory, gp_get_file(ppdev->file))
+              && !IS_LIBCTX_STDERR(pdev->memory, gp_get_file(ppdev->file))) {
 
                 code = gx_device_close_output_file(pdev, ppdev->fname, ppdev->file);
                 if (code < 0)
@@ -1393,6 +1390,7 @@ gx_page_info_color_usage(const gx_device *dev,
     start = y / band_height;
     end = (y + height + band_height - 1) / band_height;
     if (crdev->color_usage_array == NULL) {
+        return -1;
     }
     for (i = start; i < end; ++i) {
         or |= crdev->color_usage_array[i].or;
@@ -1480,17 +1478,22 @@ gx_default_create_buf_device(gx_device **pbdev, gx_device *target, int y,
         mdev = (gx_device_memory *)*pbdev;
     }
     if (target == (gx_device *)mdev) {
+        dev_t_proc_dev_spec_op((*orig_dso), gx_device) = dev_proc(mdev, dev_spec_op);
         /* The following is a special hack for setting up printer devices. */
         assign_dev_procs(mdev, mdproto);
+        /* Do not override the dev_spec_op! */
+        dev_proc(mdev, dev_spec_op) = orig_dso;
         check_device_separable((gx_device *)mdev);
         /* In order for saved-pages to work, we need to hook the dev_spec_op */
-        if (mdev->procs.dev_spec_op == NULL)
+        if (mdev->procs.dev_spec_op == NULL || mdev->procs.dev_spec_op == gx_default_dev_spec_op)
             set_dev_proc(mdev, dev_spec_op, gdev_prn_dev_spec_op);
 #ifdef DEBUG
         /* scanning sources didn't show anything, but if a device gets changed or added */
         /* that has its own dev_spec_op, it should call the gdev_prn_spec_op as well    */
-        else
-            errprintf(mdev->memory, "Warning: printer device has private dev_spec_op\n");
+        else {
+            if (dev_proc(mdev, dev_spec_op)((gx_device *)mdev, gxdso_debug_printer_check, NULL, 0) < 0)
+                errprintf(mdev->memory, "Warning: printer device has private dev_spec_op\n");
+        }
 #endif
         gx_device_fill_in_procs((gx_device *)mdev);
     } else {
@@ -1510,8 +1513,13 @@ gx_default_create_buf_device(gx_device **pbdev, gx_device *target, int y,
      */
     gs_deviceinitialmatrix(target, &mdev->initial_matrix);
     if (plane_index >= 0) {
-        gx_device_plane_extract *edev =
-            gs_alloc_struct(mem, gx_device_plane_extract,
+        gx_device_plane_extract *edev;
+
+        /* Guard against potential NULL dereference in gs_alloc_struct */
+        if (!mem)
+            return_error(gs_error_undefined);
+
+        edev = gs_alloc_struct(mem, gx_device_plane_extract,
                             &st_device_plane_extract, "create_buf_device");
 
         if (edev == 0) {
@@ -1693,22 +1701,28 @@ gdev_prn_get_bits(gx_device_printer * pdev, int y, byte * str, byte ** actual_da
 }
 /* Copy scan lines to a buffer.  Return the number of scan lines, */
 /* or <0 if error.  This procedure is DEPRECATED. */
+/* Some old and contrib drivers ignore error codes, so make sure and fill */
+/* remaining lines if we get an error (and for lines past end of page).   */
 int
 gdev_prn_copy_scan_lines(gx_device_printer * pdev, int y, byte * str, uint size)
 {
     uint line_size = gdev_prn_raster(pdev);
-    int count = size / line_size;
-    int i;
+    int requested_count = size / line_size;
+    int i, count;
+    int code = 0;
     byte *dest = str;
 
-    count = min(count, pdev->height - y);
+    /* Clamp count between 0 and remaining lines on page so we don't return < 0 */
+    /* unless gdev_prn_get_bits returns an error */
+    count = max(0, min(requested_count, pdev->height - y));
     for (i = 0; i < count; i++, dest += line_size) {
-        int code = gdev_prn_get_bits(pdev, y + i, dest, NULL);
-
-        if (code < 0)
-            return code;
+        code = gdev_prn_get_bits(pdev, y + i, dest, NULL);
+        if (code < 0) 
+            break;	/* will fill remaining lines and return code outside the loop */
     }
-    return count;
+    /* fill remaining lines with 0's to prevent printing garbage */
+    memset(dest, 0, line_size * (requested_count - i));
+    return (code < 0 ) ? code : count;
 }
 
 /* Close the current page. */
@@ -1743,6 +1757,8 @@ compare_gdev_prn_space_params(const gdev_prn_space_params sp1,
   if (sp1.band.BandHeight != sp2.band.BandHeight)
     return(1);
   if (sp1.band.BandBufferSpace != sp2.band.BandBufferSpace)
+    return(1);
+  if (sp1.band.tile_cache_size != sp2.band.tile_cache_size)
     return(1);
   if (sp1.params_are_read_only != sp2.params_are_read_only)
     return(1);

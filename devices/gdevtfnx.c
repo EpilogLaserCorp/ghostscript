@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -54,13 +54,14 @@ const gx_device_tiff gs_tiff12nc_device = {
                         X_DPI, Y_DPI,
                         0, 0, 0, 0,
                         24, tiff12_print_page),
-    arch_is_big_endian          /* default to native endian (i.e. use big endian iff the platform is so*/,
+    ARCH_IS_BIG_ENDIAN          /* default to native endian (i.e. use big endian iff the platform is so*/,
     false,                      /* default to not bigtiff */
     COMPRESSION_NONE,
     TIFF_DEFAULT_STRIP_SIZE,
-    TIFF_DEFAULT_DOWNSCALE,
     0, /* Adjust size */
-    1  /* MinFeatureSize */
+    true, /* write_datetime */
+    GX_DOWNSCALER_PARAMS_DEFAULTS,
+    0 /* icclink */
 };
 
 const gx_device_tiff gs_tiff24nc_device = {
@@ -69,13 +70,14 @@ const gx_device_tiff gs_tiff24nc_device = {
                         X_DPI, Y_DPI,
                         0, 0, 0, 0,
                         24, tiff_rgb_print_page),
-    arch_is_big_endian          /* default to native endian (i.e. use big endian iff the platform is so*/,
+    ARCH_IS_BIG_ENDIAN          /* default to native endian (i.e. use big endian iff the platform is so*/,
     false,                      /* default to not bigtiff */
     COMPRESSION_NONE,
     TIFF_DEFAULT_STRIP_SIZE,
-    TIFF_DEFAULT_DOWNSCALE,
     0, /* Adjust size */
-    1  /* MinFeatureSize */
+    true, /* write_datetime */
+    GX_DOWNSCALER_PARAMS_DEFAULTS,
+    0 /* icclink */
 };
 
 const gx_device_tiff gs_tiff48nc_device = {
@@ -84,13 +86,14 @@ const gx_device_tiff gs_tiff48nc_device = {
                         X_DPI, Y_DPI,
                         0, 0, 0, 0,
                         48, tiff_rgb_print_page),
-    arch_is_big_endian          /* default to native endian (i.e. use big endian iff the platform is so*/,
+    ARCH_IS_BIG_ENDIAN          /* default to native endian (i.e. use big endian iff the platform is so*/,
     false,                      /* default to not bigtiff */
     COMPRESSION_NONE,
     TIFF_DEFAULT_STRIP_SIZE,
-    TIFF_DEFAULT_DOWNSCALE,
     0, /* Adjust size */
-    1  /* MinFeatureSize */
+    true, /* write_datetime */
+    GX_DOWNSCALER_PARAMS_DEFAULTS,
+    0 /* icclink */
 };
 
 /* ------ Private functions ------ */
@@ -118,17 +121,10 @@ tiff_set_rgb_fields(gx_device_tiff *tfdev)
 }
 
 static int
-tiff12_print_page(gx_device_printer * pdev, FILE * file)
+tiff12_print_page(gx_device_printer * pdev, gp_file * file)
 {
     gx_device_tiff *const tfdev = (gx_device_tiff *)pdev;
     int code;
-
-    /* open the TIFF device */
-    if (gdev_prn_file_is_new(pdev)) {
-        tfdev->tif = tiff_from_filep(pdev, pdev->dname, file, tfdev->BigEndian, tfdev->UseBigTIFF);
-        if (!tfdev->tif)
-            return_error(gs_error_invalidfileaccess);
-    }
 
     code = gdev_tiff_begin_page(tfdev, file);
     if (code < 0)
@@ -143,12 +139,16 @@ tiff12_print_page(gx_device_printer * pdev, FILE * file)
     {
         int y;
         int size = gdev_prn_raster(pdev);
-        byte *data = gs_alloc_bytes(pdev->memory, size, "tiff12_print_page");
+
+        /* We allocate an extra 5 bytes to avoid buffer overflow when accessing
+        src[5] below, if size if not multiple of 6. This fixes bug-701807. */
+        int size_alloc = size + 5;
+        byte *data = gs_alloc_bytes(pdev->memory, size_alloc, "tiff12_print_page");
 
         if (data == 0)
             return_error(gs_error_VMerror);
 
-        memset(data, 0, size);
+        memset(data, 0, size_alloc);
 
         for (y = 0; y < pdev->height; ++y) {
             const byte *src;
@@ -177,17 +177,10 @@ tiff12_print_page(gx_device_printer * pdev, FILE * file)
 }
 
 static int
-tiff_rgb_print_page(gx_device_printer * pdev, FILE * file)
+tiff_rgb_print_page(gx_device_printer * pdev, gp_file * file)
 {
     gx_device_tiff *const tfdev = (gx_device_tiff *)pdev;
     int code;
-
-    /* open the TIFF device */
-    if (gdev_prn_file_is_new(pdev)) {
-        tfdev->tif = tiff_from_filep(pdev, pdev->dname, file, tfdev->BigEndian, tfdev->UseBigTIFF);
-        if (!tfdev->tif)
-            return_error(gs_error_invalidfileaccess);
-    }
 
     code = gdev_tiff_begin_page(tfdev, file);
     if (code < 0)

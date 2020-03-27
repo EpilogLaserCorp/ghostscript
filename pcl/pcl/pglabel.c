@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -40,7 +40,7 @@
 #include "gsutil.h"
 #include "gxchar.h"             /* for show enumerator */
 #include "gxfont.h"
-#include "gxstate.h"            /* for gs_state_client_data */
+#include "gxstate.h"            /* for gs_gstate_client_data */
 
 #define STICK_FONT_TYPEFACE 48
 
@@ -98,23 +98,6 @@ hpgl_points_2_plu(const hpgl_state_t * pgls, double points)
 
 /* ------ Next-character procedure ------ */
 
-/* is it a printable character - duplicate of pcl algorithm in
-   pctext.c */
-static bool
-hpgl_is_printable(const pl_symbol_map_t * psm,
-                  gs_char chr, bool is_stick, bool transparent)
-{
-    if (transparent)
-        return true;
-    if (is_stick)
-        return (chr >= ' ') && (chr <= 0xff);
-    if ((psm == 0) || (psm->type >= 2))
-        return true;
-    else if (psm->type == 1)
-        chr &= 0x7f;
-    return (chr >= ' ') && (chr <= '\177');
-}
-
 /*
  * Map a character through the symbol set, if needed.
  */
@@ -124,8 +107,9 @@ hpgl_map_symbol(uint chr, const hpgl_state_t * pgls)
     const pcl_font_selection_t *pfs =
         &pgls->g.font_selection[pgls->g.font_selected];
     const pl_symbol_map_t *psm = pfs->map;
+    bool db = pcl_downloaded_and_bound(pfs->font);
 
-    return pl_map_symbol(psm, chr,
+    return pl_map_symbol((db ? NULL : psm), chr,
                          pfs->font->storage == pcds_internal,
                          pfs->font->font_type == plft_MSL,
                          pgls->memory);
@@ -148,11 +132,14 @@ hpgl_select_font_pri_alt(hpgl_state_t * pgls, int index)
 /* forward decl */
 static int hpgl_recompute_font(hpgl_state_t * pgls);
 
-/* Ensure a font is available. */
+/* Ensure a font is available and selected. */
 static int
 hpgl_ensure_font(hpgl_state_t * pgls)
 {
-    if ((pgls->g.font == 0) || (pgls->g.font->pfont == 0))
+    pcl_font_selection_t *pfs =
+        &pgls->g.font_selection[pgls->g.font_selected];
+
+    if (pgls->g.font == 0 || pgls->g.font->pfont == 0 || pfs->font == 0)
         hpgl_call(hpgl_recompute_font(pgls));
     return 0;
 }
@@ -187,7 +174,7 @@ hpgl_select_stick_font(hpgl_state_t * pgls)
     if (pfont == 0)
         return_error(e_Memory);
     code = pl_fill_in_font((gs_font *) pfont, font, pgls->font_dir,
-                           pgls->memory, "stick/arc font");
+                           pgls->memory, "stick_arc_font");
     if (code < 0)
         return code;
     if (pfs->params.proportional_spacing)
@@ -199,6 +186,7 @@ hpgl_select_stick_font(hpgl_state_t * pgls)
     font->font_type = plft_Unicode;
     font->widths_cache = NULL;
     font->widths_cache_nitems = 0;
+    font->storage = 0;
 
     memcpy(font->character_complement, stick_character_complement, 8);
     /*
@@ -243,7 +231,7 @@ hpgl_select_531_font(hpgl_state_t * pgls)
     if (pfont == 0)
         return_error(e_Memory);
     code = pl_fill_in_font((gs_font *) pfont, font, pgls->font_dir,
-                           pgls->memory, "531 font");
+                           pgls->memory, "531_font");
     if (code < 0)
         return code;
 
@@ -472,7 +460,7 @@ hpgl_rotation_transform_distance(hpgl_state_t * pgls, gs_point * dxy,
 {
     double run = pgls->g.character.direction.x;
     double rise = pgls->g.character.direction.y;
-    int angle = (hpgl_compute_angle(run, rise) * radians_to_degrees) + 0.5;
+    int angle = (int)((hpgl_compute_angle(run, rise) * radians_to_degrees) + 0.5);
     gs_point tmp_dxy = *dxy;
     gs_matrix rmat;
 
@@ -611,7 +599,7 @@ hpgl_init_label_buffer(hpgl_state_t * pgls)
 }
 
 /* release the character buffer */
-static int
+void
 hpgl_destroy_label_buffer(hpgl_state_t * pgls)
 {
     gs_free_object(pgls->memory, pgls->g.label.buffer,
@@ -619,7 +607,6 @@ hpgl_destroy_label_buffer(hpgl_state_t * pgls)
     pgls->g.label.char_count = 0;
     pgls->g.label.buffer_size = 0;
     pgls->g.label.buffer = 0;
-    return 0;
 }
 
 /* add a single character to the line buffer */
@@ -741,7 +728,7 @@ hpgl_print_char(hpgl_state_t * pgls, uint ch)
     const pcl_font_selection_t *pfs =
         &pgls->g.font_selection[pgls->g.font_selected];
     pl_font_t *font = pfs->font;
-    gs_state *pgs = pgls->pgs;
+    gs_gstate *pgs = pgls->pgs;
     gs_matrix save_ctm;
     gs_font *pfont = pgls->g.font->pfont;
     gs_point scale = hpgl_current_char_scale(pgls);
@@ -805,7 +792,7 @@ hpgl_print_char(hpgl_state_t * pgls, uint ch)
         bool use_show = hpgl_use_show(pgls, font);
         gs_matrix pre_rmat, advance_mat;
         int angle = 0;
-        gs_text_enum_t *penum;
+        gs_text_enum_t *penum = NULL;
         int code;
         gs_point start_pt, end_pt;
         hpgl_real_t space_width;
@@ -831,7 +818,7 @@ hpgl_print_char(hpgl_state_t * pgls, uint ch)
             }
 
             angle =
-                (hpgl_compute_angle(run, rise) * radians_to_degrees) + 0.5;
+                (int)((hpgl_compute_angle(run, rise) * radians_to_degrees) + 0.5);
             gs_currentmatrix(pgs, &pre_rmat);
             gs_rotate(pgs, angle);
             /* we do something special if the angle is greater than
@@ -956,11 +943,13 @@ hpgl_print_char(hpgl_state_t * pgls, uint ch)
                 /* we just check the current position for
                    "insidedness" - this seems to address the dirty
                    page issue in practice. */
-                pcl_mark_page_for_current_pos(pgls);
-                gs_text_release(penum, "hpgl_print_char");
+                code = pcl_mark_page_for_current_pos(pgls);
             }
-            if (code < 0)
+            gs_text_release(penum, "hpgl_print_char");
+            if (code < 0) {
+                hpgl_free_stick_fonts(pgls);
                 return code;
+            }
             gs_setmatrix(pgs, &advance_mat);
             if (angle >= 0) {
                 /* Compensate for bitmap font non-rotation. */
@@ -1066,7 +1055,7 @@ hpgl_get_character_origin_offset(hpgl_state_t * pgls, int origin,
                                  gs_point * offset)
 {
     double pos_x = 0.0, pos_y = 0.0;
-    double off_x, off_y;
+    double off_x = 0.0, off_y = 0.0;
     hpgl_real_t adjusted_height = height;
 
 #ifdef CHECK_UNIMPLEMENTED
@@ -1385,8 +1374,8 @@ hpgl_process_buffer(hpgl_state_t * pgls, gs_point * offset)
                                 if (pgls->g.bitmap_fonts_allowed)       /* no mirroring */
                                     label_advance = fabs(label_advance);
                             }
-                            hpgl_move_cursor_by_characters(pgls, 0, -1,
-                                                           &label_advance);
+                            hpgl_call(hpgl_move_cursor_by_characters(pgls, 0, -1,
+                                                           &label_advance));
                             continue;
                         }
                         spaces = 0, lines = -1;
@@ -1411,8 +1400,8 @@ hpgl_process_buffer(hpgl_state_t * pgls, gs_point * offset)
                     default:
                         goto print;
                 }
-                hpgl_move_cursor_by_characters(pgls, spaces, lines,
-                                               (const hpgl_real_t *)0);
+                hpgl_call(hpgl_move_cursor_by_characters(pgls, spaces, lines,
+                                               (const hpgl_real_t *)0));
                 continue;
             }
           print:{
@@ -1422,7 +1411,7 @@ hpgl_process_buffer(hpgl_state_t * pgls, gs_point * offset)
                    it is printed as a space character */
                 const pcl_font_selection_t *pfs =
                     &pgls->g.font_selection[pgls->g.font_selected];
-                if (!hpgl_is_printable(pfs->map, ch,
+                if (!char_is_printable(pfs->font, pfs->map, ch,
                                        (pfs->params.
                                         typeface_family & 0xfff) ==
                                        STICK_FONT_TYPEFACE,
@@ -1464,13 +1453,18 @@ hpgl_LB(hpgl_args_t * pargs, hpgl_state_t * pgls)
     const byte *p = pargs->source.ptr;
     const byte *rlimit = pargs->source.limit;
     bool print_terminator = pgls->g.label.print_terminator;
+    int code = 0;
 
     if (pargs->phase == 0) {
         /* initialize the character buffer and CTM first time only */
         hpgl_call(hpgl_draw_current_path(pgls, hpgl_rm_vector));
         hpgl_call(hpgl_init_label_buffer(pgls));
         hpgl_call(hpgl_set_ctm(pgls));
-        hpgl_call(hpgl_set_clipping_region(pgls, hpgl_rm_vector));
+        code = hpgl_set_clipping_region(pgls, hpgl_rm_vector);
+        if (code < 0) {
+            hpgl_destroy_label_buffer(pgls);
+            return code;
+        }
         pgls->g.label.initial_pos = pgls->g.pos;
         hpgl_call(hpgl_add_point_to_path
                   (pgls, pgls->g.pos.x, pgls->g.pos.y,
@@ -1493,8 +1487,12 @@ hpgl_LB(hpgl_args_t * pargs, hpgl_state_t * pgls)
             if (!print_terminator) {
                 gs_point lo_offsets;
 
-                hpgl_call(hpgl_process_buffer(pgls, &lo_offsets));
-                hpgl_call(hpgl_destroy_label_buffer(pgls));
+                code = hpgl_process_buffer(pgls, &lo_offsets);
+                hpgl_destroy_label_buffer(pgls);
+                if (code < 0) {
+                    hpgl_free_stick_fonts(pgls);
+                    return code;
+                }
                 pargs->source.ptr = p;
                 /*
                  * Depending on the DV/LO combination, conditionally
@@ -1541,9 +1539,15 @@ hpgl_LB(hpgl_args_t * pargs, hpgl_state_t * pgls)
         if (GL_LB_CH == CR && !pgls->g.transparent_data) {
             gs_point lo_offsets;
 
-            hpgl_call(hpgl_process_buffer(pgls, &lo_offsets));
-            hpgl_call(hpgl_destroy_label_buffer(pgls));
-            hpgl_call(hpgl_init_label_buffer(pgls));
+            code = hpgl_process_buffer(pgls, &lo_offsets);
+            hpgl_destroy_label_buffer(pgls);
+            if (code < 0)
+                return code;
+            code = hpgl_init_label_buffer(pgls);
+            if (code < 0) {
+                hpgl_free_stick_fonts(pgls);
+                return code;
+            }
         }
     }
     pargs->source.ptr = p;
@@ -1597,7 +1601,7 @@ hpgl_print_symbol_mode_char(hpgl_state_t * pgls)
     hpgl_call(hpgl_init_label_buffer(pgls));
     hpgl_call(hpgl_buffer_char(pgls, pgls->g.symbol_mode));
     hpgl_call(hpgl_process_buffer(pgls, &lo_offsets));
-    hpgl_call(hpgl_destroy_label_buffer(pgls));
+    hpgl_destroy_label_buffer(pgls);
     hpgl_call(hpgl_grestore(pgls));
     /* restore the origin */
     pgls->g.label.origin = saved_origin;

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -39,19 +39,13 @@
 #ifndef gsmemory_INCLUDED
 #  define gsmemory_INCLUDED
 
+#include "std.h"
 #include "gstypes.h"		/* for gs_bytestring */
 #include "gslibctx.h"
 
 /* Define the opaque type for a structure descriptor. */
 typedef struct gs_memory_struct_type_s gs_memory_struct_type_t;
 typedef const gs_memory_struct_type_t *gs_memory_type_ptr_t;
-
-/* Define the opaque type for an allocator. */
-/* (The actual structure is defined later in this file.) */
-#ifndef gs_memory_DEFINED
-#  define gs_memory_DEFINED
-typedef struct gs_memory_s gs_memory_t;
-#endif
 
 /* Define the opaque type for a pointer type. */
 typedef struct gs_ptr_procs_s gs_ptr_procs_t;
@@ -82,12 +76,13 @@ typedef struct gs_memory_status_s {
      * the parent of the memory manager.  It includes space used for
      * allocated data, space available for allocation, and overhead.
      */
-    ulong allocated;
+    size_t allocated;
     /*
      * "Used" space is the amount of space used by allocated data
      * plus overhead.
      */
-    ulong used;
+    size_t used;
+    size_t max_used;
     /* used when wrapping if underlying allocator must be thread safe */
     bool is_thread_safe;
 } gs_memory_status_t;
@@ -102,7 +97,7 @@ typedef struct gs_memory_status_s {
                  */
 
 #define gs_memory_t_proc_alloc_bytes(proc, mem_t)\
-  byte *proc(mem_t *mem, uint nbytes, client_name_t cname)
+  byte *proc(mem_t *mem, size_t nbytes, client_name_t cname)
 
 #define gs_alloc_bytes_immovable(mem, nbytes, cname)\
   ((mem)->procs.alloc_bytes_immovable(mem, nbytes, cname))
@@ -119,7 +114,7 @@ typedef struct gs_memory_status_s {
                  */
 
 #define gs_memory_t_proc_resize_object(proc, mem_t)\
-  void *proc(mem_t *mem, void *obj, uint new_num_elements,\
+  void *proc(mem_t *mem, void *obj, size_t new_num_elements,\
              client_name_t cname)
 
 #define gs_resize_object(mem, obj, newn, cname)\
@@ -135,7 +130,7 @@ typedef struct gs_memory_status_s {
   void proc(mem_t *mem, void *data, client_name_t cname)
 
 #define gs_free_object(mem, data, cname)\
-  ((mem)->procs.free_object(mem, data, cname))
+  do { if (mem != NULL) {((mem)->procs.free_object(mem, data, cname));} } while (0)
 
                 /*
                  * Report status (assigned, used).
@@ -202,6 +197,7 @@ typedef struct gs_memory_status_s {
 #define gs_consolidate_free(mem)\
   ((mem)->procs.consolidate_free(mem))
 
+
 /* Define the members of the procedure structure. */
 #define gs_raw_memory_procs(mem_t)\
     gs_memory_t_proc_alloc_bytes((*alloc_bytes_immovable), mem_t);\
@@ -264,7 +260,7 @@ typedef struct gs_memory_procs_s {
      */
 
 #define gs_memory_proc_alloc_byte_array(proc)\
-  byte *proc(gs_memory_t *mem, uint num_elements, uint elt_size,\
+  byte *proc(gs_memory_t *mem, size_t num_elements, size_t elt_size,\
     client_name_t cname)
 #define gs_alloc_byte_array(mem, nelts, esize, cname)\
   (*(mem)->procs.alloc_byte_array)(mem, nelts, esize, cname)
@@ -278,7 +274,7 @@ typedef struct gs_memory_procs_s {
      */
 
 #define gs_memory_proc_alloc_struct_array(proc)\
-  void *proc(gs_memory_t *mem, uint num_elements,\
+  void *proc(gs_memory_t *mem, size_t num_elements,\
     gs_memory_type_ptr_t pstype, client_name_t cname)
 #define gs_alloc_struct_array(mem, nelts, typ, pstype, cname)\
   (typ *)(*(mem)->procs.alloc_struct_array)(mem, nelts, pstype, cname)
@@ -292,7 +288,7 @@ typedef struct gs_memory_procs_s {
      */
 
 #define gs_memory_proc_object_size(proc)\
-  uint proc(gs_memory_t *mem, const void *obj)
+  size_t proc(gs_memory_t *mem, const void *obj)
 #define gs_object_size(mem, obj)\
   (*(mem)->procs.object_size)(mem, obj)
     gs_memory_proc_object_size((*object_size));
@@ -314,7 +310,7 @@ typedef struct gs_memory_procs_s {
      */
 
 #define gs_memory_proc_alloc_string(proc)\
-  byte *proc(gs_memory_t *mem, uint nbytes, client_name_t cname)
+  byte *proc(gs_memory_t *mem, size_t nbytes, client_name_t cname)
 #define gs_alloc_string(mem, nbytes, cname)\
   (*(mem)->procs.alloc_string)(mem, nbytes, cname)
     gs_memory_proc_alloc_string((*alloc_string));
@@ -328,7 +324,7 @@ typedef struct gs_memory_procs_s {
      */
 
 #define gs_memory_proc_resize_string(proc)\
-  byte *proc(gs_memory_t *mem, byte *data, uint old_num, uint new_num,\
+  byte *proc(gs_memory_t *mem, byte *data, size_t old_num, size_t new_num,\
     client_name_t cname)
 #define gs_resize_string(mem, data, oldn, newn, cname)\
   (*(mem)->procs.resize_string)(mem, data, oldn, newn, cname)
@@ -339,21 +335,28 @@ typedef struct gs_memory_procs_s {
      */
 
 #define gs_memory_proc_free_string(proc)\
-  void proc(gs_memory_t *mem, byte *data, uint nbytes,\
+  void proc(gs_memory_t *mem, byte *data, size_t nbytes,\
     client_name_t cname)
 #define gs_free_string(mem, data, nbytes, cname)\
   (*(mem)->procs.free_string)(mem, data, nbytes, cname)
     gs_memory_proc_free_string((*free_string));
 
-    /*
-     * Register a root for the garbage collector.  root = NULL
-     * asks the memory manager to allocate the root object
-     * itself (immovable, in the manager's parent): this is the usual
-     * way to call this procedure.
-     */
+/*
+  Register a root for the garbage collector.
+    We have three scenarios to deal with:
+    1) rpp is NULL:
+       the root will remain internal to the memory manager.
+    2) rpp is valid, but *rpp is NULL:
+       We'll allocate the root, and return a pointer to it (via rpp).
+    3) rpp is valid, and *rpp is valid:
+       The caller has supplied the root, so use it.
+
+    Scenario 1 is a root that will last until the memory manager is
+    shutdown. 2 & 3 allow the root to be unregistered by the caller.
+*/
 
 #define gs_memory_proc_register_root(proc)\
-  int proc(gs_memory_t *mem, gs_gc_root_t *root, gs_ptr_type_t ptype,\
+  int proc(gs_memory_t *mem, gs_gc_root_t **root, gs_ptr_type_t ptype,\
     void **pp, client_name_t cname)
 #define gs_register_root(mem, root, ptype, pp, cname)\
   (*(mem)->procs.register_root)(mem, root, ptype, pp, cname)
@@ -385,6 +388,19 @@ typedef struct gs_memory_procs_s {
   (*(mem)->procs.enable_free)(mem, enable)
     gs_memory_proc_enable_free((*enable_free));
 
+#define gs_memory_proc_set_object_type(proc)\
+  void proc(gs_memory_t *mem, void *data, gs_memory_type_ptr_t type)
+#define gs_set_object_type(mem, data, type)\
+  (*(mem)->procs.set_object_type)(mem, data, type)
+    gs_memory_proc_set_object_type((*set_object_type));
+
+#define gs_memory_proc_defer_frees(proc)\
+  void proc(gs_memory_t *mem, int defer)
+#define gs_defer_frees(mem, defer)\
+  (*(mem)->procs.defer_frees)(mem, defer)
+    gs_memory_proc_defer_frees((*defer_frees));
+#define GS_MEMORY_CAN_DEFER_FREES
+
 } gs_memory_procs_t;
 
 /*
@@ -395,7 +411,7 @@ typedef struct gs_memory_procs_s {
  */
 void gs_free_const_object(gs_memory_t *mem, const void *data,
                           client_name_t cname);
-void gs_free_const_string(gs_memory_t *mem, const byte *data, uint nbytes,
+void gs_free_const_string(gs_memory_t *mem, const byte *data, size_t nbytes,
                           client_name_t cname);
 
 /*
@@ -411,12 +427,12 @@ void gs_free_const_bytestring(gs_memory_t *mem, gs_const_bytestring *pbs,
  * Either allocate (if obj == 0) or resize (if obj != 0) a structure array.
  * If obj != 0, pstype is used only for checking (in DEBUG configurations).
  */
-void *gs_resize_struct_array(gs_memory_t *mem, void *obj, uint num_elements,
+void *gs_resize_struct_array(gs_memory_t *mem, void *obj, size_t num_elements,
                              gs_memory_type_ptr_t pstype,
                              client_name_t cname);
 
 /* Register a structure root.  This just calls gs_register_root. */
-int gs_register_struct_root(gs_memory_t *mem, gs_gc_root_t *root,
+int gs_register_struct_root(gs_memory_t *mem, gs_gc_root_t **root,
                             void **pp, client_name_t cname);
 
 /* Define no-op freeing procedures for use by enable_free. */
@@ -435,8 +451,6 @@ gs_memory_proc_consolidate_free(gs_ignore_consolidate_free);
 void *gs_raw_alloc_struct_immovable(gs_memory_t * rmem,
                                     gs_memory_type_ptr_t pstype,
                                     client_name_t cname);
-
-typedef struct pl_mem_node_s pl_mem_node_t;
 
 /*
  * Define an abstract allocator instance.

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -44,7 +44,7 @@
  *	  lengths of the encodings.
  */
 
-const gs_glyph gs_c_min_std_encoding_glyph = gs_min_cid_glyph - 0x10000;
+const gs_glyph gs_c_min_std_encoding_glyph = GS_MIN_CID_GLYPH - 0x10000;
 
 /*
  * Encode a character in a known encoding.  The only use for glyph numbers
@@ -56,7 +56,7 @@ gs_c_known_encode(gs_char ch, int ei)
     if (ei < 0 || ei >= gs_c_known_encoding_count ||
         ch >= gs_c_known_encoding_lengths[ei]
         )
-        return gs_no_glyph;
+        return GS_NO_GLYPH;
     return gs_c_min_std_encoding_glyph + gs_c_known_encodings[ei][ch];
 }
 
@@ -121,13 +121,13 @@ gs_is_c_glyph_name(const byte *str, uint len)
 
 /*
  * Return the glyph number corresponding to a string (the inverse of
- * gs_c_glyph_name), or gs_no_glyph if the glyph name is not known.
+ * gs_c_glyph_name), or GS_NO_GLYPH if the glyph name is not known.
  */
 gs_glyph
 gs_c_name_glyph(const byte *str, uint len)
 {
     if (len == 0 || len > gs_c_known_encoding_max_length)
-        return gs_no_glyph;
+        return GS_NO_GLYPH;
     /* Binary search the character table. */
     {
         uint base = gs_c_known_encoding_offsets[len];
@@ -151,66 +151,5 @@ gs_c_name_glyph(const byte *str, uint len)
         }
     }
 
-    return gs_no_glyph;
+    return GS_NO_GLYPH;
 }
-
-#ifdef TEST
-
-/* NOTE: test values will have to be updated if representation changes. */
-#define I_caron N(5,85)
-#define I_carriagereturn N(14,154)
-#define I_circlemultiply N(14,168)
-#define I_numbersign N(10,270)
-#define I_copyright N(9,180)
-#define I_notdefined N(7, 0)
-
-/* Test */
-#include <stdio.h>
-main()
-{
-    gs_glyph g;
-        gs_char c;
-    gs_const_string str;
-
-    /* Test with a short name. */
-    g = gs_c_known_encode((gs_char)0237, 1); /* caron */
-    printf("caron is %u, should be %u\n",
-           g - gs_c_min_std_encoding_glyph, I_caron);
-    gs_c_glyph_name(g, &str);
-    fwrite(str.data, 1, str.size, stdout);
-    printf(" should be caron\n");
-
-    /* Test with a long name. */
-    g = gs_c_known_encode((gs_char)0277, 2); /* carriagereturn */
-    printf("carriagereturn is %u, should be %u\n",
-           g - gs_c_min_std_encoding_glyph, I_carriagereturn);
-    gs_c_glyph_name(g, &str);
-    fwrite(str.data, 1, str.size, stdout);
-    printf(" should be carriagereturn\n");
-
-    /* Test lookup with 3 kinds of names. */
-    g = gs_c_name_glyph((const byte *)"circlemultiply", 14);
-    printf("circlemultiply is %u, should be %u\n",
-           g - gs_c_min_std_encoding_glyph, I_circlemultiply);
-    g = gs_c_name_glyph((const byte *)"numbersign", 10);
-    printf("numbersign is %u, should be %u\n",
-           g - gs_c_min_std_encoding_glyph, I_numbersign);
-    g = gs_c_name_glyph((const byte *)"copyright", 9);
-    printf("copyright is %u, should be %u\n",
-           g - gs_c_min_std_encoding_glyph, I_copyright);
-
-    /* Test reverse lookup */
-    c = gs_c_decode(I_caron + gs_c_min_std_encoding_glyph, 1);
-    printf("%u (caron) looked up as %u, should be %u\n",
-     I_caron, c, 0237);
-    c = gs_c_decode(I_carriagereturn + gs_c_min_std_encoding_glyph, 2);
-    printf("%u (carriagereturn) looked up as %u, should be %u\n",
-     I_carriagereturn, c, 0277);
-    c = gs_c_decode(I_notdefined + gs_c_min_std_encoding_glyph, 1); /* undef'd */
-    printf("%u (notdefined) looked up as %d , should be %d\n",
-     I_notdefined, c, GS_NO_CHAR);
-
-    exit(0);
-}
-
-#endif /* TEST */

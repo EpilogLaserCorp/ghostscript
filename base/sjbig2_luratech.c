@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -55,24 +55,29 @@ private_st_jbig2decode_state();
 
 /* our implementation of the "parsed" /JBIG2Globals filter parameter */
 typedef struct s_jbig2decode_global_data_s {
+    gs_memory_t *mem;
     unsigned char *data;
     unsigned long size;
 } s_jbig2decode_global_data;
 
 /* create a global data struct and copy data into it */
 int
-s_jbig2decode_make_global_data(byte *data, uint size, void **result)
+s_jbig2decode_make_global_data(gs_memory_t *mem, byte *data, uint size, void **result)
 {
     s_jbig2decode_global_data *global = NULL;
 
-    global = malloc(sizeof(*global));
-    if (global == NULL) return gs_error_VMerror;
+    global = (s_jbig2decode_global_data *)gs_alloc_bytes(mem, sizeof (*global),
+                                                 "s_jbig2decode_make_global_data(global)");
+    if (global == NULL) return_error(gs_error_VMerror);
 
-    global->data = malloc(size);
+    global->mem = mem;
+
+    global->data = gs_alloc_bytes(global->mem, size, "s_jbig2decode_make_global_data(global_data)");
     if (global->data == NULL) {
-        free(global);
-        return gs_error_VMerror;
+        gs_free_object(global->mem, global, "s_jbig2decode_make_global_data(global)");
+        return_error(gs_error_VMerror);
     }
+
     memcpy(global->data, data, size);
     global->size = size;
 
@@ -87,23 +92,30 @@ s_jbig2decode_free_global_data(void *data)
     s_jbig2decode_global_data *global = (s_jbig2decode_global_data*)data;
 
     if (global->size && global->data) {
-        free(global->data);
+        gs_free_object(global->mem, global->data, "s_jbig2decode_free_global_data(global_data)");
         global->size = 0;
     }
-    free(global);
+
+    gs_free_object(global->mem, global, "s_jbig2decode_free_global_data(global)");
 }
 
-/* store a global ctx pointer in our state structure */
+/* store a global ctx pointer in our state structure.
+ * If "gd" is NULL, then this library must free the global context.
+ * If not-NULL, then it will be memory managed by caller, for example,
+ * garbage collected in the case of the PS interpreter.
+ * Currently gpdf will use NULL, and the PDF implemented in the gs interpreter would use
+ * the garbage collection.
+ */
 int
-s_jbig2decode_set_global_data(stream_state *ss, s_jbig2_global_data_t *gd)
+s_jbig2decode_set_global_data(stream_state *ss, s_jbig2_global_data_t *gd, void *global_ctx)
 {
     stream_jbig2decode_state *state = (stream_jbig2decode_state*)ss;
     if (state == NULL)
-        return gs_error_VMerror;
+        return_error(gs_error_VMerror);
 
     state->global_struct = gd;
-    if (gd != NULL) {
-        s_jbig2decode_global_data *global = (s_jbig2decode_global_data*)(gd->data);
+    if (global_ctx != NULL) {
+        s_jbig2decode_global_data *global = global_ctx;
         state->global_data = global->data;
         state->global_size = global->size;
     } else {
@@ -131,15 +143,16 @@ s_jbig2_invert_buffer(unsigned char *buf, int length)
 static void * JB2_Callback
 s_jbig2_alloc(unsigned long size, void *userdata)
 {
-    void *result = malloc(size);
-    return result;
+    gs_memory_t *mem = (gs_memory_t *) userdata;
+    return gs_alloc_bytes(mem, size, "s_jbig2_alloc");
 }
 
 /* memory release */
 static JB2_Error JB2_Callback
 s_jbig2_free(void *ptr, void *userdata)
 {
-    free(ptr);
+    gs_memory_t *mem = (gs_memory_t *) userdata;
+    gs_free_object(mem, ptr, "s_jbig2_free");
     return cJB2_Error_OK;
 }
 
@@ -230,7 +243,7 @@ s_jbig2decode_inbuf(stream_jbig2decode_state *state, stream_cursor_read * pr)
     /* allocate the input buffer if needed */
     if (state->inbuf == NULL) {
         state->inbuf = malloc(JBIG2_BUFFER_SIZE);
-        if (state->inbuf == NULL) return gs_error_VMerror;
+        if (state->inbuf == NULL) return_error(gs_error_VMerror);
         state->insize = JBIG2_BUFFER_SIZE;
         state->infill = 0;
     }
@@ -246,7 +259,7 @@ s_jbig2decode_inbuf(stream_jbig2decode_state *state, stream_cursor_read * pr)
         if_debug1m('s', state->memory, "[s]jbig2decode growing input buffer to %lu bytes\n",
                    new_size);
         new = realloc(state->inbuf, new_size);
-        if (new == NULL) return gs_error_VMerror;
+        if (new == NULL) return_error(gs_error_VMerror);
 
         state->inbuf = new;
         state->insize = new_size;
@@ -312,8 +325,8 @@ s_jbig2decode_process(stream_state * ss, stream_cursor_read * pr,
 
             /* initialize the codec state and pass our callbacks */
             error = JB2_Document_Start( &(state->doc),
-                s_jbig2_alloc, ss,	/* alloc and its data */
-                s_jbig2_free, ss, 	/* free and its data */
+                s_jbig2_alloc, ss->memory->non_gc_memory,	/* alloc and its data */
+                s_jbig2_free, ss->memory->non_gc_memory,	/* free and its data */
                 s_jbig2_read, ss,	/* read callback and data */
                 s_jbig2_message, ss);   /* message callback and data */
             if (error != cJB2_Error_OK) return ERRC;
@@ -376,7 +389,16 @@ s_jbig2decode_release(stream_state *ss)
         if (state->inbuf) free(state->inbuf);
         if (state->image) free(state->image);
     }
-    /* the interpreter calls jbig2decode_free_global_data() separately */
+    if (state->global_struct != NULL) {
+        /* the interpreter calls jbig2decode_free_global_data() separately */
+    } else {
+        /* We are responsible for freeing global context */
+        if (state->global_data) {
+            s_jbig2decode_free_global_data(state->global_data);
+            state->global_data = NULL;
+            state->global_size = 0;
+        }
+    }
 }
 
 /* stream template */
@@ -404,8 +426,8 @@ s_jbig2encode_start(stream_jbig2encode_state *state)
 
     /* initialize the compression handle */
     err = JB2_Compress_Start(&(state->cmp),
-        s_jbig2_alloc, state,	/* alloc and its parameter data */
-        s_jbig2_free,  state,	/* free callback */
+        s_jbig2_alloc, state->memory,	/* alloc and its parameter data */
+        s_jbig2_free,  state->memory,	/* free callback */
         s_jbig2_message, state);/* message callback */
     if (err != cJB2_Error_OK) return err;
 

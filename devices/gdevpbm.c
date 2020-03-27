@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Portable Bit/Gray/PixMap drivers */
@@ -387,7 +387,7 @@ gx_old_default_rgb_map_rgb_color(gx_device * dev,
         int bpc = dev->color_info.depth / 3;
         int drop = sizeof(gx_color_value) * 8 - bpc;
 
-        return ((((r >> drop) << bpc) + (g >> drop)) << bpc) + (b >> drop);
+        return (((((gx_color_index)(r >> drop)) << bpc) + (g >> drop)) << bpc) + (b >> drop);
     }
 }
 
@@ -439,7 +439,7 @@ pkm_map_cmyk_color(gx_device * pdev, const gx_color_value cv[])
     uint yc = cv[2] * max_value / gx_max_color_value;
     uint kc = cv[3] * max_value / gx_max_color_value;
     gx_color_index color =
-        (((((cc << bpc) + mc) << bpc) + yc) << bpc) + kc;
+        ((((((gx_color_index)cc << bpc) + mc) << bpc) + yc) << bpc) + kc;
 
     return (color == gx_no_color_index ? color ^ 1 : color);
 }
@@ -592,7 +592,7 @@ pnm_copy_alpha(gx_device * pdev, const byte * data, int data_x,
 /* non-black/white colors in the process. */
 static int
 pnm_begin_typed_image(gx_device *dev,
-                      const gs_imager_state *pis, const gs_matrix *pmat,
+                      const gs_gstate *pgs, const gs_matrix *pmat,
                       const gs_image_common_t *pim, const gs_int_rect *prect,
                       const gx_drawing_color *pdcolor,
                       const gx_clip_path *pcpath,
@@ -631,22 +631,22 @@ pnm_begin_typed_image(gx_device *dev,
         }
     }
     /* Forward to saved routine */
-    return (*bdev->save_begin_typed_image)(dev, pis, pmat, pim, prect,
+    return (*bdev->save_begin_typed_image)(dev, pgs, pmat, pim, prect,
                                            pdcolor, pcpath, memory, pinfo);
 }
 
 /* ------ Internal routines ------ */
 
 /* NOP row processing function used when no output */
-static int nop_row_proc(gx_device_printer *pdev, byte *data, int len, FILE *f)
+static int nop_row_proc(gx_device_printer *pdev, byte *data, int len, gp_file *f)
 {
     return 0;
 }
 
 /* Print a page using a given row printing routine. */
 static int
-pbm_print_page_loop(gx_device_printer * pdev, char magic, FILE * pstream,
-             int (*row_proc) (gx_device_printer *, byte *, int, FILE *))
+pbm_print_page_loop(gx_device_printer * pdev, char magic, gp_file * pstream,
+             int (*row_proc) (gx_device_printer *, byte *, int, gp_file *))
 {
     gx_device_pbm * const bdev = (gx_device_pbm *)pdev;
     uint raster = gdev_prn_raster_chunky(pdev);
@@ -661,72 +661,72 @@ pbm_print_page_loop(gx_device_printer * pdev, char magic, FILE * pstream,
     if (!output_is_nul) {
         /* Hack.  This should be done in the callers.  */
         if (magic == '9') {
-            if (fprintf(pstream, "%11d %11d %11d %11d %11d ",
+            if (gp_fprintf(pstream, "%11d %11d %11d %11d %11d ",
                 0, 0, 0, pdev->width, pdev->height) < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
         } else if (magic == '7') {
             int ncomps = pdev->color_info.num_components;
-            if (fprintf(pstream, "P%c\n", magic) < 0) {
+            if (gp_fprintf(pstream, "P%c\n", magic) < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
-            if (fprintf(pstream, "WIDTH %d\n", pdev->width) < 0) {
+            if (gp_fprintf(pstream, "WIDTH %d\n", pdev->width) < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
-            if (fprintf(pstream, "HEIGHT %d\n", pdev->height) < 0) {
+            if (gp_fprintf(pstream, "HEIGHT %d\n", pdev->height) < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
-            if (fprintf(pstream, "DEPTH %d\n", ncomps) < 0) {
+            if (gp_fprintf(pstream, "DEPTH %d\n", ncomps) < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
-            if (fprintf(pstream, "MAXVAL %d\n", 255) < 0) { /* force MAXVAL to 255 */
+            if (gp_fprintf(pstream, "MAXVAL %d\n", 255) < 0) { /* force MAXVAL to 255 */
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
-            if (fprintf(pstream, "TUPLTYPE %s\n",
+            if (gp_fprintf(pstream, "TUPLTYPE %s\n",
                 (ncomps == 4) ? "CMYK" :
                 ((ncomps == 3) ? "RGB" : "GRAYSCALE")) < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
             if (bdev->comment[0]) {
-                if (fprintf(pstream, "# %s\n", bdev->comment) < 0) {
+                if (gp_fprintf(pstream, "# %s\n", bdev->comment) < 0) {
                     code = gs_note_error(gs_error_ioerror);
                     goto punt;
                 }
             } else {
-                if (fprintf(pstream, "# Image generated by %s\n", gs_product) < 0) {
+                if (gp_fprintf(pstream, "# Image generated by %s\n", gs_product) < 0) {
                     code = gs_note_error(gs_error_ioerror);
                     goto punt;
                 }
             }
-            if (fprintf(pstream, "ENDHDR\n") < 0) {
+            if (gp_fprintf(pstream, "ENDHDR\n") < 0) {
                  code = gs_note_error(gs_error_ioerror);
                  goto punt;
             }
         } else {
-            if (fprintf(pstream, "P%c\n", magic) < 0) {
+            if (gp_fprintf(pstream, "P%c\n", magic) < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
             if (bdev->comment[0]) {
-                if (fprintf(pstream, "# %s\n", bdev->comment) < 0) {
+                if (gp_fprintf(pstream, "# %s\n", bdev->comment) < 0) {
                     code = gs_note_error(gs_error_ioerror);
                     goto punt;
                 }
             } else {
-                if (fprintf(pstream, "# Image generated by %s (device=%s)\n",
+                if (gp_fprintf(pstream, "# Image generated by %s (device=%s)\n",
                         gs_product, pdev->dname) < 0) {
                     code = gs_note_error(gs_error_ioerror);
                     goto punt;
                 }
             }
-            if (fprintf(pstream, "%d %d\n", pdev->width, pdev->height) < 0) {
+            if (gp_fprintf(pstream, "%d %d\n", pdev->width, pdev->height) < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
@@ -739,13 +739,13 @@ pbm_print_page_loop(gx_device_printer * pdev, char magic, FILE * pstream,
             break;
         case '3':               /* pkm */
         case '6':               /* pkmraw */
-            if (fprintf(pstream, "%d\n", 255) < 0) {
+            if (gp_fprintf(pstream, "%d\n", 255) < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
             break;
         default:
-            if (fprintf(pstream, "%d\n", pdev->color_info.max_gray) < 0) {
+            if (gp_fprintf(pstream, "%d\n", pdev->color_info.max_gray) < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
@@ -773,24 +773,24 @@ pbm_print_page_loop(gx_device_printer * pdev, char magic, FILE * pstream,
 /* Print a monobit page. */
 static int
 pbm_print_row(gx_device_printer * pdev, byte * data, int depth,
-              FILE * pstream)
+              gp_file * pstream)
 {
     gx_device_pbm * const bdev = (gx_device_pbm *)pdev;
 
     if (bdev->is_raw) {
         uint n = (pdev->width + 7) >> 3;
 
-        if (fwrite(data, 1, n, pstream) != n)
+        if (gp_fwrite(data, 1, n, pstream) != n)
             return_error(gs_error_ioerror);
     } else {
         byte *bp;
         uint x, mask;
 
         for (bp = data, x = 0, mask = 0x80; x < pdev->width;) {
-            if (putc((*bp & mask ? '1' : '0'), pstream) == EOF)
+            if (gp_fputc((*bp & mask ? '1' : '0'), pstream) == EOF)
                 return_error(gs_error_ioerror);
             if (++x == pdev->width || !(x & 63)) {
-                if (putc('\n', pstream) == EOF)
+                if (gp_fputc('\n', pstream) == EOF)
                     return_error(gs_error_ioerror);
             }
             if ((mask >>= 1) == 0)
@@ -800,7 +800,7 @@ pbm_print_row(gx_device_printer * pdev, byte * data, int depth,
     return 0;
 }
 static int
-pbm_print_page(gx_device_printer * pdev, FILE * pstream)
+pbm_print_page(gx_device_printer * pdev, gp_file * pstream)
 {
     gx_device_pbm * const bdev = (gx_device_pbm *)pdev;
 
@@ -810,7 +810,7 @@ pbm_print_page(gx_device_printer * pdev, FILE * pstream)
 /* Print a gray-mapped page. */
 static int
 pgm_print_row(gx_device_printer * pdev, byte * data, int depth,
-              FILE * pstream)
+              gp_file * pstream)
 {                               /* Note that bpp <= 8 for raw format, bpp <= 16 for plain. */
     gx_device_pbm * const bdev = (gx_device_pbm *)pdev;
     uint mask = (1 << depth) - 1;
@@ -826,11 +826,11 @@ pgm_print_row(gx_device_printer * pdev, byte * data, int depth,
     if (bdev->is_raw && depth == 8) {
         if (invert) {
             for (bp = data, x = 0; x < pdev->width; bp++, x++) {
-                if (putc((byte)~*bp, pstream) == EOF)
+                if (gp_fputc((byte)~*bp, pstream) == EOF)
                     return_error(gs_error_ioerror);
             }
         } else {
-            if (fwrite(data, 1, pdev->width, pstream) != pdev->width)
+            if (gp_fwrite(data, 1, pdev->width, pstream) != pdev->width)
                 return_error(gs_error_ioerror);
         }
     } else
@@ -848,10 +848,10 @@ pgm_print_row(gx_device_printer * pdev, byte * data, int depth,
             ++x;
             pixel ^= invert;
             if (bdev->is_raw) {
-                if (putc(pixel, pstream) == EOF)
+                if (gp_fputc(pixel, pstream) == EOF)
                     return_error(gs_error_ioerror);
             } else {
-                if (fprintf(pstream, "%d%c", pixel,
+                if (gp_fprintf(pstream, "%d%c", pixel,
                         (x == pdev->width || !(x & 15) ? '\n' : ' ')) < 0)
                     return_error(gs_error_ioerror);
             }
@@ -860,7 +860,7 @@ pgm_print_row(gx_device_printer * pdev, byte * data, int depth,
 }
 static int
 pxm_pbm_print_row(gx_device_printer * pdev, byte * data, int depth,
-                  FILE * pstream)
+                  gp_file * pstream)
 {                               /* Compress a PGM or PPM row to a PBM row. */
     /* This doesn't have to be very fast. */
     /* Note that we have to invert the data as well. */
@@ -903,7 +903,7 @@ pxm_pbm_print_row(gx_device_printer * pdev, byte * data, int depth,
     return pbm_print_row(pdev, data, 1, pstream);
 }
 static int
-pgm_print_page(gx_device_printer * pdev, FILE * pstream)
+pgm_print_page(gx_device_printer * pdev, gp_file * pstream)
 {
     gx_device_pbm * const bdev = (gx_device_pbm *)pdev;
 
@@ -917,7 +917,7 @@ pgm_print_page(gx_device_printer * pdev, FILE * pstream)
 /* Print a color-mapped page. */
 static int
 ppgm_print_row(gx_device_printer * pdev, byte * data, int depth,
-               FILE * pstream, bool color)
+               gp_file * pstream, bool color)
 {                               /* If color=false, write only one value per pixel; */
     /* if color=true, write 3 values per pixel. */
     /* Note that depth <= 24 for raw format, depth <= 32 for plain. */
@@ -932,7 +932,7 @@ ppgm_print_row(gx_device_printer * pdev, byte * data, int depth,
     if (bdev->is_raw && depth == 24 && color) {
         uint n = pdev->width * (depth / 8);
 
-        if (fwrite(data, 1, n, pstream) != n)
+        if (gp_fwrite(data, 1, n, pstream) != n)
             return_error(gs_error_ioerror);
     } else {
         for (bp = data, x = 0, shift = 8 - depth; x < pdev->width;) {
@@ -970,19 +970,19 @@ ppgm_print_row(gx_device_printer * pdev, byte * data, int depth,
             r = pixel & mask;
             if (bdev->is_raw) {
                 if (color) {
-                    if (putc(r, pstream) == EOF)
+                    if (gp_fputc(r, pstream) == EOF)
                         return_error(gs_error_ioerror);
-                    if (putc(g, pstream) == EOF)
+                    if (gp_fputc(g, pstream) == EOF)
                         return_error(gs_error_ioerror);
                 }
-                if (putc(b, pstream) == EOF)
+                if (gp_fputc(b, pstream) == EOF)
                     return_error(gs_error_ioerror);
             } else {
                 if (color) {
-                    if (fprintf(pstream, "%d %d ", r, g) < 0)
+                    if (gp_fprintf(pstream, "%d %d ", r, g) < 0)
                         return_error(gs_error_ioerror);
                 }
-                if (fprintf(pstream, "%d%c", b,
+                if (gp_fprintf(pstream, "%d%c", b,
                         (x == pdev->width || !(x & eol_mask) ?
                          '\n' : ' ')) < 0)
                     return_error(gs_error_ioerror);
@@ -993,18 +993,18 @@ ppgm_print_row(gx_device_printer * pdev, byte * data, int depth,
 }
 static int
 ppm_print_row(gx_device_printer * pdev, byte * data, int depth,
-              FILE * pstream)
+              gp_file * pstream)
 {
     return ppgm_print_row(pdev, data, depth, pstream, true);
 }
 static int
 ppm_pgm_print_row(gx_device_printer * pdev, byte * data, int depth,
-                  FILE * pstream)
+                  gp_file * pstream)
 {
     return ppgm_print_row(pdev, data, depth, pstream, false);
 }
 static int
-ppm_print_page(gx_device_printer * pdev, FILE * pstream)
+ppm_print_page(gx_device_printer * pdev, gp_file * pstream)
 {
     gx_device_pbm * const bdev = (gx_device_pbm *)pdev;
 
@@ -1020,19 +1020,19 @@ ppm_print_page(gx_device_printer * pdev, FILE * pstream)
 
 static int
 pam_print_row(gx_device_printer * pdev, byte * data, int depth,
-               FILE * pstream)
+               gp_file * pstream)
 {
     if (depth == 32) {
         uint n = pdev->width * (depth / 8);
 
-        if (fwrite(data, 1, n, pstream) != n)
+        if (gp_fwrite(data, 1, n, pstream) != n)
             return_error(gs_error_ioerror);
     }
     return 0;
 }
 
 static int
-pam_print_page(gx_device_printer * pdev, FILE * pstream)
+pam_print_page(gx_device_printer * pdev, gp_file * pstream)
 {
     gx_device_pbm * const bdev = (gx_device_pbm *)pdev;
 
@@ -1041,7 +1041,7 @@ pam_print_page(gx_device_printer * pdev, FILE * pstream)
 }
 
 static int
-pnmcmyk_print_page(gx_device_printer *pdev, FILE *pstream)
+pnmcmyk_print_page(gx_device_printer *pdev, gp_file *pstream)
 {
     if (pdev->icc_struct->graydetection == true && pdev->icc_struct->pageneutralcolor == true) {
         /* Here we need to convert the data from CMYK to K (gray) then print */
@@ -1052,30 +1052,32 @@ pnmcmyk_print_page(gx_device_printer *pdev, FILE *pstream)
         int code = 0;
         int output_is_nul = !strncmp(pdev->fname, "nul:", min(strlen(pdev->fname), 4)) ||
             !strncmp(pdev->fname, "/dev/null", min(strlen(pdev->fname), 9));
-        int (*row_proc) (gx_device_printer *, byte *, int, FILE *);
+        int (*row_proc) (gx_device_printer *, byte *, int, gp_file *);
 
+        if (data == NULL)
+            return_error(gs_error_VMerror);
         if (!output_is_nul) {
-            if (fprintf(pstream, "P5\n") < 0) {	/* PGM raw */
+            if (gp_fprintf(pstream, "P5\n") < 0) {	/* PGM raw */
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
             if (bdev->comment[0]) {
-                if (fprintf(pstream, "# %s\n", bdev->comment) < 0) {
+                if (gp_fprintf(pstream, "# %s\n", bdev->comment) < 0) {
                     code = gs_note_error(gs_error_ioerror);
                     goto punt;
                 }
             } else {
-                if (fprintf(pstream, "# Image generated by %s (device=%s)\n",
+                if (gp_fprintf(pstream, "# Image generated by %s (device=%s)\n",
                         gs_product, pdev->dname) < 0) {
                     code = gs_note_error(gs_error_ioerror);
                     goto punt;
                 }
             }
-            if (fprintf(pstream, "%d %d\n", pdev->width, pdev->height) < 0) {
+            if (gp_fprintf(pstream, "%d %d\n", pdev->width, pdev->height) < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
-            if (fprintf(pstream, "255\n") < 0) {
+            if (gp_fprintf(pstream, "255\n") < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
@@ -1132,7 +1134,7 @@ pnmcmyk_print_page(gx_device_printer *pdev, FILE *pstream)
 
 static int
 pam4_print_row(gx_device_printer * pdev, byte * data, int depth,
-               FILE * pstream)
+               gp_file * pstream)
 {
     int w, s;
     if (depth == 4) {
@@ -1140,10 +1142,10 @@ pam4_print_row(gx_device_printer * pdev, byte * data, int depth,
             byte C = *data++;
             for (s = 7; s >= 0; s -= 4)
             {
-                fputc(((C>>s    )&1)*0xff, pstream);
-                fputc(((C>>(s-1))&1)*0xff, pstream);
-                fputc(((C>>(s-2))&1)*0xff, pstream);
-                fputc(((C>>(s-3))&1)*0xff, pstream);
+                gp_fputc(((C>>s    )&1)*0xff, pstream);
+                gp_fputc(((C>>(s-1))&1)*0xff, pstream);
+                gp_fputc(((C>>(s-2))&1)*0xff, pstream);
+                gp_fputc(((C>>(s-3))&1)*0xff, pstream);
                 w--;
                 if (w == 0)
                     break;
@@ -1154,7 +1156,7 @@ pam4_print_row(gx_device_printer * pdev, byte * data, int depth,
 }
 
 static int
-pam4_print_page(gx_device_printer * pdev, FILE * pstream)
+pam4_print_page(gx_device_printer * pdev, gp_file * pstream)
 {
     gx_device_pbm * const bdev = (gx_device_pbm *)pdev;
 
@@ -1167,7 +1169,7 @@ pam4_print_page(gx_device_printer * pdev, FILE * pstream)
 /* In this case, we also know pdev->color_info.max_color == 1. */
 static int
 pkm_print_row_4(gx_device_printer * pdev, byte * data, int depth,
-                FILE * pstream)
+                gp_file * pstream)
 {
     gx_device_pbm * const bdev = (gx_device_pbm *)pdev;
     byte *bp;
@@ -1189,6 +1191,11 @@ pkm_print_row_4(gx_device_printer * pdev, byte * data, int depth,
      * change it, we buffer groups of pixels ourselves and use fwrite.
      */
     if (bdev->is_raw) {
+#ifdef PACIFY_VALGRIND
+        if ((pdev->width & 1) != 0) {
+            data[pdev->width>>1] &= 0xf0;
+        }
+#endif
         for (bp = data, x = 0; x < pdev->width;) {
             byte raw[50 * 3];   /* 50 is arbitrary, but must be even */
             int end = min(x + sizeof(raw) / 3, pdev->width);
@@ -1205,7 +1212,7 @@ pkm_print_row_4(gx_device_printer * pdev, byte * data, int depth,
             /* x might overshoot the width by 1 pixel. */
             if (x > end)
                 outp -= 3;
-            if (fwrite(raw, 1, outp - raw, pstream) != outp - raw)
+            if (gp_fwrite(raw, 1, outp - raw, pstream) != outp - raw)
                 return_error(gs_error_ioerror);
         }
     } else {
@@ -1217,7 +1224,7 @@ pkm_print_row_4(gx_device_printer * pdev, byte * data, int depth,
             shift ^= 4;
             bp += shift >> 2;
             ++x;
-            if (fprintf(pstream, "%d %d %d%c", rv[pixel], gv[pixel], bv[pixel],
+            if (gp_fprintf(pstream, "%d %d %d%c", rv[pixel], gv[pixel], bv[pixel],
                     (x == pdev->width || !(x & 7) ?
                      '\n' : ' ')) < 0)
                 return_error(gs_error_ioerror);
@@ -1229,7 +1236,7 @@ pkm_print_row_4(gx_device_printer * pdev, byte * data, int depth,
 /* Note that the output is scaled up to 255 max value.                 */
 static int
 pkm_print_row(gx_device_printer * pdev, byte * data, int depth,
-              FILE * pstream)
+              gp_file * pstream)
 {
     gx_device_pbm * const bdev = (gx_device_pbm *)pdev;
     byte *bp;
@@ -1263,14 +1270,14 @@ pkm_print_row(gx_device_printer * pdev, byte * data, int depth,
         g = rgb[1] * 0xff / gx_max_color_value;
         b = rgb[2] * 0xff / gx_max_color_value;
         if (bdev->is_raw) {
-            if (putc(r, pstream) == EOF)
+            if (gp_fputc(r, pstream) == EOF)
                 return_error(gs_error_ioerror);
-            if (putc(g, pstream) == EOF)
+            if (gp_fputc(g, pstream) == EOF)
                 return_error(gs_error_ioerror);
-            if (putc(b, pstream) == EOF)
+            if (gp_fputc(b, pstream) == EOF)
                 return_error(gs_error_ioerror);
         } else {
-            if (fprintf(pstream, "%d %d %d%c", r, g, b,
+            if (gp_fprintf(pstream, "%d %d %d%c", r, g, b,
                     (x == pdev->width || !(x & 7) ?
                      '\n' : ' ')) < 0)
                 return_error(gs_error_ioerror);
@@ -1279,7 +1286,7 @@ pkm_print_row(gx_device_printer * pdev, byte * data, int depth,
     return 0;
 }
 static int
-pkm_print_page(gx_device_printer * pdev, FILE * pstream)
+pkm_print_page(gx_device_printer * pdev, gp_file * pstream)
 {
     gx_device_pbm * const bdev = (gx_device_pbm *)pdev;
 
@@ -1291,7 +1298,7 @@ pkm_print_page(gx_device_printer * pdev, FILE * pstream)
 
 /* Print individual separations on a single file. */
 static int
-psm_print_page(gx_device_printer * pdev, FILE * pstream)
+psm_print_page(gx_device_printer * pdev, gp_file * pstream)
 {
     gx_device_pbm * const bdev = (gx_device_pbm *)pdev;
     /*
@@ -1303,7 +1310,7 @@ psm_print_page(gx_device_printer * pdev, FILE * pstream)
     uint max_raster = bitmap_raster(pdev->width * pdev->color_info.depth);
     byte *data = gs_alloc_bytes(pdev->memory, max_raster, "pksm_print_page");
     int code = 0;
-    int plane;
+    unsigned char plane;
 
     if (data == 0)
         return_error(gs_error_VMerror);
@@ -1325,30 +1332,30 @@ psm_print_page(gx_device_printer * pdev, FILE * pstream)
         gx_render_plane_init(&render_plane, (gx_device *)pdev, plane);
         plane_depth = render_plane.depth;
         plane_shift = render_plane.shift;
-        plane_mask = (1 << plane_depth) - 1;
+        plane_mask = ((gx_color_index)1 << plane_depth) - 1;
         raster = bitmap_raster(pdev->width * plane_depth);
-        if (fprintf(pstream, "P%c\n", bdev->magic + (plane_depth > 1)) < 0) {
+        if (gp_fprintf(pstream, "P%c\n", bdev->magic + (plane_depth > 1)) < 0) {
             code = gs_note_error(gs_error_ioerror);
             goto punt;
         }
         if (bdev->comment[0]) {
-            if (fprintf(pstream, "# %s\n", bdev->comment) < 0) {
+            if (gp_fprintf(pstream, "# %s\n", bdev->comment) < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
         } else {
-            if (fprintf(pstream, "# Image generated by %s (device=%s)\n",
+            if (gp_fprintf(pstream, "# Image generated by %s (device=%s)\n",
                     gs_product, pdev->dname) < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }
         }
-        if (fprintf(pstream, "%d %d\n", pdev->width, pdev->height) < 0) {
+        if (gp_fprintf(pstream, "%d %d\n", pdev->width, pdev->height) < 0) {
             code = gs_note_error(gs_error_ioerror);
             goto punt;
         }
         if (plane_depth > 1) {
-            if (fprintf(pstream, "%d\n", pdev->color_info.max_gray) < 0) {
+            if (gp_fprintf(pstream, "%d\n", pdev->color_info.max_gray) < 0) {
                 code = gs_note_error(gs_error_ioerror);
                 goto punt;
             }

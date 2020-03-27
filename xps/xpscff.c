@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -177,6 +177,8 @@ xps_read_cff_dict(byte *p, byte *e, xps_font_t *font, gs_font_type1 *pt1)
 
     int privatelen = 0;
     int privateofs = 0;
+
+    memset(args, 0x00, sizeof(args));
 
     offset = p - font->cffdata;
 
@@ -514,7 +516,7 @@ xps_read_cff_file(xps_font_t *font, gs_font_type1 *pt1)
 
     /* CFF header */
     {
-        int major, minor, hdrsize, offsize;
+        int major, minor, hdrsize;
 
         if (p + 4 > e)
             return gs_throw(-1, "not enough data for header");
@@ -522,7 +524,7 @@ xps_read_cff_file(xps_font_t *font, gs_font_type1 *pt1)
         major = *p++;
         minor = *p++;
         hdrsize = *p++;
-        offsize = *p++;
+        /*offsize = **/p++;
 
         if (major != 1 || minor != 0)
             return gs_throw(-1, "not a CFF 1.0 file");
@@ -594,14 +596,14 @@ xps_post_callback_encode_char(gs_font *pfont, gs_char chr, gs_glyph_space_t spc)
     int value;
     value = xps_encode_font_char(xf, chr);
     if (value == 0)
-        return gs_no_glyph;
+        return GS_NO_GLYPH;
     return value;
 }
 
-static gs_char
-xps_post_callback_decode_glyph(gs_font *p42, gs_glyph glyph, int ch)
+static int
+xps_post_callback_decode_glyph(gs_font *p42, gs_glyph glyph, int ch, ushort *unicode_return, unsigned int length)
 {
-    return GS_NO_CHAR;
+    return 0;
 }
 
 static int
@@ -705,13 +707,12 @@ xps_post_callback_pop(void *callback_data, fixed *value)
 }
 
 static int
-xps_cff_append(gs_state *pgs, gs_font_type1 *pt1, gs_glyph glyph, int donthint)
+xps_cff_append(gs_gstate *pgs, gs_font_type1 *pt1, gs_glyph glyph, int donthint)
 {
     int code, value;
     gs_type1exec_state cxs;
     gs_glyph_data_t gd;
     gs_type1_state *const pcis = &cxs.cis;
-    gs_imager_state *pgis = (gs_imager_state*)pgs;
     gs_glyph_data_t *pgd = &gd;
     double sbw[4];
     gs_matrix mtx;
@@ -725,10 +726,10 @@ xps_cff_append(gs_state *pgs, gs_font_type1 *pt1, gs_glyph glyph, int donthint)
     gs_matrix_scale(&mtx, 0.001, 0.001, &mtx);
     mtx.tx = 0;
     mtx.ty = 0;
-    gs_matrix_fixed_from_matrix(&pgis->ctm, &mtx);
-    pgis->flatness = 0;
+    gs_matrix_fixed_from_matrix(&pgs->ctm, &mtx);
+    pgs->flatness = 0;
 
-    code = gs_type1_interp_init(&cxs.cis, pgis, pgs->path, NULL, NULL, donthint, 0, pt1);
+    code = gs_type1_interp_init(&cxs.cis, pgs, pgs->path, NULL, NULL, donthint, 0, pt1);
     if (code < 0)
         return gs_throw(code, "cannot init type1 interpreter");
 
@@ -761,7 +762,7 @@ xps_cff_append(gs_state *pgs, gs_font_type1 *pt1, gs_glyph glyph, int donthint)
 }
 
 static int
-xps_post_callback_build_char(gs_show_enum *penum, gs_state *pgs,
+xps_post_callback_build_char(gs_show_enum *penum, gs_gstate *pgs,
         gs_font *pfont, gs_char chr, gs_glyph glyph)
 {
     gs_font_type1 *pt1 = (gs_font_type1*)pfont;
@@ -918,10 +919,10 @@ xps_init_postscript_font(xps_context_t *ctx, xps_font_t *font)
     pt1->data.nominalWidthX = 0;
 
     pt1->data.BlueFuzz = 1;
-    pt1->data.BlueScale = 0.039625;
+    pt1->data.BlueScale = 0.039625f;
     pt1->data.BlueShift = 7;
     pt1->data.BlueValues.count = 0;
-    pt1->data.ExpansionFactor = 0.06;
+    pt1->data.ExpansionFactor = 0.06f;
     pt1->data.ForceBold = 0;
     pt1->data.FamilyBlues.count = 0;
     pt1->data.FamilyOtherBlues.count = 0;

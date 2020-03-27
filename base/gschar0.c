@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -46,8 +46,8 @@ gs_stack_modal_fonts(gs_text_enum_t *pte)
         cfont = cmfont->data.FDepVector[cmfont->data.Encoding[0]];
         pte->fstack.items[fdepth].font = cfont;
         pte->fstack.items[fdepth - 1].index = 0;
-        if_debug2m('j', pte->memory, "[j]stacking depth=%d font=0x%lx\n",
-                   fdepth, (ulong) cfont);
+        if_debug2m('j', pte->memory, "[j]stacking depth=%d font="PRI_INTPTR"\n",
+                   fdepth, (intptr_t)cfont);
     }
     pte->fstack.depth = fdepth;
     return 0;
@@ -59,8 +59,8 @@ gs_type0_init_fstack(gs_text_enum_t *pte, gs_font * pfont)
 {
     if (!(pte->text.operation & (TEXT_FROM_STRING | TEXT_FROM_BYTES)))
         return_error(gs_error_invalidfont);
-    if_debug1m('j', pte->memory, "[j]stacking depth=0 font=0x%lx\n",
-               (ulong) pfont);
+    if_debug1m('j', pte->memory, "[j]stacking depth=0 font="PRI_INTPTR"\n",
+               (intptr_t)pfont);
     pte->fstack.depth = 0;
     pte->fstack.items[0].font = pfont;
     pte->fstack.items[0].index = 0;
@@ -111,7 +111,7 @@ gs_type0_next_char_glyph(gs_text_enum_t *pte, gs_char *pchr, gs_glyph *pglyph)
     gs_type0_data *pdata;
     uint fidx;
     gs_char chr;
-    gs_glyph glyph = gs_no_glyph;
+    gs_glyph glyph = GS_NO_GLYPH;
     int changed = 0;
 
     pte->FontBBox_as_Metrics2.x = pte->FontBBox_as_Metrics2.y = 0;
@@ -147,8 +147,8 @@ gs_type0_next_char_glyph(gs_text_enum_t *pte, gs_char *pchr, gs_glyph *pglyph)
                     p += 2;
                     if_debug1m('j', pte->memory, "[j]from root: escape %d\n", fidx);
                   rdown:select_descendant(pfont, pdata, fidx, idepth);
-                    if_debug2m('j', pte->memory, "[j]... new depth=%d, new font=0x%lx\n",
-                               idepth, (ulong) pfont);
+                    if_debug2m('j', pte->memory, "[j]... new depth=%d, new font="PRI_INTPTR"\n",
+                               idepth, (intptr_t)pfont);
                     continue;
                 case fmap_double_escape:
                     if (chr != root_esc_char(pte))
@@ -222,8 +222,8 @@ gs_type0_next_char_glyph(gs_text_enum_t *pte, gs_char *pchr, gs_glyph *pglyph)
                 fdepth--;
                 do {
                     select_descendant(pfont, pdata, fidx, fdepth);
-                    if_debug3m('j', pte->memory, "[j]down from modal: new depth=%d, index=%d, new font=0x%lx\n",
-                               fdepth, fidx, (ulong) pfont);
+                    if_debug3m('j', pte->memory, "[j]down from modal: new depth=%d, index=%d, new font="PRI_INTPTR"\n",
+                               fdepth, fidx, (intptr_t)pfont);
                     if (pfont->FontType != ft_composite)
                         break;
                     pdata = &pfont0->data;
@@ -402,11 +402,11 @@ gs_type0_next_char_glyph(gs_text_enum_t *pte, gs_char *pchr, gs_glyph *pglyph)
                         return code;
                     pte->cmap_code = code; /* hack for widthshow */
                     p = str + mindex;
-                    if_debug3m('J', pte->memory, "[J]CMap returns %d, chr=0x%lx, glyph=0x%lx\n",
-                              code, (ulong) chr, (ulong) glyph);
+                    if_debug3m('J', pte->memory, "[J]CMap returns %d, chr=0x%lx, glyph="PRI_INTPTR"\n",
+                              code, (ulong)chr, (intptr_t)glyph);
                     if (code == 0) {
-                        if (glyph == gs_no_glyph) {
-                            glyph = gs_min_cid_glyph;
+                        if (glyph == GS_NO_GLYPH) {
+                            glyph = GS_MIN_CID_GLYPH;
                             if_debug0m('J', pte->memory, "... undefined\n");
                             /* Must select a descendant font anyway, we can't use the type 0
                              * even for the /.notdef...
@@ -415,15 +415,15 @@ gs_type0_next_char_glyph(gs_text_enum_t *pte, gs_char *pchr, gs_glyph *pglyph)
                             goto done;
                         }
                     } else
-                        chr = (gs_char) glyph, glyph = gs_no_glyph;
+                        chr = (gs_char) glyph, glyph = GS_NO_GLYPH;
                     /****** RESCAN chr IF DESCENDANT IS CMAP'ED ******/
                     break;
                 }
         }
 
         select_descendant(pfont, pdata, fidx, fdepth);
-        if_debug2m('J', pte->memory, "... new depth=%d, new font=0x%lx\n",
-                  fdepth, (ulong) pfont);
+        if_debug2m('J', pte->memory, "... new depth=%d, new font="PRI_INTPTR"\n",
+                  fdepth, (intptr_t)pfont);
     }
 done:
     /* FontBBox may be used as metrics2 with WMode=1 :
@@ -445,7 +445,7 @@ done:
                             glyph, NULL, &font_index);
         if (code < 0) { /* failed to load glyph data, reload glyph for CID 0 */
            code = ((gs_font_cid0 *)pfont)->cidata.glyph_data((gs_font_base *)pfont,
-                        (gs_glyph)(gs_min_cid_glyph + 0), NULL, &font_index);
+                        (gs_glyph)(GS_MIN_CID_GLYPH + 0), NULL, &font_index);
            if (code < 0)
                return_error(gs_error_invalidfont);
         }
@@ -462,8 +462,8 @@ done:
     if (str == pte->text.data.bytes)
         pte->index = p - str;
     pte->fstack.depth = fdepth;
-    if_debug4m('J', pte->memory, "[J]depth=%d font=0x%lx index=%d changed=%d\n",
-               fdepth, (ulong) pte->fstack.items[fdepth].font,
+    if_debug4m('J', pte->memory, "[J]depth=%d font="PRI_INTPTR" index=%d changed=%d\n",
+               fdepth, (intptr_t)pte->fstack.items[fdepth].font,
                pte->fstack.items[fdepth].index, changed);
     return changed;
 }

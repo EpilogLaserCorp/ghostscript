@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -150,11 +150,19 @@ zinitialize_dsc_parser(i_ctx_t *i_ctx_p)
     ref local_ref;
     int code;
     os_ptr const op = osp;
-    dict * const pdict = op->value.pdict;
-    gs_memory_t * const mem = (gs_memory_t *)dict_memory(pdict);
-    dsc_data_t * const data =
-        gs_alloc_struct(mem, dsc_data_t, &st_dsc_data_t, "DSC parser init");
+    dict *pdict;
+    gs_memory_t *mem;
+    dsc_data_t *data;
 
+    if (ref_stack_count(&o_stack) < 1)
+        return_error(gs_error_stackunderflow);
+
+    check_read_type(*op, t_dictionary);
+
+    pdict = op->value.pdict;
+    mem = (gs_memory_t *)dict_memory(pdict);
+
+    data = gs_alloc_struct(mem, dsc_data_t, &st_dsc_data_t, "DSC parser init");
     if (!data)
         return_error(gs_error_VMerror);
     data->document_level = 0;
@@ -438,6 +446,7 @@ zparse_dsc_comments(i_ctx_t *i_ctx_p)
      * is bad, so ...).
      */
     check_type(*opString, t_string);
+    check_type(*opDict, t_dictionary);
     check_dict_write(*opDict);
     ssize = r_size(opString);
     if (ssize > MAX_DSC_MSG_SIZE)   /* need room for EOL + \0 */
@@ -448,6 +457,10 @@ zparse_dsc_comments(i_ctx_t *i_ctx_p)
     code = dict_find_string(opDict, dsc_dict_name, &pvalue);
     if (code < 0)
         return code;
+    if (code == 0)
+        return_error(gs_error_undefined);
+
+    check_stype(*pvalue, st_dsc_data_t);
     dsc_state = r_ptr(pvalue, dsc_data_t);
     /*
      * Pick up the comment string to be parsed.

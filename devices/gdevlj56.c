@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* H-P LaserJet 5 & 6 drivers for Ghostscript */
@@ -85,7 +85,7 @@ ljet5_open(gx_device * pdev)
 
         s_init(s, pdev->memory);
         swrite_file(s, ppdev->file, buf, sizeof(buf));
-        px_write_file_header(s, pdev);
+        px_write_file_header(s, pdev, false);
         sflush(s);		/* don't close */
     }
     return 0;
@@ -106,7 +106,7 @@ ljet5_close(gx_device * pdev)
 
 /* Send the page to the printer.  For now, just send the whole image. */
 static int
-ljet5_print_page(gx_device_printer * pdev, FILE * prn_stream)
+ljet5_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
     gs_memory_t *mem = pdev->memory;
     uint line_size = gdev_mem_bytes_per_scan_line((gx_device *) pdev);
@@ -192,7 +192,7 @@ ljet5_print_page(gx_device_printer * pdev, FILE * prn_stream)
 
         code = gdev_prn_copy_scan_lines(pdev, lnum, (byte *) line, line_size);
         if (code < 0)
-            goto fin;
+            goto done;
         px_put_us(s, lnum);
         PX_PUT_LIT(s, line_header);
         ncompr = gdev_pcl_mode2compress_padded(line, line + line_size_words,
@@ -202,7 +202,6 @@ ljet5_print_page(gx_device_printer * pdev, FILE * prn_stream)
     }
 
     /* Finish up. */
-  fin:
     spputc(s, pxtEndImage);
     spputc(s, pxtEndPage);
     sflush(s);

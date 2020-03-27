@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,17 +19,18 @@
 #ifndef interp_INCLUDED
 #  define interp_INCLUDED
 
+#include "imemory.h"
+
 /* ------ iinit.c ------ */
 
 /* Enter a name and value into systemdict. */
 int i_initial_enter_name(i_ctx_t *, const char *, const ref *);
-#define initial_enter_name(nstr, pvalue)\
-  i_initial_enter_name(i_ctx_p, nstr, pvalue)
+
+/* Enter a (transient) name and value into systemdict. */
+int i_initial_enter_name_copy(i_ctx_t *, const char *, const ref *);
 
 /* Remove a name from systemdict. */
 void i_initial_remove_name(i_ctx_t *, const char *);
-#define initial_remove_name(nstr)\
-  i_initial_remove_name(i_ctx_p, nstr)
 
 /* ------ interp.c ------ */
 
@@ -67,10 +68,11 @@ int gs_errorinfo_put_string(i_ctx_t *, const char *);
 int gs_interp_init(i_ctx_t **pi_ctx_p, const ref *psystem_dict,
                    gs_dual_memory_t *dmem);
 
-#ifndef gs_context_state_t_DEFINED
-#  define gs_context_state_t_DEFINED
+/*
+ * Define the externally visible state of an interpreter context.
+ * There is only a single context.
+ */
 typedef struct gs_context_state_s gs_context_state_t;
-#endif
 
 /*
  * Create initial stacks for the interpreter.
@@ -92,5 +94,7 @@ void gs_interp_reset(i_ctx_t *i_ctx_p);
 /* Define the top-level interface to the interpreter. */
 int gs_interpret(i_ctx_t **pi_ctx_p, ref * pref, int user_errors,
                  int *pexit_code, ref * perror_object);
+int
+errorexec_find(i_ctx_t *i_ctx_p, ref *perror_object);
 
 #endif /* interp_INCLUDED */

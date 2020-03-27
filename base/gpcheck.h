@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,13 +19,15 @@
 #ifndef gpcheck_INCLUDED
 #  define gpcheck_INCLUDED
 
+#include "std.h"
+
 /*
  * On some platforms, the interpreter must check periodically for user-
  * initiated actions.  (Eventually, this may be extended to all platforms,
  * to handle multi-tasking through the 'context' facility.)  Routines that
  * run for a long time must periodically call gp_check_interrupts(), and
  * if it returns true, must clean up whatever they are doing and return an
- * e_interrupted (or gs_error_interrupted) exceptional condition.
+ * gs_error_interrupt exceptional condition.
  * The return_if_interrupt macro provides a convenient way to do this.
  *
  * On platforms that require an interrupt check, the makefile defines

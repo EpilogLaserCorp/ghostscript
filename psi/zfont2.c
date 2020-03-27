@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -1433,14 +1433,35 @@ get_int(int *v,  const cff_data_t *data, unsigned p, unsigned pe)
         return code;
 
     if (c == 28) {
-        if ((code = card16(&u, data, p + 1, pe)) < 0)
-            return code;
+        if (pe - p > 2) {
+            if ((code = card16(&u, data, p + 1, pe)) < 0)
+                return code;
+        }
+        else {
+            if ((code = card8(&u, data, p + 1, pe)) < 0)
+                return code;
+        }
         *v = ((int)u + ext16) ^ ext16;
         return 3;
     }
     if (c == 29) {
-        if ((code = card32(&u, data, p + 1, pe)) < 0)
-            return code;
+        switch (pe - p) {
+            case 2:
+              if ((code = card8(&u, data, p + 1, pe)) < 0)
+                 return code;
+              break;
+            case 3:
+              if ((code = card16(&u, data, p + 1, pe)) < 0)
+                 return code;
+              break;
+            case 4:
+              if ((code = card24(&u, data, p + 1, pe)) < 0)
+                 return code;
+              break;
+            default:
+              if ((code = card32(&u, data, p + 1, pe)) < 0)
+                 return code;
+        }
         *v = ((int)u + ext32) ^ ext32;
         return 5;
     }
@@ -1646,8 +1667,14 @@ undelta(ref *ops, unsigned int cnt)
     unsigned int i;
 
     for (i = 0; i < cnt; i++) {
-        if (!r_has_type(&ops[i], t_real))
-            make_real(&ops[i], (float)ops[i].value.intval);
+        if (!r_has_type(&ops[i], t_real)) {
+            /* Strictly speaking assigning one element of union
+             * to another, overlapping element of a different size is
+             * undefined behavior, hence assign to an intermediate variable
+             */
+            float fl = (float)ops[i].value.intval;
+            make_real(&ops[i], fl);
+        }
     }
     for (i = 1; i < cnt; i++) {
         make_real(&ops[i], ops[i].value.realval + ops[i - 1].value.realval);
@@ -2341,12 +2368,18 @@ parse_font(i_ctx_t *i_ctx_p,  ref *topdict,
 
     memset(&offsets, 0, sizeof(offsets)); /* set defaults for charset_off, encoding_off */
 
-    if ((code = parse_dict(i_ctx_p, topdict, &offsets, strings, data, p_top, pe_top) < 0))
+    if ((code = parse_dict(i_ctx_p, topdict, &offsets, strings, data, p_top, pe_top)) < 0)
         return code;
-    if ((code = parse_dict(i_ctx_p, topdict, &offsets, strings, data,
+
+    /* if the values for the /Private dict are nonsensical, ignore it
+     * and hope the font doesn't actually need it!
+     */
+    if ((offsets.private_off + offsets.private_size) <= pe_all) {
+        if ((code = parse_dict(i_ctx_p, topdict, &offsets, strings, data,
                       p_all + offsets.private_off,
-                      p_all + offsets.private_off + offsets.private_size) < 0))
-        return code;
+                      p_all + offsets.private_off + offsets.private_size)) < 0)
+            return code;
+    }
     if ((code = parse_index(&local_subrs, data,
                (offsets.local_subrs_off ? p_all + offsets.private_off + offsets.local_subrs_off : 0),
                 pe_all)) < 0)
@@ -2442,10 +2475,10 @@ parse_font(i_ctx_t *i_ctx_p,  ref *topdict,
                 return code;
             if ((code = dict_create(5, fdfont)) < 0)
                 return code;
-            if ((code = parse_dict(i_ctx_p, fdfont, &offsets, strings, data, doff, doff + len) < 0))
+            if ((code = parse_dict(i_ctx_p, fdfont, &offsets, strings, data, doff, doff + len)) < 0)
                 return code;
             if ((code = parse_dict(i_ctx_p, fdfont, &offsets, strings, data,
-              p_all + offsets.private_off, p_all + offsets.private_off + offsets.private_size) < 0))
+              p_all + offsets.private_off, p_all + offsets.private_off + offsets.private_size)) < 0)
                 return code;
             if ((code = find_font_dict(i_ctx_p, fdfont, &fdprivate, "Private")) < 0)
                 return code;
@@ -2591,11 +2624,11 @@ parse_font(i_ctx_t *i_ctx_p,  ref *topdict,
             return code;
     } else {
         /* Simple font */
-        unsigned int i, gid, enc_format;
+        unsigned int i, gid, enc_format = 0;
         int sid;
         ref name, cstr, charstrings_dict, encoding, notdef;
         unsigned char gid2char[256];
-        unsigned supp_enc_offset;
+        unsigned supp_enc_offset = 0;
 
         if ((code = name_ref(imemory, (unsigned char *)".notdef", 7, &notdef, 0)) < 0)
             return code;
@@ -2718,8 +2751,12 @@ zparsecff(i_ctx_t *i_ctx_p)
     ref blk_wrap[1];
 
     check_read(*op);
+
     if (r_has_type(op, t_array)) {  /* no packedarrays */
         int i, blk_sz, blk_cnt;
+
+        if (op->value.refs == NULL)
+            return_error(gs_error_typecheck);
 
         data.blk_ref = op->value.refs;
         blk_cnt  = r_size(op);

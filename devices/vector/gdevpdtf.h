@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,6 +20,7 @@
 #  define gdevpdtf_INCLUDED
 
 #include "gdevpdtx.h"
+#include "gsfcmap.h"
 
 /* ================ Types and structures ================ */
 
@@ -83,30 +84,12 @@
  * after writing out the base font.
  */
 
-#ifndef gs_cmap_DEFINED
-#  define gs_cmap_DEFINED
-typedef struct gs_cmap_s gs_cmap_t;
-#endif
-
-#ifndef gs_font_type0_DEFINED
-#  define gs_font_type0_DEFINED
-typedef struct gs_font_type0_s gs_font_type0;
-#endif
-
-#ifndef pdf_base_font_DEFINED
-#  define pdf_base_font_DEFINED
-typedef struct pdf_base_font_s pdf_base_font_t;
-#endif
-
 #ifndef pdf_font_descriptor_DEFINED
 #  define pdf_font_descriptor_DEFINED
 typedef struct pdf_font_descriptor_s pdf_font_descriptor_t;
 #endif
 
-#ifndef pdf_char_glyph_pair_DEFINED
-#  define pdf_char_glyph_pair_DEFINED
 typedef struct pdf_char_glyph_pair_s pdf_char_glyph_pair_t;
-#endif
 
 struct pdf_char_glyph_pair_s {
     gs_char chr;
@@ -202,6 +185,7 @@ typedef struct {
 struct pdf_font_resource_s {
     pdf_resource_common(pdf_font_resource_t);
     font_type FontType;		/* copied from font, if any */
+    long XUID;
     pdf_font_write_contents_proc_t write_contents;
     gs_string BaseFont;		/* (not used for Type 3) */
     pdf_font_descriptor_t *FontDescriptor; /* (not used for Type 0, Type 3, */
@@ -269,7 +253,15 @@ struct pdf_font_resource_s {
             gs_point *v; /* [256], glyph origin for WMode 1 */
             int last_reserved_char; /* Except for synthesised Type 3,
                                            which stores such data in LastChar */
+            /* We use this when determining whether we should use an existing ToUnicode
+             * CMap or just use the Encoding, for s aimple font. Even if the Encoding
+             * only uses named glyphs, with names we can understand, the original
+             * ToUnicode may have mapped these in a non-standard way.
+             * See Bug #702201 where the ffi ligature is mapped to 3 code points
+             */
+            int TwoByteToUnicode;
 
+            gs_glyph standard_glyph_code_for_notdef;
             union {
 
                 struct /*type1*/ {

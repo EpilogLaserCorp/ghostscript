@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Default shading drawing device procedures. */
@@ -19,14 +19,13 @@
 #include "gserrors.h"
 #include "gxdevice.h"
 #include "gxcindex.h"
-#include "vdtrace.h"
 #include "gxdevsop.h"
 
-static bool 
-gx_devn_diff(frac31 devn1[], frac31 devn2[], int num) 
+static bool
+gx_devn_diff(frac31 devn1[], frac31 devn2[], int num)
 {
     int k;
-    
+
     for (k = 0; k < num; k++) {
         if (devn1[k] != devn2[k]) {
             return true;
@@ -37,7 +36,7 @@ gx_devn_diff(frac31 devn1[], frac31 devn2[], int num)
 
 int
 gx_hl_fill_linear_color_scanline(gx_device *dev, const gs_fill_attributes *fa,
-        int i0, int j, int w, const frac31 *c0, const int32_t *c0f, 
+        int i0, int j, int w, const frac31 *c0, const int32_t *c0f,
         const int32_t *cg_num, int32_t cg_den)
 {
     frac31 c[GX_DEVICE_COLOR_MAX_COMPONENTS];
@@ -53,7 +52,7 @@ gx_hl_fill_linear_color_scanline(gx_device *dev, const gs_fill_attributes *fa,
     /* Note: All the stepping math is done with frac color values */
 
     devc.type = gx_dc_type_devn;
-    
+
     if (j < fixed2int(fa->clip->p.y) ||
             j > fixed2int_ceiling(fa->clip->q.y)) /* Must be compatible to the clipping logic. */
         return 0;
@@ -110,7 +109,7 @@ gx_hl_fill_linear_color_scanline(gx_device *dev, const gs_fill_attributes *fa,
                     rect.q.y = int2fixed(j + 1);
                 }
                 for (k = 0; k < n; k++) {
-                    devc.colors.devn.values[k] = frac2cv(curr[k]);
+                    devc.colors.devn.values[k] = frac312cv(curr[k]);
                 }
                 code = dev_proc(dev, fill_rectangle_hl_color) (dev, &rect, NULL, &devc, NULL);
                 if (code < 0)
@@ -125,7 +124,7 @@ gx_hl_fill_linear_color_scanline(gx_device *dev, const gs_fill_attributes *fa,
             i++;
             break;
         } else {
-            /* Compute a color change pixel analitically. */
+            /* Compute a color change pixel analytically. */
             di = i1 - i;
             for (k = 0; k < n; k++) {
                 int32_t a;
@@ -173,7 +172,7 @@ gx_hl_fill_linear_color_scanline(gx_device *dev, const gs_fill_attributes *fa,
             rect.q.y = int2fixed(j + 1);
         }
         for (k = 0; k < n; k++) {
-            devc.colors.devn.values[k] = frac2cv(curr[k]);
+            devc.colors.devn.values[k] = frac312cv(curr[k]);
         }
         return dev_proc(dev, fill_rectangle_hl_color) (dev, &rect, NULL, &devc, NULL);
     }
@@ -200,10 +199,15 @@ gx_default_fill_linear_color_scanline(gx_device *dev, const gs_fill_attributes *
     const gx_device_color_info *cinfo = &dev->color_info;
     int n = cinfo->num_components;
     int si, ei, di, code;
+    /* If the device encodes tags, we expect the comp_shift[num_components] to be valid */
+    /* for the tag part of the color (usually the high order bits of the color_index).  */
+    gx_color_index tag = device_encodes_tags(dev) ?
+                         (gx_color_index)(dev->graphics_type_tag & ~GS_DEVICE_ENCODES_TAGS) << cinfo->comp_shift[n]
+                         : 0;
 
     /* Todo: set this up to vector earlier */
-    if (devn && cinfo->polarity == GX_CINFO_POLARITY_SUBTRACTIVE)
-        return gx_hl_fill_linear_color_scanline(dev, fa, i0, j, w, c0, c0f, 
+    if (devn)  /* Note, PDF14 could be additive and doing devn */
+        return gx_hl_fill_linear_color_scanline(dev, fa, i0, j, w, c0, c0f,
                                                 cg_num, cg_den);
     if (j < fixed2int(fa->clip->p.y) ||
             j > fixed2int_ceiling(fa->clip->q.y)) /* Must be compatible to the clipping logic. */
@@ -263,11 +267,10 @@ gx_default_fill_linear_color_scanline(gx_device *dev, const gs_fill_attributes *
             si = max(bi, fixed2int(fa->clip->p.x));	    /* Must be compatible to the clipping logic. */
             ei = min(i, fixed2int_ceiling(fa->clip->q.x));  /* Must be compatible to the clipping logic. */
             if (si < ei) {
+                ci0 |= tag;		/* set tag (may be 0 if the device doesn't use tags) */
                 if (fa->swap_axes) {
-                    vd_rect(int2fixed(j), int2fixed(si), int2fixed(j + 1), int2fixed(ei), 1, (ulong)ci0);
                     code = dev_proc(dev, fill_rectangle)(dev, j, si, 1, ei - si, ci0);
                 } else {
-                    vd_rect(int2fixed(si), int2fixed(j), int2fixed(ei), int2fixed(j + 1), 1, (ulong)ci0);
                     code = dev_proc(dev, fill_rectangle)(dev, si, j, ei - si, 1, ci0);
                 }
                 if (code < 0)
@@ -316,11 +319,10 @@ gx_default_fill_linear_color_scanline(gx_device *dev, const gs_fill_attributes *
     si = max(bi, fixed2int(fa->clip->p.x));	    /* Must be compatible to the clipping logic. */
     ei = min(i, fixed2int_ceiling(fa->clip->q.x));  /* Must be compatible to the clipping logic. */
     if (si < ei) {
+        ci0 |= tag;		/* set tag (may be 0 if the device doesn't use tags) */
         if (fa->swap_axes) {
-            vd_rect(int2fixed(j), int2fixed(si), int2fixed(j + 1), int2fixed(ei), 1, (ulong)ci0);
             return dev_proc(dev, fill_rectangle)(dev, j, si, 1, ei - si, ci0);
         } else {
-            vd_rect(int2fixed(si), int2fixed(j), int2fixed(ei), int2fixed(j + 1), 1, (ulong)ci0);
             return dev_proc(dev, fill_rectangle)(dev, si, j, ei - si, 1, ci0);
         }
     }

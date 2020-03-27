@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -187,9 +187,10 @@ pcl_cursor_at_home_pos(pcl_state_t * pcs)
     return ((pcs->cap.y == HOME_Y(pcs)) && (pcs->cap.x == HOME_X(pcs)));
 }
 
-void
+int
 pcl_set_cap_x(pcl_state_t * pcs, coord x, bool relative, bool use_margins)
 {
+    int code = 0;
     coord old_x = pcs->cap.x;
 
     if (relative)
@@ -212,11 +213,13 @@ pcl_set_cap_x(pcl_state_t * pcs, coord x, bool relative, bool use_margins)
 
     /* leftward motion "breaks" an underline */
     if (x < old_x) {
-        pcl_break_underline(pcs);
+        code = pcl_break_underline(pcs);
         pcs->cap.x = x;
         pcl_continue_underline(pcs);
     } else
         pcs->cap.x = x;
+
+    return code;
 }
 
 int
@@ -225,6 +228,7 @@ pcl_set_cap_y(pcl_state_t * pcs,
               bool relative,
               bool use_margins, bool by_row, bool by_row_command)
 {
+    int code = 0;
     coord lim_y = pcs->xfm_state.pd_size.y;
     coord max_y = pcs->margins.top + pcs->margins.length;
     bool page_eject = by_row && relative;
@@ -246,7 +250,9 @@ pcl_set_cap_y(pcl_state_t * pcs,
         y += (by_row ? HOME_Y(pcs) : pcs->margins.top);
 
     /* vertical moves always "break" underlines */
-    pcl_break_underline(pcs);
+    code = pcl_break_underline(pcs);
+    if (code < 0)
+        return code;
 
     max_y = (use_margins ? max_y : lim_y);
     if (y < 0L)
@@ -280,7 +286,7 @@ pcl_set_cap_y(pcl_state_t * pcs,
     }
 
     pcl_continue_underline(pcs);
-    return 0;
+    return code;
 }
 
 static inline float
@@ -295,14 +301,13 @@ motion_args(pcl_args_t * pargs, bool truncate)
 
 /* some convenient short-hand for the cursor movement commands */
 
-static inline void
+static inline int
 do_horiz_motion(pcl_args_t * pargs,
                 pcl_state_t * pcs, coord mul, bool truncate_arg)
 {
-    pcl_set_cap_x(pcs, (coord) (motion_args(pargs, truncate_arg) * mul),
-                  arg_is_signed(pargs), false);
     pcs->cursor_moved = true;
-    return;
+    return pcl_set_cap_x(pcs, (coord) (motion_args(pargs, truncate_arg) * mul),
+                  arg_is_signed(pargs), false);
 }
 
 static inline int
@@ -329,13 +334,20 @@ do_vertical_move(pcl_state_t * pcs, pcl_args_t * pargs, float mul,
  *
  * Note: CR always "breaks" an underline, even if it is a movement to the right.
  */
-void
+int
 pcl_do_CR(pcl_state_t * pcs)
 {
-    pcl_break_underline(pcs);
-    pcl_set_cap_x(pcs, pcs->margins.left, false, false);
-    pcl_continue_underline(pcs);
-    pcs->cursor_moved = true;
+    int code =  pcl_break_underline(pcs);
+    if (code < 0)
+        return code;
+
+    code = pcl_set_cap_x(pcs, pcs->margins.left, false, false);
+    if (code >= 0) {
+        pcl_continue_underline(pcs);
+        pcs->cursor_moved = true;
+    }
+
+    return code;
 }
 
 int
@@ -366,17 +378,24 @@ pcl_do_FF(pcl_state_t * pcs)
 /*
  * Return the cursor to its "home" position
  */
-void
+int
 pcl_home_cursor(pcl_state_t * pcs)
 {
-    pcl_set_cap_x(pcs, pcs->margins.left, false, false);
-    pcl_set_cap_y(pcs, 0L, false, false, true, false);
+    int code = pcl_set_cap_x(pcs, pcs->margins.left, false, false);
+    if (code < 0)
+        return code;
+    return pcl_set_cap_y(pcs, 0L, false, false, true, false);
+}
+
+int pcl_update_hmi_cp(pcl_state_t * pcs)
+{
+    return ((pcs->hmi_cp == HMI_DEFAULT) ? pcl_updated_hmi(pcs) : 0);
 }
 
 /*
  * Update the HMI by recomputing it from the font.
  */
-coord
+int
 pcl_updated_hmi(pcl_state_t * pcs)
 {
     coord hmi;
@@ -386,7 +405,7 @@ pcl_updated_hmi(pcl_state_t * pcs)
     const pl_font_t *plfont = pcs->font;
 
     if (code < 0)
-        return pcs->hmi_cp;     /* bad news; don't mark the HMI as valid. */
+        return code;     /* bad news; don't mark the HMI as valid. */
 
     /* we check for typeface == 0 here (lineprinter) because we
        frequently simulate lineprinter with a scalable truetype
@@ -407,7 +426,8 @@ pcl_updated_hmi(pcl_state_t * pcs)
      * LanguageTechnical Reference Manual", October 1992 ed., page 5-22.
      */
     hmi = hmi + pcs->uom_cp / 2;
-    return pcs->hmi_cp = hmi - (hmi % pcs->uom_cp);
+    pcs->hmi_cp = hmi - (hmi % pcs->uom_cp);
+    return code;
 }
 
 /* Commands */
@@ -442,6 +462,7 @@ set_horiz_motion_index(pcl_args_t * pargs, pcl_state_t * pcs)
 static int
 set_vert_motion_index(pcl_args_t * pargs, pcl_state_t * pcs)
 {
+    int code = 0;
     /* LMI :== 48.0 / lpi;  ie 0.16 = 48/300;
      * convert to pcl_coord_scale (7200), roundup the float prior to truncation.
      */
@@ -461,8 +482,8 @@ set_vert_motion_index(pcl_args_t * pargs, pcl_state_t * pcs)
        coordinate (horizontal position) cause the command to not take
        effect. */
     if (cursor_at_home)
-        pcl_home_cursor(pcs);
-    return 0;
+        code = pcl_home_cursor(pcs);
+    return code;
 }
 
 #undef HP_VERT_MOTION_NEW
@@ -476,6 +497,7 @@ set_vert_motion_index(pcl_args_t * pargs, pcl_state_t * pcs)
 static int
 set_line_spacing(pcl_args_t * pargs, pcl_state_t * pcs)
 {
+    int code = 0;
     uint lpi = uint_arg(pargs);
     bool cursor_at_home = pcl_cursor_at_home_pos(pcs);
 
@@ -484,8 +506,8 @@ set_line_spacing(pcl_args_t * pargs, pcl_state_t * pcs)
     if ((48 % lpi) == 0)        /* lpi must divide 48 */
         pcs->vmi_cp = inch2coord(1.0 / lpi);
     if (cursor_at_home)
-        pcl_home_cursor(pcs);
-    return 0;
+        code = pcl_home_cursor(pcs);
+    return code;
 }
 
 /*
@@ -507,8 +529,11 @@ set_line_termination(pcl_args_t * pargs, pcl_state_t * pcs)
 static int
 horiz_cursor_pos_columns(pcl_args_t * pargs, pcl_state_t * pcs)
 {
-    do_horiz_motion(pargs, pcs, pcl_hmi(pcs), false);
-    return 0;
+    int code = pcl_update_hmi_cp(pcs);
+    if (code < 0)
+        return code;
+
+    return do_horiz_motion(pargs, pcs, pcs->hmi_cp, false);
 }
 
 /*
@@ -517,8 +542,7 @@ horiz_cursor_pos_columns(pcl_args_t * pargs, pcl_state_t * pcs)
 static int
 horiz_cursor_pos_decipoints(pcl_args_t * pargs, pcl_state_t * pcs)
 {
-    do_horiz_motion(pargs, pcs, (coord) 10.0, false);
-    return 0;
+    return do_horiz_motion(pargs, pcs, (coord) 10.0, false);
 }
 
 /*
@@ -527,8 +551,7 @@ horiz_cursor_pos_decipoints(pcl_args_t * pargs, pcl_state_t * pcs)
 static int
 horiz_cursor_pos_units(pcl_args_t * pargs, pcl_state_t * pcs)
 {
-    do_horiz_motion(pargs, pcs, pcs->uom_cp, true);
-    return 0;
+    return do_horiz_motion(pargs, pcs, pcs->uom_cp, true);
 }
 
 /*
@@ -538,7 +561,9 @@ static int
 cmd_CR(pcl_args_t * pargs,      /* ignored */
        pcl_state_t * pcs)
 {
-    pcl_do_CR(pcs);
+    int code = pcl_do_CR(pcs);
+    if (code < 0)
+        return code;
     return ((pcs->line_termination & 1) != 0 ? pcl_do_LF(pcs) : 0);
 }
 
@@ -549,10 +574,9 @@ static int
 cmd_BS(pcl_args_t * pargs,      /* ignored */
        pcl_state_t * pcs)
 {
-    pcl_set_cap_x(pcs, (coord) - pcs->last_width, true, true);
     pcs->last_was_BS = true;
     pcs->cursor_moved = true;
-    return 0;
+    return pcl_set_cap_x(pcs, (coord) - pcs->last_width, true, true);
 }
 
 /*
@@ -569,13 +593,20 @@ cmd_HT(pcl_args_t * pargs,      /* ignored */
 
     if (x < 0)
         x = -x;
-    else if ((tab = 8 * pcl_hmi(pcs)) > 0)
-        x = tab - (x % tab);
     else
-        x = 0L;
-    pcl_set_cap_x(pcs, x, true, true);
+    {
+        int code = pcl_update_hmi_cp(pcs);
+        if (code < 0)
+            return code;
+
+        if ((tab = 8 * pcs->hmi_cp) > 0)
+            x = tab - (x % tab);
+        else
+            x = 0L;
+    }
+
     pcs->cursor_moved = true;
-    return 0;
+    return pcl_set_cap_x(pcs, x, true, true);
 }
 
 /*
@@ -627,8 +658,11 @@ static int
 cmd_LF(pcl_args_t * pargs,      /* ignored */
        pcl_state_t * pcs)
 {
-    if ((pcs->line_termination & 2) != 0)
-        pcl_do_CR(pcs);
+    if ((pcs->line_termination & 2) != 0) {
+        int code = pcl_do_CR(pcs);
+        if (code < 0)
+            return code;
+    }
     return pcl_do_LF(pcs);
 }
 
@@ -639,8 +673,11 @@ static int
 cmd_FF(pcl_args_t * pargs,      /* ignored */
        pcl_state_t * pcs)
 {
-    if ((pcs->line_termination & 2) != 0)
-        pcl_do_CR(pcs);
+    if ((pcs->line_termination & 2) != 0) {
+        int code = pcl_do_CR(pcs);
+        if (code < 0)
+            return code;
+    }
     return pcl_do_FF(pcs);
 }
 
@@ -654,6 +691,7 @@ cmd_FF(pcl_args_t * pargs,      /* ignored */
 static int
 push_pop_cursor(pcl_args_t * pargs, pcl_state_t * pcs)
 {
+    int code = 0;
     int type = uint_arg(pargs);
 
     if ((type == 0) && (pcs->cursor_stk_size < countof(pcs->cursor_stk))) {
@@ -669,13 +707,15 @@ push_pop_cursor(pcl_args_t * pargs, pcl_state_t * pcs)
 
         pcl_invert_mtx(&(pcs->xfm_state.pd2lp_mtx), &lp2pd);
         gs_point_transform(ppt->x, ppt->y, &lp2pd, ppt);
-        pcl_set_cap_x(pcs, (coord) ppt->x, false, false);
-        pcl_set_cap_y(pcs,
+        code = pcl_set_cap_x(pcs, (coord) ppt->x, false, false);
+        if (code < 0)
+            return code;
+        code = pcl_set_cap_y(pcs,
                       (coord) ppt->y - pcs->margins.top,
                       false, false, false, false);
     }
 
-    return 0;
+    return code;
 }
 
 static int
@@ -715,9 +755,8 @@ pcl_vmi_default(pcl_state_t * pcs)
     if (!pjl_proc_compare(pcs->pjls,
                           pjl_proc_get_envvar(pcs->pjls,
                                               "FORMLINES_SET"), "ON")) {
-        vmi = (pcs->margins.length /
-               pjl_proc_vartoi(pcs->pjls,
-                               pjl_proc_get_envvar(pcs->pjls, "formlines")));
+        int value = pjl_proc_vartoi(pcs->pjls, pjl_proc_get_envvar(pcs->pjls, "formlines"));
+        vmi = (pcs->margins.length / (value < 5 ? 5 : (value > 128 ? 128 : value)));
     } else {
         vmi = inch2coord(8.0 / 48.0);
     }
@@ -788,14 +827,14 @@ pcursor_do_registration(pcl_parser_state_t * pcl_parser_state,
         return 0;
 }
 
-static void
+static int
 pcursor_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
     static const uint mask = (pcl_reset_initial
                               | pcl_reset_printer | pcl_reset_overlay);
 
     if ((type & mask) == 0)
-        return;
+        return 0;
 
     pcs->line_termination = 0;
     pcs->hmi_cp = HMI_DEFAULT;
@@ -815,7 +854,8 @@ pcursor_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
             pcs->cap.x = pcs->cap.y = 0;
         }
     }
-    pcl_home_cursor(pcs);
+
+    return pcl_home_cursor(pcs);
 }
 
 const pcl_init_t pcursor_init =

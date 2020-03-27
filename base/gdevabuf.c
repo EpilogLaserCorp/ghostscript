@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Alpha-buffering memory devices */
@@ -65,7 +65,7 @@ mem_alpha_map_rgb_color(gx_device * dev, const gx_color_value cv[])
     gx_color_index color = gx_forward_map_rgb_color(dev, cv);
 
     return (color == 0 || color == gx_no_color_index ? color :
-            (gx_color_index) ((1 << mdev->log2_alpha_bits) - 1));
+            (((gx_color_index)1 << mdev->log2_alpha_bits) - 1));
 }
 static int
 mem_alpha_map_color_rgb(gx_device * dev, gx_color_index color,
@@ -97,6 +97,28 @@ mem_alpha_copy_alpha(gx_device * dev, const byte * data, int data_x,
            int raster, gx_bitmap_id id, int x, int y, int width, int height,
                      gx_color_index color, int depth)
 {				/* Just use copy_color. */
+    if (depth == 8) {
+        /* We don't support depth=8 in this function, but this doesn't
+         * matter, because:
+         * 1) This code is only called for dTextAlphaBits > 0, when
+         *    DisableFAPI=true. And we don't support DisableFAPI.
+         * 2) Even if we did support DisableFAPI, this can never actually
+         *    be called because gx_compute_text_oversampling arranges that
+         *    log2_scale.{x,y} sum to <= alpha_bits, and this code is only
+         *    called if it sums to MORE than alpha_bits.
+         * 3) Even if copy_alpha DID somehow manage to be called, the
+         *    only place that uses depth==8 is the imagemask interpolation
+         *    code, and that can never hit this code. (Type 3 fonts might
+         *    include Imagemasks, but those don't go through FAPI).
+         *
+         * If in the future we ever rearrange the conditions under which
+         * this code is called (so that it CAN be called with depth == 8)
+         * then this will probably be best implemented by decimating the
+         * input alpha values to either 2 or 4 bits as appropriate and
+         * then recursively calling us back.
+         */
+        return_error(gs_error_unknownerror);
+    }
     return (color == 0 ?
             (*dev_proc(dev, fill_rectangle)) (dev, x, y, width, height,
                                               color) :
@@ -410,7 +432,7 @@ mem_abuf_fill_rectangle(gx_device * dev, int x, int y, int w, int h,
 /* Fill a rectangle. */
 static int
 mem_abuf_fill_rectangle_hl_color(gx_device * dev, const gs_fixed_rect *rect,
-                                 const gs_imager_state *pis,
+                                 const gs_gstate *pgs,
                                  const gx_drawing_color *pdcolor,
                                  const gx_clip_path *pcpath)
 {
@@ -420,6 +442,7 @@ mem_abuf_fill_rectangle_hl_color(gx_device * dev, const gs_fixed_rect *rect,
     int y = fixed2int(rect->p.y);
     int w = fixed2int(rect->q.x) - x;
     int h = fixed2int(rect->q.y) - y;
+    (void)pgs;
 
     x -= mdev->mapped_x;
     fit_fill_xy(dev, x, y, w, h);
@@ -458,7 +481,7 @@ mem_abuf_get_clipping_box(gx_device * dev, gs_fixed_rect * pbox)
  * We should do alpha buffering iff this value is >1.
  */
 int
-alpha_buffer_bits(gs_state * pgs)
+alpha_buffer_bits(gs_gstate * pgs)
 {
     gx_device *dev;
 

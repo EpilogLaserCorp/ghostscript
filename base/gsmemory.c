@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,13 +9,14 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
 /* Generic allocator support */
 #include "memory_.h"
+#include "stdint_.h"
 #include "gdebug.h"
 #include "gstypes.h"
 #include "gsmemory.h"
@@ -82,9 +83,9 @@ reloc_const_bytestring(gs_const_bytestring *pbs, gc_state_t *gcst)
 /* Fill an unoccupied block with a pattern. */
 /* Note that the block size may be too large for a single memset. */
 void
-gs_alloc_memset(void *ptr, int /*byte */ fill, ulong lsize)
+gs_alloc_memset(void *ptr, int /*byte */ fill, size_t lsize)
 {
-    ulong msize = lsize;
+    size_t msize = lsize;
     char *p = ptr;
     int isize;
 
@@ -99,15 +100,15 @@ gs_alloc_memset(void *ptr, int /*byte */ fill, ulong lsize)
  * If obj != 0, pstype is used only for checking (in DEBUG configurations).
  */
 void *
-gs_resize_struct_array(gs_memory_t *mem, void *obj, uint num_elements,
+gs_resize_struct_array(gs_memory_t *mem, void *obj, size_t num_elements,
                        gs_memory_type_ptr_t pstype, client_name_t cname)
 {
     if (obj == 0)
         return gs_alloc_struct_array(mem, num_elements, void, pstype, cname);
 #ifdef DEBUG
     if (gs_object_type(mem, obj) != pstype) {
-        lprintf3("resize_struct_array 0x%lx, type was 0x%lx, expected 0x%lx!\n",
-                 (ulong)obj, (ulong)gs_object_type(mem, obj), (ulong)pstype);
+        lprintf3("resize_struct_array "PRI_INTPTR", type was "PRI_INTPTR", expected "PRI_INTPTR"!\n",
+                 (intptr_t)obj, (intptr_t)gs_object_type(mem, obj), (intptr_t)pstype);
         return 0;
     }
 #endif
@@ -133,7 +134,7 @@ gs_ignore_free_object(gs_memory_t * mem, void *data, client_name_t cname)
 {
 }
 void
-gs_ignore_free_string(gs_memory_t * mem, byte * data, uint nbytes,
+gs_ignore_free_string(gs_memory_t * mem, byte * data, size_t nbytes,
                       client_name_t cname)
 {
 }
@@ -149,7 +150,7 @@ gs_free_const_object(gs_memory_t * mem, const void *data, client_name_t cname)
     gs_free_object(mem, u.w, cname);
 }
 void
-gs_free_const_string(gs_memory_t * mem, const byte * data, uint nbytes,
+gs_free_const_string(gs_memory_t * mem, const byte * data, size_t nbytes,
                      client_name_t cname)
 {
     union { const byte *r; byte *w; } u;
@@ -212,7 +213,7 @@ gs_struct_type_name(gs_memory_type_ptr_t pstype)
 
 /* Register a structure root. */
 int
-gs_register_struct_root(gs_memory_t *mem, gs_gc_root_t *root,
+gs_register_struct_root(gs_memory_t *mem, gs_gc_root_t **root,
                         void **pp, client_name_t cname)
 {
     return gs_register_root(mem, root, ptr_struct_type, pp, cname);
@@ -251,29 +252,29 @@ rc_object_type_name(const void *vp, const rc_header *prc)
 void
 rc_trace_init_free(const void *vp, const rc_header *prc)
 {
-    dmprintf3(prc->memory, "[^]%s 0x%lx init = %ld\n",
-              rc_object_type_name(vp, prc), (ulong)vp, (long)prc->ref_count);
+    dmprintf3(prc->memory, "[^]%s "PRI_INTPTR" init = %ld\n",
+              rc_object_type_name(vp, prc), (intptr_t)vp, (long)prc->ref_count);
 }
 void
 rc_trace_free_struct(const void *vp, const rc_header *prc, client_name_t cname)
 {
-    dmprintf3(prc->memory, "[^]%s 0x%lx => free (%s)\n",
+    dmprintf3(prc->memory, "[^]%s "PRI_INTPTR" => free (%s)\n",
               rc_object_type_name(vp, prc),
-              (ulong)vp, client_name_string(cname));
+              (intptr_t)vp, client_name_string(cname));
 }
 void
 rc_trace_increment(const void *vp, const rc_header *prc)
 {
-    dmprintf3(prc->memory, "[^]%s 0x%lx ++ => %ld\n",
+    dmprintf3(prc->memory, "[^]%s "PRI_INTPTR" ++ => %ld\n",
               rc_object_type_name(vp, prc),
-              (ulong)vp, (long)prc->ref_count);
+              (intptr_t)vp, (long)prc->ref_count);
 }
 void
-rc_trace_adjust(const void *vp, const rc_header *prc, int delta)
+rc_trace_adjust(const void *vp, const rc_header *prc, int delta, const char *cname)
 {
-    dmprintf4(prc->memory, "[^]%s 0x%lx %+d => %ld\n",
+    dmprintf5(prc->memory, "[^]%s "PRI_INTPTR" %+d => %ld (%s)\n",
               rc_object_type_name(vp, prc),
-              (ulong)vp, delta, (long)(prc->ref_count + delta));
+              (intptr_t)vp, delta, (long)(prc->ref_count + delta), cname);
 }
 
 #endif /* DEBUG */
@@ -297,8 +298,8 @@ ENUM_PTRS_BEGIN_PROC(basic_enum_ptrs)
     /* with number of elements 0 and allocation not passing 'element' */
     if (size == 0) {
 #ifdef DEBUG
-        dmprintf2(mem, "  basic_enum_ptrs: Attempt to enum 0 size structure at 0x%lx, type: %s\n",
-                  (ulong)vptr, pstype->sname);
+        dmprintf2(mem, "  basic_enum_ptrs: Attempt to enum 0 size structure at "PRI_INTPTR", type: %s\n",
+                  (intptr_t)vptr, pstype->sname);
 #endif
         return 0;
     }
@@ -309,8 +310,8 @@ ENUM_PTRS_BEGIN_PROC(basic_enum_ptrs)
 #ifdef DEBUG
         /* some extra checking to make sure we aren't out of bounds */
         if (ppe->offset > size - sizeof(void *)) {
-            dmprintf4(mem, "  basic_enum_ptrs: Attempt to enum ptr with offset=%d beyond size=%d: structure at 0x%lx, type: %s\n",
-                      ppe->offset, size, (ulong)vptr, pstype->sname);
+            dmprintf4(mem, "  basic_enum_ptrs: Attempt to enum ptr with offset=%d beyond size=%d: structure at "PRI_INTPTR", type: %s\n",
+                      ppe->offset, size, (intptr_t)vptr, pstype->sname);
             return 0;
         }
 #endif

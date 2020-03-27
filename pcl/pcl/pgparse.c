@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -213,6 +213,14 @@ hpgl_process(hpgl_parser_state_t * pst, hpgl_state_t * pgls,
     }
   x:pr->ptr = p;
     pst->exit_to_parser = NULL;
+
+    /*
+     * Within a macro we can't run out of data since all the data is
+     * available in memory.
+     */
+    if (pgls->macro_level > 0 && (code == gs_error_NeedInput))
+        code = gs_error_Fatal;
+        
     return (code == gs_error_NeedInput ? 0 : code);
 }
 
@@ -264,7 +272,14 @@ hpgl_arg(const gs_memory_t * mem, hpgl_parser_state_t * pst)
                         pvalue->v_n.r = 0;
                         break;
                     case 1:
-                        pvalue->v_n.r = pvalue->v_n.i;
+                    {
+                       /* Strictly speaking assigning one element of union
+                        * to another, overlapping element of a different size is
+                        * undefined behavior, hence assign to an intermediate variable
+                        */
+                        double r = (double)pvalue->v_n.i;
+                        pvalue->v_n.r = r;
+                    }
                 }
                 parg->have_value = 2;
                 parg->frac_scale = 1.0;
@@ -425,8 +440,10 @@ hpgl_init_command_index(hpgl_parser_state_t ** pgl_parser_state,
                                                "hpgl_init_command_index");
 
     /* fatal */
-    if (pgst == 0)
+    if (pgst == 0) {
+        *pgl_parser_state = NULL;
         return -1;
+    }
 
     pgst->exit_to_parser = NULL;
     pgst->hpgl_command_next_index = 0;

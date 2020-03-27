@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -22,30 +22,27 @@
 #include "gsht.h"
 
 /* Procedural interface */
-int gs_setcolorscreen(gs_state *, gs_colorscreen_halftone *);
-int gs_currentcolorscreen(gs_state *, gs_colorscreen_halftone *);
+int gs_setcolorscreen(gs_gstate *, gs_colorscreen_halftone *);
+int gs_currentcolorscreen(gs_gstate *, gs_colorscreen_halftone *);
 
 /*
  * We include sethalftone here, even though it is a Level 2 feature,
  * because it turns out to be convenient to define setcolorscreen
  * using sethalftone.
  */
-#ifndef gs_halftone_DEFINED
-#  define gs_halftone_DEFINED
 typedef struct gs_halftone_s gs_halftone;
 
-#endif
 /*
  * gs_halftone structures may have complex substructures.  We provide two
  * procedures for setting them.  gs_halftone assumes that the gs_halftone
  * structure and all its substructures was allocated with the same allocator
- * as the gs_state; gs_halftone_allocated looks in the structure itself (the
+ * as the gs_gstate; gs_halftone_allocated looks in the structure itself (the
  * rc.memory member) to find the allocator that was used.  Both procedures
  * copy the top-level structure (using the appropriate allocator), but take
  * ownership of the substructures.
  */
-int gs_sethalftone(gs_state *, gs_halftone *);
-int gs_sethalftone_allocated(gs_state *, gs_halftone *);
-int gs_currenthalftone(gs_state *, gs_halftone *);
+int gs_sethalftone(gs_gstate *, gs_halftone *);
+int gs_sethalftone_allocated(gs_gstate *, gs_halftone *);
+int gs_currenthalftone(gs_gstate *, gs_halftone *);
 
 #endif /* gsht1_INCLUDED */

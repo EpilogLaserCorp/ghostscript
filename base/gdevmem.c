@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Generic "memory" (stored bitmap) device */
@@ -133,6 +133,9 @@ gs_device_is_memory(const gx_device * dev)
     int bits_per_pixel = dev->color_info.depth;
     const gx_device_memory *mdproto;
 
+    if (dev->is_planar)
+        bits_per_pixel /= dev->color_info.num_components;
+
     mdproto = gdev_mem_device_for_bits(bits_per_pixel);
     if (mdproto != 0 && dev_proc(dev, draw_thin_line) == dev_proc(mdproto, draw_thin_line))
         return true;
@@ -173,16 +176,16 @@ gs_make_mem_device(gx_device_memory * dev, const gx_device_memory * mdproto,
         /* Forward the color mapping operations to the target. */
         gx_device_forward_color_procs((gx_device_forward *) dev);
         gx_device_copy_color_procs((gx_device *)dev, target);
+        dev->color_info.separable_and_linear = target->color_info.separable_and_linear;
         dev->cached_colors = target->cached_colors;
         dev->graphics_type_tag = target->graphics_type_tag;	/* initialize to same as target */
-        /* Do a copy of put_image since it needs the source buffer */
-#define COPY_PROC(p) set_dev_proc(dev, p, target->procs.p)
-        COPY_PROC(put_image);
-#undef COPY_PROC
+
+        set_dev_proc(dev, put_image, gx_forward_put_image);
+        set_dev_proc(dev, dev_spec_op, gx_default_dev_spec_op);
     }
     if (dev->color_info.depth == 1) {
         gx_color_value cv[GX_DEVICE_COLOR_MAX_COMPONENTS];
-        int k;
+        uchar k;
 
         if (target != 0) {
             for (k = 0; k < target->color_info.num_components; k++) {
@@ -305,6 +308,7 @@ gs_make_mem_mono_device(gx_device_memory * dev, gs_memory_t * mem,
     /* Should this be forwarding, monochrome profile, or not set? MJV */
     set_dev_proc(dev, get_profile, gx_forward_get_profile);
     set_dev_proc(dev, set_graphics_type_tag, gx_forward_set_graphics_type_tag);
+    set_dev_proc(dev, dev_spec_op, gx_default_dev_spec_op);
     /* initialize to same tag as target */
     dev->graphics_type_tag = target ? target->graphics_type_tag : GS_UNKNOWN_TAG;
 }
@@ -378,11 +382,12 @@ gdev_mem_data_size(const gx_device_memory * dev, int width, int height, ulong *p
  */
 int
 gdev_mem_max_height(const gx_device_memory * dev, int width, ulong size,
-                bool page_uses_transparency)
+                    bool page_uses_transparency)
 {
     int height;
     ulong max_height;
     ulong data_size;
+    bool deep = device_is_deep((const gx_device *)dev);
 
     if (page_uses_transparency) {
         /*
@@ -393,7 +398,7 @@ gdev_mem_max_height(const gx_device_memory * dev, int width, ulong size,
          * processing the file.
          */
         max_height = size / (bitmap_raster_pad_align(width
-                * dev->color_info.depth + ESTIMATED_PDF14_ROW_SPACE(width, dev->color_info.num_components),
+            * dev->color_info.depth + ESTIMATED_PDF14_ROW_SPACE(width, dev->color_info.num_components, deep ? 16 : 8),
                 dev->pad, dev->log2_align_mod) + sizeof(byte *) * (dev->is_planar ? dev->color_info.num_components : 1));
         height = (int)min(max_height, max_int);
     } else {
@@ -448,8 +453,15 @@ gdev_mem_open_scan_lines(gx_device_memory *mdev, int setup_height)
                                     "mem_open");
         if (mdev->base == 0)
             return_error(gs_error_VMerror);
+#ifdef PACIFY_VALGRIND
+        /* If we end up writing the bitmap to the clist, we can get valgrind errors
+         * because we write and read the padding at the end of each raster line.
+         * Easiest to set the entire block.
+         */
+        memset(mdev->base, 0x00, size);
+#endif
         align = 1<<mdev->log2_align_mod;
-        mdev->base += (-(int)mdev->base) & (align-1);
+        mdev->base += (-(int)(intptr_t)mdev->base) & (align-1);
         mdev->foreign_bits = false;
     } else if (mdev->line_pointer_memory != 0) {
         /* Allocate the line pointers now. */
@@ -464,7 +476,15 @@ gdev_mem_open_scan_lines(gx_device_memory *mdev, int setup_height)
         line_pointers_adjacent = false;
     }
     if (line_pointers_adjacent) {
-        gdev_mem_bits_size(mdev, mdev->width, mdev->height, &size);
+        int code;
+
+        if (mdev->base == 0)
+            return_error(gs_error_rangecheck);
+
+        code = gdev_mem_bits_size(mdev, mdev->width, mdev->height, &size);
+        if (code < 0)
+            return code;
+
         mdev->line_ptrs = (byte **)(mdev->base + size);
     }
     mdev->raster = gx_device_raster((gx_device *)mdev, 1);
@@ -506,7 +526,7 @@ gdev_mem_set_line_ptrs(gx_device_memory * mdev, byte * base, int raster,
     /* Now, pad and align as required. */
     if (mdev->log2_align_mod > log2_align_bitmap_mod) {
         int align = 1<<mdev->log2_align_mod;
-        align = (-(int)base) & (align-1);
+        align = (-(int)(intptr_t)base) & (align-1);
         data = base + align;
     } else {
         data = mdev->base;
@@ -590,6 +610,8 @@ mem_get_bits_rectangle(gx_device * dev, const gs_int_rect * prect,
             GB_PACKING_CHUNKY | GB_COLORS_NATIVE | GB_ALPHA_NONE;
         return_error(gs_error_rangecheck);
     }
+    if (mdev->line_ptrs == 0x00)
+        return_error(gs_error_rangecheck);
     if ((w <= 0) | (h <= 0)) {
         if ((w | h) < 0)
             return_error(gs_error_rangecheck);
@@ -619,7 +641,7 @@ mem_get_bits_rectangle(gx_device * dev, const gs_int_rect * prect,
     }
 }
 
-#if !arch_is_big_endian
+#if !ARCH_IS_BIG_ENDIAN
 
 /*
  * Swap byte order in a rectangular subset of a bitmap.  If store = true,
@@ -692,6 +714,10 @@ mem_word_get_bits_rectangle(gx_device * dev, const gs_int_rect * prect,
     }
     bit_x = x * dev->color_info.depth;
     bit_w = w * dev->color_info.depth;
+
+    if(mdev->line_ptrs == 0x00)
+        return_error(gs_error_rangecheck);
+
     src = scan_line_base(mdev, y);
     mem_swap_byte_rect(src, dev_raster, bit_x, bit_w, h, false);
     code = mem_get_bits_rectangle(dev, prect, params, unread);
@@ -699,7 +725,7 @@ mem_word_get_bits_rectangle(gx_device * dev, const gs_int_rect * prect,
     return code;
 }
 
-#endif /* !arch_is_big_endian */
+#endif /* !ARCH_IS_BIG_ENDIAN */
 
 /* Map a r-g-b color to a color index for a mapped color memory device */
 /* (2, 4, or 8 bits per pixel.) */

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -62,14 +62,15 @@ px_error_setfont(px_state_t * pxs)
                           px_bitmap_font_header_size,
                           gs_next_ids(pxs->memory, 1), pxs);
     {
-        const byte *cdata = px_bitmap_font_char_data;
+        const byte *cdatanext, *cdata = px_bitmap_font_char_data;
 
         while (*cdata && code >= 0) {
-            code = pl_font_add_glyph(pxfont, *cdata, cdata + 1);
-            ++cdata;
-            cdata = cdata + 16 +
-                ((uint16at(cdata + 10, true) + 7) >> 3) *
-                uint16at(cdata + 12, true);
+           cdatanext = cdata + 16 +
+                ((uint16at(cdata + 11, true) + 7) >> 3) *
+                uint16at(cdata + 13, true) + 1; /* add one to clear the char code */
+
+            code = pl_font_add_glyph(pxfont, *cdata, cdata + 1, (int)(cdatanext - cdata - 2));
+            cdata = cdatanext;
         }
     }
     if (code < 0) {
@@ -226,12 +227,17 @@ px_error_message_line(char message[px_max_error_line + 1], int N,
 
 /* Begin an error page.  Return the initial Y value. */
 int
-px_begin_error_page(px_state_t * pxs)
+px_begin_error_page(px_state_t * pxs, int* y)
 {
-    gs_state *pgs = pxs->pgs;
+    int code;
 
-    gs_initgraphics(pgs);
-    gs_erasepage(pgs);
+    gs_gstate *pgs = pxs->pgs;
+
+    code = gs_initgraphics(pgs);
+    if (code < 0)   return code;
+
+    code = gs_erasepage(pgs);
+    if (code < 0)   return code;
     /* Don't call pxSetPageDefaultCTM -- we don't want rotation or */
     /* unusual Units of Measure -- but do invert the Y axis. */
     /*pxSetPageDefaultCTM(NULL, pxs); */
@@ -241,8 +247,9 @@ px_begin_error_page(px_state_t * pxs)
         px_get_default_media_size(pxs, &pt);
         gs_translate(pgs, 0.0, pt.y);
         gs_scale(pgs, 1.0, -1.0);
-        return 90;
+        *y = 90;
     }
+    return 0;
 }
 
 /* Print a message on an error page. */
@@ -250,7 +257,7 @@ px_begin_error_page(px_state_t * pxs)
 int
 px_error_page_show(const char *message, int ytop, px_state_t * pxs)
 {
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     int y = ytop;
     const char *m = message;
     const char *p;

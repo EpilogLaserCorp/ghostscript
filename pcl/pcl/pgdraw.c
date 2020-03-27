@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -440,7 +440,7 @@ hpgl_set_graphics_line_attribute_state(hpgl_state_t * pgls,
      * is not documented PCLTRM.  Pen widths are maintained in
      * plotter units
      */
-    if (render_mode != hpgl_rm_character && pen_wid <= 14.0) {
+    if (pen_wid <= 14.0) {
         hpgl_call(gs_setlinejoin(pgls->pgs, gs_join_none));
         hpgl_call(gs_setlinecap(pgls->pgs, gs_cap_butt));
         hpgl_call(gs_setlinewidth(pgls->pgs, pen_wid));
@@ -450,7 +450,6 @@ hpgl_set_graphics_line_attribute_state(hpgl_state_t * pgls,
 
     switch (render_mode) {
 
-        case hpgl_rm_character:
         case hpgl_rm_polygon:
         case hpgl_rm_clip_and_fill_polygon:
             hpgl_call(gs_setlinejoin(pgls->pgs, gs_join_round));
@@ -840,7 +839,7 @@ static int
 hpgl_fill_polyfill_background(hpgl_state_t * pgls)
 {
     /* conditionally mark page as dirty */
-    pcl_mark_page_for_path(pgls);
+    hpgl_call(pcl_mark_page_for_path(pgls));
     /* if we are drawing on a transparent background */
     if (pgls->g.source_transparent)
         return 0;
@@ -858,6 +857,8 @@ static int
 hpgl_polyfill_using_current_line_type(hpgl_state_t * pgls,
                                       hpgl_rendering_mode_t render_mode)
 {
+    int code;
+
     /* gsave and grestore used to preserve the clipping region */
     hpgl_call(hpgl_gsave(pgls));
 
@@ -866,13 +867,17 @@ hpgl_polyfill_using_current_line_type(hpgl_state_t * pgls,
      * beginning at the anchor corner replicate lines
      */
     if (pgls->g.fill_type == hpgl_even_odd_rule)
-        hpgl_call(gs_eoclip(pgls->pgs));
+        code = gs_eoclip(pgls->pgs);
     else
-        hpgl_call(gs_clip(pgls->pgs));
-    hpgl_call(hpgl_fill_polyfill_background(pgls));
-    hpgl_call(hpgl_polyfill(pgls, render_mode));
-    hpgl_call(hpgl_grestore(pgls));
-    return 0;
+        code = gs_clip(pgls->pgs);
+    if (code >= 0)  code = hpgl_fill_polyfill_background(pgls);
+    if (code >= 0)  code = hpgl_polyfill(pgls, render_mode);
+
+    {
+        int code2 = hpgl_grestore(pgls);
+        if (code >= 0)  code = code2;
+        return code;
+    }
 }
 
 static gs_rop3_t
@@ -1055,14 +1060,19 @@ hpgl_set_drawing_color(hpgl_state_t * pgls, hpgl_rendering_mode_t render_mode)
     }
 
     if (code >= 0) {
-        gs_setrasterop(pgls->pgs, hpgl_rop(pgls, render_mode));
+        code = gs_setrasterop(pgls->pgs, hpgl_rop(pgls, render_mode));
+        if (code < 0)
+            return code;
         code = gx_set_dev_color(pgls->pgs);
         if (code == gs_error_Remap_Color)
             code = pixmap_high_level_pattern(pgls->pgs);
     }
+
+    if (code < 0)
+        return code;
+
     /* make sure the halftone is set */
-    pcl_ht_set_halftone(pgls);
-    return code;
+    return pcl_ht_set_halftone(pgls);
 }
 
 static int
@@ -1132,7 +1142,7 @@ hpgl_add_point_to_path(hpgl_state_t * pgls,
                        double x,
                        double y, hpgl_plot_function_t func, bool set_ctm)
 {
-    static int (*const gs_procs[]) (gs_state *, double, double)
+    static int (*const gs_procs[]) (gs_gstate *, double, double)
         = {
     hpgl_plot_function_procedures};
     int code = 0;
@@ -1487,14 +1497,14 @@ hpgl_set_special_pixel_placement(hpgl_state_t * pgls,
 int
 hpgl_draw_current_path(hpgl_state_t * pgls, hpgl_rendering_mode_t render_mode)
 {
-    gs_state *pgs = pgls->pgs;
+    gs_gstate *pgs = pgls->pgs;
     pcl_pattern_set_proc_t set_proc;
     int code = 0;
     gx_path *ppath = gx_current_path(pgls->pgs);
 
     /* check if we have a current path - we don't need the current
        point */
-    if (!ppath->current_subpath) {
+    if ((ppath->segments != NULL) && (!ppath->current_subpath)) {
         /* NB this clear shouldn't be necessary. */
         hpgl_call(hpgl_clear_current_path(pgls));
         return 0;
@@ -1515,7 +1525,7 @@ hpgl_draw_current_path(hpgl_state_t * pgls, hpgl_rendering_mode_t render_mode)
                 /* Intellifonts require eofill, but TrueType require fill. */
             /****** HACK: look at the scaling technology of ******/
             /****** the current font to decide. ******/
-                int (*fill) (gs_state *);
+                int (*fill) (gs_gstate *);
 
                 if (pgls->g.font->scaling_technology == plfst_Intellifont)
                     fill = gs_eofill;
@@ -1560,7 +1570,7 @@ hpgl_draw_current_path(hpgl_state_t * pgls, hpgl_rendering_mode_t render_mode)
                                        min(scale.x,
                                            scale.y) * 0.0375 * 0.2835));
                         }
-                        pcl_mark_page_for_path(pgls);
+                        hpgl_call(pcl_mark_page_for_path(pgls));
                         hpgl_call(gs_stroke(pgls->pgs));
                         break;
 
@@ -1582,11 +1592,17 @@ hpgl_draw_current_path(hpgl_state_t * pgls, hpgl_rendering_mode_t render_mode)
                         if ((pgls->g.fill.type != hpgl_FT_pattern_one_line) &&
                             (pgls->g.fill.type !=
                              hpgl_FT_pattern_two_lines)) {
+                            int code2 = 0;
                             hpgl_call(hpgl_gsave(pgls));
                             /* all character fills appear to have 0 fill adjustment */
                             gs_setfilladjust(pgls->pgs, 0, 0);
-                            hpgl_call((*fill) (pgs));
-                            hpgl_call(hpgl_grestore(pgls));
+                            /* Always restore before handling any error. */
+                            code = (*fill) (pgs);
+                            code2 = hpgl_grestore(pgls);
+                            if (code >=0 && code2 < 0) {
+                                code = code2;
+                            }
+                            hpgl_call(code);
                         }
                         if ((pgls->g.bitmap_fonts_allowed) || (hpgl_is_currentfont_stick_or_arc(pgls))) /* no edging */
                             hpgl_call(hpgl_clear_current_path(pgls));
@@ -1619,7 +1635,8 @@ hpgl_draw_current_path(hpgl_state_t * pgls, hpgl_rendering_mode_t render_mode)
             break;
         case hpgl_rm_polygon:
             hpgl_set_special_pixel_placement(pgls, hpgl_rm_polygon);
-            pcl_mark_page_for_path(pgls);
+            if ((code = pcl_mark_page_for_path(pgls)) < 0)
+                return code;
             if (pgls->g.fill_type == hpgl_even_odd_rule)
                 hpgl_call(gs_eofill(pgs));
             else                /* hpgl_winding_number_rule */
@@ -1635,7 +1652,7 @@ hpgl_draw_current_path(hpgl_state_t * pgls, hpgl_rendering_mode_t render_mode)
              * the lines that comprise the vector fill
              */
             if (hpgl_get_selected_pen(pgls) == 0) {
-                pcl_mark_page_for_path(pgls);
+                hpgl_call(pcl_mark_page_for_path(pgls));
                 hpgl_call(gs_fill(pgls->pgs));
             }
             hpgl_call(hpgl_clear_current_path(pgls));
@@ -1662,7 +1679,7 @@ hpgl_draw_current_path(hpgl_state_t * pgls, hpgl_rendering_mode_t render_mode)
                 if (!pgls->g.line.current.is_solid
                     && (pgls->g.line.current.type == 0))
                     hpgl_call(gs_reversepath(pgls->pgs));
-                pcl_mark_page_for_path(pgls);
+                hpgl_call(pcl_mark_page_for_path(pgls));
                 hpgl_call(gs_stroke(pgls->pgs));
                 gs_setmatrix(pgs, &save_ctm);
                 break;

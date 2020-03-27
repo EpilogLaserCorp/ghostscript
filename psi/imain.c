@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -38,7 +38,7 @@
 #include "oper.h"
 #include "iconf.h"              /* for gs_init_* imports */
 #include "idebug.h"
-#include "idict.h"
+#include "iddict.h"
 #include "iname.h"              /* for name_init */
 #include "dstack.h"
 #include "estack.h"
@@ -57,10 +57,9 @@
 #include "ivmspace.h"
 #include "idisp.h"              /* for setting display device callback */
 #include "iplugin.h"
+#include "zfile.h"
 
-#ifdef PACIFY_VALGRIND
 #include "valgrind.h"
-#endif
 
 /* ------ Exported data ------ */
 
@@ -70,12 +69,7 @@
 gs_main_instance*
 get_minst_from_memory(const gs_memory_t *mem)
 {
-#ifdef PSI_INCLUDED
-    extern gs_main_instance *ps_impl_get_minst( const gs_memory_t *mem );
-    return ps_impl_get_minst(mem);
-#else
     return (gs_main_instance*)mem->gs_lib_ctx->top_of_system;
-#endif
 }
 
 /** construct main instance caller needs to retain */
@@ -91,14 +85,10 @@ gs_main_alloc_instance(gs_memory_t *mem)
                                                          "init_main_instance");
     if (minst == NULL)
         return NULL;
+    memset(minst, 0, sizeof(gs_main_instance));
     memcpy(minst, &gs_main_instance_init_values, sizeof(gs_main_instance_init_values));
     minst->heap = mem;
-
-#   ifndef PSI_INCLUDED
     mem->gs_lib_ctx->top_of_system = minst;
-    /* else top of system is pl_universe */
-#   endif
-
     return minst;
 }
 
@@ -133,11 +123,15 @@ void print_resource_usage(const gs_main_instance *,
 
 /* Initialization to be done before anything else. */
 int
-gs_main_init0(gs_main_instance * minst, FILE * in, FILE * out, FILE * err,
+gs_main_init0(gs_main_instance * minst, gp_file * in, gp_file * out, gp_file * err,
               int max_lib_paths)
 {
-    ref *paths;
     ref *array;
+    int code = 0;
+
+    if (gs_debug_c(gs_debug_flag_init_details))
+        dmprintf1(minst->heap, "%% Init phase 0 started, instance "PRI_INTPTR"\n",
+                  (intptr_t)minst);
 
     /* Do platform-dependent initialization. */
     /* We have to do this as the very first thing, */
@@ -146,88 +140,105 @@ gs_main_init0(gs_main_instance * minst, FILE * in, FILE * out, FILE * err,
     gp_init();
 
     /* Initialize the imager. */
-#   ifndef PSI_INCLUDED
+
     /* Reset debugging flags */
 #ifdef PACIFY_VALGRIND
     VALGRIND_HG_DISABLE_CHECKING(gs_debug, 128);
 #endif
     memset(gs_debug, 0, 128);
     gs_log_errors = 0;  /* gs_debug['#'] = 0 */
-#   else
-    /* plmain settings remain in effect */
-#   endif
-    gp_get_usertime(minst->base_time);
+
+    gp_get_realtime(minst->base_time);
 
     /* Initialize the file search paths. */
-    paths = (ref *) gs_alloc_byte_array(minst->heap, max_lib_paths, sizeof(ref),
-                                        "lib_path array");
-    if (paths == 0) {
-        gs_lib_finit(1, gs_error_VMerror, minst->heap);
-        return_error(gs_error_VMerror);
-    }
     array = (ref *) gs_alloc_byte_array(minst->heap, max_lib_paths, sizeof(ref),
                                         "lib_path array");
     if (array == 0) {
         gs_lib_finit(1, gs_error_VMerror, minst->heap);
-        return_error(gs_error_VMerror);
+        code = gs_note_error(gs_error_VMerror);
+        goto fail;
     }
     make_array(&minst->lib_path.container, avm_foreign, max_lib_paths,
                array);
     make_array(&minst->lib_path.list, avm_foreign | a_readonly, 0,
                minst->lib_path.container.value.refs);
-    minst->lib_path.env = 0;
-    minst->lib_path.final = 0;
+    minst->lib_path.env = NULL;
+    minst->lib_path.final = NULL;
     minst->lib_path.count = 0;
+    minst->lib_path.first_is_current = 0;
     minst->user_errors = 1;
     minst->init_done = 0;
-    return 0;
+
+fail:
+    if (gs_debug_c(gs_debug_flag_init_details))
+        dmprintf2(minst->heap, "%% Init phase 0 %s, instance "PRI_INTPTR"\n",
+                  code < 0 ? "failed" : "done", (intptr_t)minst);
+
+    return code;
 }
 
 /* Initialization to be done before constructing any objects. */
 int
 gs_main_init1(gs_main_instance * minst)
 {
-    i_ctx_t *i_ctx_p;
+    gs_dual_memory_t idmem;
+    name_table *nt = NULL;
+    int code;
 
-    if (minst->init_done < 1) {
-        gs_dual_memory_t idmem;
-        int code =
-            ialloc_init(&idmem, minst->heap,
-                        minst->memory_chunk_size, gs_have_level2());
+    if (minst->init_done >= 1)
+        return 0;
 
-        if (code < 0)
-            return code;
-        code = gs_lib_init1((gs_memory_t *)idmem.space_system);
-        if (code < 0)
-            return code;
-        alloc_save_init(&idmem);
-        {
-            gs_memory_t *mem = (gs_memory_t *)idmem.space_system;
-            name_table *nt = names_init(minst->name_table_size,
-                                        idmem.space_system);
+    if (gs_debug_c(gs_debug_flag_init_details))
+        dmprintf1(minst->heap, "%% Init phase 1 started, instance "PRI_INTPTR"\n",
+                  (intptr_t)minst);
 
-            if (nt == 0)
-                return_error(gs_error_VMerror);
-            mem->gs_lib_ctx->gs_name_table = nt;
-            code = gs_register_struct_root(mem, NULL,
-                                           (void **)&mem->gs_lib_ctx->gs_name_table,
-                                           "the_gs_name_table");
-            if (code < 0)
-                return code;
+    code = ialloc_init(&idmem, minst->heap,
+                       minst->memory_clump_size, gs_have_level2());
+
+    if (code < 0)
+        goto fail_early;
+
+    code = gs_lib_init1((gs_memory_t *)idmem.space_system);
+    if (code < 0)
+        goto fail;
+    alloc_save_init(&idmem);
+    {
+        gs_memory_t *mem = (gs_memory_t *)idmem.space_system;
+        nt = names_init(minst->name_table_size, idmem.space_system);
+
+        if (nt == 0) {
+            code = gs_note_error(gs_error_VMerror);
+            goto fail;
         }
-        code = obj_init(&minst->i_ctx_p, &idmem);  /* requires name_init */
+        mem->gs_lib_ctx->gs_name_table = nt;
+        code = gs_register_struct_root(mem, &mem->gs_lib_ctx->name_table_root,
+                                       (void **)&mem->gs_lib_ctx->gs_name_table,
+                                       "the_gs_name_table");
         if (code < 0)
-            return code;
-        code = i_plugin_init(minst->i_ctx_p);
-        if (code < 0)
-            return code;
-        i_ctx_p = minst->i_ctx_p;
-        code = i_iodev_init(minst->i_ctx_p);
-        if (code < 0)
-            return code;
-        minst->init_done = 1;
+            goto fail;
+        mem->gs_lib_ctx->client_check_file_permission = z_check_file_permissions;
     }
-    return 0;
+    code = obj_init(&minst->i_ctx_p, &idmem);  /* requires name_init */
+    if (code < 0)
+        goto fail;
+    minst->init_done = 1;
+    code = i_plugin_init(minst->i_ctx_p);
+    if (code < 0)
+        goto fail;
+    code = i_iodev_init(&idmem);
+    if (code < 0) {
+fail:
+        names_free(nt);
+        if (minst->i_ctx_p == NULL)
+            ialloc_finit(&idmem);
+    }
+fail_early:
+
+    if (gs_debug_c(gs_debug_flag_init_details))
+        dmprintf2(minst->heap, "%% Init phase 1 %s, instance "PRI_INTPTR"\n",
+                  code < 0 ? "failed" : "done", (intptr_t)minst);
+
+    return code;
 }
 
 /*
@@ -236,7 +247,7 @@ gs_main_init1(gs_main_instance * minst)
  */
 static int
 gs_main_interpret(gs_main_instance *minst, ref * pref, int user_errors,
-        int *pexit_code, ref * perror_object)
+                  int *pexit_code, ref * perror_object)
 {
     int code;
 
@@ -244,7 +255,7 @@ gs_main_interpret(gs_main_instance *minst, ref * pref, int user_errors,
     minst->i_ctx_p->lib_path = &minst->lib_path;
 
     code = gs_interpret(&minst->i_ctx_p, pref,
-                user_errors, pexit_code, perror_object);
+                        user_errors, pexit_code, perror_object);
     return code;
 }
 
@@ -275,18 +286,18 @@ int gs_main_init2aux(gs_main_instance * minst) {
 
         /* Set up the array of additional initialization files. */
         make_const_string(&ifa, a_readonly | avm_foreign, gs_init_files_sizeof - 2, gs_init_files);
-        code = initial_enter_name("INITFILES", &ifa);
+        code = i_initial_enter_name(i_ctx_p, "INITFILES", &ifa);
         if (code < 0)
             return code;
 
         /* Set up the array of emulator names. */
         make_const_string(&ifa, a_readonly | avm_foreign, gs_emulators_sizeof - 2, gs_emulators);
-        code = initial_enter_name("EMULATORS", &ifa);
+        code = i_initial_enter_name(i_ctx_p, "EMULATORS", &ifa);
         if (code < 0)
             return code;
 
         /* Pass the search path. */
-        code = initial_enter_name("LIBPATH", &minst->lib_path.list);
+        code = i_initial_enter_name(i_ctx_p, "LIBPATH", &minst->lib_path.list);
         if (code < 0)
             return code;
 
@@ -302,7 +313,6 @@ int gs_main_init2aux(gs_main_instance * minst) {
         if ((code = display_set_callback(minst, minst->display)) < 0)
             return code;
 
-#ifndef PSI_INCLUDED
         if ((code = gs_main_run_string(minst,
                 "JOBSERVER "
                 " { false 0 .startnewjob } "
@@ -310,7 +320,6 @@ int gs_main_init2aux(gs_main_instance * minst) {
                 "ifelse", 0, &exit_code,
                 &error_object)) < 0)
            return code;
-#endif /* PSI_INCLUDED */
     }
     return 0;
 }
@@ -320,51 +329,69 @@ gs_main_init2(gs_main_instance * minst)
 {
     i_ctx_t *i_ctx_p;
     int code = gs_main_init1(minst);
-    int initial_init_level = minst->init_done;
 
     if (code < 0)
         return code;
-    i_ctx_p = minst->i_ctx_p;
+
+    if (minst->init_done >= 2)
+        return 0;
+
+    if (gs_debug_c(gs_debug_flag_init_details))
+        dmprintf1(minst->heap, "%% Init phase 2 started, instance "PRI_INTPTR"\n",
+                  (intptr_t)minst);
+
     code = gs_main_init2aux(minst);
     if (code < 0)
-       return code;
+       goto fail;
+
     i_ctx_p = minst->i_ctx_p; /* display_set_callback or run_string may change it */
 
     /* Now process the initial saved-pages=... argument, if any as well as saved-pages-test */
-    if (initial_init_level < 2) {
+    {
        gx_device *pdev = gs_currentdevice(minst->i_ctx_p->pgs);	/* get the current device */
        gx_device_printer *ppdev = (gx_device_printer *)pdev;
 
         if (minst->saved_pages_test_mode) {
-            if ((dev_proc(pdev, dev_spec_op)(pdev, gxdso_supports_saved_pages, NULL, 0) == 0)) {
+            if ((dev_proc(pdev, dev_spec_op)(pdev, gxdso_supports_saved_pages, NULL, 0) <= 0)) {
                 /* no warning or error if saved-pages-test mode is used, just disable it */
                 minst->saved_pages_test_mode = false;  /* device doesn't support it */
             } else {
                 if ((code = gx_saved_pages_param_process(ppdev, (byte *)"begin", 5)) < 0)
-                    return code;
+                    goto fail;
                 if (code > 0)
                     if ((code = gs_erasepage(minst->i_ctx_p->pgs)) < 0)
-                        return code;
+                        goto fail;
             }
         } else if (minst->saved_pages_initial_arg != NULL) {
-            if (dev_proc(pdev, dev_spec_op)(pdev, gxdso_supports_saved_pages, NULL, 0) == 0) {
+            if (dev_proc(pdev, dev_spec_op)(pdev, gxdso_supports_saved_pages, NULL, 0) <= 0) {
+                while (pdev->child)
+                    pdev = pdev->child;		/* so we get the real device name */
                 outprintf(minst->heap,
                           "   --saved-pages not supported by the '%s' device.\n",
                           pdev->dname);
-                return gs_error_Fatal;
+                code = gs_error_Fatal;
+                goto fail;
             }
-            code = gx_saved_pages_param_process(ppdev, minst->saved_pages_initial_arg,
+            code = gx_saved_pages_param_process(ppdev, (byte *)minst->saved_pages_initial_arg,
                                                 strlen(minst->saved_pages_initial_arg));
             if (code > 0)
                 if ((code = gs_erasepage(minst->i_ctx_p->pgs)) < 0)
-                    return code;
+                    goto fail;
         }
     }
 
-    if (gs_debug_c(':'))
-        print_resource_usage(minst, &gs_imemory, "Start");
-    gp_readline_init(&minst->readline_data, imemory_system);
-    return 0;
+    if (code >= 0) {
+        if (gs_debug_c(':'))
+            print_resource_usage(minst, &gs_imemory, "Start");
+        gp_readline_init(&minst->readline_data, minst->heap);
+    }
+
+fail:
+    if (gs_debug_c(gs_debug_flag_init_details))
+        dmprintf2(minst->heap, "%% Init phase 2 %s, instance "PRI_INTPTR"\n",
+                  code < 0 ? "failed" : "done", (intptr_t)minst);
+
+    return code;
 }
 
 /* ------ Search paths ------ */
@@ -396,62 +423,115 @@ extend_path_list_container (gs_main_instance * minst, gs_file_path * pfp)
     return(0);
 }
 
+static int
+lib_path_insert_copy_of_string(gs_main_instance *minst, int pos, size_t strlen, const char *str)
+{
+    ref *paths;
+    int listlen = r_size(&minst->lib_path.list); /* The real number of entries currently in the list */
+    byte *newstr;
+    int code;
+
+    /* Extend the container if required */
+    if (listlen == r_size(&minst->lib_path.container)) {
+        code = extend_path_list_container(minst, &minst->lib_path);
+        if (code < 0) {
+            emprintf(minst->heap, "\nAdding path to search paths failed.\n");
+            return(code);
+        }
+    }
+
+    /* Copy the string */
+    newstr = gs_alloc_string(minst->heap, strlen, "lib_path_add");
+    if (newstr == NULL)
+        return gs_error_VMerror;
+    memcpy(newstr, str, strlen);
+
+    /* Shuffle up the entries */
+    paths = &minst->lib_path.container.value.refs[pos];
+    if (pos != listlen)
+        memmove(paths + 1, paths, (listlen-pos) * sizeof(*paths));
+
+    /* And insert the new string, converted to a PS thing */
+    make_const_string(paths, avm_foreign | a_readonly,
+                      strlen,
+                      newstr);
+
+    /* Update the list length */
+    r_set_size(&minst->lib_path.list, listlen+1);
+
+    return 0;
+}
+
 /* Internal routine to add a set of directories to a search list. */
 /* Returns 0 or an error code. */
 
 static int
-file_path_add(gs_main_instance * minst, gs_file_path * pfp, const char *dirs)
+lib_path_add(gs_main_instance * minst, const char *dirs)
 {
+    gs_file_path * pfp = &minst->lib_path;
     uint len = r_size(&pfp->list);
     const char *dpath = dirs;
     int code;
 
     if (dirs == 0)
         return 0;
+
     for (;;) {                  /* Find the end of the next directory name. */
         const char *npath = dpath;
 
         while (*npath != 0 && *npath != gp_file_name_list_separator)
             npath++;
         if (npath > dpath) {
-            if (len == r_size(&pfp->container)) {
-                code = extend_path_list_container(minst, pfp);
-                if (code < 0) {
-                    emprintf(minst->heap, "\nAdding path to search paths failed.\n");
-                    return(code);
-                }
-            }
-            make_const_string(&pfp->container.value.refs[len],
-                              avm_foreign | a_readonly,
-                              npath - dpath, (const byte *)dpath);
-            ++len;
+            code = gs_add_control_path_len(minst->heap, gs_permit_file_reading, dpath, npath - dpath);
+            if (code < 0) return code;
+
+            code = lib_path_insert_copy_of_string(minst, len, npath - dpath, dpath);
+            if (code < 0)
+                return code;
+            len++;
+            /* Update length/count so we don't lose entries if a later
+             * iteration fails. */
+            r_set_size(&pfp->list, len);
         }
         if (!*npath)
             break;
         dpath = npath + 1;
     }
-    r_set_size(&pfp->list, len);
     return 0;
+}
+
+static void
+set_lib_path_length(gs_main_instance * minst, int newsize)
+{
+    gs_file_path * pfp = &minst->lib_path;
+    uint len = r_size(&pfp->list); /* Yes, list, not container */
+    uint i;
+
+    /* Free any entries that are discarded by us shortening the list */
+    for (i = newsize; i < len; i++)
+        gs_free_object(minst->heap, pfp->container.value.refs[i].value.bytes, "lib_path entry");
+    r_set_size(&pfp->list, newsize);
 }
 
 /* Add a library search path to the list. */
 int
 gs_main_add_lib_path(gs_main_instance * minst, const char *lpath)
 {
-    /* Account for the possibility that the first element */
-    /* is gp_current_directory name added by set_lib_paths. */
-    int first_is_here =
-        (r_size(&minst->lib_path.list) != 0 &&
-         minst->lib_path.container.value.refs[0].value.bytes ==
-         (const byte *)gp_current_directory_name ? 1 : 0);
+    gs_file_path * pfp = &minst->lib_path;
     int code;
 
-    r_set_size(&minst->lib_path.list, minst->lib_path.count +
-               first_is_here);
-    code = file_path_add(minst, &minst->lib_path, lpath);
-    minst->lib_path.count = r_size(&minst->lib_path.list) - first_is_here;
+    /* Throw away all the elements after the user ones. */
+    set_lib_path_length(minst, pfp->count + pfp->first_is_current);
+
+    /* Now add the new one */
+    code = lib_path_add(minst, lpath);
     if (code < 0)
         return code;
+
+    /* Update the count of user paths */
+    pfp->count = r_size(&pfp->list) - pfp->first_is_current;
+
+    /* Now add back in the others */
     return gs_main_set_lib_paths(minst);
 }
 
@@ -465,53 +545,96 @@ extern_gx_io_device_table();
 int
 gs_main_set_lib_paths(gs_main_instance * minst)
 {
-    ref *paths = minst->lib_path.container.value.refs;
-    int first_is_here =
-        (r_size(&minst->lib_path.list) != 0 &&
-         paths[0].value.bytes == (const byte *)gp_current_directory_name ? 1 : 0);
     int code = 0;
-    int count = minst->lib_path.count;
     int i, have_rom_device = 0;
 
-    if (minst->search_here_first) {
-        if (!(first_is_here ||
-              (r_size(&minst->lib_path.list) != 0 &&
-               !bytes_compare((const byte *)gp_current_directory_name,
-                              strlen(gp_current_directory_name),
-                              paths[0].value.bytes,
-                              r_size(&paths[0]))))
-            ) {
-            memmove(paths + 1, paths, count * sizeof(*paths));
-            make_const_string(paths, avm_foreign | a_readonly,
-                              strlen(gp_current_directory_name),
-                              (const byte *)gp_current_directory_name);
-        }
-    } else {
-        if (first_is_here)
-            memmove(paths, paths + 1, count * sizeof(*paths));
+    /* We are entered with a list potentially full of stuff already.
+     * In general the list is of the form:
+     *    <optionally, the current directory>
+     *    <any -I specified directories, "count" of them>
+     *    <any directories from the environment variable>
+     *    <if there is a romfs, the romfs paths>
+     *    <any directories from the 'final' variable>
+     *
+     * Unfortunately, the value read from the environment variable may not
+     * have actually been read the first time this function is called, so
+     * we can see the value change over time. Short of a complete rewrite
+     * this requires us to clear the latter part of the list and repopulate
+     * it each time we run through.
+     */
+
+    /* First step, ensure that we have the current directory as our
+     * first entry, iff we need it. */
+    if (minst->search_here_first && !minst->lib_path.first_is_current) {
+        /* We should have a "gp_current_directory" at the start, and we haven't.
+         * So insert one. */
+
+        code = gs_add_control_path_len(minst->heap, gs_permit_file_reading,
+                gp_current_directory_name, strlen(gp_current_directory_name));
+        if (code < 0) return code;
+
+        code = lib_path_insert_copy_of_string(minst, 0,
+                                              strlen(gp_current_directory_name),
+                                              gp_current_directory_name);
+        if (code < 0)
+            return code;
+    } else if (!minst->search_here_first && minst->lib_path.first_is_current) {
+        /* We have a "gp_current_directory" at the start, and we shouldn't have.
+         * Remove it. */
+        int listlen = r_size(&minst->lib_path.list); /* The real number of entries currently in the list */
+        ref *paths = minst->lib_path.container.value.refs;
+
+        gs_free_object(minst->heap, paths->value.bytes, "lib_path entry");
+        --listlen;
+        memmove(paths, paths + 1, listlen * sizeof(*paths));
+        r_set_size(&minst->lib_path.list, listlen);
+
+        code = gs_remove_control_path_len(minst->heap, gs_permit_file_reading,
+                gp_current_directory_name, strlen(gp_current_directory_name));
+        if (code < 0) return code;
     }
-    r_set_size(&minst->lib_path.list,
-               count + (minst->search_here_first ? 1 : 0));
-    if (minst->lib_path.env != 0)
-        code = file_path_add(minst, &minst->lib_path, minst->lib_path.env);
+    minst->lib_path.first_is_current = minst->search_here_first;
+
+    /* Now, the horrid bit. We throw away all the entries after the user entries */
+    set_lib_path_length(minst, minst->lib_path.count + minst->lib_path.first_is_current);
+
+    /* Now we (re)populate the end of the list. */
+    if (minst->lib_path.env != 0) {
+        code = lib_path_add(minst, minst->lib_path.env);
+        if (code < 0) return code;
+
+        code = gs_add_control_path(minst->heap, gs_permit_file_reading, minst->lib_path.env);
+        if (code < 0) return code;
+    }
     /* now put the %rom%lib/ device path before the gs_lib_default_path on the list */
     for (i = 0; i < gx_io_device_table_count; i++) {
         const gx_io_device *iodev = gx_io_device_table[i];
         const char *dname = iodev->dname;
+        const char *fcheckname = "Resource/Init/gs_init.ps";
 
         if (dname && strlen(dname) == 5 && !memcmp("%rom%", dname, 5)) {
-            have_rom_device = 1;
+            struct stat pstat;
+            /* gs_error_unregistered means no usable romfs is available */
+            /* gpdl always includes a real romfs, but it may or may have the Postscript
+               resources in it, so we explicitly check for a fairly vital file
+             */
+            int code = iodev->procs.file_status((gx_io_device *)iodev, fcheckname, &pstat);
+            if (code != gs_error_unregistered && code != gs_error_undefinedfilename){
+                have_rom_device = 1;
+            }
             break;
         }
     }
     if (have_rom_device && code >= 0) {
-        code = file_path_add(minst, &minst->lib_path, "%rom%Resource/Init/");
+        code = lib_path_add(minst, "%rom%Resource/Init/");
         if (code < 0)
             return code;
-        code = file_path_add(minst, &minst->lib_path, "%rom%lib/");
+        code = lib_path_add(minst, "%rom%lib/");
     }
-    if (minst->lib_path.final != 0 && code >= 0)
-        code = file_path_add(minst, &minst->lib_path, minst->lib_path.final);
+    else code = 0;
+
+    if (minst->lib_path.final != NULL && code >= 0)
+        code = lib_path_add(minst, minst->lib_path.final);
     return code;
 }
 
@@ -614,8 +737,15 @@ gs_main_run_string_with_length(gs_main_instance * minst, const char *str,
                                        pexit_code, perror_object);
     if (code != gs_error_NeedInput)
         return code;
-    return gs_main_run_string_end(minst, user_errors,
+
+    code = gs_main_run_string_end(minst, user_errors,
                                   pexit_code, perror_object);
+    /* Not okay for user to use .needinput
+     * This treats it as a fatal error.
+     */
+    if (code == gs_error_NeedInput)
+        return_error(gs_error_Fatal);
+    return code;
 }
 
 /* Set up for a suspendable run_string. */
@@ -631,7 +761,7 @@ gs_main_run_string_begin(gs_main_instance * minst, int user_errors,
     make_const_string(&rstr, avm_foreign | a_readonly | a_executable,
                       strlen(setup), (const byte *)setup);
     code = gs_main_interpret(minst, &rstr, user_errors, pexit_code,
-                        perror_object);
+                             perror_object);
     return (code == gs_error_NeedInput ? 0 : code == 0 ? gs_error_Fatal : code);
 }
 /* Continue running a string with the option of suspending. */
@@ -646,8 +776,16 @@ gs_main_run_string_continue(gs_main_instance * minst, const char *str,
     make_const_string(&rstr, avm_foreign | a_readonly, length,
                       (const byte *)str);
     return gs_main_interpret(minst, &rstr, user_errors, pexit_code,
-                        perror_object);
+                             perror_object);
 }
+uint
+gs_main_get_uel_offset(gs_main_instance * minst)
+{
+    if (minst->i_ctx_p == NULL)
+        return 0;
+    return (uint)minst->i_ctx_p->uel_position;
+}
+
 /* Signal EOF when suspended. */
 int
 gs_main_run_string_end(gs_main_instance * minst, int user_errors,
@@ -657,7 +795,79 @@ gs_main_run_string_end(gs_main_instance * minst, int user_errors,
 
     make_empty_const_string(&rstr, avm_foreign | a_readonly);
     return gs_main_interpret(minst, &rstr, user_errors, pexit_code,
-                        perror_object);
+                             perror_object);
+}
+
+gs_memory_t *
+gs_main_get_device_memory(gs_main_instance * minst)
+{
+  gs_memory_t *dev_mem = NULL;
+  if (minst && minst->init_done >= 1) {
+      i_ctx_t * i_ctx_p = minst->i_ctx_p;
+      dev_mem = imemory_global->stable_memory;
+  }
+  return dev_mem;
+}
+
+int
+gs_main_set_device(gs_main_instance * minst, gx_device *pdev)
+{
+    i_ctx_t *i_ctx_p = minst->i_ctx_p;
+    ref error_object;
+    int code;
+
+    if (pdev == NULL) {
+        /* Leave job encapsulation, restore the graphics state gsaved below (so back to the nullpage device)
+           and re-enter job encapsulation.
+           We rely on the end of job encapsulation restore to the put the gstate stack back how it was when
+           we entered job encapsulation below, so the grestore will pickup the correct gstate.
+         */
+        code = gs_main_run_string(minst,
+                                 "true 0 startjob pop grestore false 0 startjob pop",
+                                 0, &code, &error_object);
+        if (code < 0) goto done;
+    }
+    else {
+        /* Leave job encapsulation, and save the graphics state (including the device: nullpage)
+           Store the page size in a dictionary, which we'll use to configure the incoming device */
+        code = gs_main_run_string(minst,
+                                  "true 0 startjob pop gsave "
+                                  /* /PageSize /GetDeviceParam .special_op will either return:
+                                   * /PageSize [ <width> <height> ] true   (if it exists) or
+                                   * false                                 (if it does not) */
+                                  "<< /PageSize /GetDeviceParam .special_op "
+                                  /* If we wanted to force a default pagesize, we'd do:
+                                   * "not { /PageSize [595 842] } if "
+                                   * but for now we'll just leave the default as it is, and do: */
+                                  "pop "
+                                  ">> "
+                                  , 0, &code, &error_object);
+        if (code < 0) goto done;
+        /* First call goes to the C directly to actually set the device. This
+         * avoids the SAFER checks. */
+        code = zsetdevice_no_safer(i_ctx_p, pdev);
+        if (code < 0) goto done;
+        code = zcurrentdevice(i_ctx_p);
+        if (code < 0) goto done;
+        code = gs_main_run_string(minst,
+                                  /* Set the device again to the same one. This determines
+                                   * whether to erase page or not, but passes the safer
+                                   * checks as the device is unchanged. */
+                                  "setdevice "
+                                  "setpagedevice "
+                                  /* GS specifics: Force the cached copy of the params to be updated. */
+                                  "currentpagedevice pop "
+                                  /* Setup the halftone */
+                                  ".setdefaultscreen "
+                                  /* Re-run the scheduled initialisation procs, in case we've just set pdfwrite */
+                                  "1183615869 internaldict /.execute_scheduled_inits get exec "
+                                  /* Re-enter job encapsulation */
+                                  "false 0 startjob pop "
+                                  , 0, &code, &error_object);
+        if (code < 0) goto done;
+    }
+done:
+    return code;
 }
 
 /* ------ Operand stack access ------ */
@@ -852,14 +1062,31 @@ static char *gs_main_tempnames(gs_main_instance *minst)
     return tempnames;
 }
 
+static void
+gs_finit_push_systemdict(i_ctx_t *i_ctx_p)
+{
+    if (i_ctx_p == NULL)
+        return;
+    if (dsp == dstop ) {
+        if (ref_stack_extend(&d_stack, 1) < 0) {
+            /* zend() cannot fail */
+            (void)zend(i_ctx_p);
+        }
+    }
+    dsp++;
+    ref_assign(dsp, systemdict);
+}
+
 /* Free all resources and return. */
 int
 gs_main_finit(gs_main_instance * minst, int exit_status, int code)
 {
     i_ctx_t *i_ctx_p = minst->i_ctx_p;
+    gs_dual_memory_t dmem = {0};
     int exit_code;
     ref error_object;
-    char *tempnames;
+    char *tempnames = NULL;
+    gs_lib_ctx_core_t *core;
 
     /* NB: need to free gs_name_table
      */
@@ -872,47 +1099,98 @@ gs_main_finit(gs_main_instance * minst, int exit_status, int code)
      */
     tempnames = gs_main_tempnames(minst);
 
-#ifndef PSI_INCLUDED
+    /* by the time we get here, we *must* avoid any random redefinitions of
+     * operators etc, so we push systemdict onto the top of the dict stack.
+     * We do this in C to avoid running into any other re-defininitions in the
+     * Postscript world.
+     */
+    gs_finit_push_systemdict(i_ctx_p);
+
     /* We have to disable BGPrint before we call interp_reclaim() to prevent the
      * parent rendering thread initialising for the next page, whilst we are
      * removing objects it may want to access - for example, the I/O device table.
      * We also have to mess with the BeginPage/EndPage procs so that we don't
      * trigger a spurious extra page to be emitted.
      */
-    if (minst->init_done >= 1) {
+    if (minst->init_done >= 2) {
         gs_main_run_string(minst,
-            "/systemdict .systemexec /begin .systemexec \
-            /BGPrint /GetDeviceParam .special_op \
+            "/BGPrint /GetDeviceParam .special_op \
             {{ <</BeginPage {pop} /EndPage {pop pop //false } \
               /BGPrint false /NumRenderingThreads 0>> setpagedevice} if} if \
-              serverdict /.jobsavelevel get 0 eq {/quit} {/stop} ifelse end \
+              serverdict /.jobsavelevel get 0 eq {/quit} {/stop} ifelse \
               .systemvar exec",
             0 , &exit_code, &error_object);
     }
-#endif
 
     /*
      * Close the "main" device, because it may need to write out
      * data before destruction. pdfwrite needs so.
      */
-    if (minst->init_done >= 1) {
+    if (minst->init_done >= 2) {
         int code = 0;
 
         if (idmemory->reclaim != 0) {
             code = interp_reclaim(&minst->i_ctx_p, avm_global);
 
-            if (code < 0) {
-                emprintf1(minst->heap,
-                          "ERROR %d reclaiming the memory while the interpreter finalization.\n",
-                          code);
+            /* We ignore gs_error_VMerror because it comes from gs_vmreclaim()
+            calling context_state_load(), and we don't seem to depend on the
+            missing fields. */
+            if (code == gs_error_VMerror) {
+                if (exit_status == 0 || exit_status == gs_error_Quit) {
+                    exit_status = gs_error_VMerror;
+                }
+            }
+            else if (code < 0) {
+                ref error_name;
+                if (tempnames)
+                    free(tempnames);
+
+                if (gs_errorname(i_ctx_p, code, &error_name) >= 0) {
+                    char err_str[32] = {0};
+                    name_string_ref(imemory, &error_name, &error_name);
+                    memcpy(err_str, error_name.value.const_bytes, r_size(&error_name));
+                    emprintf2(imemory, "ERROR: %s (%d) reclaiming the memory while the interpreter finalization.\n", err_str, code);
+                }
+                else {
+                    emprintf1(imemory, "UNKNOWN ERROR %d reclaiming the memory while the interpreter finalization.\n", code);
+                }
+#ifdef MEMENTO
+                if (Memento_squeezing() && code != gs_error_VMerror ) return gs_error_Fatal;
+#endif
                 return gs_error_Fatal;
             }
             i_ctx_p = minst->i_ctx_p; /* interp_reclaim could change it. */
         }
-#ifndef PSI_INCLUDED
+
+        if (i_ctx_p->pgs != NULL && i_ctx_p->pgs->device != NULL &&
+            gx_device_is_null(i_ctx_p->pgs->device)) {
+            /* if the job replaced the device with the nulldevice, we we need to grestore
+               away that device, so the block below can properly dispense
+               with the default device.
+             */
+            int code = gs_grestoreall(i_ctx_p->pgs);
+            if (code < 0) {
+                free(tempnames);
+                return_error(gs_error_Fatal);
+            }
+        }
+
         if (i_ctx_p->pgs != NULL && i_ctx_p->pgs->device != NULL) {
             gx_device *pdev = i_ctx_p->pgs->device;
             const char * dname = pdev->dname;
+            gs_gc_root_t dev_root;
+            gs_gc_root_t *dev_root_ptr = &dev_root;
+            /* There is a chance that, during the call to gs_main_run_string(), the interpreter may
+             * decide to call the garbager - the device is in gc memory, and the only reference to it
+             * (in the gstate) has been removed, thus it can be destroyed by the garbager.
+             * Counter-intuitively, adjusting the reference count makes not difference to that.
+             * Register the device as a gc 'root' so it will be implicitely marked by garbager, and
+             * and thus surive until control returns here.
+             */
+            if (gs_register_struct_root(pdev->memory, &dev_root_ptr, (void **)&pdev, "gs_main_finit") < 0) {
+                free(tempnames);
+                return_error(gs_error_Fatal);
+            }
 
             /* make sure device doesn't isn't freed by .uninstalldevice */
             rc_adjust(pdev, 1, "gs_main_finit");
@@ -923,54 +1201,65 @@ gs_main_finit(gs_main_instance * minst, int exit_status, int code)
                 /.jobsavelevel get 0 eq {/quit} {/stop} ifelse .systemvar exec",
                 0 , &exit_code, &error_object);
             code = gs_closedevice(pdev);
-            if (code < 0)
-                emprintf2(pdev->memory,
-                          "ERROR %d closing %s device. See gs/psi/ierrors.h for code explanation.\n",
-                          code,
-                          dname);
+            if (code < 0) {
+                ref error_name;
+                if (gs_errorname(i_ctx_p, code, &error_name) >= 0) {
+                    char err_str[32] = {0};
+                    name_string_ref(imemory, &error_name, &error_name);
+                    memcpy(err_str, error_name.value.const_bytes, r_size(&error_name));
+                    emprintf3(imemory, "ERROR: %s (%d) on closing %s device.\n", err_str, code, dname);
+                }
+                else {
+                    emprintf2(imemory, "UNKNOWN ERROR %d closing %s device.\n", code, dname);
+               }
+            }
+            gs_unregister_root(pdev->memory, dev_root_ptr, "gs_main_finit");
             rc_decrement(pdev, "gs_main_finit");                /* device might be freed */
             if (exit_status == 0 || exit_status == gs_error_Quit)
                 exit_status = code;
         }
-#endif
-    }
-    /* Flush stdout and stderr */
-    if (minst->init_done >= 2)
+
+      /* Flush stdout and stderr */
       gs_main_run_string(minst,
         "(%stdout) (w) file closefile (%stderr) (w) file closefile \
-        /systemdict .systemexec /begin .systemexec \
         serverdict /.jobsavelevel get 0 eq {/quit} {/stop} ifelse .systemexec \
-        end",
+          systemdict /savedinitialgstate .forceundef",
         0 , &exit_code, &error_object);
+    }
     gp_readline_finit(minst->readline_data);
+    gs_free_object(minst->heap, minst->saved_pages_initial_arg, "gs_main_finit");
     i_ctx_p = minst->i_ctx_p;		/* get current interp context */
     if (gs_debug_c(':')) {
         print_resource_usage(minst, &gs_imemory, "Final");
-        dmprintf1(minst->heap, "%% Exiting instance 0x%p\n", minst);
+        dmprintf1(minst->heap, "%% Exiting instance "PRI_INTPTR"\n", (intptr_t)minst);
     }
     /* Do the equivalent of a restore "past the bottom". */
     /* This will release all memory, close all open files, etc. */
     if (minst->init_done >= 1) {
         gs_memory_t *mem_raw = i_ctx_p->memory.current->non_gc_memory;
         i_plugin_holder *h = i_ctx_p->plugin_list;
-        code = alloc_restore_all(idmemory);
+
+        dmem = *idmemory;
+        code = alloc_restore_all(i_ctx_p);
         if (code < 0)
             emprintf1(mem_raw,
                       "ERROR %d while the final restore. See gs/psi/ierrors.h for code explanation.\n",
                       code);
+        i_iodev_finit(&dmem);
         i_plugin_finit(mem_raw, h);
     }
-#ifndef PSI_INCLUDED
+
     /* clean up redirected stdout */
-    if (minst->heap->gs_lib_ctx->fstdout2
-        && (minst->heap->gs_lib_ctx->fstdout2 != minst->heap->gs_lib_ctx->fstdout)
-        && (minst->heap->gs_lib_ctx->fstdout2 != minst->heap->gs_lib_ctx->fstderr)) {
-        fclose(minst->heap->gs_lib_ctx->fstdout2);
-        minst->heap->gs_lib_ctx->fstdout2 = (FILE *)NULL;
+    core = minst->heap->gs_lib_ctx->core;
+    if (core->fstdout2
+        && (gp_get_file(core->fstdout2) != core->fstdout)
+        && (gp_get_file(core->fstdout2) != core->fstderr)) {
+        gp_fclose(core->fstdout2);
+        core->fstdout2 = NULL;
     }
-#endif
-    minst->heap->gs_lib_ctx->stdout_is_redirected = 0;
-    minst->heap->gs_lib_ctx->stdout_to_stderr = 0;
+
+    minst->heap->gs_lib_ctx->core->stdout_is_redirected = 0;
+    minst->heap->gs_lib_ctx->core->stdout_to_stderr = 0;
     /* remove any temporary files, after ghostscript has closed files */
     if (tempnames) {
         char *p = tempnames;
@@ -980,9 +1269,15 @@ gs_main_finit(gs_main_instance * minst, int exit_status, int code)
         }
         free(tempnames);
     }
-#ifndef PSI_INCLUDED
     gs_lib_finit(exit_status, code, minst->heap);
-#endif
+
+    set_lib_path_length(minst, 0);
+    gs_free_object(minst->heap, minst->lib_path.container.value.refs, "lib_path array");
+    if (minst->init_done == 0 && i_ctx_p) {
+        /* This fixes leak if memento forces failure in gs_main_init1(). */
+        dmem = *idmemory;
+    }
+    ialloc_finit(&dmem);
     return exit_status;
 }
 int
@@ -1012,36 +1307,34 @@ void
 print_resource_usage(const gs_main_instance * minst, gs_dual_memory_t * dmem,
                      const char *msg)
 {
-    ulong allocated = 0, used = 0;
+    ulong used = 0;		/* this we accumulate for the PS memories */
     long utime[2];
+    int i;
+    gs_memory_status_t status;
 
-    gp_get_usertime(utime);
-    {
-        int i;
+    gp_get_realtime(utime);
 
-        for (i = 0; i < countof(dmem->spaces_indexed); ++i) {
-            gs_ref_memory_t *mem = dmem->spaces_indexed[i];
+    for (i = 0; i < countof(dmem->spaces_indexed); ++i) {
+        gs_ref_memory_t *mem = dmem->spaces_indexed[i];
 
-            if (mem != 0 && (i == 0 || mem != dmem->spaces_indexed[i - 1])) {
-                gs_memory_status_t status;
-                gs_ref_memory_t *mem_stable =
-                    (gs_ref_memory_t *)gs_memory_stable((gs_memory_t *)mem);
+        if (mem != 0 && (i == 0 || mem != dmem->spaces_indexed[i - 1])) {
+            gs_ref_memory_t *mem_stable =
+                (gs_ref_memory_t *)gs_memory_stable((gs_memory_t *)mem);
 
-                gs_memory_status((gs_memory_t *)mem, &status);
-                allocated += status.allocated;
+            gs_memory_status((gs_memory_t *)mem, &status);
+            used += status.used;
+            if (mem_stable != mem) {
+                gs_memory_status((gs_memory_t *)mem_stable, &status);
                 used += status.used;
-                if (mem_stable != mem) {
-                    gs_memory_status((gs_memory_t *)mem_stable, &status);
-                    allocated += status.allocated;
-                    used += status.used;
-                }
             }
         }
     }
-    dmprintf4(minst->heap, "%% %s time = %g, memory allocated = %lu, used = %lu\n",
+    /* Now get the overall values from the heap memory */
+    gs_memory_status(minst->heap, &status);
+    dmprintf5(minst->heap, "%% %s time = %g, memory allocated = %lu, used = %lu, max_used = %lu\n",
               msg, utime[0] - minst->base_time[0] +
               (utime[1] - minst->base_time[1]) / 1000000000.0,
-              allocated, used);
+              status.allocated, used, status.max_used);
 }
 
 /* Dump the stacks after interpretation */
@@ -1060,4 +1353,51 @@ gs_main_dump_stack(gs_main_instance *minst, int code, ref * perror_object)
     debug_dump_stack(minst->heap, &o_stack, "Operand stack");
     debug_dump_stack(minst->heap, &e_stack, "Execution stack");
     debug_dump_stack(minst->heap, &d_stack, "Dictionary stack");
+}
+
+int
+gs_main_force_resolutions(gs_main_instance * minst, const float *resolutions)
+{
+    ref value;
+    int code;
+
+    if (resolutions == NULL)
+        return 0;
+
+    if (minst == NULL)
+        return gs_error_Fatal;
+
+    make_true(&value);
+    code = i_initial_enter_name(minst->i_ctx_p, "FIXEDRESOLUTION", &value);
+    if (code < 0)
+        return code;
+    make_real(&value, resolutions[0]);
+    code = i_initial_enter_name(minst->i_ctx_p, "DEVICEXRESOLUTION", &value);
+    if (code < 0)
+        return code;
+    make_real(&value, resolutions[1]);
+    return i_initial_enter_name(minst->i_ctx_p, "DEVICEYRESOLUTION", &value);
+}
+
+int
+gs_main_force_dimensions(gs_main_instance *minst, const long *dimensions)
+{
+    ref value;
+    int code = 0;
+
+    if (dimensions == NULL)
+        return 0;
+    if (minst == NULL)
+        return gs_error_Fatal;
+
+    make_true(&value);
+    code = i_initial_enter_name(minst->i_ctx_p, "FIXEDMEDIA", &value);
+    if (code < 0)
+        return code;
+    make_int(&value, dimensions[0]);
+    code = i_initial_enter_name(minst->i_ctx_p, "DEVICEWIDTH", &value);
+    if (code < 0)
+        return code;
+    make_int(&value, dimensions[1]);
+    return i_initial_enter_name(minst->i_ctx_p, "DEVICEHEIGHT", &value);
 }

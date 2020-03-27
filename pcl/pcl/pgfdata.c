@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -5056,6 +5056,7 @@ hpgl_stick_segments(const gs_memory_t * mem, void *data, uint char_index)
     short stop = count + offset;
     /* set up tables debending on stick or arc font */
     int i;
+    int code = 0;
 
     if ((char_index < 0x20) ||
         (char_index > 0xff) || ((char_index > 0x7f) && (char_index < 0xa0)))
@@ -5065,12 +5066,16 @@ hpgl_stick_segments(const gs_memory_t * mem, void *data, uint char_index)
     i = offset;
     while (i < stop) {
         if (stick_font_data[i] == FNT_LINETO) {
-            gs_lineto(data, (double) (stick_font_data[i + 1]),
+            code = gs_lineto(data, (double) (stick_font_data[i + 1]),
                       (double) (stick_font_data[i + 2]));
+            if (code < 0)
+                return code;
             i += 3;
         } else if (stick_font_data[i] == FNT_MOVETO) {
-            gs_moveto(data, (double) (stick_font_data[i + 1]),
+            code = gs_moveto(data, (double) (stick_font_data[i + 1]),
                       (double) (stick_font_data[i + 2]));
+            if (code < 0)
+                return code;
             i += 3;
         } else
             return_error(gs_error_invalidfont);
@@ -5090,6 +5095,7 @@ hpgl_531_segments(const gs_memory_t * mem, void *data, void *cdata)
     hpgl_dl_cdata_t *cd = cdata;
     bool pen_up = true;
     int i = 0;
+    int code = 0;
 
     /* we assume the data is correct at this point - errors should
        have been detected when the DL command was saving the data */
@@ -5102,10 +5108,14 @@ hpgl_531_segments(const gs_memory_t * mem, void *data, void *cdata)
             double y = cd->data[i + 1];
 
             if (pen_up) {
-                gs_moveto(data, x, y);
+                code = gs_moveto(data, x, y);
+                if (code < 0)
+                    return code;
                 pen_up = false;
             } else {
-                gs_lineto(data, x, y);
+                code = gs_lineto(data, x, y);
+                if (code < 0)
+                    return code;
             }
             i += 2;
         }
@@ -5130,6 +5140,7 @@ hpgl_arc_segments(const gs_memory_t * mem, void *data, uint char_index)
 
     /* set up tables debending on stick or arc font */
     int i;
+    int code = 0;
     /* 3 entries for moveto and lineto and 5 for curveto */
 
     if ((char_index < 0x20) ||
@@ -5139,20 +5150,26 @@ hpgl_arc_segments(const gs_memory_t * mem, void *data, uint char_index)
     i = offset;
     while (i < stop) {
         if (arc_font_data[i] == FNT_LINETO) {
-            gs_lineto(data, (double) (arc_font_data[i + 1]),
+            code = gs_lineto(data, (double) (arc_font_data[i + 1]),
                       (double) (arc_font_data[i + 2]));
+            if (code < 0)
+                return code;
             i += 3;
         } else if (arc_font_data[i] == FNT_MOVETO) {
-            gs_moveto(data, (double) (arc_font_data[i + 1]),
+            code = gs_moveto(data, (double) (arc_font_data[i + 1]),
                       (double) (arc_font_data[i + 2]));
+            if (code < 0)
+                return code;
             i += 3;
         } else if (arc_font_data[i] == FNT_CURVETO) {
-            gs_curveto(data, (double) (arc_font_data[i + 1]),
+            code = gs_curveto(data, (double) (arc_font_data[i + 1]),
                        (double) (arc_font_data[i + 2]),
                        (double) (arc_font_data[i + 3]),
                        (double) (arc_font_data[i + 4]),
                        (double) (arc_font_data[i + 5]),
                        (double) (arc_font_data[i + 6]));
+            if (code < 0)
+                return code;
             i += 7;
         } else
             return_error(gs_error_invalidfont);

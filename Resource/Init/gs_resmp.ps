@@ -1,4 +1,4 @@
-% Copyright (C) 2001-2012 Artifex Software, Inc.
+% Copyright (C) 2001-2019 Artifex Software, Inc.
 % All Rights Reserved.
 %
 % This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 % of the license contained in the file LICENSE in this distribution.
 %
 % Refer to licensing information at http://www.artifex.com or contact
-% Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-% CA  94903, U.S.A., +1(415)492-9861, for further information.
+% Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+% CA 94945, U.S.A., +1(415)492-9861, for further information.
 %
 
 % A procset to redefine a resource category with a resource map.
@@ -183,7 +183,7 @@ setpacking
   % We don't check them.
 
   currentglobal //false setglobal                  % <object> bGlobal
-  countexecstack array execstack                   % <object> bGlobal [execstack]
+  //false .countexecstack array //false .execstack % <object> bGlobal [execstack]
   dup //null exch                                  % <object> bGlobal [execstack] null [execstack]
   length 3 sub -1 0 {                              % <object> bGlobal [execstack] null i
     2 index exch get                               % <object> bGlobal [execstack] null proc
@@ -230,7 +230,7 @@ currentpacking //false setpacking
       } {
         dup dup .map exch .knownget {      % /Name /Name <<record>>
           dup dup /RecordVirtualMethods get /IsActive get exec {
-            1 index .getvminstance {       % /Name /Name <<record>> holder
+            1 index //.getvminstance exec {       % /Name /Name <<record>> holder
               1 get 1 eq
             } {
               //true
@@ -242,7 +242,7 @@ currentpacking //false setpacking
             DefineResource exec            % size bStatusIs1 /Name Instance
             % Make ResourceStatus to return correct values for this instance :
             % Hack: we replace status values in the instance holder :
-            exch .getvminstance pop        % size bStatusIs1 Instance holder
+            exch //.getvminstance exec pop        % size bStatusIs1 Instance holder
             dup 5 -1 roll 2 exch put       % bStatusIs1 Instance holder
             3 2 roll {                     % Instance holder
               1 1 put                      % Instance
@@ -257,7 +257,7 @@ currentpacking //false setpacking
         } ifelse
       } ifelse
       RESMPDEBUG { (resmp FindResource end) = } if
-    } bind def
+    } .bind def
 
     /ResourceStatus   % <Name> ResourceStatus <status> <size> true
                       % <Name> ResourceStatus false
@@ -292,7 +292,7 @@ currentpacking //false setpacking
         } ifelse
       } ifelse
       RESMPDEBUG { (resmp ResourceStatus end) = } if
-    } bind def
+    } .bind def
 
     /ResourceFileName  % <Name> <scratch> ResourceFileName <string>
     { RESMPDEBUG { (resmp ResourceFileName beg ) print 1 index = } if
@@ -314,7 +314,7 @@ currentpacking //false setpacking
         RESMPDEBUG { (resmp ResourceFileName : retrieving ) print dup = } if
       } ifelse
       RESMPDEBUG { (resmp ResourceFileName end) = } if
-    } bind def
+    } .bind def
 
     /ResourceForAll  % <template> <proc> <scratch> ResourceForAll -
     { RESMPDEBUG { (resmp ResourceForAll beg ) print CategoryName =string cvs print ( ) print 2 index = } if
@@ -367,7 +367,7 @@ currentpacking //false setpacking
       % Make the enumerator and apply it :
       //MakeResourceEnumerator exec exec
       RESMPDEBUG { (resmp ResourceForAll end)= } if
-    } bind def
+    } .bind def
 
     /GetCIDSystemInfoFromMap   % <Name> GetCIDSystemInfoFromMap <Name>
                                % <Name> GetCIDSystemInfoFromMap <dict>

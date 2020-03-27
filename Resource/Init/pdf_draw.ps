@@ -1,4 +1,4 @@
-% Copyright (C) 2001-2012 Artifex Software, Inc.
+% Copyright (C) 2001-2019 Artifex Software, Inc.
 % All Rights Reserved.
 %
 % This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 % of the license contained in the file LICENSE in this distribution.
 %
 % Refer to licensing information at http://www.artifex.com or contact
-% Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-% CA  94903, U.S.A., +1(415)492-9861, for further information.
+% Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+% CA 94945, U.S.A., +1(415)492-9861, for further information.
 %
 
 % pdf_draw.ps
@@ -18,41 +18,12 @@
 
 /.setlanguagelevel where { pop 2 .setlanguagelevel } if
 .currentglobal //true .setglobal
-/pdfdict where { pop } { /pdfdict 100 dict def } ifelse
-GS_PDF_ProcSet begin
+/GS_PDF_ProcSet load begin
 pdfdict begin
 
 % For simplicity, we use a single interpretation dictionary for all
 % PDF graphics operations, even though this is too liberal.
 /drawopdict 100 dict def
-
-/SetGroupExtGStateDict
-<<
-  /AlphaIsShape //AIS
-  /FillConstantAlpha //ca
-  % We don't have to worry about the enumeration order, even
-  % with the color/space settings, since we only store, not
-  % not set them.
-  /FillColor //sc1
-  /FillColorSpace { /FillColorSpace gput } bind
-  /FillOverprint //op
-  /SoftMask //SMask
-  /StrokeConstantAlpha //CA
-  /StrokeColor //SC1
-  /StrokeColorSpace { /StrokeColorSpace gput } bind
-  /StrokeOverprint //OP
-  /TextSpacing //Tc
-  % We can't use //Tz as we've stored the value we actually use,
-  % not value * 100 (see /Tz in pdf_ops.ps)
-  /TextHScaling { /TextHScaling gput } bind
-  /Leading //TD
-  /TextFont { /TextFont gput} bind
-  /TextLineMatrix { /TextLineMatrix gput } bind
-  /TextMatrix { /TextMatrix gput } bind
-  /TextRise { /TextRise gput } bind
-  /TextRenderingMode { /TextRenderingMode gput } bind
-  /WordSpacing //Tw
->> def
 
 % ================================ Graphics ================================ %
 
@@ -96,14 +67,14 @@ pdfdict begin
                 % Stack: filepos fndict data
   exch dup /DataSource 4 -1 roll put
   exch PDFfile exch setfileposition
-} bdef
+} bind executeonly def
 
 /.resolvefn2 {
   dup length dict .copydict
   dup /C0 2 copy knownoget { put } { pop pop } ifelse
   dup /C1 2 copy knownoget { put } { pop pop } ifelse
   dup /N 2 copy knownoget { put } { pop pop } ifelse
-} bdef
+} bind executeonly def
 
 /.resolvefn3 {
   dup length dict .copydict
@@ -113,7 +84,7 @@ pdfdict begin
     oforce .resolvefn
   } forall
   counttomark -1 roll astore exch pop put
-} bdef
+} bind executeonly def
 
 /.resolvefn4 {
   PDFfile fileposition exch             % filepos fndict
@@ -130,31 +101,45 @@ pdfdict begin
   .bind
   1 index /Function 3 -1 roll put
   exch PDFfile exch setfileposition
-} bdef
+} bind executeonly def
 
 /.resolvefn {		% <fndict> .resolvefn <fndict'>
   dup length dict .copydict
   dup /Domain 2 copy knownoget { put } { pop pop } ifelse
   dup /Range 2 copy knownoget { put } { pop pop } ifelse
   dup /FunctionType oget //fnrdict exch get exec
-} bdef
+} bind executeonly def
 
 /resolvefunction {	% <fndict> resolvefunction <function>
   .resolvefn
-  PDFDEBUG { pdfdict /PDFSTEPcount .knownget { 1 le } { //true } ifelse { (%Function: ) print dup === flush } if } if
-} bdef
+  PDFDEBUG { //pdfdict /PDFSTEPcount .knownget { 1 le } { //true } ifelse { (%Function: ) print dup === flush } if } if
+} bind executeonly def
 
 /resolvefnproc {	% <fndict> resolvefnproc <proc>
   resolvefunction .buildfunction
-} bdef
+} bind executeonly def
 
 /resolveidfnproc {	% <fndict> resolveidfnproc <proc>
   dup /Identity eq { pop { } } { resolvefnproc } ifelse
-} bdef
+} bind executeonly def
 
 /resolvedefaultfnproc {	% <fndict> <default> resolved'fnproc <proc>
   1 index /Default eq { exch pop } { pop resolveidfnproc } ifelse
-} bdef
+} bind executeonly def
+
+%% A BBox where width or height (or both) is 0 should still paint one pixel
+%% See the ISO 32000-2:2017 spec, section 8.7.4.3, p228 'BBox' and 8.7.3.1
+/FixPatternBBox
+{
+  dup aload pop
+  3 index 2 index sub 0 eq {
+    3 index 0.000001 add 3 -1 roll pop exch
+  } if
+  2 index 1 index sub 0 eq {
+    2 index 0.000001 add exch pop
+  }if
+  5 -1 roll astore
+}bind executeonly def
 
 % ---------------- Shadings ---------------- %
 
@@ -164,29 +149,34 @@ pdfdict begin
     5 1 roll
     4 { % Bug 694542
       dup type dup /integertype ne exch /realtype ne and {
-         (   **** Warning: replacing malformed number ') pdfformaterror pdfstring cvs pdfformaterror
+         (   **** Error: replacing malformed number ') pdfformaterror pdfstring cvs pdfformaterror
          (' with 0.\n) pdfformaterror
+         (               Output may be incorrect.\n) pdfformaterror
          0
       } if
       4 1 roll
     } repeat
     5 -1 roll
     astore
-  } bind
+  } bind executeonly
   /BBox {
     dup dup dup aload pop normrect_elems
     5 -1 roll astore
-  } bind
+    FixPatternBBox
+  } bind executeonly
   /ColorSpace {
     resolvecolorspace
-  } bind
+  } bind executeonly
   /Function {
     dup type /dicttype eq {
       resolvefunction
     } {
       [ exch { oforce resolvefunction } forall ]
     } ifelse
-  } bind
+  } bind executeonly
+  /Extend {
+    mark exch {oforce} forall ]
+  } bind executeonly
 .dicttomark readonly def
 
 /resolveshading {	% <shadingstream> resolveshading <shading>
@@ -210,15 +200,24 @@ pdfdict begin
     exch PDFfile exch setfileposition
     dup 3 1 roll /.shading_dict exch put
   } ifelse
-} bdef
+} bind executeonly def
 /resolvesh {		% <shname> resolvesh <shading>
                         % <shname> resolvesh <null>
   Page /Shading rget {
+  %% Horrible hacky fix, see /DoImage later in ths file for more information
+  %%
+  dup /ColorSpace known {
+    dup /ColorSpace get dup type /arraytype eq {
+      exch dup length dict copy exch
+      dup length array copy /ColorSpace exch 2 index 3 1 roll put
+    } {pop} ifelse
+  } if
+
     resolveshading
   } {
     //null
   }ifelse
-} bdef
+} bind executeonly def
 
 % ---------------- Halftones ---------------- %
 
@@ -229,7 +228,7 @@ pdfdict begin
     } {
       1 sub dup mul exch 1 sub dup mul add 1 sub
     } ifelse
-  } bind
+  } bind executeonly
   /Diamond {
     abs exch abs 2 copy add .75 le {
       dup mul exch dup mul add 1 exch sub
@@ -240,7 +239,7 @@ pdfdict begin
         1 sub dup mul exch 1 sub dup mul add 1 sub
       } ifelse
     } ifelse
-  } bind
+  } bind executeonly
   /Ellipse {
     abs exch abs 2 copy 3 mul exch 4 mul add 3 sub dup 0 lt {
       pop dup mul exch .75 div dup mul add 4 div 1 exch sub
@@ -252,49 +251,70 @@ pdfdict begin
         .5 exch sub exch pop exch pop
       } ifelse
     } ifelse
-  } bind
-  /EllipseA { dup mul .9 mul exch dup mul add 1 exch sub } bind
-  /InvertedEllipseA { dup mul .9 mul exch dup mul add 1 sub } bind
-  /EllipseB { dup 5 mul 8 div mul exch dup mul exch add sqrt 1 exch sub } bind
-  /EllipseC { dup mul .9 mul exch dup mul add 1 exch sub } bind
-  /InvertedEllipseC { dup mul .9 mul exch dup mul add 1 sub } bind
-  /Line { exch pop abs neg } bind
-  /LineX { pop } bind
-  /LineY { exch pop } bind
-  /Square { abs exch abs 2 copy lt { exch } if pop neg } bind
-  /Cross { abs exch abs 2 copy gt { exch } if pop neg } bind
-  /Rhomboid { abs exch abs 0.9 mul add 2 div } bind
-  /DoubleDot { 2 {360 mul sin 2 div exch } repeat add } bind
-  /InvertedDoubleDot { 2 {360 mul sin 2 div exch } repeat add neg } bind
-  /SimpleDot { dup mul exch dup mul add 1 exch sub } bind
-  /InvertedSimpleDot { dup mul exch dup mul add 1 sub } bind
-  /CosineDot { 180 mul cos exch 180 mul cos add 2 div } bind
-  /Double { exch 2 div exch 2 { 360 mul sin 2 div exch } repeat add } bind
+  } bind executeonly
+  /EllipseA { dup mul .9 mul exch dup mul add 1 exch sub } bind executeonly
+  /InvertedEllipseA { dup mul .9 mul exch dup mul add 1 sub } bind executeonly
+  /EllipseB { dup 5 mul 8 div mul exch dup mul exch add sqrt 1 exch sub } bind executeonly
+  /EllipseC { dup mul .9 mul exch dup mul add 1 exch sub } bind executeonly
+  /InvertedEllipseC { dup mul .9 mul exch dup mul add 1 sub } bind executeonly
+  /Line { exch pop abs neg } bind executeonly
+  /LineX { pop } bind executeonly
+  /LineY { exch pop } bind executeonly
+  /Square { abs exch abs 2 copy lt { exch } if pop neg } bind executeonly
+  /Cross { abs exch abs 2 copy gt { exch } if pop neg } bind executeonly
+  /Rhomboid { abs exch abs 0.9 mul add 2 div } bind executeonly
+  /DoubleDot { 2 {360 mul sin 2 div exch } repeat add } bind executeonly
+  /InvertedDoubleDot { 2 {360 mul sin 2 div exch } repeat add neg } bind executeonly
+  /SimpleDot { dup mul exch dup mul add 1 exch sub } bind executeonly
+  /InvertedSimpleDot { dup mul exch dup mul add 1 sub } bind executeonly
+  /CosineDot { 180 mul cos exch 180 mul cos add 2 div } bind executeonly
+  /Double { exch 2 div exch 2 { 360 mul sin 2 div exch } repeat add } bind executeonly
   /InvertedDouble {
     exch 2 div exch 2 { 360 mul sin 2 div exch } repeat add neg
-  } bind
+  } bind executeonly
 .dicttomark readonly def
 
 /.resolveht1 {
   mark exch {
     oforce
     1 index /SpotFunction eq {
-      dup type /nametype eq
-        { //spotfunctions exch get } { resolvefnproc }
-      ifelse
+      dup type /arraytype eq {
+        %% check all the names in the array in turn, stop when we find
+        %% the first one we recognise.
+        {
+          //spotfunctions exch .knownget {
+            exit
+          } if
+        } forall
+        dup type /nametype eq {
+          %% If we didn't find any that we recognise, then use
+          %% the default halftone's spot function
+          .setdefaulthalftone currenthalftone dup /SpotFunction .knownget {
+            exch pop
+          }{
+            /GraySpotFunction .knownget not {
+              //spotfunctions /Round get
+            } if
+          }ifelse
+        } if
+      }{
+        dup type /nametype eq
+          { //spotfunctions exch get } { resolvefnproc }
+        ifelse
+      } ifelse
     } {
       1 index /TransferFunction eq {
         resolveidfnproc
       } if
     } ifelse
   } forall .dicttomark
-} bdef
+} bind executeonly def
 
 /.resolveht5 {
   mark exch {
     oforce dup type /dicttype eq { resolvehalftone } if
   } forall .dicttomark
-} bdef
+} bind executeonly def
 
 /.resolveht6 {
   %% resolvestream will reposition PDFfile. If we are in the middle
@@ -311,7 +331,7 @@ pdfdict begin
     1 index exch /TransferFunction exch put
   } if
   exch PDFfile exch setfileposition
-} bdef
+} bind executeonly def
 
 /htrdict mark
   1 //.resolveht1
@@ -331,19 +351,20 @@ currentdict /.resolveht6 undef
     exch pop exec
   } {
     =string cvs
-    (   **** Warning: Incorrect halftone type ) exch concatstrings
+    (   **** Error: Incorrect halftone type ) exch concatstrings
     (. Using defailt.\n) concatstrings pdfformaterror
+    (               Output may be incorrect.\n) pdfformaterror
     gsave .setdefaulthalftone currenthalftone grestore
   } ifelse
-} bdef
+} bind executeonly def
 
 % ---------------- Graphics state management ---------------- %
 
 /cmmatrix matrix def
 drawopdict begin
                         % Graphics state stack
-  /q { q } def
-  /Q { Q } def
+  /q { q } executeonly def
+  /Q { Q } executeonly def
                         % Graphics state setting
   /cm { //cmmatrix astore
         .getpath
@@ -358,25 +379,25 @@ drawopdict begin
         currentdict /qTextSaveMatrix .knownget {
          //cmmatrix exch dup concatmatrix pop
         } if
-      } bdef
+      } bind executeonly def
 
-  /i { 1 .min setflat } bdef
+  /i { 1 .min setflat } bind executeonly def
   /J { setlinecap } bind 0 get def
   /d { setdash } bind 0 get def
   /j { setlinejoin } bind 0 get def
   /w { setlinewidth } bind 0 get def
-  /M { 1 .max setmiterlimit } bdef
-  /gs { gs } def
+  /M { 1 .max setmiterlimit } bind executeonly def
+  /gs { gs } executeonly def
 end
 
 % Each entry in this dictionary is
 %	<gsres> <value> -proc- <gsres>
 /gsbg {
   /BGDefault load resolvedefaultfnproc setblackgeneration
-} bdef
+} bind executeonly def
 /gsucr {
   /UCRDefault load resolvedefaultfnproc setundercolorremoval
-} bdef
+} bind executeonly def
 /gstr {
   dup type /arraytype eq {
     { oforce /TRDefault load resolvedefaultfnproc } forall
@@ -384,29 +405,58 @@ end
   } {
     /TRDefault load resolvedefaultfnproc settransfer
   } ifelse
-} bdef
+} bind executeonly def
 /gsparamdict mark
-  /SA { setstrokeadjust }
-  /OP { 1 index /op known not { dup op } if OP }
+  /SA { setstrokeadjust } executeonly
+  /OP { 1 index /op known not { dup op } if OP } executeonly
         % The PDF 1.3 specification says that the name /Default is only
         % recognized for {BG,UCR,TR}2.  However, PDF 1.3 files produced
         % by Adobe Acrobat Distiller 4.0 for Windows use the name /Default
         % with the older keys, so we have to implement this.
-  /BG { 1 index /BG2 known { pop } { gsbg } ifelse }
-  /UCR { 1 index /UCR2 known { pop } { gsucr } ifelse }
-  /TR { 1 index /TR2 known { pop } { gstr } ifelse }
+  /BG { 1 index /BG2 known { pop } { gsbg } ifelse } executeonly
+  /UCR { 1 index /UCR2 known { pop } { gsucr } ifelse } executeonly
+  /TR { 1 index /TR2 known { pop } { gstr } ifelse } executeonly
 
   % Some functions used to implement phases of HT and HTP
   /sethalftones {
+    % As is so often the case, if we get an error we need to clean up the stack, but we can't
+    % use mark/cleartomark, because the action which caused the error may have left a mark
+    % on the stack. So we need to define our own mark. On an error we'll clean up the stack
+    % until we reach this unique key on the stack
+    /SethalftonesMark exch
+
     dup /Default eq {
-      pop .setdefaulthalftone
-    } {
-      resolvehalftone sethalftone
+      pop .setdefaulthalftone pop
+    }
+    {
+      {resolvehalftone} stopped
+      {
+        (\n   **** Error resolving halftone. Ignoring the halftone, output may be incorrect.\n)
+        pdfformaterror
+        % Clean up the stack by checking every entry until we find our unique key
+        {/SethalftonesMark eq {exit} if} loop
+      }
+      {
+        {sethalftone} stopped
+        {
+          (\n   **** Error setting halftone. Ignoring the halftone, output may be incorrect.\n)
+          pdfformaterror
+          % Clean up the stack by checking every entry until we find our unique key
+          {/SethalftonesMark eq {exit} if} loop
+        }
+        {
+          pop
+        }ifelse
+      }ifelse
     } ifelse
-  } bdef
+  } bind executeonly def
   /sethalftonephases {
-    /sethalftonephase where { pop aload pop sethalftonephase } { pop } ifelse
-  } bdef
+      {aload pop -1 2 index 2 index .setscreenphase pop pop} stopped
+      {
+        (\n   **** Error setting halftone phase. Ignoring the phase, output may be incorrect.\n)
+        pdfformaterror
+      } if
+  } bind executeonly def
 
   /HT {
     dup sethalftones .swapcolors sethalftones .swapcolors
@@ -420,44 +470,51 @@ end
         /dup /Default eq { oforce gsparamdict /TR get exec } { pop } ifelse
       } if
     } ifelse
-  }
+  } executeonly
   /HTP {
     % HTP may be present even if this isn't a DPS interpreter.
     dup sethalftonephases .swapcolors sethalftonephases .swapcolors
-  }
+  } executeonly
         % PDF 1.3
   % The font is an indirect reference, not a resource name
   /Font { aload pop exch oforce resourcefont exch Tf }
-  /LW { setlinewidth }
-  /LC { setlinecap }
-  /LJ { setlinejoin }
-  /ML { 1 .max setmiterlimit }
-  /D { aload pop setdash }
-  /RI { ri }
-  /op { op }
-  /OPM { OPM }
-  /BG2 { gsbg }
-  /UCR2 { gsucr }
-  /TR2 { gstr }
-  /FL { 1 .min setflat }
+  /LW { setlinewidth } executeonly
+  /LC { setlinecap } executeonly
+  /LJ { setlinejoin } executeonly
+  /ML { 1 .max setmiterlimit } executeonly
+  /D { aload pop setdash } executeonly
+  /RI { ri } executeonly
+  /op { op } executeonly
+  /OPM { OPM } executeonly
+  /BG2 { gsbg } executeonly
+  /UCR2 { gsucr } executeonly
+  /TR2 { gstr } executeonly
+  /FL { 1 .min setflat } executeonly
   /SM {
         % SM may be present even if this is only a Level 2 interpreter.
     /setsmoothness where { pop setsmoothness } { pop } ifelse
-  }
+  } executeonly
         % PDF 1.4
         % All of these require the "transparency" feature in the interpreter.
-  /ca { ca }
-  /CA { CA }
+  /ca { ca } executeonly
+  /CA { CA } executeonly
   /SMask {
     {gssmask} PDFSTOPONERROR { exec //false } { stopped } ifelse
     {
-      pop (\n   **** Warning: Error in SMask during ExtGState.\n)
+      pop (\n   **** Error in SMask during ExtGState. Ignoring the mask, output may be incorrect.\n)
       pdfformaterror
     } if
-  }
-  /AIS { AIS }
-  /BM { BM }
-  /TK { TK }
+  } executeonly
+  /AIS { AIS } executeonly
+  /BM { BM } executeonly
+  /TK { TK } executeonly
+  /UseBlackPtComp { UseBlackPtComp } executeonly
+  /HTO {
+    % PDF 2.0, supposed to be 'similar' to halftone phase but using a different
+    % co-ordiate system. Treat the same for now and fix if anyone ever complains.
+    aload pop transform cvi exch cvi exch 2 array astore
+    dup sethalftonephases .swapcolors sethalftonephases .swapcolors
+  } executeonly
 .dicttomark readonly def
 /gs {			% <gsres> gs -
   Page /ExtGState rget {
@@ -466,18 +523,41 @@ end
     dup {
       oforce exch gsparamdict exch .knownget { exec } { pop } ifelse
     } forall pop
-  } if
-} bdef
+  } {
+    //pdfdict /.gs_warning_issued known not {
+      (\n   **** Error 'gs' ignored -- ExtGState missing from Resources.\n)
+      pdfformaterror
+      (        Output may be incorrect.\n) pdfformaterror
+      //pdfdict /.gs_warning_issued //true .forceput
+      PDFSTOPONERROR { /gs /undefined signalerror } if
+    } executeonly if
+  } executeonly
+  ifelse
+} bind executeonly def
 
 % ------ Transparency support ------ %
 
 /gssmask {
   {
+   dup type /dicttype eq
+   {
+     dup /G knownogetdict
+     {pop}
+     {
+        (   **** Error: Ignoring invalid transparency SMask group\n)
+        pdfformaterror
+        (               Output may be incorrect.\n) pdfformaterror
+        % replace the invalid SMask object
+        pop /None
+     } ifelse
+    } if
+
     dup /None eq 1 index //null eq or PDFusingtransparency not or {
       pop //null
-      SoftMask //null ne {
+
+      .currentSMask //null ne {
         % get rid of the current SMask (Bug 695471)
-        false			% colorspace not set
+        //false			% colorspace not set
         << /Subtype /None >>	% Special type for this purpose
         0 0 0 0			% fake BBox
         .begintransparencymaskgroup
@@ -492,14 +572,31 @@ end
     dup /BC knownoget {
       dup /Background exch 4 2 roll
       1 index /G oget /Group knownoget not {
-        (   **** Warning: Dropping transparency group XObject without /Group attribute.\n)
+        (   **** Error: Ignoring a transparency group XObject without /Group attribute.\n)
         pdfformaterror
+        (               Output may be incorrect.\n) pdfformaterror
         cleartomark //null exit
       } if
       gsave //nodict begin
-        /CS knownoget {
+        dup /CS knownoget {
+          exch pop
           resolvecolorspace dup setgcolorspace csput
-        } if
+        }
+        {
+          % Group attributes dictionaries are supposed to contain a /CS
+          % entry, but Acrobat apparently also handles a /ColorSpace....
+          /ColorSpace knownoget {
+            (   **** Error: A transparency group XObject has a /ColorSpace instead of /CS attribute.\n)
+            pdfformaterror
+            resolvecolorspace dup setgcolorspace csput
+          }
+          {
+            (   **** Error: Ignoring a transparency group XObject without /CS attribute.\n)
+            pdfformaterror
+            (               Output may be incorrect.\n) pdfformaterror
+            cleartomark //null exit
+          }ifelse
+        } ifelse
         aload pop setcolor [ currentgray ]
       end grestore
       /GrayBackground exch 3 2 roll
@@ -530,25 +627,16 @@ end
     /GroupGState gstate currentgstate 6 2 roll
     grestore
     /GroupMat matrix currentmatrix 8 2 roll
-    /GroupExtGState 1 dict
-    //SetGroupExtGStateDict
-    {
-      exch dup where
-      {
-        exch get 2 index 3 1 roll put
-      }
-      {
-        pop pop
-      } ifelse
-    } forall
-    10 2 roll
+%    /GroupExtGState 1 dict
+%    10 2 roll
+
     /.execmaskgroup cvx 2 packedarray cvx /Draw exch 3 2 roll
     pop
     .dicttomark
     exit
   } loop
   SMask
-} bdef
+} bind executeonly def
 
 % Functions specific to the Device* colorspaces to force the switch to
 % the Device* colorspace so that the SMask will not get a CIEBased* colorspace
@@ -557,7 +645,7 @@ end
 /forceDefaultCS <<
   {
     currentcolorspace setcolorspace	% this will switch to Device colorspace
-  } bind
+  } bind executeonly
   /DeviceGray exch
   /DeviceRGB 1 index
   /DeviceCMYK 1 index
@@ -574,6 +662,9 @@ def
   matrix currentmatrix 4 1 roll
   mark currentcolor counttomark dup 4 add exch roll pop
   currentcolorspace 4 1 roll .getuseciecolor 4 1 roll
+  .swapcolors mark currentcolor counttomark dup 4 add exch roll pop currentcolorspace 4 1 roll .swapcolors
+  currentuserparams /OverrideICC get 4 1 roll
+  mark /OverrideICC //true .dicttomark setuserparams
 
   % We can't simply set the group's gstate here because
   % we can't use gsave/grestore. So we actually set it
@@ -597,51 +688,83 @@ def
     resolvecolorspace dup setgcolorspace csput
     //true		% use currentcolorspace
   } {
-    % inheriting the colorspace -- make sure Device* spaces are not CIEBased
-    forceDefaultCS currentcolorspace 0 get .knownget { exec } if
-    //false		% no defined colorspace
+    % Group attributes dictionaries are supposed to contain a /CS
+    % entry, but Acrobat apparently also handles a /ColorSpace....
+    dup /Group oget /ColorSpace knownoget {
+    (   **** Error: A transparency group attribute dictionary has a /ColorSpace instead of /CS attribute.\n)
+    pdfformaterror
+      resolvecolorspace dup setgcolorspace csput
+      //true		% use currentcolorspace
+    }
+    {
+      % inheriting the colorspace -- make sure Device* spaces are not CIEBased
+      forceDefaultCS currentcolorspace 0 get .knownget { exec } if
+      //false		% no defined colorspace
+    } ifelse
   } ifelse
   3 -1 roll dup
   dup 4 1 roll /BBox get aload pop .begintransparencymaskgroup
   exch dup /Resources knownoget { oforce } { 2 dict } ifelse
-  3 -1 roll dup /GroupGState .knownget { 2 index /GroupGState 3 -1 roll put} if
-  /GroupExtGState .knownget { 1 index /GroupExtGState 3 -1 roll put} if
+  3 -1 roll /GroupGState .knownget { 1 index /GroupGState 3 -1 roll put} if
   exch //false resolvestream
-  .execgroup .endtransparencymask
+  1 index exch
+
+  %% Get the current colour space and colour values (as an array), we need to pass these to .execgroup
+  %% as well, so that it can restore them, in case the colour space gets changed by transparency
+  %% graphics state stuff.
+  mark currentcolor counttomark array astore exch pop
+  currentcolorspace 4 2 roll
+
+  .execgroup
+  % We have to remove these in case the Form XObject is subsequently used as
+  % a form rather than a group - they remain in the paramdict for the SMask
+  % so this will all still work if the SMask is re-evaluated.
+  /GroupGState undef
+
+  .endtransparencymask
   PDFfile exch setfileposition
+  mark exch /OverrideICC exch .dicttomark setuserparams
+  .swapcolors setcolorspace setcolor .swapcolors
   .setuseciecolor setcolorspace setcolor
   setmatrix
   end	% restore colorspace, color and ExtGState (end)
-  /SoftMask where pop /SoftMask //true put	% special setting to tell us it has been rendered
-} bdef
+  .currentSMask /Processed //true put % special setting to tell us it has been rendered
+} bind executeonly def
 
 % Paint a Form+Group XObject, either for a transparency mask or for a Do.
-/.execgroup {		% <resdict> <stream> .execgroup -
+/.execgroup {		% [colour values] <colour space> <resdict> <stream> .execgroup -
   pdfemptycount 3 1 roll
-  /pdfemptycount count 3 sub store
+  /pdfemptycount count 5 sub store
   gsave //nodict begin
 
   % We have to set the gstate correctly for lazy evaluation of a softmask group.
-  % we also must preserve the color(space) as setup in .execmaskgroup.
+  % we also must restore the color(space) as setup in .execmaskgroup or paintformgroup.
   % This stuff must be done here, as .execmaskgroup can't use gsave/grestore to
   % manipulate the gstates, due to the requirements of .begintransparencymaskgroup.
   % We also must set the ExtGState values.
   % It may seem redundant to do the color(space) twice (once here and once in
   % .execmaskgroup) but we have to set it in .execmaskgroup for the background
   % color and set it here once in the correct gstate.
-  mark currentcolor currentcolorspace counttomark 2 add index dup
+  1 index
   /GroupGState .knownget { setgstate } if
-  /GroupExtGState .knownget { { exch exec } forall } if
-  setcolorspace setcolor pop
+
   newpath //null SMask
   1 .setopacityalpha 1 .setshapealpha
   1 CA 1 ca
   /Compatible .setblendmode
         % Execute the body of the Form, similar to DoForm.
-  pdfopdict .pdfruncontext
+  pdfopdict
+
+  %% Restore the colour space (passed in on the stack) and current colour
+  %%
+  6 -2 roll
+  setcolorspace
+  aload pop setcolor
+
+  .pdfruncontext
   end grestore
   /pdfemptycount exch store
-} bdef
+} bind executeonly def
 
 /.beginformgroup {	% groupdict bbox .beginformgroup -
   exch mark exch			% bbox mark groupdict
@@ -652,17 +775,35 @@ def
                 % Stack: bbox paramdict
   exch aload pop
   .begintransparencygroup
-} bdef
+} bind executeonly def
+
+/.beginpagegroup {	% groupdict bbox .beginformgroup -
+  currentcolorspace 3 1 roll
+  exch mark exch			% bbox mark groupdict
+  dup /CS knownoget { resolvecolorspace dup setgcolorspace /CS exch 3 2 roll} if
+  dup /I knownoget { /Isolated exch 3 2 roll } if
+  dup /K knownoget { /Knockout exch 3 2 roll } if
+  pop .dicttomark
+                % Stack: bbox paramdict
+  exch aload pop
+  .begintransparencypagegroup
+  setcolorspace
+} bind executeonly def
 
 % .paintgroupform implements the Form PaintProc in the case where the
 % Form XObject dictionary includes a Group key.  See .paintform below.
 /.paintgroupform {	% <resdict> <stream> <formdict> .paintgroupform -
+  %% Pass the current color space, and an array with the current color vales
+  %% as arguments to .execgroup
+  mark currentcolor counttomark array astore exch pop
+  currentcolorspace 5 2 roll
+
   dup /Group oget exch /BBox oget
                 % Stack: resdict stream groupdict bbox
   .beginformgroup
   .execgroup
   .endtransparencygroup
-} bdef
+} bind executeonly def
 
 % Make an ImageType 103 (soft-masked) image.
 /makesoftmaskimage {	% <datasource> <imagemask> <SMask> makesoftmaskimage
@@ -693,9 +834,10 @@ def
   DataDict /Matte knownoget {
     /Matte exch def
   } if
-  AlphaIsShape { /ShapeMaskDict } { /OpacityMaskDict } ifelse exch def
+  .currentalphaisshape
+  { /ShapeMaskDict } { /OpacityMaskDict } ifelse exch def
   /ColorSpace DataDict /ColorSpace get def
-} bdef
+} bind executeonly def
 
 % ---------------- Color setting ---------------- %
 
@@ -705,17 +847,17 @@ def
 
 % The keys here are resolved (PostScript, not PDF) color space names.
 /csncompdict 9 dict begin
-  /DeviceGray { pop 1 } bdef
-  /DeviceRGB { pop 3 } bdef
-  /DeviceCMYK { pop 4 } bdef
+  /DeviceGray { pop 1 } bind executeonly def
+  /DeviceRGB { pop 3 } bind executeonly def
+  /DeviceCMYK { pop 4 } bind executeonly def
   /CIEBasedA //DeviceGray def
   /CIEBasedABC //DeviceRGB def
   /CalGray //DeviceGray def
   /CalRGB //DeviceRGB def
   /Lab //DeviceRGB def
-  /ICCBased { 1 oget /N oget } bdef
+  /ICCBased { 1 oget /N oget } bind executeonly def
   /Separation //DeviceGray def
-  /DeviceN { 1 oget length } bdef
+  /DeviceN { 1 oget length } bind executeonly def
   /Indexed  //DeviceGray def
 currentdict end readonly def
 
@@ -723,7 +865,7 @@ currentdict end readonly def
 /csncomp {
   dup dup type /arraytype eq { 0 oget } if
   //csncompdict exch get exec
-} bdef
+} bind executeonly def
 
 currentdict /csncompdict undef
 
@@ -732,7 +874,41 @@ currentdict /csncompdict undef
   dup dup 1 oget
   mark exch { oforce } forall .dicttomark
   dup dup //true resolvestream
-  /ReusableStreamDecode filter /DataSource exch put
+  {
+    /ReusableStreamDecode filter
+  } stopped
+  {
+    pop null
+%    (   **** Error: Failed to read ICC profile for an ICCBased colour space.\n) pdfformaterror
+%    (               Falling back to a colour space determined by the /N value.\n) pdfformaterror
+  }if
+  /DataSource exch put
+  dup /.hash 0 put	% placeholder for use by seticc icc_profile_cache key
+  % Check that the number of components (/N) defined in the ICCBased
+  % dictionry matches the actual profile. Bug #696120
+  dup /N get
+  1 index
+  %% If we get an error reading the profile, just assume that /N is correct
+  %% If its genuinely faulty we will use an alternate based on /N.
+  {.numicc_components} stopped {pop dup} if
+  dup 3 -1 roll ne {
+    %% /N and the actual number of components don't match. Ensure
+    %% that we have a valid number of components from the ICC
+    %% profile. Certain kinds of profile can't determine the numebr of components
+    %% and in ths case we must not override the /N value.
+    dup 0 gt {
+         (   **** Error: ICCbased space /N value does not match the ICC profile.\n) pdfformaterror
+         (                 Using the number of channels from the profile.\n) pdfformaterror
+         (                 Output may be incorrect.\n) pdfformaterror
+        1 index dup /N get /OrigN exch put
+        1 index exch /N exch put
+    }{
+      pop
+    } ifelse
+  } {
+    pop
+  } ifelse
+
   1 exch put
   exch PDFfile exch setfileposition
   % Resolve alternate color space
@@ -742,34 +918,38 @@ currentdict /csncompdict undef
   } {
     pop 			% remove colorspace dictionary
   } ifelse
-} bdef
+} bind executeonly def
 
 /csrdict 13 dict begin
-  /DeviceGray { } bdef
-  /DeviceRGB { } bdef
-  /DeviceCMYK { } bdef
+  /DeviceGray { } bind executeonly def
+  /DeviceRGB { } bind executeonly def
+  /DeviceCMYK { } bind executeonly def
 
-  /CalGray { 1 oget [ exch /CalGray exch ] } bdef
-  /CalRGB { 1 oget [ exch /CalRGB exch ] } bdef
-  /Lab { 1 oget [ exch /Lab exch ] } bdef
+  /CalGray { 1 oget [ exch /CalGray exch ] } bind executeonly def
+  /CalRGB { 1 oget [ exch /CalRGB exch ] } bind executeonly def
+  /Lab { 1 oget [ exch /Lab exch ] } bind executeonly def
 
   /CalCMYK {
     pop /DeviceCMYK		% not defined by Adobe
-  } bdef
+  } bind executeonly def
 
   /ICCBased {
     dup 1 get type /dicttype ne {	% don't resolve more than once
       ICCBased-resolve
     } if
-  } bdef
+  } bind executeonly def
 
   /Separation {
     aload pop exch oforce resolvecolorspace
                 % Contrary to PDF manuals up to v.1.5, Acrobat Distiller 3.01
                 % can use /Identity name here instead of a function.
     exch oforce resolveidfnproc
+
+    %% Make sure the ink name is not an indirect object....
+    3 -1 roll oforce 3 1 roll
+
     4 array astore
-  } bdef
+  } bind executeonly def
 
   /DeviceN {
     [ exch aload pop ]			% Copy into a new array
@@ -794,15 +974,30 @@ currentdict /csncompdict undef
           << exch { oforce resolvecolorspace } forall >>
           /Colorants exch >>		% Finish new attributes dict
         } if
+                            % devn_array devn_array <<..attributes..>>
+      1 index 4 oget /Process knownoget {
+        dup /ColorSpace knownoget {
+          1 index exch resolvecolorspace /ColorSpace exch put
+        } if
+                            % devn_array devn_array <<..attributes..>> <<..Process..>>
+        1 index
+        /Process 3 -1 roll
+        put
+      } if
       4 exch put			% Put resolved or new attributes dict
     } if
-  } bdef
+  } bind executeonly def
 
   /Indexed {
     aload pop
+    %% Resolve 'hival' in case it is an indirect reference. This is kind of
+    %% dumb, it just makes the file bigger, but it *is* legal.
+    3 1 roll oforce 3 -1 roll
+
     1 index -1 eq {
       exch pop 255 exch
-      (   **** Warning: Assuming that max color index -1 means 255.\n) pdfformaterror
+      (   **** Error: Highest color index given as -1. Assuming this actually means 255.\n) pdfformaterror
+      (               Output may be incorrect.\n) pdfformaterror
     } if
     3 -1 roll oforce resolvecolorspace
                 % Stack: /Indexed hival lookup basespace
@@ -839,8 +1034,9 @@ currentdict /csncompdict undef
         exch //true resolvestream
         1 index readstring not {
           % The string is padded with 0s
-          (   **** Warning: Short look-up table in the Indexed color space was padded with 0's.\n)
+          (   **** Error: Short look-up table in the Indexed color space was padded with 0's.\n)
           pdfformaterror
+          (               Output may be incorrect.\n) pdfformaterror
         } if
         pop
                 % Stack: filepos /Indexed basespace hival (...)
@@ -859,14 +1055,15 @@ currentdict /csncompdict undef
         } if
       } if
     } if pop
-  } bdef
+  } bind executeonly def
 
   /I { % Bug 689815
-    (   **** Warning: The name /Indexed cannot be abbreviated to /I in the color space\n)
+    (   **** Error: The name /Indexed cannot be abbreviated to /I in the color space\n)
     pdfformaterror
+    (               Output may be incorrect.\n) pdfformaterror
     dup 0 /Indexed put
     //Indexed exec
-  } bdef
+  } bind executeonly def
 
   /Pattern {
     dup type /nametype ne {
@@ -875,7 +1072,7 @@ currentdict /csncompdict undef
         /Pattern exch 2 array astore
       } if
     } if
-  } bdef
+  } bind executeonly def
 
 currentdict end readonly def
 
@@ -883,16 +1080,17 @@ currentdict end readonly def
                         % <csname> cssubst false
   dup resolvecolorspace
   dup 1 index ne { exch pop //true } { pop pop //false } ifelse
-} bdef
+} bind executeonly def
 
 /csnames mark
   /DeviceGray dup  /DeviceRGB dup  /DeviceCMYK dup  /Pattern dup
 .dicttomark readonly def
 /csresolve {		% <csresourcename> csresolve <cspace> <true> | <false>
   dup type /nametype ne {
-    (\n   **** Warning: CS/cs (setcolorspace) operand not a name: ) pdfformaterror
+    (\n   **** Error: CS/cs (setcolorspace) operand not a name: ) pdfformaterror
     dup stderrfile dup 3 -1 roll write==only flushfile
     ( ****\n) pdfformaterror
+    (                 Output may be incorrect.\n) pdfformaterror
     dup type /arraytype eq {	% Adobe InDesign + PDF Library has array
       resolvecolorspace
     } if //true
@@ -903,23 +1101,25 @@ currentdict end readonly def
       //csnames 1 index known {
         //true
       } {
-        (   **** Warning: Undefined space resource: /)
+        (   **** Error: Undefined space resource: /)
         exch .namestring concatstrings (\n) concatstrings pdfformaterror
+        (               Output may be incorrect.\n) pdfformaterror
         //false
       } ifelse
     } ifelse
   } ifelse
-} bdef
+} bind executeonly def
 
 /resolvecolorspace {	% <cspace> resolvecolorspace <cspace'>
   dup type /dicttype eq {
       dup /N known {
-      (   **** ICCBased color space is a bare stream dictionary\n) pdfformaterror
+      (   **** ICCBased color space is a bare stream dictionary\n) pdfformatwarning
       [ /ICCBased 3 -1 roll ] ICCBased-resolve exec
       //false
     } {
       dup /ColorSpace knownoget {
-        (   **** Strange color space <</ColorSpace /Device...>>\n) pdfformaterror
+        (   **** Error: unrecognised color space <</ColorSpace /Device...>>\n) pdfformaterror
+        (                 Output may be incorrect.\n) pdfformaterror
         exch pop //true
       } {
         //true
@@ -929,6 +1129,8 @@ currentdict end readonly def
     //true
   } ifelse {
     dup dup type /arraytype eq { 0 get } if
+    dup type /packedarraytype eq {exch pop exec dup} if
+
     //csrdict exch .knownget  {
       exec dup type /nametype ne { dup length 1 eq { 0 get } if } if
     } {
@@ -939,7 +1141,7 @@ currentdict end readonly def
       } ifelse
     } ifelse
   } if
-} bdef
+} bind executeonly def
 
 /scresolve {	% <c0> ... scresolve <multi>
                 % We can't really make sc[n] and SC[N] work, because
@@ -957,7 +1159,7 @@ currentdict end readonly def
   } {
     .pdfcount 1 gt
   } ifelse
-} bdef
+} bind executeonly def
 
 %% Bug #696017 When we begin a text block, we switch to a special set of marking operations
 %% for paths, these ops don't use the current CTM, but the 'SavedTextMatrix', in order to
@@ -969,7 +1171,7 @@ currentdict end readonly def
 %% finished running the PaintProc.
 
 /.actual_pdfpaintproc {         % <patdict> <resdict> .pdfpaintproc -
-  PDFDEBUG { pdfdict /PDFSTEPcount .knownget { 1 le } { //true } ifelse { (%Begin PaintProc) print dup === flush } if } if
+  PDFDEBUG { //pdfdict /PDFSTEPcount .knownget { 1 le } { //true } ifelse { (%Begin PaintProc) print dup === flush } if } if
   PDFfile fileposition 3 1 roll
   q
   1 index /PaintType oget 1 eq {
@@ -978,13 +1180,16 @@ currentdict end readonly def
   } {
     % For uncolored patterns, we have to unbind the current
     % color and color space before running the PaintProc.
-    //null sc1 //null SC1
+    % Not true since moving the ExtGState parameters into the gstate.
+    %    //null sc1 //null SC1
   } ifelse
 
   % Save old values on opstack, set pdfemptycount to new value.
   pdfemptycount countdictstack mark
 
-  /pdfemptycount count 3 sub def 5 3 roll
+  %% We can't simply 'def' into the dictionary saved by 'q' above, we need to
+  %% call gput to copy it and store inside it. Stupid or what....
+  /pdfemptycount count 3 sub gput 5 3 roll
   %
   % Stack: ... <old emptycount> <dictcount> mark <patdict> <resdict>
   %                                                  |
@@ -997,35 +1202,81 @@ currentdict end readonly def
   { countdictstack
     2 index le { exit } if
     currentdict /n known not or
-    Q
-  } loop {
-    (   **** Warning: Pattern stream has unbalanced q/Q operators \(too many q's\)\n)
-    pdfformaterror
-  } if
+    currentdict /n known currentdict /self known or{
+      Q
+    }{
+      (\n   **** Error: File has unbalanced q/Q operators \(too many Q's\)\n               Output may be incorrect.\n)
+      //pdfdict /.Qqwarning_issued .knownget
+      {
+        {
+          pop
+        }
+        {
+          currentglobal //pdfdict gcheck .setglobal
+          //pdfdict /.Qqwarning_issued //true .forceput
+          .setglobal
+          pdfformaterror
+        } executeonly ifelse
+      } executeonly
+      {
+        currentglobal //pdfdict gcheck .setglobal
+        //pdfdict /.Qqwarning_issued //true .forceput
+        .setglobal
+        pdfformaterror
+      } executeonly ifelse
+      end
+    } executeonly ifelse
+  } executeonly loop
+  {
+    (\n   **** Error: File has unbalanced q/Q operators \(too many q's\)\n               Output may be incorrect.\n)
+    //pdfdict /.Qqwarning_issued .knownget
+    {
+      {
+        pop
+      }
+      {
+        currentglobal //pdfdict gcheck .setglobal
+        //pdfdict /.Qqwarning_issued //true .forceput
+        .setglobal
+        pdfformaterror
+      } executeonly ifelse
+    } executeonly
+    {
+      currentglobal //pdfdict gcheck .setglobal
+      //pdfdict /.Qqwarning_issued //true .forceput
+      .setglobal
+      pdfformaterror
+    } executeonly ifelse
+  } executeonly if
   pop
 
   % restore pdfemptycount
   /pdfemptycount exch def
 
   Q
-  PDFDEBUG { pdfdict /PDFSTEPcount .knownget { 1 le } { //true } ifelse { (%End PaintProc) print dup === flush } if } if
+  PDFDEBUG { //pdfdict /PDFSTEPcount .knownget { 1 le } { //true } ifelse { (%End PaintProc) print dup === flush } if } if
   PDFfile exch setfileposition
-} bdef
+} bind executeonly odef
 
 /.pdfpaintproc {
     %% Get the /m from pdfopdict (must be present)
     %% and check its a packedarray
     pdfopdict /m get dup type /packedarraytype eq {
-      %% get the initial element of the packedarray
-      %% and check its a name
-      0 get dup type /nametype eq {
-        %% If the name is inside_text_m then we are in a text block
-        /inside_text_m eq
+      %% The non-text version of /m is executeonly, so if we can't read it, its not a text block.
+      dup rcheck {
+        %% get the initial element of the packedarray
+        %% and check its a name
+        0 get dup type /nametype eq {
+          %% If the name is inside_text_m then we are in a text block
+          /inside_text_m eq
+          }{
+             pop //false
+          } ifelse
         }{
-           pop false
+          pop //false
         } ifelse
     }{
-      pop false
+      pop //false
     } ifelse
     %% rearrange the operands, move the boolean to the back
     3 1 roll
@@ -1036,7 +1287,7 @@ currentdict end readonly def
     {
       switch_to_text_marking_ops
     } if
-}bdef
+}bind executeonly odef
 
 /resolvepattern {	% <patternstreamdict> resolvepattern <patterndict>
                 % Don't do the resolvestream now: just capture the data
@@ -1072,12 +1323,12 @@ currentdict end readonly def
     2 index /Resources knownoget { oforce } { 0 dict } ifelse
     /.pdfpaintproc cvx
   ] cvx put
-  dup /BBox 2 copy knownoget { normrect put } { pop pop } ifelse
+  dup /BBox 2 copy knownoget { normrect FixPatternBBox put } { pop pop } ifelse
   dup /.pattern_uses_transparency  1 index patternusestransparency put
-  PDFDEBUG { pdfdict /PDFSTEPcount .knownget { 1 le } { //true } ifelse { (%Pattern: ) print dup === flush } if } if
-} bdef
+  PDFDEBUG { //pdfdict /PDFSTEPcount .knownget { 1 le } { //true } ifelse { (%Pattern: ) print dup === flush } if } if
+} bind executeonly def
 
-/ignore_color_op  (   **** Warning: Ignoring a color operation in a cached context.\n) readonly def
+/ignore_color_op  (   **** Error: Ignoring a color operation in a cached context.\n               Output may be incorrect.\n) readonly def
 
 drawopdict begin
   /g  { .incachedevice { % Bug 689302
@@ -1085,35 +1336,40 @@ drawopdict begin
         } {
           /DeviceGray cssubst { cs sc1 } { g } ifelse
         } ifelse
-      } bdef
+      } bind executeonly def
 
   /rg { .incachedevice {
           pop pop pop //ignore_color_op pdfformaterror
         } {
           /DeviceRGB cssubst { cs sc* } { rg } ifelse
         } ifelse
-      } bdef
+      } bind executeonly def
 
   /k  { .incachedevice {
           pop pop pop pop //ignore_color_op pdfformaterror
         } {
           k
         } ifelse
-      } bdef
+      } bind executeonly def
 
   /cs { .incachedevice {
           pop //ignore_color_op pdfformaterror
         } {
           csresolve { cs } if
         } ifelse
-      } bdef
+      } bind executeonly def
 
   /sc { .incachedevice {
           .pdfcount { pop } repeat //ignore_color_op pdfformaterror
         } {
-          scresolve { sc*_and_set } { sc1_and_set } ifelse
+          scresolve 1 index //null eq {
+            pop pop
+            //ignore_color_op pdfformaterror
+          } {
+            { sc*_and_set } { sc1_and_set } ifelse
+          } ifelse
         } ifelse
-      } bdef
+      } bind executeonly def
 
   /scn /sc load def
 
@@ -1122,42 +1378,47 @@ drawopdict begin
         } {
           /DeviceGray cssubst { CS SC1 } { G } ifelse
         } ifelse
-      } bdef
+      } bind executeonly def
 
   /RG { .incachedevice {
           pop pop pop //ignore_color_op pdfformaterror
         } {
           /DeviceRGB cssubst { CS SC* } { RG } ifelse
         } ifelse
-      } bdef
+      } bind executeonly def
 
   /K  { .incachedevice {
           pop pop pop pop //ignore_color_op pdfformaterror
         } {
           K
         } ifelse
-      } bdef
+      } bind executeonly def
 
   /CS { .incachedevice {
           pop //ignore_color_op pdfformaterror
         } {
           csresolve { CS } if
         } ifelse
-      } bdef
+      } bind executeonly def
 
   /ri { .incachedevice {
           pop //ignore_color_op pdfformaterror
         } {
           ri
         } ifelse
-      } bdef
+      } bind executeonly def
 
   /SC { .incachedevice {
           .pdfcount { pop } repeat //ignore_color_op pdfformaterror
         } {
-          scresolve { SC*_and_set } { SC1_and_set } ifelse
+          scresolve 1 index //null eq {
+            pop pop
+            //ignore_color_op pdfformaterror
+          }{
+            { SC*_and_set } { SC1_and_set } ifelse
+          }ifelse
         } ifelse
-      } bdef
+      } bind executeonly def
 
   /SCN /SC load def
 end
@@ -1168,107 +1429,117 @@ currentdict /ignore_color_op undef
 
 drawopdict begin
                         % Path construction
-  /m { { moveto }  stopped { count pdfemptycount sub 2 .min { pop } repeat 0 0 moveto } if } bdef
-  /l { { lineto }  stopped { count pdfemptycount sub 2 .min { pop } repeat } if } bdef
-  /c { { curveto } stopped { count pdfemptycount sub 6 .min { pop } repeat } if } bdef
+  /m { { moveto }  stopped { count pdfemptycount sub 2 .min { pop } repeat 0 0 moveto } if } bind executeonly def
+  /l { { lineto }  stopped { count pdfemptycount sub 2 .min { pop } repeat } if } bind executeonly def
+  /c { { curveto } stopped { count pdfemptycount sub 6 .min { pop } repeat } if } bind executeonly def
 
   /v { count pdfemptycount sub 4 ge {
          { currentpoint 6 2 roll curveto } stopped { count pdfemptycount sub 6 .min { pop } repeat  } if
        } {
          count pdfemptycount sub { pop } repeat
        } ifelse
-     } bdef
-  /y { { 2 copy curveto } stopped { count pdfemptycount sub 6 .min { pop } repeat } if } bdef
+     } bind executeonly def
+  /y { { 2 copy curveto } stopped { count pdfemptycount sub 6 .min { pop } repeat } if } bind executeonly def
 
   /re {
    4 2 roll moveto  exch dup 0 rlineto  0 3 -1 roll rlineto  neg 0 rlineto
    closepath
-  } bdef
+  } bind executeonly def
 
   /h { closepath } bind 0 get def
                         % Path painting and clipping
-  /n { n } def
-  /S { S } def
-  /s { s } def
-  /f { f } def
-  /f* { f* } def
-  /B { B } def
-  /b { b } def
-  /B* { B* } def
-  /b* { b* } def
-  /W { W } def
-  /W* { W* } def
+  /n { n } executeonly def
+  /S { S } executeonly def
+  /s { s } executeonly def
+  /f { f } executeonly def
+  /f* { f* } executeonly def
+  /B { B } executeonly def
+  /b { b } executeonly def
+  /B* { B* } executeonly def
+  /b* { b* } executeonly def
+  /W { W } executeonly def
+  /W* { W* } executeonly def
 
   /sh_save 1 array def
-  /sh_group  << /Subtype /Group /Isolated //true >> readonly def
+
+  /do_shade {
+    0 .setoverprintmode
+    { dup /.shading .knownget {
+        exch pop
+      } {
+       .buildshading_and_shfill
+      } ifelse
+    } stopped {
+      pop
+      (   **** Error: Ignoring invalid smooth shading object, output may be incorrect.\n)
+      pdfformaterror
+    } if
+  } bind executeonly def
+
   /sh {
       OFFlevels length 0 eq {
         setfillstate resolvesh
         //sh_save 0 save put
-        SoftMask //null ne {
-          //sh_group
-          1 index /BBox knownoget {
+        PDFusingtransparency {
+          gsave
+          dup /BBox knownoget {
             { oforce } forall
+            4 2 roll moveto exch 0 lineto 0 exch lineto closepath
           } {
-            gsave clippath pathbbox grestore
+            clippath
           } ifelse
-          .begintransparencygroup
-        } if
-        0 .setoverprintmode
-        { dup /.shading .knownget {
-            exch
-            pop
-          } {
-           .buildshading
-          } ifelse
-          .shfill
-        } stopped {
-          pop
-          (   **** Warning: Dropping incorrect smooth shading object.\n)
-          pdfformaterror
-        } if
-        SoftMask //null ne { .endtransparencygroup } if
+          % If we get an error, just emit an empty box
+          { pathbbox } stopped { 0 0 0 0 } if
+          4 array astore
+          grestore
+          //null
+          setup_trans
+          //do_shade exec
+          teardown_trans
+        } {
+          //do_shade exec
+        } ifelse
         //sh_save 0 get restore
       } {
         pop
       } ifelse
-    } bdef
+    } bind executeonly def
   currentdict dup /sh_save undef /sh_group undef
 end
 
 % ---------------- XObjects ---------------- %
 
 /xobjectprocs mark		% <dict> -proc- -
-  /Image { DoImage }
-  /Form { DoForm }
-  /PS { DoPS }
+  /Image { DoImage } executeonly
+  /Form { DoForm } executeonly
+  /PS { DoPS } executeonly
 .dicttomark readonly def
 
 % Note that the keys in defaultdecodedict are resolved (PostScript, not PDF)
 % color space names.
 /defaultdecodedict mark
-  /DeviceGray { pop //01_1 } bind
-  /DeviceRGB { pop //01_3 } bind
-  /DeviceCMYK { pop //01_4 } bind
-  /CIEBasedA { 1 get /RangeA knownoget not { //01_1 } if } bind
-  /CIEBasedABC { 1 get /RangeABC knownoget not { //01_3 } if } bind
-  /CalGray { pop //01_1 } bind
-  /CalRGB { pop //01_3 } bind
-  /Lab { 1 get /Range knownoget not { [-100 100 -100 100] } if } bind
+  /DeviceGray { pop //01_1 } bind executeonly
+  /DeviceRGB { pop //01_3 } bind executeonly
+  /DeviceCMYK { pop //01_4 } bind executeonly
+  /CIEBasedA { 1 get /RangeA knownoget not { //01_1 } if } bind executeonly
+  /CIEBasedABC { 1 get /RangeABC knownoget not { //01_3 } if } bind executeonly
+  /CalGray { pop //01_1 } bind executeonly
+  /CalRGB { pop //01_3 } bind executeonly
+  /Lab { 1 get /Range knownoget not { [-100 100 -100 100] } {aload pop 0 100 6 2 roll 6 array astore}ifelse } bind executeonly
   /ICCBased {
      1 oget dup /Range knownoget {
        exch pop
      }{
        /N get [ exch {0 1} repeat ] readonly
      } ifelse
-  } bind
-  /Separation { pop //01_1 } bind
+  } bind executeonly
+  /Separation { pop //01_1 } bind executeonly
   /DeviceN {
     1 oget length [ exch {0 1} repeat ] readonly
-  } bind
+  } bind executeonly
   /Indexed {
     pop [ 0 1 BitsPerComponent bitshift 1 sub ]
-  } bind
+  } bind executeonly
 .dicttomark readonly def
 
 /checkaltimage {	% <resdict> checkaltimage <resdict[']>
@@ -1287,28 +1558,28 @@ end
       } forall
     } if
   } if
-} bdef
+} bind executeonly def
 
 % <string> <index> getu16 <integer>
 /getu16 {
   2 copy get 8 bitshift 3 1 roll 1 add get add
-} bind def
+} bind executeonly def
 
 % <string> <index> getu32 <integer>
 /getu32 {
   2 copy getu16 16 bitshift 3 1 roll 2 add getu16 add
-} bind def
+} bind executeonly def
 
 /jp2_csp_dict mark
   12 { /DeviceCMYK }       % CMYK
   14 { [ /Lab << /WhitePoint [ 0.9505 1 1.0890 ] readonly >> ] }              % LAB, WhitePoint == D65
-  16 { /sRGBICC /ColorSpace findresource } bind
-  17 { /sGrayICC /ColorSpace findresource } bind
+  16 { /sRGBICC /ColorSpace findresource } bind executeonly
+  17 { /sGrayICC /ColorSpace findresource } bind executeonly
   18 3 index               % YCC is converted to RGB
 % 19                       % CIEJab not supportec by PDF 1.7
-% 20                       % e-sRGB
-% 21                       % ROMMRGB
-% 24                       % e-sYCC
+  20 { /esRGBICC /ColorSpace findresource } bind executeonly                   % e-sRGB
+  21 { /rommRGBICC /ColorSpace findresource} bind executeonly                  % ROMMRGB
+  24 { /esRGBICC /ColorSpace findresource } bind executeonly                   % e-sYCC
 .dicttomark readonly def
 
 % Process jp2 blocks (aka boxes). All procedures have the signature
@@ -1317,7 +1588,7 @@ end
 
   /jp2h { % descend into a sub-stream, don't return.
     () /SubFileDecode filter 0
-  } bdef
+  } bind executeonly def
 
   /ihdr {
     14 sub                                   % file len-14
@@ -1334,7 +1605,7 @@ end
       dup 12 eq { pop 16 } if
       /BitsPerComponent exch def               % file len-14
     } {pop} ifelse
-  } bdef
+  } bind executeonly def
 
   %% if the ihdr has a BPC of 255 then we get a bpcc box which
   %% gives the bpc for each component individually. We cannot
@@ -1347,14 +1618,15 @@ end
     dup 0 get /BitsPerComponent exch def
     1 1 JPXComponents 1 sub {
       1 index exch get BitsPerComponent eq not {
-        (   **** Warning: colour channels do not all have the same colour depth\n)
+        (   **** Error: JPX image colour channels do not all have the same colour depth\n)
         pdfformaterror
+        (               Output may be incorrect.\n) pdfformaterror
       } if
     } for
 
     pop
     /BitsPerComponent BitsPerComponent 1 add def
-  } bdef
+  } bind executeonly def
 
   /colr {
     currentdict /ColorSpace known not {
@@ -1367,8 +1639,9 @@ end
         //jp2_csp_dict exch .knownget {
           exec /ColorSpace exch def        % file len-7
         } {
-          (   **** Warning: Unknown enumerated color space in JPX stream.\n)
+          (   **** Error: Unknown enumerated color space in JPX stream.\n)
           pdfformaterror
+          (               Output may be incorrect.\n) pdfformaterror
         } ifelse
       } {
         dup 2 eq exch 3 eq or {
@@ -1376,16 +1649,21 @@ end
           /JPXICC exch def
           0                                % file 0
         } {
-          (   **** Warning: Unknown color space method in JPX stream.\n)
+          (   **** Error: Unknown color space method in JPX stream.\n)
           pdfformaterror
+          (               Output may be incorrect.\n) pdfformaterror
         } ifelse
       } ifelse
     } if
-  } bdef
+  } bind executeonly def
 
   % Palette colors are decoded by the library.
-  % For now, ignore 'pclr' table.
-  /pclr { } bdef
+  /pclr {
+    4 sub
+    1 index (1234) readstring pop
+    3 get 16#7F and 1 add
+    /BitsPerComponent exch def
+  } bind executeonly def
 
   /cdef {
     pop
@@ -1401,7 +1679,7 @@ end
       } ifelse
     } repeat
     0
-  } bdef
+  } bind executeonly def
 
 currentdict end readonly def
 
@@ -1443,7 +1721,7 @@ currentdict end readonly def
     } ifelse
   } loop
   pop
-} bind def
+} bind executeonly def
 
 currentdict /jp2_tag_dict .undef
 currentdict /jp2_csp_dict .undef
@@ -1485,24 +1763,168 @@ currentdict /jp2_csp_dict .undef
   } ifelse
   1 index exch
   /DecodeParms exch put                  % <resdict>
-} bdef
+} bind executeonly def
+
+% Add a key-value pair to the all the /DecodeParms
+% dictionaries (i.e. handle the array)
+% Copy the objects to avoid spoiling shared ones.
+% <resdict> <patch dict> -> <resdict>
+/add-to-all-params {
+  1 index                         % <resdict> <patch dict> <resdict>
+  /Filter knownoget
+  {                               % <resdict> <patch dict> </name or [array]>
+    dup type /arraytype eq
+    {
+      length                      % <resdict> <patch dict> <len>
+      dup 0 gt
+      {
+        2 index /DecodeParms
+        knownoget
+        {
+          oforce_recursive          % resolve indirect references
+          exch pop                  % <resdict> <patch dict> [array]
+          [
+            exch
+            {
+              dup type /dicttype eq
+              {
+                mark exch {} forall .dicttomark
+              }
+              {
+                pop 1 dict
+              } ifelse
+            } forall
+          ]                         % <resdict> <patch dict> [array]
+        }
+        {                           % <resdict> <patch dict> <len>
+          % create an array of dictionaries
+          [
+            0 1 4 -1 roll 1 sub
+            { pop 1 dict } for
+          ]
+                                    % <resdict> <patch dict> [array]
+        } ifelse
+        dup                         % <resdict> <patch dict> [array] [array]
+        {                           % <resdict> <patch dict> [array] [dict]
+          2 index                   % <resdict> <patch dict> [array] [dict] <patch dict>
+          {                         % <resdict> <patch dict> [array] [dict] </key> <value>
+            2 index                 % <resdict> <patch dict> [array] [dict] </key> <value> [dict]
+            3 1 roll
+            put
+          } forall
+          pop
+        } forall
+                                    % <resdict> <patch dict> [array]
+        exch pop
+                                  % <resdict> [dict/array]
+        1 index exch /DecodeParms exch put
+      }
+      {
+        pop pop
+      } ifelse
+    }
+    {                             % <resdict> <patch dict> </name>
+      pop
+      1 index
+      /DecodeParms knownoget
+      {
+        oforce_recursive
+        dup type /dicttype eq
+        {
+          mark exch {} forall .dicttomark
+        }
+        {
+          pop 1 dict
+        } ifelse
+      }
+      {
+        1 dict
+      } ifelse                    % <resdict> <patch dict> [dict]
+
+      1 index                     % <resdict> <patch dict> [dict] <patch dict>
+      {                           % <resdict> <patch dict> [dict] </key> <value>
+        2 index
+        3 1 roll put
+      } forall
+      exch pop
+                                  % <resdict> [dict/array]
+      1 index exch /DecodeParms exch put
+    } ifelse
+  }
+  {pop} ifelse
+} bind def
 
 /last-ditch-bpc-csp {
   currentdict /BitsPerComponent oknown not {
-    (   **** Warning: image has no /BitsPerComponent key; assuming 8 bit.\n)
-    pdfformaterror
+    (   **** Error: image has no /BitsPerComponent key; assuming 8 bit.\n)
+   pdfformaterror
+    (               Output may be incorrect.\n) pdfformaterror
     /BitsPerComponent 8 def
   } if
 
   currentdict /ColorSpace knownoget not {
     dup /ColorSpace knownoget not {
-      (   **** Warning: image has no /ColorSpace key; assuming /DeviceRGB.\n)
+      (   **** Error: image has no /ColorSpace key; assuming /DeviceRGB.\n)
       pdfformaterror
+      (               Output may be incorrect.\n) pdfformaterror
       /DeviceRGB
     } if
   } if
-  resolvecolorspace /ColorSpace exch def
-} bdef
+  resolvecolorspace
+
+  %% This section is to deal with the horrible pair of files in Bug #696690 and Bug #696120
+  %% These files have ICCBased spaces where the value of /N and the number of components
+  %% in the profile differ. In addition the profile in Bug #696690 is invalid. In the
+  %% case of Bug #696690 the /N value is correct, and the profile is wrong, in the case
+  %% of Bug #696120 the /N value is incorrect and the profile is correct.
+  %% We 'suspect' that Acrobat uses the fact that Bug #696120 is a pure image to detect
+  %% that the /N is incorrect, we can't be sure whether it uses the profile or just uses
+  %% the /N to decide on a device space. What we now do is; If the /N and device profile
+  %% number of components don't match, we assume the device profile is correct and patch
+  %% /N to be the same as the profile (see /ICCBased-resolve), but we save the original
+  %% value of /N in /OrigN. In setcolor, if the space is a genuine ICCBased space
+  %% (not a replacement for a device profile) we call set_dev_color which will actually
+  %% exercise the profile. If that fails we return an error. Here we run setcolor in a
+  %% stopped context, and if it fails we check to see if there is a /OrigN (ths occurs
+  %% only if the /N was different to the number of components in the profile). If there
+  %% is a /OrigN then prefer that to the profile, otherwise they agreed, so just use
+  %% /N and select a device space. If we can't select a device space with the correct
+  %% number of components, give up and throw an error. See also 'Cdict' in pdf_ops.ps.
+  dup type /arraytype eq {
+    dup 0 get /ICCBased eq {
+      gsave
+      dup setcolorspace dup 1 get /N get
+       1 sub mark exch 0 1 3 -1 roll
+       {pop 0} for
+      {setcolor} stopped
+      grestore
+      {
+        cleartomark
+        1 get
+        dup /OrigN .knownget {exch pop}{/N get} ifelse
+        [//null /DeviceGray //null /DeviceRGB /DeviceCMYK] exch
+        {get} stopped
+        {
+          (   **** Error: Unable to set an ICCBased colour space, and cannot set an alternate from the number of components.\n) print
+          /setcolorspace cvx /undefined signalerror
+        }
+        {
+          dup //null eq {
+            (   **** Error: Unable to set an ICCBased colour space, and cannot set an alternate from the number of components.\n) print
+            /setcolorspace cvx /undefined signalerror
+          }{
+            ICCProfileNError not {
+              (   **** Warning : Error setting an ICCBased colour space, using /N to set an alternate device space.\n) print
+              (                  Output may be incorrect.\n) print
+            } if
+          } ifelse
+        }ifelse
+        /ICCProfileNError //true def
+      }{cleartomark}ifelse
+    } if
+  } if
+  /ColorSpace exch def
+} bind executeonly def
 
 /get-smask-in-data { % <dict> -> <int>
   /SMaskInData knownoget {
@@ -1512,7 +1934,7 @@ currentdict /jp2_csp_dict .undef
   } {
     0
   } ifelse
-} bdef
+} bind executeonly def
 
 /makeimagedict {	% <resdict> <newdict> makeimagedict <imagemask?>
                         % On return, newdict' is currentdict
@@ -1523,7 +1945,7 @@ currentdict /jp2_csp_dict .undef
   /BitsPerComponent 2 copy knownoget { cvi def } { pop } ifelse
   /Interpolate 2 copy knownoget { def } { pop } ifelse
   makeimagekeys
-} bdef
+} bind executeonly def
 
 /makeimagekeys {	% <resdict> makeimagekeys <imagemask>
                 % newdict is currentdict
@@ -1533,6 +1955,14 @@ currentdict /jp2_csp_dict .undef
                 % Handle 0-height images specially.
     Height dup 0 eq { pop 1 } if neg 0 1 index neg
     6 array astore def
+
+  %% If the image has a rendering intent, get its numeric equivalent
+  %% from renderingintentdict, and save it in the dictionary we pass
+  %% on to render images.
+  dup /Intent knownoget {
+    //.renderingintentdict exch .knownget { /Intent exch def } if
+  } if
+
   dup /ImageMask knownoget dup { and } if {
                 % Image mask
                 % Decode is required for the PostScript image operators.
@@ -1543,6 +1973,9 @@ currentdict /jp2_csp_dict .undef
                 % Even though we're going to read data,
                 % pass false to resolvestream so that
                 % it doesn't try to use Length (which may not be present).
+
+    % Bug 701083: We add a /ErrsAsEOD key to the DecodeParms here too.
+    <</ErrsAsEOD //true>> //add-to-all-params exec
     //false resolvestream /DataSource exch def
     //true
   } {
@@ -1576,7 +2009,7 @@ currentdict /jp2_csp_dict .undef
         dup dup /ColorSpace get /ImageDictColorSpace exch put
       } if
       dup /IDFlag known {
-        (   **** Warning: PDF spec bans inline JPX images.\n) pdfformaterror
+        (   **** Warning: PDF spec bans inline JPX images.\n) pdfformatwarning
         % Inline stream is not positionable. Cannot get ColorSpace.
       } {
         % Drop the last filter (JPXDecode) from the pipeline
@@ -1689,89 +2122,10 @@ currentdict /jp2_csp_dict .undef
     % filter, create one and add a /Height key. This is to solve the problem
     % in Bug #695116 where a JPEG image has a bad height, which is later
     % fixed up using a DNL marker. By placing the image height from the
-    % PDF in the DeoceParms we cna use it in the DCTDecode filter to
+    % PDF in the DecodeParms we can use it in the DCTDecode filter to
     % work around this.
-    dup /Filter knownoget {              % <<stream dict>> /name or [array]
-      dup type /arraytype eq {
-                                         % <<stream dict>> [array of names]
-        length                           % <<stream dict>> number of filters
-        1 index /DecodeParms knownoget {
-          exch pop                       % drop length of Filter array, the DecodeParams has 1 entry per filter
-                                         % <<stream dict>> [array of decodeparams]
-        } {
-                                         % No deocde params, we must make an array of them
-                                         % <<stream dict>> number of filters
-          array                          % <<stream dict>> []
-          dup                            % <<stream dict>> [] []
-          2 index /DecodeParms exch      % <<stream dict>> [] [] /DecodeParms <<stream dict>>
-          3 1 roll                       % <<stream dict>> <<stream dict>> [] /DecodeParms
-          exch put                       % <<stream dict>> []
-        } ifelse
-        dup length 1 sub                 % <<stream dict>> [] arraylength-1
-        0 1 3 -1 roll                    % <<stream dict>> [] 0 1 arraylength-1
-        {                                % <<stream dict>> [] loopcount
-          1 index                        % <<stream dict>> [] loopcount []
-          2 copy                         % <<stream dict>> [] loopcount [] loopcount []
-          exch
-          get                            % <<stream dict>> [] loopcount [] <<>> or -null-
-          dup null eq {
-            pop exch                     % <<stream dict>> [] [] loopcount
-            <</Height
-            5 index /Height oget         % <<stream dict>> [] [] loopcount << /Height Height
-            round cvi
-            >>
-            put                          % <<stream dict>> []
-          }{                             %
-            oforce_recursive             % resolve any indirect references
-            dup type /dicttype eq {
-                                         % <<stream dict>> [] loopcount [] <<>>
-              /Height                    % <<stream dict>> [] loopcount [] <<>> /Height
-              5 index /Height oget       % <<stream dict>> [] loopcount [] <<>> /Height Height
-              round
-              cvi
-              put pop pop                % <<stream dict>> []
-            }{
-              %% bogus entry, throw it away and create a new one
-              pop exch                   % <<stream dict>> [] loopcount []
-              <</Height
-              5 index /Height oget       % <<stream dict>> [] [] loopcount << /Height Height
-              round cvi
-              >>
-              put                        % <<stream dict>> []
-            } ifelse
-          }ifelse
-        } for
-        pop                              % <<stream dict>>
-      }{
-        pop                              % <<stream dict>>
-        dup /DecodeParms knownoget {
-          oforce_recursive               % resolve any indirect references
-          dup type /dicttype eq {
-                                         % <<stream dict>> <<decode parms dict>>
-            /Height 2 index              % <<stream dict>> <<decode parms dict>> /Height <<stream dict>>
-            /Height oget                  % <<stream dict>> <<decode parms dict>> /Height ImageHeight
-            round cvi
-            put                          % <<stream dict>>
-          }{
-            %% bogus entry, throw it away and create a new one
-            pop                     % <<image dict>> <<stream dict>> []
-            <</Height                    % <<stream dict>> <<image dict>> << /Height
-            2 index /Height oget         % <<stream dict>> <<image dict>> << /Height Height
-            round cvi
-            >>
-            1 index exch /DecodeParms exch put       % <<stream dict> <<image dict>>
-          } ifelse
-        }{
-          dup                            % <<stream dict>> <<stream dict>>
-          /DecodeParms <</Height         % <<stream dict>> <<stream dict>> /DecodeParms << /Height
-          3 index                        % <<stream dict>> <<stream dict>> /DecodeParms << /Height <<stream dict>>
-          /Height oget
-          round cvi
-          >>                             % <<stream dict>> <<stream dict>> /DecodeParms << /Height ImageHeight>>
-          put                            % <<stream dict>>
-        }ifelse
-      }ifelse
-    } if
+    % Bug 701083: We add a /ErrsAsEOD key to the DecodeParms here too.
+    << /Height 2 index /Height oget round cvi /ErrsAsEOD //true >>  //add-to-all-params exec
 
                 % Even though we're going to read data,
                 % pass false to resolvestream so that
@@ -1779,24 +2133,46 @@ currentdict /jp2_csp_dict .undef
     //false resolvestream /DataSource exch def
     //false
   } ifelse
-} bdef
+} bind executeonly def
 
 currentdict /add-to-last-param undef
+currentdict /add-to-all-params undef
 currentdict /last-ditch-bpc-csp undef
 
 /DoImage {
+  %% Bug #696439. This is incredibly icky. When we find indirect obects we resolve them
+  %% and store the resolved object in the containing object. This means that we retain
+  %% the image dicionary here until the end of job. Potentially wasteful. Even worse though
+  %% is the case where the image has a ColorSpace which is not an indirect object, but *is*
+  %% an ICCBased colour space. In ths case we end up resolving the colour space and storing it
+  %% here. Unfortunately, we use a ReusableStreamDecode filter on the ICC profile, which means
+  %% we end up retaining the memory for that too. ICC profiles can be large, and if there are a
+  %% lot of places where they get used, we can exhaust memory.
+  %% Here we check if the ColorSpace is an array object, if it is we *copy* the image dictionary
+  %% and use the copy instead. The copy is (eventually) discarded so we don't retain the ICC profile
+  %% and don't exhaust memory. Note that we have to copy the actual colour space array too, copying
+  %% the dictionary just copies the opriginal array as well.
+  %%
+  dup /ColorSpace known {
+    dup /ColorSpace get dup type /arraytype eq {
+      exch dup length dict copy exch
+      dup length array copy /ColorSpace exch 2 index 3 1 roll put
+    } {pop} ifelse
+  } if
+
   checkaltimage dup length 6 add dict  % <<image>> <<>>
   1 index /SMask knownoget {           % <<image>> <<>> <<sm>>
     dup 3 index ne {                   % <<image>> <<>> <<sm>> <<sm>>
       1 index exch /SMask exch put
     } {
       pop
-      (   **** Warning: ignoring recursive /SMask attribute.\n) pdfformaterror
+      (   **** Error: ignoring recursive /SMask attribute.\n) pdfformaterror
+      (               Output may be incorrect.\n) pdfformaterror
     } ifelse
   } if
   1 index /Mask knownoget { 1 index exch /Mask exch put } if
   makeimagedict doimagesmask
-} bdef
+} bind executeonly def
 /makemaskimage {	% <datasource> <imagemask> <Mask> makemaskimage
                         %   <datasource> <imagemask>, updates currentdict =
                         %   imagedict
@@ -1810,8 +2186,9 @@ currentdict /last-ditch-bpc-csp undef
       //false 1 index {
         type /integertype ne or
       } forall {
-        (\n   **** Warning: Some elements of Mask array are not integers.\n)
+        (\n   **** Error: Some elements of Mask array are not integers.\n)
         pdfformaterror
+        (               Output may be incorrect.\n) pdfformaterror
         [ exch { 0.5 add cvi } forall ]  % following AR4, 5, 6 implementation
       } if
     } if
@@ -1820,13 +2197,16 @@ currentdict /last-ditch-bpc-csp undef
     1 BitsPerComponent bitshift 1 sub //false 2 index {
       % stack: max_value result_bool value
       dup 0 lt exch 3 index gt or or
-    } forall exch pop {
-      (   **** Warning: Some elements of Mask array are out of range.\n)
+    } forall exch pop
+    {
+      (   **** Error: Some elements of Mask array are out of range.\n)
       pdfformaterror
+      (               Output may be incorrect.\n) pdfformaterror
 
       ColorSpace dup type /arraytype eq { 0 oget } if /Indexed eq
-      BitsPerComponent 1 eq and {
-        % AR9 treats Indexed 1 bpc images specially. Bug 692852.
+      BitsPerComponent 1 eq and
+      {
+        % AR9 treats Indexed 1 bpc images specially. Bug 692852 see also 697919 and 689717.
         dup 0 oget
         dup 0 lt exch 1 BitsPerComponent bitshift ge or {
           % First component is invalid - AR9 ignores the mask
@@ -1835,11 +2215,37 @@ currentdict /last-ditch-bpc-csp undef
           % Second component is invalid; AR9 replaces it with 1.
           [ exch 0 oget 1 ]
         } ifelse
-      } {
-        % AR5, AR9 do this for most cases. Bug 690786.
-        [ exch { 1 BitsPerComponent bitshift 1 sub and } forall ]
+      }
+      {
+        BitsPerComponent 1 eq {
+          dup length 2 gt {
+            % There are too many Mask entries, discard the Mask array
+            pop //null
+          }{
+            % Bug 701468 and 689717, the latter requires us to set the Mask values
+            % so that the value is calculated from the BPC, the other requires us
+            % to ignore the Mask. The only difference between the two files is the
+            % actual range of the Mask values. This may yet need more work.
+            % Note! Both files are technically invalid....
+
+            aload 3 1 roll eq {
+              % There's only one Mask value, but its illegal, substitute with the
+              % calculated maximum.
+              [ exch { 1 BitsPerComponent bitshift 1 sub and } forall ]
+            } {
+              % The Mask values are not the same. This is a 2 colour image, if
+              % we mask off any range then the result will be blank, so ignore the Mask
+              pop //null
+            } ifelse
+          } ifelse
+        } {
+          % We think AR5, AR9 do this for most other cases. Originally Bug 690786,
+          % but that is actually handled in the /Indexed case above.
+          [ exch { 1 BitsPerComponent bitshift 1 sub and } forall ]
+        } ifelse
       } ifelse
     } if
+
     dup //null ne {
       /MaskColor exch def
     } {
@@ -1870,28 +2276,22 @@ currentdict /last-ditch-bpc-csp undef
     /MaskDict exch def
     /ColorSpace DataDict /ColorSpace get def
   } ifelse
-} bdef
+} bind executeonly def
 
 /doimagesmask { % <imagemask> doimagesmask -
-  PDFusingtransparency {
-    currentdict /SMask knownoget
+  PDFusingtransparency not
+  /PreserveSMask /GetDeviceParam .special_op { exch pop } { //false } ifelse
+  or {
+    % not using transparency OR the device supports SMask (e.g. pdfwrite)
+    doimage
   } {
-    //false
-  } ifelse
-  {	% We are doing transparency and SMask is present in the image
-        % stack: <imagemask> <SMask>
-    /PreserveSMask /GetDeviceParam .special_op {
-        exch pop
-    }{
-        //false
-    }ifelse
-    {
-      pop	% pdfwrite will process SMask directly during 'doimage'
-    } {
+    currentdict /SMask knownoget {
+      % We are doing transparency and SMask is present in the image
+      % stack: <imagemask> <SMask>
       .begintransparencymaskimage
       PDFfile fileposition exch
       gsave //nodict begin
-      //null /SoftMask gput
+      //null .setSMask
       1 .setopacityalpha 1 .setshapealpha
       1 CA 1 ca
       /Compatible .setblendmode
@@ -1899,102 +2299,158 @@ currentdict /last-ditch-bpc-csp undef
       end grestore
       PDFfile exch setfileposition
       0 .endtransparencymask
-    } ifelse
-    << /Subtype /Group /Isolated //true
-      /.image_with_SMask //true % pdfwrite needs : see gs/src/ztrans.c, gs/src/gdevpdft.c
-    >> 0 0 1 1 .begintransparencygroup
-    doimage
-    .endtransparencygroup
-  } {
-    SoftMask //null ne {
-      % the image doesn't have an SMask, but the ExtGState does, force a group.
-      << /Subtype /Group /Isolated //true >> 0 0 1 1 .begintransparencygroup
+      << /Subtype /Group /Isolated //true
+         /.image_with_SMask //true
+         % pdfwrite needs : see gs/src/ztrans.c, gs/src/gdevpdft.c
+         % Code to deal with a Matte in the SMask. We know the image dictionary must have an SMask
+         % entry if we get here, so we don't need to check its existence. Just pull it out and see if
+         % the SMask has a Matte entry. If it does, get the ColorSpace from the parent image and
+         % put a /CS key with that colour space in the Group that we manufacture. Bug #700686
+         % We also need to actually set the current colour space to be the same as the group
+         % code only picks up the current colour space, not the space from the dictionary.
+         currentdict /SMask get /Matte known {/CS currentdict /ColorSpace get dup pdfopdict /cs get exec } if
+      >> 0 0 1 1
+      .begintransparencygroup
+      .currentstrokeconstantalpha .currentfillconstantalpha .currentshapealpha .currentopacityalpha 5 -1 roll
+      1 .setfillconstantalpha 1 .setstrokeconstantalpha
+      1 .setopacityalpha 1 .setshapealpha
       doimage
+      .setopacityalpha .setshapealpha .setfillconstantalpha .setstrokeconstantalpha
       .endtransparencygroup
-    }
-    { doimage }
-    ifelse
+      % tell the compositor we're done with the SMask.
+      % Note that any SMask in the ExtGState should be reapplied
+      % by the next call to setfill(stroke)state AND this relies
+      % on our lazy evaulation of SMask groups
+      //false << /Subtype /None >> 0 0 0 0 .begintransparencymaskgroup
+    } {
+      % We don't have an SMask in the image but there might be an SMask in the ExtGState
+      .currentSMask //null ne {
+        % the image doesn't have an SMask, but the ExtGState does, force a group.
+        << /Subtype /Group /Isolated //true >> 0 0 1 1
+        .begintransparencygroup
+        .currentstrokeconstantalpha .currentfillconstantalpha .currentshapealpha .currentopacityalpha 5 -1 roll
+        1 .setopacityalpha 1 .setshapealpha
+        doimage
+        .setopacityalpha .setshapealpha .setfillconstantalpha .setstrokeconstantalpha
+        .endtransparencygroup
+      } {
+        doimage
+      } ifelse
+    } ifelse
   } ifelse
-} bdef
+} bind executeonly def
 
 % For development needs we define a special option for running with a new handler
 % for images with a soft mask.
 //systemdict /NEW_IMAGE3X .knownget not { //false } if {
   /doimagesmask { % <imagemask> doimagesmask -
     doimage
-  } bdef
+  } bind executeonly def
 } if
 
-/is_big_mask {  % - is_big_mask <bool>
-  1 0 dtransform dup mul exch dup mul sqrt add
-  0 1 dtransform dup mul exch dup mul sqrt add mul
-  currentdevice getdeviceprops .dicttomark /BufferSpace .knownget not {
-    4000000 % hack: Can't get the real default value from C source.
-  } if
-  2 % arbitrary
-  div gt
-} bind def
-
-% For development needs we define a special option for running with a new handler
-% for images with a soft mask.
-//systemdict /NEW_IMAGE3X .knownget not { //false } if {
-  /is_big_mask {  % - is_big_mask <bool>
-    //false
-  } bdef
-} if
+/ValidateDecode { % <<image dict>> -imagemask- ValidateDecode <<image dict>>
+  exch
+  dup /Decode .knownget {
+    dup length                      % -imagemask- <<image dict>> [Decode] length
+    4 -1 roll                       % <<image dict>> [Decode] length -imagemask-
+    {
+      1                             % ImageMask Decode arrays must be [0 1] or [1 0]
+    }
+    {
+      mark currentcolor counttomark % <<image dict>> [Decode] length [ ... component_count
+      dup 2 add 1 roll              % <<image dict>> [Decode] length component_count [ ....
+      cleartomark                   % <<image dict>> [Decode] length component_count
+    } ifelse
+    2 mul dup                       % <<image dict>> [Decode] length comp_count*2 comp_count*2
+    3 1 roll                        % <<image dict>> [Decode] comp_count*2 length comp_count*2
+     eq {                           % <<image dict>> length of Decode matches colour space requirement
+      pop pop                       % <<image dict>> remove [Decode] and comp_count*2
+    }{                              % <<image dict>> Decode array incorrect
+      dup 2 index length            % <<image dict>> [Decode] comp_count*2 comp_count*2 length
+      exch sub 0 gt {               % Decode is too long
+      (\n   **** Warning:  Decode array for an image is too long\n) pdfformatwarning
+      (                  Output may be incorrect.\n) pdfformatwarning
+        0 exch                      % <<image dict>> [Decode] 0 comp_count*2
+        getinterval                 % <<image dict>> [subarray of Decode]
+        1 index exch /Decode exch   % <<image dict>> <<image dict>> /Decode [subarray]
+        put                         % <<image dict>>
+      }{
+                                    % Decode is too short, Acrobat throws errors on this
+        (\n   **** ERROR:  Decode array for an image is too short\n) pdfformaterror
+        (                Output may be incorrect.\n) pdfformaterror
+        pop pop                     % remove [Decode] and comp_count*2
+      } ifelse
+    } ifelse
+  } {
+    exch pop
+  }ifelse
+}bind executeonly def
 
 /doimage {	% <imagemask> doimage -
                 % imagedict is currentdict, gets popped from dstack
+  %% We must save the colour space, in case it gets changed. I did try doing this
+  %% at a higher level (/Do) but that caused numerous problems with pdfwrite.
+  currentcolorspace exch
+  %% save the current rendering intent
+  .currentrenderintent exch
+
+  %% Check the image dictionary to see if there is a /Intent
+  currentdict /Intent known {
+    %% and set the current rendering intent to match if so
+    Intent .setrenderingintent
+  } if
+
   DataSource exch
-  PDFusingtransparency
-  /PreserveSMask /GetDeviceParam .special_op {
-    exch pop not
-  }{
-    //true
-  }ifelse
-  {
-    % This is a temporary workaround for the bug 689080,
-    % which is done under a rush of 8.63 release.
-    % The purpose is to disable a conversion of an image with soft mask
-    % into a Type 103 image, which currently allocates a full mask buffer
-    % before writing clist.
-    % With this workaround the Matte color is not working (ignored).
-    is_big_mask not
-  } {
-    //true % pdfwrite doesn't need the workaround explained above,
-           % and cannot work with it.
-  } ifelse
- and {
-    currentdict /SMask knownoget
-  } {
-    //false
-  } ifelse {
-    makesoftmaskimage
-  } {
-    currentdict /Mask knownoget {
-      makemaskimage
+  currentdict /SMask known PDFusingtransparency and {
+    /PreserveSMask /GetDeviceParam .special_op {
+      pop pop
+      currentdict /SMask oget
+      makesoftmaskimage
     } if
-  } ifelse
+  } if
+  currentdict /Mask knownoget {
+      makemaskimage
+  } if
                 % Stack: datasource imagemask
-   { currentdict end setfillstate { imagemask } }
-   { ColorSpace setgcolorspace currentdict end setfillblend { image } }
+  gsave 1 1 moveto 0 0 lineto
+  % If we get an error, just emit an empty box
+  { pathbbox } stopped { 0 0 0 0 } if
+  4 array astore grestore
+  /image
+  setup_trans
+  { currentdict end setfillstate //true ValidateDecode { imagemask } }
+  { ColorSpace setgcolorspace currentdict end setfillblend //false ValidateDecode { image } }
   ifelse
   PDFSTOPONERROR { exec //false } { stopped } ifelse {
     dup type /dicttype eq { pop } if % Sometimes image fails to restore the stack
     $error /errorname get dup /ioerror eq {
-      pop (\n   **** Warning: File has insufficient data for an image.\n)
+      pop (\n   **** Error: File has insufficient data for an image.\n)
       pdfformaterror
+    (               Output may be incorrect.\n) pdfformaterror
     } {
-      (\n   **** Warning: File encountered ')
+      (\n   **** Error: File encountered ')
       exch 40 string cvs concatstrings
       (' error while processing an image.\n) concatstrings
       pdfformaterror
+      (               Output may be incorrect.\n) pdfformaterror
     } ifelse
   } if
                 % Close the input stream, unless it is PDFfile or
                 % PDFsource.
   dup dup PDFfile eq exch PDFsource eq or { pop } { closefile } ifelse
-} bdef
+
+  %% restore the rendering intent
+  .setrenderingintent
+
+  %% and restore the colour space. We need to do this in a stopped context because
+  %% if we are rendering a glyph, the cache device will throw an error if we try
+  %% to change colour space (even when the new space is the same as the old space)
+  %% We can't tell if we are rendering a bitmap for a glyph, and its hard to compare
+  %% colour spaces, so just ignore errors for now.
+  {setcolorspace} stopped {pop} if
+
+  teardown_trans
+} bind executeonly def
 
 /.paintform {	% <formdict> <resdict> <stream> .paintform -
   1 index /FormResDict gput  % For broken forms that inherit resources from the context.
@@ -2003,9 +2459,92 @@ currentdict /last-ditch-bpc-csp undef
   } {
     pop pdfopdict .pdfruncontext
   } ifelse
-} bdef
+} bind executeonly def
+
+/IncrementAppearanceNumber {
+  //pdfdict /AppearanceNumber .knownget {
+    1 add //pdfdict /AppearanceNumber 3 -1 roll .forceput
+  } executeonly
+  {
+    //pdfdict /AppearanceNumber 0 .forceput
+  } executeonly ifelse
+}bind executeonly odef
+
+/MakeAppearanceName {
+  //pdfdict /AppearanceNumber get
+  10 string cvs
+  dup length 10 add string dup 0 (\{FormName) putinterval
+  dup 3 -1 roll
+  9 exch putinterval
+  dup dup length 1 sub (\}) putinterval
+} bind executeonly def
+
+/MakeNewAppearanceName {
+  IncrementAppearanceNumber
+  MakeAppearanceName
+}bind executeonly def
+
+/DoAppearance {
+%% Might need to rethink this. The problem is that if the page has a CropBox, we apply
+%% that as an initial clip. When we run the form, we don't apply the /Rect from the
+%% annotation, which means that the form could be out of the clip, which results in
+%% content going missing. Resetting the clip prevents this.
+  gsave initclip
+  MakeNewAppearanceName
+  .pdfFormName
+  //pdfdict /.PreservePDFForm known {//pdfdict /.PreservePDFForm get} {//false}ifelse exch
+  //pdfdict /.PreservePDFForm //true .forceput
+  DoForm
+  //pdfdict /.PreservePDFForm 3 -1 roll .forceput
+  grestore
+} bind executeonly odef
+
+%% We don't want to do any high level forms stuff if the source
+%% is PDF because :
+%% 1) Transparent forms are handled separately and we don't want to ge confused
+%% 2) PDF forms are too llikely to trip over the limitations in our support
+%% 3) Its highly unusual to find a PDF file which uses forms sensibly.
+%%
+%% So we have a special PDF version of execform which doesn't do high level forms.
+
+pdfdict
+/.PDFexecform {
+        % This is a separate operator so that the stacks will be restored
+        % properly if an error occurs.
+  dup /Matrix get concat
+  dup /BBox get aload pop
+  exch 3 index sub exch 2 index sub rectclip
+  dup /PaintProc get
+  1 index /Implementation known not {
+    1 index dup /Implementation //null .forceput readonly pop
+  } executeonly if
+  exec
+} .bind executeonly put
+
+pdfdict
+/PDFexecform {
+  gsave { //.PDFexecform exec } stopped
+  grestore {stop} if
+} .bind executeonly put
 
 /DoForm {
+  %% save the current value, if its true we will set it to false later, in order
+  %% to prevent us preserving Forms which are used *from* an annotation /Appearance.
+  //pdfdict /.PreservePDFForm known {//pdfdict /.PreservePDFForm get} {//false}ifelse exch
+
+  %% We may alter the Default* colour spaces, if the Resources
+  %% ColorSpace entry contains one of them. But we don't want that
+  %% to become the new default, we want to revert to any existing
+  %% definition, or the Device space. The Default* spaces are defined
+  %% as ColorSpace resources, so the only way to handle them is to
+  %% save and restore round the definitions
+  3 dict dup begin
+  /saved_DG /DefaultGray /ColorSpace findresource def
+  /saved_DRGB /DefaultRGB /ColorSpace findresource def
+  /saved_DCMYK /DefaultCMYK /ColorSpace findresource def
+  end
+  exch
+
     % Adobe 2nd edition of the PDF 1.3 spec makes /FormType
     % and /Matrix keys optional. Cope with the missing keys.
   begin <<
@@ -2019,8 +2558,9 @@ currentdict /last-ditch-bpc-csp undef
       /integertype eq exch
       /realtype eq or not
       {
-        (\n   **** Warning: Invalid element in /Form XObject matrix.\n)
+        (\n   **** Error: Invalid element in /Form XObject matrix.\n)
         pdfformaterror
+        (               Output may be incorrect.\n) pdfformaterror
         Matrix exch 0.00 put
       }
       { pop }
@@ -2028,20 +2568,96 @@ currentdict /last-ditch-bpc-csp undef
     } for
   } ifelse
   currentdict /BBox known not {
-        (\n   **** Warning: Required entry /BBox not present in Form.\n)
+        (\n   **** Error: Required entry /BBox not present in Form.\n)
         pdfformaterror
+        (               Output may be incorrect.\n) pdfformaterror
         /BBox [0 1 0 1]
   } if
   currentdict end { oforce } forall
   >>
   dup [ 2 index /Resources knownoget { oforce } { 0 dict } ifelse
+
+  %% Ugly hackery for Default* colour spaces in forms
+  %%
+  dup /ColorSpace knownoget {
+    oforce {
+      //false 3 1 roll
+      exch dup /DefaultGray eq
+      {
+      pop exec resolvecolorspace dup csncomp 1 eq {
+        dup type /nametype eq { 1 array astore } if
+        /DefaultGray exch /ColorSpace defineresource pop
+        pop //true
+      }{
+        pop
+        (   **** Error: ignoring invalid /DefaultGray color space.\n)
+        pdfformaterror
+        (                 Output may be incorrect.\n) pdfformaterror
+      } ifelse
+      }{
+        dup /DefaultRGB eq {
+          pop exec resolvecolorspace dup csncomp 3 eq {
+            dup type /nametype eq { 1 array astore } if
+            /DefaultRGB exch /ColorSpace defineresource pop
+            pop //true
+          }{
+            pop
+            (   **** Error: ignoring invalid /DefaultRGB color space in Form Resources.\n)
+            pdfformaterror
+            (                 Output may be incorrect.\n) pdfformaterror
+          } ifelse
+        }{
+          /DefaultCMYK eq {
+            exec resolvecolorspace dup csncomp 4 eq {
+              dup type /nametype eq { 1 array astore } if
+              /DefaultCMYK exch /ColorSpace defineresource pop
+              pop //true
+            }{
+              pop
+              (   **** Error: ignoring invalid /DefaultCMYK color space in Form Resources.\n)
+              pdfformaterror
+              (                 Output may be incorrect.\n) pdfformaterror
+            } ifelse
+          }{
+            pop
+          } ifelse
+        } ifelse
+      }ifelse
+      { % if using color space substitution, "transition" the current color space
+        currentcolorspace dup length 1 eq {  % always an array
+          0 get
+          dup /DeviceGray eq 1 index /DeviceRGB eq or 1 index /DeviceCMYK eq or {
+            /Pattern setcolorspace setcolorspace
+          } {
+            pop
+          } ifelse
+        } {
+          pop
+        } ifelse
+      } if
+    } forall
+  } if
+
   3 index //false /resolvestream cvx
   /.paintform cvx
   ] cvx /PaintProc exch put
     % Adjust pdfemptycount since we have an extra dictionary on the stack
   pdfemptycount countdictstack 3 -1 roll
   /pdfemptycount count 4 sub store
-  /q cvx /PDFexecform cvx 5 -2 roll
+
+  //pdfdict /.PreservePDFForm known {//pdfdict /.PreservePDFForm get}{//false} ifelse
+  {
+    %% We must *not* preserve any subsidiary forms (curently at least) as PDF
+    %% form preservation doesn't really work. This is used just for Annotation
+    %% Appearances currently, and if they should happen to use a form, we do not
+    %% want to preserve it.
+    //pdfdict /.PreservePDFForm //false .forceput
+    /q cvx /execform cvx 5 -2 roll
+  } executeonly
+  {
+    /q cvx /PDFexecform cvx 5 -2 roll
+  } ifelse
+
   4 .execn
   % Restore pdfemptycount
   0
@@ -2053,12 +2669,23 @@ currentdict /last-ditch-bpc-csp undef
     countdictstack eq {end} if
   } loop
   1 gt {
-    (   **** Warning: Form stream has unbalanced q/Q operators \(too many q's\)\n)
+    (   **** Error: Form stream has unbalanced q/Q operators \(too many q's\)\n)
     pdfformaterror
+    (               Output may be incorrect.\n) pdfformaterror
   } if
   pop
   /pdfemptycount exch store
-} bdef
+
+  %% Put back pre-existing Default* ColorSpace definitions.
+    dup type /dicttype eq {
+    begin
+    saved_DG /DefaultGray exch /ColorSpace defineresource pop
+    saved_DRGB /DefaultRGB exch /ColorSpace defineresource pop
+    saved_DCMYK /DefaultCMYK exch /ColorSpace defineresource pop
+    end
+  } if
+  //pdfdict /.PreservePDFForm 3 -1 roll .forceput
+} bind executeonly odef
 
 /_dops_save 1 array def
 
@@ -2071,7 +2698,7 @@ currentdict /last-ditch-bpc-csp undef
    }
    { pop }
   ifelse
-} bdef
+} bind executeonly def
 
 currentdict /_dops_save undef
 
@@ -2084,7 +2711,7 @@ currentdict /_dops_save undef
         pop
       } ifelse
     } forall
-  } bdef
+  } bind executeonly def
   /AnyOn {
     //false exch {
       oforce dup type /dicttype eq {
@@ -2093,13 +2720,13 @@ currentdict /_dops_save undef
         pop
       } ifelse
     } forall
-  } bdef
+  } bind executeonly def
   /AnyOff {
     //AllOn exec not
-  } bdef
+  } bind executeonly def
   /AllOff {
     //AnyOn exec not
-  } bdef
+  } bind executeonly def
 currentdict end readonly def
 
 % Check whether OCG or OCMD is visible
@@ -2116,12 +2743,66 @@ currentdict end readonly def
         //ocg_pocs exch get exec             % bool
       } ifelse
     } {
-      /OFF known not % OFF is inserted by process_trailer_attrs
+      dup /OFF known not % OFF is inserted by process_trailer_attrs
+      {
+        %% /OC is not in the OCProperties /OFF array, so we need to
+        %% test its usage. We may eventually have to add a /ON to the dictionary
+        %% if the OCProperties /ON array defines the /OC, I think that should override
+        % the Usage, but I don't have an example to test.
+        /Usage .knownget {
+          oforce
+          /Printed where {
+            /Printed get
+          } {
+            //false
+          }ifelse
+          {
+            %% We are behaving as a printer, check the Print state
+            /Print .knownget {
+              /PrintState .knownget {
+                oforce
+                /OFF eq {
+                  //false
+                }{
+                  //true
+                } ifelse
+              }{
+                //true
+              } ifelse
+            }{
+              %% If we don't know, assume its visible
+              //true
+            } ifelse
+          }{
+            %% We are behaving as a viewer, check the View state
+            /View .knownget {
+              oforce
+              /ViewState .knownget {
+                /OFF eq {
+                  //false
+                }{
+                  //true
+                } ifelse
+              }{
+                //true
+              } ifelse
+            }{
+              %% If we don't know, assume its visible
+              //true
+            } ifelse
+          } ifelse
+        }{
+          %% If we don't know, assume its visible
+          //true
+        } ifelse
+      }{
+        pop //false
+      }ifelse
     } ifelse
   } {
     /OFF known not % OFF is inserted by process_trailer_attrs
   } ifelse
-} bdef
+} bind executeonly def
 
 drawopdict begin
   /Do {                                                  % /Name
@@ -2133,43 +2814,85 @@ drawopdict begin
     %% Of course, the file is badly broken, but 'Acrobat can open it....'
     currentdict /TextSaveMatrix known {
       gsave
-      (   **** Illegal; Executing Do inside a text block, attempting to recover\n) pdfformaterror
+      (   **** Error: Executing Do inside a text block, attempting to recover\n) pdfformaterror
       currentdict /TextSaveMatrix get setmatrix
+      (               Output may be incorrect.\n) pdfformaterror
     } if
     currentdict /qTextSaveMatrix known {
       gsave
-      (   **** Illegal; Executing Do inside a text block, attempting to recover\n) pdfformaterror
+      (   **** Error: Executing Do inside a text block, attempting to recover\n) pdfformaterror
+      (               Output may be incorrect.\n) pdfformaterror
       currentdict /qTextSaveMatrix get setmatrix
     } if
     setfillblend
     PDFfile fileposition exch                      % pos /Name
-    dup Page /XObject rget {
-      exch pop                                     % pos obj
-      OFFlevels length 0 eq {
-        dup /OC knownoget { ocg-is-visible } { //true } ifelse
-      } {
+
+    % Bug #698226, Acrobat signals an error for recursive XObjects in a PDF file
+    % but continues. This is true even if the XObject is not a simple self-reference
+    % (eg /Fm1 -> /Fm2 -> /Fm3 -> /Fm1).
+    % Normally when dealing with recursion we would put a dictionary on the stack, store the
+    % object numbers encoutnered in it, and check each new object number to see if we've
+    % already seen it. This doesn't work well for XObjects, because the operand stack can be
+    % in any state when we run a Do. So we make a new dictionary in pdfdict to hold the
+    % object numbers.
+    % We also don't usually know the object number of a Form, we just get given its name
+    % so we need a new routine to return the object number. This is because the parent XObject
+    % might reference teh object by one name, while the child references it by another, we
+    % can't permit clashes.
+    %
+    % Start by getting the object number for a Form XObject
+    dup Page /XObject obj_get dup 0 eq not {
+      % Now get the recording dictionary and see if that object number has been seen
+      //pdfdict /Recursive_XObject_D get 1 index known {
+        (   **** Error: Recursive XObject detected, ignoring ") print 1 index 256 string cvs print (", object number ) print 256 string cvs print (\n) print
+        (               Output may be incorrect.\n) pdfformaterror
         //false
-      } ifelse {
-        dup /Subtype oget //xobjectprocs exch get   % pos obj {proc}
-        % Don't leave extra objects on the stack while executing
-        % the definition of the form.
-        3 -1 roll                                  % obj {proc} pos
-        2 .execn                                   % pos
-      } {
-        pop                                        % pos
-      } ifelse
-    } {
-        % This should cause an error, but Acrobat Reader can
-        % continue, so we do too.
-      (   **** Undefined XObject resource: )
-      exch =string cvs concatstrings (\n) concatstrings
-      pdfformaterror
+      }{
+        % We haven't seen it yet, so record it.
+        //pdfdict /Recursive_XObject_D get 1 index //null put
+        3 1 roll
+        //true
+      }ifelse
+    }
+    {
+      % I don't think this should be possible, but just in case
+        (   **** Error: Unable to determine object number for ) print exch 256 string cvs print ( so ignoring it) print
+        (               Output may be incorrect.\n) pdfformaterror
+      //false
     } ifelse
-    PDFfile exch setfileposition
-%    currentdict /TextSaveMatrix known currentdict /TextSaveMatrix known or {
-%      grestore
-%    } if
-  } bdef
+
+    % If we could get the object number, and we haven't already seen it, then execute it.
+    {
+      dup Page /XObject rget {
+        exch pop                                     % pos obj
+        OFFlevels length 0 eq {
+          dup /OC knownoget { ocg-is-visible } { //true } ifelse
+        } {
+          //false
+        } ifelse {
+          dup /Subtype oget //xobjectprocs exch get   % pos obj {proc}
+          % Don't leave extra objects on the stack while executing
+          % the definition of the form.
+          3 -1 roll                                  % obj {proc} pos
+          2 .execn                                   % pos
+        } {
+          pop                                        % pos
+        } ifelse
+      } {
+          % This should cause an error, but Acrobat Reader can
+          % continue, so we do too.
+        (   **** Error: Undefined XObject resource: )
+        exch =string cvs concatstrings (\n) concatstrings
+        pdfformaterror
+        (               Output may be incorrect.\n) pdfformaterror
+      } ifelse
+      PDFfile exch setfileposition
+      //pdfdict /Recursive_XObject_D get exch undef
+    }{
+      % Otherwise ignore it and tidy up the stacks
+      pop pop
+    } ifelse
+  } bind executeonly def
 end
 
 currentdict /xobjectprocs .undef
@@ -2203,13 +2926,31 @@ currentdict /ocg_pocs .undef
 .dicttomark readonly def
 /unabbrevvalue {	% <obj> unabbrevvalue <obj'>
   oforce //unabbrevtypedict 1 index type .knownget { exec } if
-} bdef
+} bind executeonly def
 
 /is_space_dict << 0 0 9 9 10 10 12 12 13 13 32 32 >> readonly def
 
 drawopdict begin
-  /BI { mark } bdef
+  /BI { mark } bind executeonly def
   /ID {
+    gsave
+    %% Bug 696547, related to Bug 695897 (see /Do above) This file has an inline image inside
+    %% a text block. Here we attempt to detect and recover from this by setting the
+    %% CTM to the matrix we saved before the text block. NB we update the 'TextSaveMatrix'
+    %% or 'qTextSaveMatrix' whenever a 'cm' is issued, even if we are in a text block, so
+    %% these matrices 'ought' to be correct.
+    %% Of course, the file is badly broken, but 'Acrobat can open it....'
+    currentdict /TextSaveMatrix known {
+      (   **** Error: Executing ID inside a text block, attempting to recover\n) pdfformaterror
+      currentdict /TextSaveMatrix get setmatrix
+      (               Output may be incorrect.\n) pdfformaterror
+    } if
+    currentdict /qTextSaveMatrix known {
+      (   **** Error: Executing ID inside a text block, attempting to recover\n) pdfformaterror
+      (               Output may be incorrect.\n) pdfformaterror
+      currentdict /qTextSaveMatrix get setmatrix
+    } if
+
     counttomark 2 idiv dup 7 add dict begin {
       exch //unabbrevkeydict 1 index .knownget { exch pop } if
       exch unabbrevvalue def
@@ -2258,7 +2999,8 @@ drawopdict begin
           } ifelse
       } ifelse
     } loop
-  } bdef
+    grestore
+  } bind executeonly def
 end
 
 currentdict /is_space_dict undef
@@ -2267,26 +3009,26 @@ currentdict /is_space_dict undef
 
 drawopdict begin
                         % Text control
-  /BT { BT } def
-  /ET { ET } def
-  /Tc { Tc } def
-  /TL { TL } def
-  /Tr { Tr } def
-  /Ts { Ts } def
-  /Tw { Tw } def
-  /Tz { Tz } def
+  /BT { BT } executeonly def
+  /ET { ET } executeonly def
+  /Tc { Tc } executeonly def
+  /TL { TL } executeonly def
+  /Tr { Tr } executeonly def
+  /Ts { Ts } executeonly def
+  /Tw { Tw } executeonly def
+  /Tz { Tz } executeonly def
                         % Text positioning
-  /Td { Td } def
-  /TD { TD } def
-  /Tm { Tm } def
-  /T* { T* } def
+  /Td { Td } executeonly def
+  /TD { TD } executeonly def
+  /Tm { Tm } executeonly def
+  /T* { T* } executeonly def
                         % Text painting
-  /Tj { Tj } def
-  /' { ' } def
-  /" { " } def
-  /TJ { TJ } def
+  /Tj { Tj } executeonly def
+  /' { ' } executeonly def
+  /" { " } executeonly def
+  /TJ { TJ } executeonly def
 
-  /Tform { Tform } def  % Text formatting and painting for AcroForm
+  /Tform { Tform } executeonly def  % Text formatting and painting for AcroForm
                         % without appearance streams.
 end
 
@@ -2295,15 +3037,17 @@ end
 drawopdict begin
   /QBT {
     Q BT
-    (   **** Warning: invalid operator QBT processed as Q BT .\n)
+    (   **** Error: invalid operator QBT processed as Q BT .\n)
     pdfformaterror  % Bug 690089
-  } def
+    (               Output may be incorrect.\n) pdfformaterror
+  } executeonly def
 
   /. {
     0.
-    (   **** Warning: invalid operator . processed as number 0. .\n)
+    (   **** Error: invalid operator . processed as number 0. .\n)
     pdfformaterror  % Bug 690730
-  } def
+    (               Output may be incorrect.\n) pdfformaterror
+  } executeonly def
 end
 
 % ============================== Annotations ============================== %
@@ -2323,14 +3067,14 @@ end
   dup /Parent oknown not {
     2 copy exch /ParentField exch put
   } if
-} bdef
+} bind executeonly def
 
 % Get and normalize an annotation's rectangle.
 /annotrect {		% <annot> annotrect <x> <y> <w> <h>
-  /Rect oget aload pop
+  /Rect oget oforce_recursive aload pop
   exch 3 index sub dup 0 lt { dup 5 -1 roll add 4 1 roll neg } if
   exch 2 index sub dup 0 lt { dup 4 -1 roll add 3 1 roll neg } if
-} bdef
+} bind executeonly def
 
 % Set an annotation color.
 % If the /C array is empty we don't want to draw the annotation
@@ -2338,48 +3082,81 @@ end
 /annotsetcolor {	% <annot> annotsetcolor bool
   /C knownoget {
     dup length 4 eq {
-      aload pop setcmykcolor true
+      aload pop setcmykcolor //true
     }{
       dup length 3 eq {
-        aload pop setrgbcolor true
+        aload pop setrgbcolor //true
       }{
         dup length 1 eq {
-          aload pop setgray true
+          aload pop setgray //true
         } {
           dup length 0 eq {
             pop
-            false
+            //false
           }{
-            (invalid color specified for annotation /C entry)
-            pdfformaterror false
+            (   **** Error: invalid color specified for annotation /C entry)
+            pdfformaterror //false
+            (               Output may be incorrect.\n) pdfformaterror
           } ifelse
         } ifelse
       } ifelse
     } ifelse
   }
-  { 0 setgray true} ifelse
-} bdef
+  { 0 setgray //true} ifelse
+} bind executeonly def
+
+% Set an annotation color.
+% If the /C array is empty we don't want to draw the annotation
+%
+/annotsetinteriorcolor {	% <annot> annotsetcolor bool
+  /IC knownoget {
+    dup length 4 eq {
+      aload pop setcmykcolor //true
+    }{
+      dup length 3 eq {
+        aload pop setrgbcolor //true
+      }{
+        dup length 1 eq {
+          aload pop setgray //true
+        } {
+          dup length 0 eq {
+            pop
+            //false
+          }{
+            (   **** Error: invalid color specified for annotation /C entry)
+            pdfformaterror //false
+            (               Output may be incorrect.\n) pdfformaterror
+          } ifelse
+        } ifelse
+      } ifelse
+    } ifelse
+  }
+  { //false } ifelse
+} bind executeonly def
 
 % Draw the border.  Currently, we ignore requests for beveling, and we
 % don't round the corners of rectangles.
 /strokeborder {		% <annot> <width> <dash> strokeborder -
   1 index 0 ne {	% do not draw if border width is 0
     gsave
-    2 index annotsetcolor
-    {
+%    2 index annotsetcolor
+%    {
       0 setdash dup setlinewidth
-      exch annotrect
+      exch dup annotrect
+      5 -1 roll /RD knownoget {
+        applyRD
+      } if
       2 { 4 index sub 4 1 roll } repeat
       2 { 4 index 0.5 mul add 4 1 roll } repeat
       rectstroke pop
       grestore
-    } {
-      pop pop pop
-    } ifelse
+%    } {
+%      pop pop pop
+%    } ifelse
   } {
     pop pop pop
   }ifelse
-} bdef
+} bind executeonly def
 
 % Draw an annotation border.
 /drawborder {		% <annot> drawborder -
@@ -2395,8 +3172,9 @@ end
         //true
       } ifelse                % <annot> [border] <bad?>
     } ifelse {
-      (   **** Warning: Wrong annotation border object, no border is drawn.\n)
+      (   **** Error: Invalid annotation border object, border has not been drawn.\n)
       pdfformaterror
+      (               Output may be incorrect.\n) pdfformaterror
       pop { 0 0 0 }
     } if
     dup type /dicttype eq {
@@ -2407,12 +3185,16 @@ end
       % Scaling due to -dPDFFitPage is not undone, to keep the correct border width
       % compared to the size of the surrounding marks.
       //systemdict /NoUserUnit .knownget not { //false } if not
-      //systemdict /PDFFitPage known not and {	% UserUnit is ignored if -dPDFFitPage
+      //systemdict /PDFFitPage known not and
+      % Don't apply USerUnit if we are passing it to the device
+      /PassUserUnit /GetDeviceParam .special_op {exch pop} {//false} ifelse not and
+      {	% UserUnit is ignored if -dPDFFitPage
         Page /UserUnit knownoget { div } if
       } if
       {} 2 index /S knownoget {
         /D eq { 2 index /D knownoget not { {3} } if exch pop } if
-      } if 3 -1 roll pop strokeborder
+      } if
+      3 -1 roll pop strokeborder
     } {
       dup 2 get
       exch dup length 3 gt { 3 get } { pop {} } ifelse
@@ -2422,7 +3204,80 @@ end
     1 {} strokeborder
   } ifelse
   grestore
-} bdef
+} bind executeonly def
+
+% stroke the path of an annotation border.
+/strokeborderpath {		% <annot> strokeborderpath -
+  gsave
+  dup /BS known 1 index /Border known or {
+    dup /BS knownoget {
+      dup type /dicttype ne   % <annot> <border> <bad?>
+    } {
+      dup /Border oget
+      dup type /arraytype eq {
+        dup length 3 lt
+      } {
+        //true
+      } ifelse                % <annot> [border] <bad?>
+    } ifelse {
+      (   **** Error: Invalid annotation border object, border has not been drawn.\n)
+      pdfformaterror
+      (               Output may be incorrect.\n) pdfformaterror
+      pop { 0 0 0 }
+    } if
+    dup type /dicttype eq {
+      dup /W knownoget not { 1 } if
+      % Per PDF1.6 Reference table 8.13, /W in the border style dictionary is
+      % expressed in points (an absolute unit), so compensate here for any
+      % scaling of the PostScript user space done due to /UserUnit.
+      % Scaling due to -dPDFFitPage is not undone, to keep the correct border width
+      % compared to the size of the surrounding marks.
+      //systemdict /NoUserUnit .knownget not { //false } if not
+      //systemdict /PDFFitPage known not and
+      % Don't apply USerUnit if we are passing it to the device
+      /PassUserUnit /GetDeviceParam .special_op {exch pop} {//false} ifelse not and
+      {	% UserUnit is ignored if -dPDFFitPage
+        Page /UserUnit knownoget { div } if
+      } if
+      {} 2 index /S knownoget {
+        /D eq { 2 index /D knownoget not { {3} } if exch pop } if
+      } if
+      3 index /CA knownoget {.setopacityalpha} if
+      3 -1 roll pop
+%      2 index annotsetcolor {
+      0 setdash setlinewidth stroke
+%      } if
+    } {
+      dup 2 get
+      % If element 3 of the /Border array is 0, then don't draw the border
+      dup 0 ne {
+        exch dup length 3 gt { 3 get } { pop {} } ifelse
+        3 index /CA knownoget {.setopacityalpha} if
+%        2 index annotsetcolor {
+        0 setdash setlinewidth stroke
+%        } if
+      }{
+       pop pop
+      } ifelse
+    } ifelse
+  } {
+    3 index /CA knownoget {.setopacityalpha} if
+    1 {}
+%    2 index annotsetcolor {
+    0 setdash setlinewidth stroke
+%    } if
+  } ifelse
+  pop
+  grestore
+} bind executeonly def
+
+/fillborderpath {		% <annot> fillborderpath -
+  gsave
+  dup /ca knownoget {.setopacityalpha} if
+  annotsetinteriorcolor
+  {fill} if
+  grestore
+}bind executeonly def
 
 %
 %   The PDF annotation F (flags) integer is bit encoded.
@@ -2451,12 +3306,12 @@ end
   } {
     pop pop //false                            % Hidden
   } ifelse
-} bdef
+} bind executeonly def
 
 /set_bc_color <<
- 1 { 0 get oforce setgray } bind
- 3 { { oforce } forall setrgbcolor } bind
- 4 { { oforce } forall setcmykcolor } bind
+ 1 { 0 get oforce setgray } bind executeonly
+ 3 { { oforce } forall setrgbcolor } bind executeonly
+ 4 { { oforce } forall setcmykcolor } bind executeonly
 >> readonly def
 
 % Get an inherited attribute from a node through /Parent and /ParentField
@@ -2480,7 +3335,7 @@ end
        } ifelse
      } ifelse
    } loop
- } bind def
+ } bind executeonly def
 
 % <annot> foo <annot>
 /make_tx_da {
@@ -2496,11 +3351,27 @@ end
   dup (BT ) writestring
   1 index /DA fget not {
     1 index /V fget {
-      <FEFF> anchorsearch{
-        pop pop /FallBackFont /Identity-UTF16-H [/CIDFallBack] composefont 12 scalefont setfont
-      }{
-        pop /Helvetica findfont 12 scalefont setfont
-      } ifelse
+      <EFBBBF> anchorsearch {
+        pop /Helvetica findfont
+        12 scalefont setfont
+      } {
+        <FEFF> anchorsearch {
+          pop pop /FallBackFont /Identity-UTF16-H [/CIDFallBack] composefont 12 scalefont setfont
+        } {
+          pop /Helvetica findfont
+          % re-encode the font to PDFDocEncoding
+          dup length dict begin
+          {
+            1 index /FID ne 2 index /UniqueID ne and { def } { pop pop } ifelse
+          } forall
+          /Encoding /PDFDocEncoding /Encoding findresource def
+          /FontName /Helvetica-PDFDocEncoding def
+          currentdict
+          end
+          /Helvetica-PDFDocEncoding exch definefont
+          12 scalefont setfont
+        }ifelse
+      }ifelse
     } if
     ()
   }if
@@ -2530,21 +3401,28 @@ end
   /File File 0 Length getinterval def
   closefile             % <annot>
   end
-} bdef
+} bind executeonly def
 
 /can-regenerate-ap { % <annot> -> <bool>
   //false exch
   NeedAppearances {
     dup /FT fget {
-      /Tx eq {
-        dup /V oknown {
-          pop not 1
-        } if
-      } if
+     dup /Tx eq {
+       pop
+       dup /V oknown {
+         pop not 1
+       } if
+     } {
+       /Ch eq {
+         dup /V oknown {
+           pop not 1
+         } if
+       } if
+     } ifelse
     } if
   } if
   pop
-} bdef
+} bind executeonly def
 
 /drawwidget {			% <scalefactor_x> <scalefactor_y> <annot> drawwidget -
 
@@ -2562,106 +3440,151 @@ end
 %      dup /AP undef
 %    } if
 %  } if
-  dup /AP knownoget {
-    dup /N known not {
-      (   **** Appearance dictionary (AP) lacks the mandatory normal (N) appearance.\n)
-      pdfformaterror
+
+  % Acrobat doesn't draw Widget annotations unles they have both /FT
+  % (which is defined as required) and /T keys present. Annoyingly
+  % these can either be inherited from the Form Definition Field
+  % dictionary (via the AcroForm tree) or present directly in the
+  % annotation, so we need to check the annotation to make sure its
+  % a Widget, then follow any /Parent key up to the root node
+  % extracting and storing any FT or T keys as we go (we only care if
+  % these are present, their value is immaterial). If after all that
+  % both keys are not present, then we don't draw the annotation.
+
+  dup /Subtype get /Widget eq {
+    dup /FT known 1 index /T known and not {
+      dup
+      {
+        dup /FT knownoget {
+          /FT exch 3 index 3 1 roll put
+        } if
+        dup /T knownoget {
+          /T exch 3 index 3 1 roll put
+        } if
+        /Parent knownoget not {
+          exit
+        } if
+      } loop
     } if
-    //false
-    [/N /R /D] {
-        % stack: scalex scaley annot appearance false key
-      2 index exch knownogetdict {
-        exch not exit
+    dup /FT known 1 index /T known and {
+      //true
+    } {
+      (   **** Warning: A Widget annotation dictionary lacks either the FT or T key.\n)
+      pdfformaterror
+      (               Acrobat ignores such annotations, annotation will not be rendered.\n)
+      pdfformaterror
+      (               Output may not be as expected.\n) pdfformaterror
+      //false
+    } ifelse
+  } {
+    //true
+  }ifelse
+
+  {
+    dup /AP knownoget {
+      dup /N known not {
+        (   **** Error: Appearance dictionary (AP) lacks the mandatory normal (N) appearance.\n)
+        pdfformaterror
+        (               Output may be incorrect.\n) pdfformaterror
       } if
-    } forall
-        % stack: scalex scaley annot appearance value true
-        % stack: scalex scaley annot appearance false
-    dup {
-      pop exch pop
+      //false
+      [/N /R /D] {
+          % stack: scalex scaley annot appearance false key
+        2 index exch knownogetdict {
+          exch not exit
+        } if
+      } forall
+          % stack: scalex scaley annot appearance value true
+          % stack: scalex scaley annot appearance false
+      dup {
+        pop exch pop
                 % Acrobat Distiller produces files in which this Form
                 % XObject lacks Type and Subtype keys.  This is illegal,
                 % but Acrobat Reader accepts it.  The only way we can
                 % tell whether this is a Form or a set of sub-appearances
                 % is by testing for the stream Length or File key.
                 % If the stream lacks Length key, try File key.
-      dup /Length knownoget { type /integertype eq } { //false } ifelse
-      1 index /File knownoget { type /filetype eq or } if {
-                % If this is a form then simply use it
-        //true
-      } {
-        1 index /AS knownoget not {
-                % If we do not have AS then use any appearance
-          { exch pop oforce exit } forall //true
+        dup /Length knownoget { type /integertype eq } { //false } ifelse
+        1 index /File knownoget { type /filetype eq or } if {
+                  % If this is a form then simply use it
+          //true
         } {
-                % Stack: annot Ndict AS
-                % Get the specified appearance.  If no appearance, then
-                % display nothing - set stack = false.
-          knownoget
+          1 index /AS knownoget not {
+                  % If we do not have AS then use any appearance
+            { exch pop oforce exit } forall //true
+          } {
+                  % Stack: annot Ndict AS
+                  % Get the specified appearance.  If no appearance, then
+                  % display nothing - set stack = false.
+            knownoget
+          } ifelse
         } ifelse
+      } {
+        exch pop	% discard useless AP dictionary
       } ifelse
-    } {
-      exch pop	% discard useless AP dictionary
-    } ifelse
 
                 % Stack: scalex scaley annot appearance true
                 % Stack: scalex scaley annot false
-    {
-      dup type /dicttype eq {
+      {
+        dup type /dicttype eq {
                 % Draw appearance
                 % Initialize graphic following "7.4.4 Appearance Streams"
-        q graphicsbeginpage textbeginpage
-        1 index annotrect pop pop translate
-        3 index 3 index scale	% Apply scale factors
-        dup /BBox knownoget {
-          1 index /Matrix knownoget not { {1 0 0 1 0 0} } if
-          .bbox_transform pop pop
-          % Compensate for non-zero origin of BBox
-          neg exch neg exch translate
+          q graphicsbeginpage textbeginpage
+          1 index annotrect pop pop translate
+          3 index 3 index scale	% Apply scale factors
+          dup /BBox knownoget {
+            1 index /Matrix knownoget not { {1 0 0 1 0 0} } if
+            .bbox_transform pop pop
+            % Compensate for non-zero origin of BBox
+            neg exch neg exch translate
+          } if
+          DoForm Q
+        } {
+          (   **** Error: Annotation's appearance is not a dictionary.\n)
+          pdfformaterror
+          (               Output may be incorrect.\n) pdfformaterror
+        } ifelse
+      } if
+    } {
+      dup /MK knownoget {    % mk
+        dup /BG knownoget {  % mk bg
+          dup length         % mk bg len
+          //set_bc_color exch .knownget {
+             gsave
+             exec
+             3 index 3 index scale
+             1 index annotrect rectfill
+             grestore
+          } {
+            pop
+          } ifelse
         } if
-        DoForm Q
-      } {
-        (   **** Annotation's appearance is not a dictionary.\n)
-        pdfformaterror
-      } ifelse
-    } if
-  } {
-    dup /MK knownoget {    % mk
-      dup /BG knownoget {  % mk bg
-        dup length         % mk bg len
-        //set_bc_color exch .knownget {
-           gsave
-           exec
-           3 index 3 index scale
-           1 index annotrect rectfill
-           grestore
-        } {
-          pop
-        } ifelse
+        dup /BC knownoget {
+          dup length
+          //set_bc_color exch .knownget {
+             gsave
+             exec
+             1 setlinewidth
+             3 index 3 index scale
+             1 index annotrect rectstroke
+             grestore
+          } {
+            pop
+          } ifelse
+        } if
+        pop
       } if
-      dup /BC knownoget {
-        dup length
-        //set_bc_color exch .knownget {
-           gsave
-           exec
-           1 setlinewidth
-           3 index 3 index scale
-           1 index annotrect rectstroke
-           grestore
-        } {
-          pop
-        } ifelse
-      } if
-      pop
-    } if
 
-    dup can-regenerate-ap {
-      make_tx_da
-      dup /UpdatedAP //true put
-      3 copy drawwidget
-    } if
-  } ifelse
+      dup can-regenerate-ap {
+        make_tx_da
+        dup /UpdatedAP //true put
+        3 copy drawwidget
+      } if
+    } ifelse
+  } if
   pop pop pop
-} bdef
+} bind executeonly def
+
 
 currentdict /set_bc_color undef
 
@@ -2686,8 +3609,9 @@ currentdict /set_bc_color undef
           3 -1 roll sub         % <<>> x y  x0 x1 y1-y0
           3 1 roll exch sub     % <<>> x y  y1-y0 x1-x0
           2 copy mul 0 eq {
-            (   **** Warning: /BBox has zero width or height, which is not allowed.\n)
+            (   **** Error: /BBox has zero width or height, which is not allowed.\n)
             pdfformaterror
+            (               Output may be incorrect.\n) pdfformaterror
             pop pop pop pop 1 1	% zero size -- revert to unity scaling
           } {
             3 1 roll div        % <<>> x x1-x0 y/(y1-y0)
@@ -2705,14 +3629,72 @@ currentdict /set_bc_color undef
     } ifelse			% if we have /AP
     3 -1 roll pop
   } {
-    (   **** Warning: /Annot dict is missing required /Rect entry.\n)
+    (   **** Error: /Annot dict is missing required /Rect entry.\n)
     pdfformaterror
+    (               Output may be incorrect.\n) pdfformaterror
     pop 1 1
   } ifelse
-} bdef
+} bind executeonly def
+
+/applyRD {
+  % x y w h [l t r b]
+  dup 0 get             % x y w h [] l
+  6 -1 roll add
+  5 1 roll              %x+l y w h []
+  dup 1 get             %x+l y w h [] b
+  5 -1 roll add         %x+l w h [] b+y
+  4 1 roll              %x+l y+b w h []
+  aload pop             %x+l y+b w h l t r b
+  exch                  %x+l y+b w h l t b r
+  4 -1 roll add         %x+l y+b w h t b r+l
+  3 1 roll add          %x+l y+b w h r+l t+b
+  3 -1 roll exch sub    %x+l y+b w r+l h-(t+b)
+  3 1 roll sub          %x+l y+b h-(t+b) w-(r+l)
+  exch
+} bind executeonly def
 
 % Draw an annotation.
 /drawannottypes 20 dict begin
+
+  /startannottransparency {
+    PDFusingtransparency {
+      dup /BM known {
+        dup /BM get
+        << exch /BM exch >>
+      } {
+        << >>
+      }ifelse
+      %% We should be able to use the Rect to create the group, but it seems
+      %% Acrobat ignores this, or at least doesn't clip the annotation to it :-(
+%      1 index /Rect known {
+%        1 index annotrect exch % llx lly h w
+%        3 index add exch   % x y urx h
+%        2 index add
+%      }{
+        clippath pathbbox newpath
+%      } ifelse
+      .begintransparencygroup
+    } if
+  }bind executeonly def
+
+  /endannottransparency {
+    PDFusingtransparency {
+      .endtransparencygroup
+    } if
+  }bind executeonly def
+
+  /ValidateAP {
+    dup /AP oknown {
+        dup /AP oget
+        /N oknown not {
+          //false
+        } {
+          //true
+        } ifelse
+    } {
+      //false
+    }ifelse
+  } bind executeonly def
 
   % x0 y0 x1 y1 x2 y2 x3 y3 -> x0 y0 x1-x0 y1-y0 x2-x0 y2-y0
   /quadpoints2basis {
@@ -2755,48 +3737,543 @@ currentdict /set_bc_color undef
     4 index sub exch  % x0 y0 x2-x0 y2-y0 y1-y0 x1
     5 index sub exch  % x0 y0 x2-x0 y2-y0 x1-x0 y1-y0
     4 2 roll          % x0 y0 x1-x0 y1-y0 x2-x0 y2-y0
-  } bdef
+  } bind executeonly def
+
+  /Square {
+    //ValidateAP exec
+    {
+      //true
+    } {
+      gsave
+      //startannottransparency exec
+      dup
+      annotsetinteriorcolor
+      {
+        gsave
+        dup /ca knownoget {.setopacityalpha} if
+        dup annotrect
+        5 index /RD knownoget {
+          applyRD
+        } if
+        rectfill
+        grestore
+        dup /CA knownoget {.setopacityalpha} if
+        dup annotsetcolor {
+          drawborder
+        } if
+        //false
+      }{
+        dup annotrect
+        5 index /RD knownoget {
+          applyRD
+        } if
+        drawopdict /re get exec
+        dup annotsetcolor {
+          strokeborderpath
+        } if
+      } ifelse
+      //endannottransparency exec
+      grestore
+      //false
+    }ifelse
+  } bind executeonly def
+
+%% Width Height drawellipse -
+/drawellipse {
+  %% Don Lancaster's code for drawing an ellipse
+  0.55228475 0.00045 sub % improved magic value
+  3 1 roll               % magic width height
+  2 div exch 2 div       % magic y-radius x-radius
+  dup 3 index mul        % magic y-radius x-radius x-magic
+  2 index                % magic y-radius x-radius x-magic y-radius
+  5 -1 roll mul          % magic y-radius x-radius x-magic y-magic
+
+  2 index neg 0 moveto                                          % xrad neg 0 moveto
+  2 index neg 1 index 3 index neg 6 index 0 8 index curveto     % xrad neg ymag xmag neg yrad 0 yrad curveto
+  1 index 4 index 4 index 3 index 1 index 0 curveto             % xmag yrad xrad ymag xrad 0 curveto
+  2 index 1 index neg 3 index 6 index neg 0 1 index curveto     % xrad ymag neg xmag yrad neg 0 yrad neg curveto
+                                                                % Stack: yrad xrad xmag ymag
+  exch neg 4 1 roll 3 -1 roll neg 3 1 roll exch neg exch
+  neg 1 index 0 curveto                                         % xmag neg yrad neg xrad neg ymag neg 0 curveto
+}bind executeonly def
+
+  /Circle {
+    //ValidateAP exec
+    {
+      //true
+    } {
+      gsave
+      //startannottransparency exec
+      dup annotrect
+      5 index /RD knownoget {
+        applyRD
+      } if
+      4 2 roll exch 3 index 2 div add exch 2 index 2 div add
+      translate //drawellipse exec
+      dup
+      fillborderpath
+      dup annotsetcolor {
+        strokeborderpath
+      } if
+      //endannottransparency exec
+      grestore
+      //false
+    } ifelse
+  } bind executeonly def
+
+  /Polygon {
+    //ValidateAP exec
+    {
+      //true
+    } {
+      gsave
+      //startannottransparency exec
+      dup /Vertices knownoget {
+        dup length 2 div 1 sub cvi 0 1 3 -1 roll
+        {
+          2 mul dup
+          2 index exch 2 getinterval aload pop
+          3 -1 roll 0 eq {
+            moveto
+          }{
+            lineto
+          } ifelse
+        }
+        for
+        pop
+        closepath
+        //true
+      } {
+          (   **** Error: Invalid Vertices for Polygon, annotation has not been drawn.\n)
+          pdfformaterror
+          (               Output may be incorrect.\n) pdfformaterror
+        //false
+      } ifelse
+
+      1 index annotsetinteriorcolor {
+        //true
+      }{
+        //false
+      }ifelse
+      and
+
+      {
+        gsave
+        dup /ca knownoget {.setopacityalpha} if
+        fill
+        grestore
+        dup /CA knownoget {.setopacityalpha} if
+        dup annotsetcolor {
+          strokeborderpath
+        } if
+      } {
+        dup annotsetcolor {
+          strokeborderpath
+        } if
+      } ifelse
+      //endannottransparency exec
+      //false
+      grestore
+    } ifelse
+  } bind executeonly def
+
+  /LineEnd_dict 10 dict begin
+    %% Stack contains <annot>
+    %% CTM rotated so line segment is vertical, translated so line endpoint at 0,0
+
+    /Square {
+      dup
+      /BS knownoget {
+        /W knownoget {
+        }{
+          1
+        }ifelse
+      }{
+        1
+      }ifelse
+      dup 2.5 mul
+      gsave
+      dup neg 1 index neg exch moveto
+      dup neg 1 index lineto
+      dup 1 index exch lineto
+      dup neg lineto
+      closepath
+      1 index /CA knownoget {.setopacityalpha} if
+      1 index fillborderpath
+      grestore
+      3 mul
+      dup neg 1 index neg exch moveto
+      dup neg 1 index lineto
+      dup 1 index exch lineto
+      dup neg lineto
+      closepath
+      strokeborderpath
+    } bind executeonly def
+    /Circle {
+      dup
+      /BS knownoget {
+        /W knownoget {
+        }{
+          1
+        }ifelse
+      }{
+        1
+      }ifelse
+      dup
+      gsave
+      2.5 mul dup
+      0 moveto
+      0 0 3 -1 roll 0 360 arc
+      1 index /CA knownoget {.setopacityalpha} if
+      1 index fillborderpath
+      grestore
+      3 mul dup
+      0 moveto
+      0 0 3 -1 roll 0 360 arc
+      strokeborderpath
+    } bind executeonly def
+    /Diamond {
+      dup
+      /BS knownoget {
+        /W knownoget {
+        }{
+          1
+        }ifelse
+      }{
+        1
+      }ifelse
+      dup 2.5 mul
+      gsave
+      dup neg 0 exch moveto
+      dup neg 0 lineto
+      dup 0 exch lineto
+      0 lineto
+      closepath
+      1 index /CA knownoget {.setopacityalpha} if
+      1 index fillborderpath
+      grestore
+      3 mul
+      dup neg 0 exch moveto
+      dup neg 0 lineto
+      dup 0 exch lineto
+      0 lineto
+      closepath
+      strokeborderpath
+    } bind executeonly def
+    /OpenArrow {
+      dup
+      gsave
+      /BS knownoget {
+        /W knownoget {
+        }{
+          1
+        }ifelse
+      }{
+        1
+      }ifelse
+      0 setlinejoin
+      dup 6 mul neg 1 index 4 mul neg moveto dup 1.2 div neg 0 lineto
+      dup 6 mul neg exch 4 mul lineto
+      strokeborderpath
+      grestore
+    } bind executeonly def
+    /ClosedArrow {
+      dup
+      gsave
+      /BS knownoget {
+        /W knownoget {
+        }{
+          1
+        }ifelse
+      }{
+        1
+      }ifelse
+      dup
+      gsave
+      0 setlinejoin
+      dup 6 mul neg 1 index 4 mul neg moveto dup 1.2 div neg 0 lineto
+      dup 6 mul neg exch 4 mul lineto closepath
+      1 index strokeborderpath
+      grestore
+      dup 1.3 mul neg 0 translate
+      dup 2 div sub
+      dup 8.4 mul neg 1 index 5.9 mul neg moveto dup 1.2 div neg 0 lineto
+      dup 8.4 mul neg exch 5.9 mul lineto closepath
+      dup /CA knownoget {.setopacityalpha} if
+      fillborderpath
+      grestore
+    } bind executeonly def
+    /None {pop} bind executeonly def
+    /Butt {
+      dup
+      /BS knownoget {
+        /W knownoget {
+        }{
+          1
+        }ifelse
+      }{
+        1
+      }ifelse
+      3 mul dup neg 0 exch moveto 0 exch lineto
+      strokeborderpath
+    } bind executeonly def
+    /ROpenArrow {
+      gsave
+      dup
+      /BS knownoget {
+        /W knownoget {
+        }{
+          1
+        }ifelse
+      }{
+        1
+      }ifelse
+      180 rotate
+      0 setlinejoin
+      dup 6 mul neg 1 index 4 mul neg moveto dup 1.2 div neg 0 lineto
+      dup 6 mul neg exch 4 mul lineto
+      strokeborderpath
+      grestore
+    } bind executeonly def
+    /RClosedArrow {
+      gsave
+      dup
+      /BS knownoget {
+        /W knownoget {
+        }{
+          1
+        }ifelse
+      }{
+        1
+      }ifelse
+      180 rotate
+      dup
+      gsave
+      0 setlinejoin
+      dup 6 mul neg 1 index 4 mul neg moveto dup 1.2 div neg 0 lineto
+      dup 6 mul neg exch 4 mul lineto closepath
+      1 index strokeborderpath
+      grestore
+      dup 1.3 mul neg 0 translate
+      dup 2 div sub
+      dup 8.4 mul neg 1 index 5.9 mul neg moveto dup 1.2 div neg 0 lineto
+      dup 8.4 mul neg exch 5.9 mul lineto closepath
+      dup /CA knownoget {.setopacityalpha} if
+      fillborderpath
+      grestore
+    } bind executeonly def
+    /Slash {
+      gsave
+      dup
+      /BS knownoget {
+        /W knownoget {
+        }{
+          1
+        }ifelse
+      }{
+        1
+      }ifelse
+      330 rotate
+      3 mul dup neg 0 exch moveto 0 exch lineto
+      strokeborderpath
+      grestore
+    } bind executeonly def
+
+  currentdict end readonly def
+
+  /Line  {
+    //ValidateAP exec
+    {
+      //true
+    } {
+      gsave
+      //startannottransparency exec
+      dup annotsetcolor {
+        dup /L knownoget {
+          1 index /LE knownoget { % <annot> [x1 y1 x2 y2] [LE1 LE2]
+            gsave
+            1 index aload pop     % <annot> [x1 y1 x2 y2] [LE1 LE2] x1 y1 x2 y2
+            3 -1 roll sub         % <annot> [x1 y1 x2 y2] [LE1 LE2] x1 x2 dy
+            3 1 roll exch sub     % <annot> [x1 y1 x2 y2] [LE1 LE2] dy dx
+            3 index aload pop 4 2 roll pop pop
+            translate
+            0 0 moveto
+            atan                  % <annot> [x1 y1 x2 y2] [LE1 LE2]
+            rotate
+            dup 1 get             % <annot> [x1 y1 x2 y2] [LE1 LE2] LE1
+            dup //LineEnd_dict exch known not
+            {
+              pop /None
+            } if
+            //LineEnd_dict exch   % <annot> [x1 y1 x2 y2] [LE1 LE2] <dict> LE1
+            get                   % <annot> [x1 y1 x2 y2] [LE1 LE2] {}
+            3 index exch          % <annot> [x1 y1 x2 y2] [LE1 LE2] <annot> {}
+            exec
+            grestore
+            gsave
+            1 index aload pop  % x1 y1 x2 y2
+            3 -1 roll sub      % x1 x2 dy
+            3 1 roll exch sub  % dy dx
+            3 index aload pop pop pop
+            translate
+            0 0 moveto
+            atan 180 add
+            rotate
+            0 get dup //LineEnd_dict exch known not {pop /None} if //LineEnd_dict exch get 3 index exch exec
+            grestore
+          }if
+          aload pop 4 2 roll
+          moveto lineto
+          strokeborderpath
+        }{
+          (   **** Error: Invalid L array for Line, annotation has not been drawn.\n)
+          pdfformaterror
+          (               Output may be incorrect.\n) pdfformaterror
+          pop
+        } ifelse
+      } if
+      //endannottransparency exec
+      //false
+      grestore
+    } ifelse
+  } bind executeonly def
+
+  /PolyLine {
+    //ValidateAP exec
+    {
+      //true
+    } {
+      gsave
+      //startannottransparency exec
+      dup /Vertices knownoget {
+        1 index /LE knownoget {
+          gsave
+          1 index 0 4 getinterval aload pop
+          4 2 roll
+          2 copy translate 4 2 roll
+          3 -1 roll sub      % x1 x2 dy
+          3 1 roll exch sub  % dy dx
+          atan
+          rotate
+          dup 0 get dup //LineEnd_dict exch known not {pop /None} if //LineEnd_dict exch get 3 index exch exec
+          grestore
+
+          gsave
+          1 index dup length 4 sub 4 getinterval aload pop
+          2 copy translate
+          3 -1 roll sub      % x1 x2 dy
+          3 1 roll exch sub  % dy dx
+          atan
+          rotate
+          1 get dup //LineEnd_dict exch known not {pop /None} if //LineEnd_dict exch get 3 index exch exec
+          grestore
+        } if
+        dup length 2 div 1 sub cvi 0 1 3 -1 roll
+        {
+          2 mul dup
+          2 index exch 2 getinterval aload pop
+          3 -1 roll 0 eq {
+            moveto
+          }{
+            lineto
+          } ifelse
+        }
+        for
+        pop
+        //true
+      } {
+          (   **** Error: Invalid Vertices for Polygon, annotation has not been drawn.\n)
+          pdfformaterror
+          (               Output may be incorrect.\n) pdfformaterror
+        //false
+      } ifelse
+
+      {
+        strokeborderpath
+      } if
+      //endannottransparency exec
+      //false
+      grestore
+    } ifelse
+  } bind executeonly def
 
   /Link { % <annot> -> <false>
-    dup drawborder dup calc_annot_scale
-    2 copy mul 0 ne {3 -1 roll drawwidget //false}{pop pop (   **** Warning: ignoring annotation with scale factor of 0\n) pdfformaterror}ifelse
-  } bdef
+    //startannottransparency exec
+    dup annotsetcolor {
+      dup drawborder dup calc_annot_scale
+      2 copy mul 0 ne
+      {3 -1 roll drawwidget //false}
+      {
+        pop pop
+        (   **** Error: ignoring annotation with scale factor of 0\n) pdfformaterror
+        (               Output may be incorrect.\n) pdfformaterror
+      }ifelse
+    } if
+    //endannottransparency exec
+  } bind executeonly def
 
   /Ink { % <annot> -> <annot> <true>
          % <annot> -> <false>
-    dup /AP oknown {
+    //ValidateAP exec
+    {
       //true
     } {
+      //startannottransparency exec
       1 setlinewidth
       1 setlinecap
       1 setlinejoin
-      dup annotsetcolor {
+      dup annotsetcolor
+      {
         dup calc_annot_scale
         2 copy mul 0 ne
         {
-            3 index annotrect pop pop translate
             scale
-            /InkList knownoget {
+            dup /InkList knownoget {
               { oforce
                 mark exch { oforce } forall
                 .pdfinkpath
                 stroke
               } forall
-            } if
+              pop
+            } {
+              /Path knownoget {
+                oforce
+                dup length 1 sub 0 1 3 -1 roll {
+                  dup 0 eq {
+                    1 index exch get aload pop moveto
+                  } {
+                    1 index exch get dup length 2 eq {
+                      aload pop lineto
+                    }{
+                      aload pop curveto
+                    } ifelse
+                  }ifelse
+                } for
+                pop dup
+                strokeborderpath
+              } if
+            }ifelse
         }
-        {pop pop (   **** Warning: ignoring annotation with scale factor of 0\n) pdfformaterror}
+        {
+          pop pop
+          (   **** Error: ignoring annotation with scale factor of 0\n) pdfformaterror
+          (               Output may be incorrect.\n) pdfformaterror
+        }
         ifelse
       } if
+      //endannottransparency exec
       //false
     } ifelse
-  } bdef
+  } bind executeonly def
 
   /Underline {
-    dup /AP oknown {
+    //ValidateAP exec
+    {
       //true
     } {
       0 setlinecap
-      dup annotsetcolor {
+      dup annotsetcolor
+      {
         dup calc_annot_scale
         2 copy mul 0 ne
         {
@@ -2819,19 +4296,25 @@ currentdict /set_bc_color undef
               } repeat
             } if
         }
-        {pop pop (   **** Warning: ignoring annotation with scale factor of 0\n) pdfformaterror}
+        {
+          pop pop
+          (   **** Error: ignoring annotation with scale factor of 0\n) pdfformaterror
+          (               Output may be incorrect.\n) pdfformaterror
+        }
         ifelse
       } if
       //false
     } ifelse
-  } bdef
+  } bind executeonly def
 
   /StrikeOut {
-    dup /AP oknown {
+    //ValidateAP exec
+    {
       //true
     } {
       0 setlinecap
-      dup annotsetcolor {
+      dup annotsetcolor
+      {
         dup calc_annot_scale
         2 copy mul 0 ne
         {
@@ -2854,12 +4337,16 @@ currentdict /set_bc_color undef
               } repeat
             } if
         }
-        {pop pop (   **** Warning: ignoring annotation with scale factor of 0\n) pdfformaterror}
+        {
+          pop pop
+          (   **** Error: ignoring annotation with scale factor of 0\n) pdfformaterror
+          (               Output may be incorrect.\n) pdfformaterror
+        }
         ifelse
       } if
       //false
     } ifelse
-  } bdef
+  } bind executeonly def
 
   % Connect 2 points with an arc that has max distance from the line
   % segment to the ark equal 1/4 of the radius.
@@ -2879,14 +4366,18 @@ currentdict /set_bc_color undef
     atan                                % x0 y0 x1 y1 xc yc r a1 a2
     exch arcn                           % x0 y0 x1 y1
     pop pop pop pop
-  } bind def
+  } bind executeonly def
 
   /emptydict 0 dict readonly def
 
   /Highlight {
-    % Acrobat ignores /AP and uses transparent highlighting
+    //ValidateAP exec
+    {
+      //true
+    } {
     0 setlinecap
-    dup annotsetcolor {
+    dup annotsetcolor
+    {
       /QuadPoints knownoget {
         aload length 8 idiv {
           6 -2 roll
@@ -2898,7 +4389,9 @@ currentdict /set_bc_color undef
         } repeat
         PDFusingtransparency {
           //emptydict
-          pathbbox 2 index add exch 3 index add exch .begintransparencygroup
+          % If we get an error, just emit an empty box
+          { pathbbox } stopped { 0 0 0 0 } if
+          2 index add exch 3 index add exch .begintransparencygroup
           /Multiply .setblendmode
           fill
           .endtransparencygroup
@@ -2908,15 +4401,19 @@ currentdict /set_bc_color undef
       } if
     } if
     //false
-  } bdef
+    } ifelse
+  } bind executeonly def
   currentdict /emptydict undef
   currentdict /highlight-arc undef
 
   /Squiggly {
-    dup /AP oknown {
+    //ValidateAP exec
+    {
       //true
     } {
-      dup annotsetcolor {
+      //startannottransparency exec
+      dup annotsetcolor
+      {
         dup calc_annot_scale
         2 copy mul 0 ne
         {
@@ -2957,17 +4454,24 @@ currentdict /set_bc_color undef
               } repeat
             } if
         }
-        {pop pop (   **** Warning: ignoring annotation with scale factor of 0\n) pdfformaterror}
+        {
+          pop pop
+          (   **** Error: ignoring annotation with scale factor of 0\n) pdfformaterror
+          (               Output may be incorrect.\n) pdfformaterror
+        }
         ifelse
       } if
+      //endannottransparency exec
       //false
     } ifelse
-  } bdef
+  } bind executeonly def
 
   /Text {
-    dup /AP oknown {
+    //ValidateAP exec
+    {
       //true
     } {
+      //startannottransparency exec
       dup calc_annot_scale
       2 copy mul 0 ne
       {
@@ -2994,27 +4498,27 @@ currentdict /set_bc_color undef
           9 0 moveto 9 5 lineto 14 5 lineto
           stroke
       }
-      {pop pop (   **** Warning: ignoring annotation with scale factor of 0\n) pdfformaterror}
+      {
+        pop pop
+        (   **** Error: ignoring annotation with scale factor of 0\n) pdfformaterror
+        (               Output may be incorrect.\n) pdfformaterror
+      }
       ifelse
+      //endannottransparency exec
       //false
     } ifelse
-  } bdef
+  } bind executeonly def
 
   /FreeText {
-    dup /AP knownoget {
-        %% Check minimal entriy in /AP dictionary
-        /N known not {
-          //true
-        }{
-          //false
-        }ifelse
-      } {
-        //true
-    }ifelse
+    //ValidateAP exec
+    {
+      //true
+    }
     %% We either have no appearance, or its invalid, make one up.
     {
       gsave
 
+      //startannottransparency exec
       dup annotrect rectclip
 
       dup /CA knownoget {
@@ -3027,39 +4531,60 @@ currentdict /set_bc_color undef
 
       dup /C knownoget {
         dup length 4 eq {
-          aload pop setcmykcolor true
+          aload pop setcmykcolor //true
         }{
           dup length 3 eq {
-            aload pop setrgbcolor true
+            aload pop setrgbcolor //true
           }{
             dup length 1 eq {
-              aload pop setgray true
+              aload pop setgray //true
             } {
               dup length 0 eq {
                 pop
-                false
+                //false
               }{
-                (invalid color specified for FreeText annotation /C entry)
-                pdfformaterror false
+                (   **** Error: invalid color specified for FreeText annotation /C entry)
+                pdfformaterror
+                (               Output may be incorrect.\n) pdfformaterror
+                //false
               } ifelse
             } ifelse
           } ifelse
         } ifelse
       }{
-        false
+        //false
       } ifelse
-      {dup annotrect
-        %% Somewhat horrifyingly, rectfill maps directly to the device fill_rectangle
-        %% method, which bypasses transparency (!!) So we construct the rectangle,
-        %% and fill it, manually instead....
-        gsave 4 2 roll moveto 1 index 0 rlineto
-        0 exch rlineto neg 0 rlineto closepath fill grestore
+      {
+        dup annotrect
+        5 index /RD knownoget {
+          applyRD
+        } if
+        rectfill
       } if
 
       %% get and process the default appearance string, if we don't have one, use a default
       /DA_Action_Dict
       <<
-        /Tf {exch dup /Helv eq {pop /Helvetica findfont exch scalefont setfont}{findfont exch scalefont setfont}ifelse}
+        /Tf
+        {
+          exch dup /Helv eq
+          {
+            pop /Helvetica dup findfont
+          }
+          {dup findfont}ifelse
+
+          % re-encode the font to PDFDocEncoding
+          dup length dict begin
+          {
+            1 index /FID ne 2 index /UniqueID ne and { def } { pop pop } ifelse
+          } forall
+          /Encoding /PDFDocEncoding /Encoding findresource def
+          /FontName /Helvetica-PDFDocEncoding def
+          currentdict
+          end
+          definefont
+          exch scalefont setfont
+        }
         /r  {aload pop setrgbcolor} % Can't find this actually defined anywhere, but Acrobat seems to honour it :-(
         /rg {setrgbcolor}
         /RG {setrgbcolor}
@@ -3068,114 +4593,247 @@ currentdict /set_bc_color undef
         /k  {setcmykcolor}
         /K  {setcmykcolor}
       >> def
+
       dup /DA knownoget {
         length string /tempstr exch def
         dup /DA get tempstr copy pop
+
+        gstate
+        mark
         {
-          %% This is kind of ugly, we use token to process the string
-          %% and process each token separately.
-          tempstr
-          token {
-            exch /tempstr exch def
-            %% If the token is a name
-            %%
-            dup type /nametype eq {
-              %% Is it a name we want to take actionon
-              dup DA_Action_Dict exch known {
-                DA_Action_Dict exch get exec
+          {
+            %% This is kind of ugly, we use token to process the string
+            %% and process each token separately.
+            tempstr
+            token {
+              exch /tempstr exch def
+              %% If the token is a name
+              %%
+              dup type /nametype eq {
+                %% Is it a name we want to take actionon
+                dup DA_Action_Dict exch known {
+                  DA_Action_Dict exch get exec
+                }{
+                  %% Its not a name we know, is it executable
+                  dup xcheck {exec} if
+                } ifelse
               }{
-                %% Its not a name we know, is it executable
-                dup xcheck {exec} if
-              } ifelse
+                %% Not a name, just make it executable and execute it
+                cvx exec
+              }ifelse
             }{
-              %% Not a name, just make it executable and execute it
-              cvx exec
+              exit
             }ifelse
-          }{
-            exit
-          }ifelse
-        } loop
+          } loop
+        } stopped
+        {cleartomark setgstate}
+        {cleartomark pop} ifelse
       } {
         0 setgray
-        /Helvetica findfont 12 scalefont setfont
+        /Helvetica findfont
+        % re-encode the font to PDFDocEncoding
+        dup length dict begin
+        {
+          1 index /FID ne 2 index /UniqueID ne and { def } { pop pop } ifelse
+        } forall
+        /Encoding /PDFDocEncoding /Encoding findresource def
+        /FontName /Helvetica-PDFDocEncoding def
+        currentdict
+        end
+        /Helvetica-PDFDocEncoding exch definefont
+        12 scalefont setfont
       }ifelse
+
       %% draw the border, if we don't have a border style dictionary, draw a default one.
-      dup /BS knownoget {
+      dup /BS knownoget
+      {
         pop dup drawborder
       }{
         newpath
         0 setgray 1 setlinewidth
-        dup annotrect 4 -1 roll 1 add 4 -1 roll 1 add 4 -1 roll 2 sub 4 -1 roll 2 sub
-        4 2 roll moveto
-        currentpoint exch 3 index add exch lineto
-        currentpoint 2 index add lineto
-        exch currentpoint 3 1 roll exch sub exch lineto
-        currentpoint 3 -1 roll sub lineto stroke
+        dup annotrect
+        5 index /RD knownoget {
+          applyRD
+          4 -1 roll 4 -1 roll 4 -1 roll 4 -1 roll
+          4 2 roll
+        } {
+          4 -1 roll 1 add 4 -1 roll 1 add 4 -1 roll 2 sub 4 -1 roll 2 sub
+          4 2 roll
+        }ifelse
+        moveto
+        currentpoint exch 3 index add exch
+        lineto
+        currentpoint 2 index add
+        lineto
+        exch currentpoint 3 1 roll exch sub exch
+        lineto
+        currentpoint 3 -1 roll sub
+        lineto stroke
       }ifelse
 
+      gsave % in case we rotate the contents
       %% Start the current point at the top left of the annotation Rect
       %%
-      dup annotrect 4 -1 roll 2 add 4 -1 roll 2 add 4 -1 roll 4 sub 4 -1 roll 4 sub
-      3 -1 roll add 2 index exch moveto 1 index add
+      dup /Rotate knownoget
+      % x y w h - x' w' x' y'
+      {
+        dup 90 eq {
+          pop
+          dup annotrect
+          5 index /RD knownoget {
+            applyRD
+          } if
+          exch pop 3 -1 roll 2 index
+          moveto 90 rotate
+          1 index add
+        } {
+          dup 180 eq {
+            pop
+            dup annotrect
+            5 index /RD knownoget {
+              applyRD
+            } if
+            pop 3 -1 roll 1 index add -1 mul exch 1 index -1 mul 4 -1 roll
+            moveto 180 rotate
+            1 index add
+          }{
+            270 eq {
+              dup annotrect
+              5 index /RD knownoget {
+                applyRD
+              } if
+              dup 4 -1 roll add 3 -1 roll 3 index add exch
+              moveto 270 rotate
+              exch pop currentpoint
+              pop dup 3 -1 roll add
+            }{
+              dup annotrect
+              5 index /RD knownoget {
+                applyRD
+                3 -1 roll add 2 index exch
+                moveto 1 index add
+              }{
+                4 -1 roll 2 add 4 -1 roll 2 add 4 -1 roll 4 sub 4 -1 roll 4 sub
+                3 -1 roll add 2 index exch
+                moveto 1 index add
+              } ifelse
+            } ifelse
+          } ifelse
+        } ifelse
+      }{
+         dup annotrect
+          5 index /RD knownoget {
+            applyRD
+            3 -1 roll add 2 index exch
+            moveto 1 index add
+          }{
+           4 -1 roll 2 add 4 -1 roll 2 add 4 -1 roll 4 sub 4 -1 roll 4 sub
+           3 -1 roll add 2 index exch
+           moveto 1 index add
+         } ifelse
+      } ifelse
 
       %% Get the Contents string, if we don't have one, we're done
       %%
       2 index /Contents knownoget {
-        %% Check for UTF16-BE, we probably don't work properly with this yet.
-        %%
-        dup 0 get 254 eq 1 index 1 get 255 eq and
-        {
-          /FallBackFont /Identity-UTF16-H [/CIDFallBack] composefont 12 scalefont setfont
-          dup length 2 div 1 sub 0 1 3 -1 roll {
-                                    %% llx urx (string) index
-            1 index exch 2 mul 2 getinterval        %% llx urx (string) (substring)
-            dup stringwidth pop currentpoint pop add 3 index gt {
-              currentpoint exch pop 4 index exch 12 sub moveto
-            } if
-            show
-          } for
-          pop
-        }
-        {
-          %% Heuristic to determine the height (ascender to descender) of the text
-          %% for when we move down a line.
-          gsave
-          /..TextHeight (Hy) false charpath pathbbox exch pop exch sub exch pop def
-          grestore
-          %% and use it immediatley to start the text one line down
-          %%
-          currentpoint ..TextHeight sub moveto
+        dup length 0 gt {
+          PDFusingtransparency {
+            .begintransparencytextgroup
+          } if
+          %% Check for UTF16-BE, we probably don't work properly with this yet.
+          %% (If the string is less than 4 bytes its either not UTF16-BE or it is
+          %% but has no actual content)
+          dup length 4 ge {
+            dup 0 get 254 eq 1 index 1 get 255 eq and
+          }{
+            //false
+          } ifelse
 
-          %% Now we process each character code in the string. If we find
-          %% a /r/ or /n then we drop a line. If the character would end up
-          %% outside the Annot Rect, then we drop a line before showing it.
-          %%
-          dup length 1 sub 0 1 3 -1 roll {
-                                    %% llx urx (string) index
-            1 index exch get        %% llx urx (string) int
-            dup 10 eq 1 index 13 eq or {
-              pop
-              currentpoint exch pop 3 index exch ..TextHeight sub moveto
-            } {
-              1 string dup 0 4 -1 roll
-              put dup                 %% llx urx (string) (int) (int)
-              stringwidth pop currentpoint pop add 3 index gt {
-                currentpoint exch pop 4 index exch ..TextHeight sub moveto
+          {
+            /FallBackFont /Identity-UTF16-H [/CIDFallBack] composefont 12 scalefont setfont
+            dup length 2 div 1 sub 0 1 3 -1 roll {
+                                      %% llx urx (string) index
+             1 index exch 2 mul 2 getinterval        %% llx urx (string) (substring)
+              dup stringwidth pop currentpoint pop add 3 index gt {
+                currentpoint exch pop 4 index exch 12 sub moveto
               } if
               show
-            } ifelse
-          } for
+            } for
+            pop
+          }
+          {
+            %% Heuristic to determine the height (ascender to descender) of the text
+            %% for when we move down a line.
+            gsave
+            /..TextHeight (Hy) //false charpath pathbbox exch pop exch sub exch pop def
+            grestore
+            %% and use it immediatley to start the text one line down
+            %%
+            currentpoint ..TextHeight sub moveto
+            %% Now we process each character code in the string. If we find
+            %% a /r/ or /n then we drop a line. If the character would end up
+            %% outside the Annot Rect, then we drop a line before showing it.
+            %%
+            dup length 1 sub 0 1 3 -1 roll {
+                                      %% llx urx (string) index
+              1 index exch get        %% llx urx (string) int
+              dup 10 eq 1 index 13 eq or {
+                pop
+                currentpoint exch pop 3 index exch ..TextHeight sub moveto
+              } {
+                1 string dup 0 4 -1 roll
+                put dup                 %% llx urx (string) (int) (int)
+                stringwidth pop currentpoint pop add 3 index
+                gt {
+                  currentpoint exch pop 4 index exch ..TextHeight sub moveto
+                } if
+                show
+              } ifelse
+            } for
+            pop
+          }ifelse
+          PDFusingtransparency {
+            .endtransparencytextgroup
+          } if
+        }
+        {
           pop
-        }ifelse
+        } ifelse
       } if
       pop pop
+
+      grestore % in case the contents were rotated
+      dup /CL knownoget {
+        dup length 6 eq {
+          dup aload pop pop pop
+        } {
+          dup length 4 eq {
+            dup aload pop
+          } {
+            pop 0
+          } ifelse
+        } ifelse
+        4 2 roll
+        exch 4 -1 roll sub
+        3 1 roll exch sub
+        atan exch
+        aload pop moveto lineto lineto
+        currentpoint
+%        stroke
+%        0 1 0 setrgbcolor
+        moveto currentpoint translate 0 0 moveto
+        360 exch sub rotate
+        currentpoint
+        -5 -8 rlineto
+        moveto
+        5 -8 rlineto
+        stroke
+      } if
+      //endannottransparency exec
       //false
       grestore
-    }
-    {
-      //true
     } ifelse
-  } bdef
+  } bind executeonly def
 
   /frame {
     { 255 div } forall setrgbcolor
@@ -3199,11 +4857,25 @@ currentdict /set_bc_color undef
    }
    gsave 1 -1 translate 0.75 setgray dup exec grestore
    exec
-  } bdef
+  } bind executeonly def
 
   % (text) y h -> -
   /text {
-    /Times-Bold findfont exch scalefont setfont  % (text) y
+    PDFusingtransparency {
+      .begintransparencytextgroup
+    } if
+    /Times-Bold findfont
+    % re-encode the font to PDFDocEncoding
+    dup length dict begin
+    {
+      1 index /FID ne 2 index /UniqueID ne and { def } { pop pop } ifelse
+    } forall
+    /Encoding /PDFDocEncoding /Encoding findresource def
+    /FontName /Times-Bold-PDFDocEncoding def
+    currentdict
+    end
+    /Times-Bold-PDFDocEncoding exch definefont
+    exch scalefont setfont  % (text) y
     gsave
     0 0 moveto
     1 index //false charpath flattenpath pathbbox
@@ -3212,7 +4884,10 @@ currentdict /set_bc_color undef
     95 add exch moveto
     gsave 1 -1 rmoveto  0.75 setgray dup show grestore
     show
-  } bdef
+    PDFusingtransparency {
+      .endtransparencytextgroup
+    } if
+  } bind executeonly def
 
   /red   <ef4023> readonly def
   /green <3fae49> readonly def
@@ -3222,44 +4897,44 @@ currentdict /set_bc_color undef
     /Approved {
       //green //frame exec
       (APPROVED) 13 30 //text exec
-    } bdef
+    } bind executeonly def
     /AsIs {
       //red //frame exec
       (AS IS) 13 30 //text exec
-    } bdef
+    } bind executeonly def
     /Confidential {
       //red //frame exec
       (CONFIDENTIAL) 17 20 //text exec
-    } bdef
+    } bind executeonly def
     /Departmental {
       //blue //frame exec
       (DEPARTMENTAL) 17 20 //text exec
-    } bdef
+    } bind executeonly def
     /Draft {
       //red //frame exec
       (DRAFT) 13 30 //text exec
-    } bdef
+    } bind executeonly def
     /Experimental {
       //blue //frame exec
       (EXPERIMENTAL) 17 20 //text exec
-    } bdef
+    } bind executeonly def
     /Expired {
       //red //frame exec
       (EXPIRED) 13 30 //text exec
-    } bdef
+    } bind executeonly def
     /Final {
       //red //frame exec
       (FINAL) 13 30 //text exec
-    } bdef
+    } bind executeonly def
     /ForComment {
       //green //frame exec
       (FOR COMMENT) 17 20 //text exec
-    } bdef
+    } bind executeonly def
     /ForPublicRelease {
       //green //frame exec
       (FOR PUBLIC) 26 18 //text exec
       (RELEASE)  8.5 18 //text exec
-    } bdef
+    } bind executeonly def
     /NotApproved {
       //red //frame exec
       (NOT APPROVED) 17 20 //text exec
@@ -3268,23 +4943,25 @@ currentdict /set_bc_color undef
       //red //frame exec
       (NOT FOR) 26 18 //text exec
       (PUBLIC RELEASE) 8.5 18 //text exec
-    } bdef
+    } bind executeonly def
     /Sold {
       //blue //frame exec
       (SOLD) 13 30 //text exec
-    } bdef
+    } bind executeonly def
     /TopSecret {
       //red //frame exec
       (TOP SECRET) 14 26 //text exec
-    } bdef
+    } bind executeonly def
   currentdict end readonly def
 
   {/text/frame/red/green/blue} {currentdict exch undef} forall
 
   /Stamp  {
-    dup /AP oknown {
+    //ValidateAP exec
+    {
       //true
     } {
+      //startannottransparency exec
       dup calc_annot_scale
       2 copy mul 0 ne
       {
@@ -3295,38 +4972,532 @@ currentdict /set_bc_color undef
           2 index 2 div add exch
           3 index 2 div add exch translate  % dx dy
 
-          50 div exch 190 div .min dup scale
+          50 div exch 190 div .min dup 0.0 eq {pop 1.0} if dup scale
 
           /Name knownoget not { /Draft } if
           //stamp_dict 1 index known not { exch pop /Draft exch } if
           //stamp_dict exch get exec
       }
-      {pop pop (   **** Warning: ignoring annotation with scale factor of 0\n) pdfformaterror}
+      {
+        pop pop
+        (   **** Error: ignoring annotation with scale factor of 0\n) pdfformaterror
+        (               Output may be incorrect.\n) pdfformaterror
+      }
       ifelse
+      //endannottransparency exec
       //false
     } ifelse
-  } bdef
+  } bind executeonly def
 
-  currentdict /quadpoints2basis undef
+  /Popup {
+    dup /Open oknown {
+      dup /Open get {
+        //ValidateAP exec
+        {
+          //true
+        } {
+          gsave
+          //startannottransparency exec
+          newpath
+          0.05 setlinewidth
+          dup /Parent .knownget {
+            oforce
+          } {
+            dup /P .knownget {
+              oforce
+            } {
+              dup
+            } ifelse
+          } ifelse
+          /C .knownget {
+            aload pop
+          }{
+            1 1 0
+          }ifelse
+          setrgbcolor
+          dup /Rect get
+          dup aload pop
+          2 index sub
+          exch 3 index sub exch
+          4 copy
+          gsave 1 setgray rectfill grestore
+          gsave 0 setgray rectstroke grestore
+          1 index /Parent .knownget {
+            oforce
+          }{
+            1 index /P .knownget {
+              oforce
+            }{
+              1 index
+            } ifelse
+          }ifelse
+          dup
+          /Contents .knownget {
+            gsave
+            PDFusingtransparency {
+              .begintransparencytextgroup
+            } if
+            0 setgray
+            /Helvetica findfont
+            % re-encode the font to PDFDocEncoding
+            dup length dict begin
+            {
+              1 index /FID ne 2 index /UniqueID ne and { def } { pop pop } ifelse
+            } forall
+            /Encoding /PDFDocEncoding /Encoding findresource def
+            /FontName /Helvetica-PDFDocEncoding def
+            currentdict
+            end
+            /Helvetica-PDFDocEncoding exch definefont
+            9 scalefont setfont
+            2 index aload pop 3 1 roll pop pop 30 sub exch 5 add exch
+            moveto show
+            PDFusingtransparency {
+              .endtransparencytextgroup
+            } if
+            grestore
+          } if
+          exch
+          dup aload pop 3 -1 roll pop exch 2 index sub -15
+          4 copy rectfill
+          0 setgray rectstroke
+          exch
+          /T .knownget {
+            gsave
+            PDFusingtransparency {
+              .begintransparencytextgroup
+            } if
+            0 setgray
+            /Helvetica findfont
+            % re-encode the font to PDFDocEncoding
+            dup length dict begin
+            {
+              1 index /FID ne 2 index /UniqueID ne and { def } { pop pop } ifelse
+            } forall
+            /Encoding /PDFDocEncoding /Encoding findresource def
+            /FontName /Helvetica-PDFDocEncoding def
+            currentdict
+            end
+            /Helvetica-PDFDocEncoding exch definefont
+            9 scalefont setfont
+            dup stringwidth pop
+            2 index aload pop pop exch pop exch sub
+            exch sub 2 div 2 index aload pop 3 1 roll pop pop 11 sub 3 1 roll add exch moveto
+            show
+            PDFusingtransparency {
+              .endtransparencytextgroup
+            } if
+            grestore
+          } if
+          grestore
+          //endannottransparency exec
+          //false
+        } ifelse
+      } {
+        pop //false
+      }ifelse
+    } {
+      pop //false
+    }ifelse
+  } bind executeonly def
+
+  /Redact {
+    %% Redact annotations are part of a process, a Redact annotation is only present
+    %% until the content is removed, before that the content should be present and
+    %% I beleive we should print it. So take no action for Redact annotations if they
+    %% have no appearance.
+    //ValidateAP exec
+    {
+      //true
+    } {
+      //false
+    } ifelse
+  } bind executeonly def
+
+currentdict /startannottransparency undef
+currentdict /endannottransparency undef
+currentdict /ValidateAP undef
+currentdict /quadpoints2basis undef
+currentdict /drawellipse undef
 currentdict end readonly def
+
+/.PDFDrawAnnotType?
+{
+    //false exch
+    /ShowAnnotTypes where
+    {
+      /ShowAnnotTypes get
+      {
+        dup /* eq exch 2 index eq or
+        {
+          pop //true exch
+          exit
+        } if
+     } forall
+     pop
+   }
+   {pop pop //true}
+   ifelse
+} bind executeonly def
+
+/.PDFPreserveAnnotType?
+{
+    //false exch
+    /PreserveAnnotTypes where
+    {
+      /PreserveAnnotTypes get
+      {
+        dup /* eq exch 2 index eq or
+        {
+          pop //true exch
+          exit
+        } if
+     } forall
+     pop
+   }
+   {pop pop //true}
+   ifelse
+} bind executeonly def
 
 /drawannot {		% <annot> drawannot -
   dup annotvisible {
     gsave
     dup dup /Subtype knownoget {
-      //drawannottypes exch .knownget { exec } { //true } ifelse
+      dup //.PDFDrawAnnotType? exec
       {
-        dup calc_annot_scale 2 copy mul 0 ne {3 -1 roll drawwidget}{(   **** Warning: ignoring annotation with scale factor of 0\n) pdfformaterror}ifelse % Draw rejected annots as widgets
-      } if			% type known
+        //drawannottypes exch .knownget { exec } { //true } ifelse
+        {
+          dup calc_annot_scale 2 copy mul 0 ne
+          {
+            3 -1 roll drawwidget
+          }
+          {
+            (   **** Error: ignoring annotation with scale factor of 0\n) pdfformaterror
+            (               Output may be incorrect.\n) pdfformaterror
+          }ifelse % Draw rejected annots as widgets
+        } if			% type known
+      }
+      {
+        pop
+      }ifelse
     } {
       pop
-      (   **** Warning: /Annot dict without required /Subtype entry is ignored.\n)
+      (   **** Error: Ignoring /Annot dict without required /Subtype entry.\n)
       pdfformaterror
+      (               Output may be incorrect.\n) pdfformaterror
     } ifelse
     grestore
   } if pop			% annotvisible
-} bdef
+} bind executeonly def
 currentdict /drawannottypes undef
+
+% Draw an annotation.
+
+/loadannot {
+  dup /AP .knownget {                                       % <<Annot dict>> <<Appearance dictionary>> true | false
+    oforce
+
+    dup {                                                       % <<Annot dict>> <<Appearance dict>> /Key <</Key dict>>
+    oforce                                                  % <<Annot dict>> <<Appearance dict>> /Key <<resolved /Key dict>>
+
+    %%
+    %% Check to see if the apperance key has a simple stream or a dictionary of states
+    %%
+    dup /Subtype known                                      % <<Annot dict>> <<Appearance dict>> /Key <<resolved /Key dict>> bool
+    {
+      %% Simple appearance stream
+      DoAppearance                                          % <<Annot dict>> <<Appearance dict>> /Key
+      2 index                                               % <<Annot dict>> <<Appearance dict>> /Key <<Annot dict>>
+      /AP <<                                                % <<Annot dict>> <<Appearance dict>> /Key <<Annot dict>> /AP <<
+      4 -1 roll MakeAppearanceName cvx cvn >> put           % <<Annot dict>> <<Appearance dict>>
+    } {
+      %% dictionary of states   <<Annot dict>> <<Appearance dict>> /Key <<appearance states dict>>
+      dup                                                   % <<Annot dict>> <<Appearance dict>> /Key <<appearance states dict>> <<appearance states dict>>
+      {                                                     % <<Annot dict>> <<Appearance dict>> /Key <<appearance states dict>> /StateKey <<State dictionary>>
+        oforce                                              % <<Annot dict>> <<Appearance dict>> /Key <<appearance states dict>> /StateKey <<resolved State dictionary>>
+        DoAppearance                                        % <<Annot dict>> <<Appearance dict>> /Key <<appearance states dict>> /StateKey
+        1 index exch                                        % <<Annot dict>> <<Appearance dict>> /Key <<appearance states dict>> <<appearance states dict>> /StateKey
+        MakeAppearanceName cvx cvn                          % <<Annot dict>> <<Appearance dict>> /Key <<appearance states dict>> <<appearance states dict>> /StateKey {}
+        put                                                 % <<Annot dict>> <<Appearance dict>> /Key <<appearance states dict>>
+      } forall
+      put                                                   % <<Annot dict>> <<Appearance dict>> /Key
+      dup
+    }ifelse
+    } forall
+    pop                                                   % <<Annot dict>>
+  } if
+
+  %% Parent (or /P) references will be incorrect. Remove them
+  %% for now as they are optional.
+  dup /Popup known {dup /Popup undef} if
+  dup /IRT known {dup /IRT undef} if
+  dup /RT known {dup /RT undef} if
+  dup /P known {dup /P undef} if
+  dup /Parent known {dup /Parent undef} if
+
+  %% Resolve any indirect references. May need further work :-(
+  {
+    %% We know /AP doesn't need processing, we handled that above...
+    1 index /AP eq not {
+      dup {oforce} stopped not {exch pop} if
+      dup type /dicttype eq{
+        dup
+        {
+          dup {oforce} stopped not {exch pop} if
+          2 index 3 1 roll put
+        } forall
+        Removepdfobj#
+      } if
+      dup type /arraytype eq {
+        0 1 2 index length 1 sub{
+          dup 2 index exch get dup {oforce} stopped not {exch pop} if
+          2 index 3 1 roll put
+        } for
+      } if
+    } if
+  } forall
+} bind executeonly def
+
+
+/ApplyCTMToQuadPoints {
+  %% Nasty hackery here really. We need to undo the HWResolution scaling which
+  %% is done by pdfwrite. Default is 720 dpi, so 0.1. We also need to make
+  %% sure that any translation of the page (because its been rotated for example)
+  %% is also modified by the requisite amount. SO we ned to calculate a matrix
+  %% which does the scaling and concatenate it with the current matrix.
+  %% Do this inside a gsave/grestore pair to avoid side effects!
+
+  gsave
+  currentpagedevice /HWResolution get
+  aload pop exch 72 exch div exch 72 exch div
+  matrix 3 1 roll 2 index 3 3 -1 roll put
+  1 index 0 3 -1 roll put
+  matrix currentmatrix exch matrix concatmatrix
+  setmatrix
+
+  oforce
+
+  %% QuadPoints are given as 'n' sequences of 8 numbers.
+
+  mark exch aload counttomark 1 roll
+  counttomark 1 sub 2 div cvi {
+    transform
+    counttomark 1 sub 2 roll
+  } repeat
+  counttomark -1 roll astore
+
+  exch pop % the mark
+
+  grestore
+} bind executeonly def
+
+/preserveannottypes 20 dict begin
+
+/Circle {mark exch loadannot /ANN pdfmark  //false} bind executeonly def
+/FileAttachment {mark exch loadannot /ANN pdfmark  //false} bind executeonly def
+/FreeText {mark exch loadannot /ANN pdfmark  //false} bind executeonly def
+
+/Highlight {
+  mark exch
+  dup /QuadPoints .knownget {
+    1 index /QuadPoints 3 -1 roll
+    ApplyCTMToQuadPoints
+    put
+  } if
+  loadannot /ANN pdfmark  //false
+} bind executeonly def
+
+/Ink {mark exch loadannot /ANN pdfmark  //false} bind executeonly def
+
+/Line {
+  mark exch dup /L .knownget {
+    aload 5 1 roll transform 4 -2 roll transform 4 2 roll
+    5 -1 roll astore
+    1 index /L 3 -1 roll put
+  } if
+  loadannot /ANN pdfmark //false
+} bind executeonly def
+
+/Link {
+    /NO_PDFMARK_DESTS where {pop NO_PDFMARK_DESTS not}{//true}ifelse
+    {
+    mark exch
+    dup /BS knownoget { << exch { oforce } forall >> /BS exch 3 -1 roll } if
+    dup /F knownoget { /F exch 3 -1 roll } if
+    dup /C knownoget { /Color exch 3 -1 roll } if
+    dup /Rect knownoget { /Rect exch 3 -1 roll } if
+    dup /Border knownoget {
+      dup type /arraytype eq {
+        dup length 3 lt
+      } {
+        //true
+      } ifelse {
+        pop [ 0 0 0 ] % Following AR5 use invisible border.
+      } if
+      /Border exch 3 -1 roll
+    } if
+    dup /A knownoget {
+      dup /URI known {
+        /A mark 3 2 roll    % <<>> /A [ <<action>>
+        { oforce } forall
+        .dicttomark
+        3 2 roll
+      } {
+        dup /S knownoget  {
+          %% Because we process GoTo Destinations into absolute references in the PDF file
+          %% we need to resolve the /D or /Dest. However, we must *not* do this for
+          %% GoToR Destinations because (obviously) those are in a different file and
+          %% we cannot resolve them into absolute references. We don't need to anyway
+          %% because that file must already have a named destination.
+          dup /GoTo eq {
+            pop
+            dup /D knownoget {
+              exch pop exch dup length dict copy dup /Dest 4 -1 roll put
+            } if
+          }{
+            dup /GoToR eq {
+              pop /A mark       % <<..action dict..>> /A [
+              3 2 roll          % /A [ <<..action dict..>>
+              { oforce } forall
+              .dicttomark
+              3 2 roll
+            }{
+              dup /Launch eq {
+                pop /A mark       % <<..action dict..>> /A [
+                3 2 roll          % /A [ <<..action dict..>>
+                { oforce } forall
+                .dicttomark
+                3 2 roll
+              }{
+                /Named eq {
+                  /N knownoget {
+                    namedactions exch .knownget {
+                      exec {
+                        pop
+                        (   **** Warning: Ignoring a named action pointing out of the document page range.\n)
+                        pdfformatwarning
+                      } {
+                        /Page exch 3 -1 roll
+                      } ifelse
+                    } if
+                  } if
+                } if
+              }ifelse
+            } ifelse
+          } ifelse
+        } if
+      } ifelse
+    } if
+    { linkdest } stopped {
+      cleartomark
+      (   **** Warning: Link annotation points out of the document page range.\n)
+      pdfformatwarning
+    } {
+      pop
+      {
+        %% Need to remove any '/.gs.pdfobj# key/value pairs from any dictionaries
+        counttomark array astore dup length 1 sub 0 1 3 -1 roll {
+          dup 2 index exch get Removepdfobj# 2 index 3 1 roll put
+        } for aload pop
+        /LNK pdfmark
+      } stopped {cleartomark} if
+    } ifelse
+    }{pop} ifelse
+    //false
+} bind executeonly def
+
+/Movie {mark exch loadannot /ANN pdfmark  //false} bind executeonly def
+/Popup {mark exch loadannot /ANN pdfmark  //false} bind executeonly def
+/Sound {mark exch loadannot /ANN pdfmark  //false} bind executeonly def
+/Square {mark exch loadannot /ANN pdfmark //false} bind executeonly def
+/Stamp {mark exch loadannot /ANN pdfmark  //false} bind executeonly def
+
+/StrikeOut {
+  mark exch
+  dup /QuadPoints .knownget {
+    1 index /QuadPoints 3 -1 roll
+    ApplyCTMToQuadPoints
+    put
+  } if
+  loadannot /ANN pdfmark  //false
+} bind executeonly def
+
+/Squiggly {
+  mark exch
+  dup /QuadPoints .knownget {
+    1 index /QuadPoints 3 -1 roll
+    ApplyCTMToQuadPoints
+    put
+  } if
+  loadannot /ANN pdfmark  //false
+} bind executeonly def
+
+/Text {mark exch loadannot /ANN pdfmark  //false} bind executeonly def
+/TrapNet {mark exch loadannot /ANN pdfmark  //false} bind executeonly def
+
+/Underline {
+  mark exch
+  dup /QuadPoints .knownget {
+    1 index /QuadPoints 3 -1 roll
+    ApplyCTMToQuadPoints
+    put
+  } if
+  loadannot /ANN pdfmark  //false
+} bind executeonly def
+
+%% Widget annotations are only used with AcroForms, and since we don't preserve AcroForms
+%% we don't want to preserve widget annotations either, because the consumer of the new
+%% PDF won't know what values they should take. So we draw widget annotations instead. If we
+%% ever preserve AcroForms then we should alter this to preserve Widgets as well.
+%% simply chane "drawannot" to "mark exch loadannot /ANN pdfmark"
+/Widget {mark exch {drawannot} PDFSTOPONERROR {exec}{stopped {(Error: Ignoring invalid annotation, output may be incorrect.\n) pdfformaterror} if} ifelse cleartomark //false} bind executeonly def
+
+currentdict end readonly def
+
+/preserveannot {		% <annot> preserveannot -
+  dup /.gs.pdfobj# known {
+    dup /.gs.pdfobj# undef
+  } if
+
+  gsave
+  dup dup /Subtype knownoget {
+    dup //.PDFPreserveAnnotType? exec
+    {
+      //preserveannottypes exch .knownget { exec } { //true } ifelse
+      {
+        dup annotvisible {
+          dup calc_annot_scale 2 copy mul 0 ne
+          {
+            3 -1 roll drawwidget
+          }
+          {
+            (   **** Error: ignoring annotation with scale factor of 0\n) pdfformaterror
+            (               Output may be incorrect.\n) pdfformaterror
+          }ifelse % Draw rejected annots as widgets
+        } {
+            pop
+        }ifelse
+      } if
+    }
+    {
+      % Not preserving this type of annotation
+      % discard teh Subtype
+      pop
+      % copy the Annot dictionary and try drawing it instead
+      dup drawannot
+    } ifelse
+    % type known
+  } {
+    pop
+    (   **** Error: Ignoring /Annot dict without required /Subtype entry.\n)
+    pdfformaterror
+    (               Output may be incorrect.\n) pdfformaterror
+  } ifelse
+  grestore
+} bind executeonly def
+
+currentdict /preserveannottypes undef
+currentdict /.PDFDrawAnnotType? undef
 
 % ============================ AcroForm fields ============================ %
 
@@ -3337,7 +5508,7 @@ currentdict /drawannottypes undef
   } {
     oget
   } ifelse
-} bdef
+} bind executeonly def
 
 % All procedures have the signature:
 % <acroform> <field> <annot|field> foo <acroform> <field> <annot|field>
@@ -3371,7 +5542,7 @@ currentdict /drawannottypes undef
         } ifelse
     } ifelse
   } ifelse
-} bdef
+} bind executeonly def
 
 /Tx {
   dup /AP known {
@@ -3409,8 +5580,8 @@ currentdict /drawannottypes undef
       { 1 index exch write== } forall
       dup 3 index /MaxLen pget not { 0 } if write=
       dup 3 index /V pget not {
-        3 index /DV pget not { () } if write==
-      } if
+        3 index /DV pget not { () } if
+      } if write==
       dup 3 index /Ff pget not { 0 } if write=
       dup 3 index /Q pget not { 0 } if write=
       dup (Tform ET) write=
@@ -3419,15 +5590,59 @@ currentdict /drawannottypes undef
       dup 1 1 3 -1 roll drawwidget
     } if
   } ifelse
-} bdef
+} bind executeonly def
 
 /Ch {
-  (Ch is not yet implemened) //== exec
-} bdef
+  dup /AP known 3 index /NeedAppearances knownoget not { //true } if not and {
+    dup 1 1 3 -1 roll drawwidget
+  } {
+    %% If we don't have a NeedApperances, treat as true, because Acrobat
+    %% always regenerates Appearances anyway.
+    2 index /NeedAppearances knownoget not { //true } if {
+      dup /AP << /N 10 dict dup cvx begin >> put
+      /Subtype /Form def
+      /BBox [ 0 0 4 index /Rect oget { oforce } forall  3 -1 roll sub abs 3 1 roll sub abs exch ] def
+      /Resources 3 index /DR pget not { 0 dict } if def
+      /File 1000 string dup 3 1 roll def
+      /Length 1000 def
+                            % <acroform> <field> <annot> (string)
+      /NullEncode filter    % <acroform> <field> <annot> file
+
+      dup (BT ) writestring
+      2 index /DA pget not { () } if
+      [ exch
+        { token {
+            dup /Tf eq {
+              2 index 0 eq {
+                /BBox load 3 get
+                0.75 mul   % empirical constant
+                4 -1 roll pop 3 1 roll
+              } if
+            } if
+            exch
+          } {
+            exit
+          } ifelse
+        } loop
+      ]
+      { 1 index exch write== } forall
+      dup 3 index /MaxLen pget not { 0 } if write=
+      dup 3 index /V pget not {
+        3 index /DV pget not { () } if
+      } if write==
+      dup 3 index /Ff pget not { 0 } if write=
+      dup 3 index /Q pget not { 0 } if write=
+      dup (Tform ET) write=
+      end
+      closefile             %  <acroform> <field> <annot>
+      dup 1 1 3 -1 roll drawwidget
+    } if
+  } ifelse
+} bind executeonly def
 
 /Sig {
   (Sig is not yet implemened ) //== exec
-} bdef
+} bind executeonly def
 
 currentdict end def
 
@@ -3441,7 +5656,7 @@ currentdict end def
    } if
  } if
  pop pop
-} bdef
+} bind executeonly def
 
 % We distinguish 4 types of nodes on the form field tree:
 %  - non-terminal field - has a kid that refers to the parent (or anywhere else)
@@ -3453,24 +5668,29 @@ currentdict end def
 
 /draw_form_field { % <field> draw_form_field -
   dup /Kids knownoget {                       % field []
-    dup 0 oget /Parent knownoget {            % field [] kid
-      pop % mon-terminal field                % field []
-      exch pop                                % []
-      { oforce draw_form_field } forall
+    dup length 0 gt {
+      dup 0 oget /Parent knownoget {            % field [] kid
+        pop % mon-terminal field                % field []
+        exch pop                                % []
+        { oforce draw_form_field } forall
+      } {
+        pop draw_terminal_field % separate annots % -
+      } ifelse
     } {
-      pop draw_terminal_field % separate annots % -
+        (  **** Error: Ignoring empty /Kids array in Form field.\n) pdfformaterror
+        (              Output may be incorrect.\n) pdfformaterror
     } ifelse
   } {
     draw_terminal_field % merged annotation   % -
   } ifelse
-} bdef
+} bind executeonly def
 
 /draw_acro_form {		% <form> draw_acro_form -
   dup /Fields knownoget {
     { oforce draw_form_field } forall
   } if
   pop
-} bdef
+} bind executeonly def
 
 currentdict /draw_terminal_field_dict undef
 

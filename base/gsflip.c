@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -308,17 +308,20 @@ flipNx1to8(byte * buffer, const byte ** planes, int offset, int nbytes,
     /* This is only needed for DeviceN colors, so it can be slow. */
     uint mask = (1 << bits_per_sample) - 1;
     int bi, pi;
-    sample_store_declare_setup(dptr, dbit, dbbyte, buffer, 0, bits_per_sample);
+    byte *dptr = buffer;
+    int dbit = 0;
+    byte dbbyte = 0;
 
     for (bi = 0; bi < nbytes * 8; bi += bits_per_sample) {
         for (pi = 0; pi < num_planes; ++pi) {
             const byte *sptr = planes[pi] + offset + (bi >> 3);
             uint value = (*sptr >> (8 - (bi & 7) - bits_per_sample)) & mask;
 
-            sample_store_next8(value, dptr, dbit, bits_per_sample, dbbyte);
+            if (sample_store_next8(value, &dptr, &dbit, bits_per_sample, &dbbyte) < 0)
+                return_error(gs_error_rangecheck);
         }
     }
-    sample_store_flush(dptr, dbit, bits_per_sample, dbbyte);
+    sample_store_flush(dptr, dbit, dbbyte);
     return 0;
 }
 
@@ -329,7 +332,9 @@ flipNx12(byte * buffer, const byte ** planes, int offset, int nbytes,
 {
     /* This is only needed for DeviceN colors, so it can be slow. */
     int bi, pi;
-    sample_store_declare_setup(dptr, dbit, dbbyte, buffer, 0, 12);
+    byte *dptr = buffer;
+    int dbit = 0;
+    byte dbbyte = 0;
 
     for (bi = 0; bi < nbytes * 8; bi += 12) {
         for (pi = 0; pi < num_planes; ++pi) {
@@ -338,10 +343,10 @@ flipNx12(byte * buffer, const byte ** planes, int offset, int nbytes,
                 (bi & 4 ? ((*sptr & 0xf) << 8) | sptr[1] :
                  (*sptr << 4) | (sptr[1] >> 4));
 
-            sample_store_next_12(value, dptr, dbit, dbbyte);
+            sample_store_next_12(value, &dptr, &dbit, &dbbyte);
         }
     }
-    sample_store_flush(dptr, dbit, 12, dbbyte);
+    sample_store_flush(dptr, dbit, dbbyte);
     return 0;
 }
 

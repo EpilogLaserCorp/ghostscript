@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,6 +20,8 @@
 #  define gxobj_INCLUDED
 
 #include "gxbitmap.h"
+#include "gsstruct.h"
+#include "memento.h" /* Because we use "free" below */
 
 #ifndef IGC_PTR_STABILITY_CHECK
 #  define IGC_PTR_STABILITY_CHECK 0
@@ -80,19 +82,19 @@
  * The back pointer's meaning depends on whether the object is
  * free (unmarked) or in use (marked):
  *      - In free objects, the back pointer is an offset from the object
- * header back to a chunk_head_t structure that contains the location
- * to which all the data in this chunk will get moved; the reloc field
+ * header back to a clump_head_t structure that contains the location
+ * to which all the data in this clump will get moved; the reloc field
  * contains the amount by which the following run of useful objects
  * will be relocated downwards.
  *      - In useful objects, the back pointer is an offset from the object
  * back to the previous free object; the reloc field is not used (it
  * overlays the type field).
- * These two cases can be distinguished when scanning a chunk linearly,
- * but when simply examining an object via a pointer, the chunk pointer
+ * These two cases can be distinguished when scanning a clump linearly,
+ * but when simply examining an object via a pointer, the clump pointer
  * is also needed.
  */
 #define obj_flag_bits 1
-#define obj_mb_bits (arch_sizeof_int * 8 - obj_flag_bits)
+#define obj_mb_bits (ARCH_SIZEOF_INT * 8 - obj_flag_bits)
 #define o_unmarked (((uint)1 << obj_mb_bits) - 1)
 #define o_set_unmarked(pp)\
   ((pp)->o_smark = o_unmarked)
@@ -120,7 +122,7 @@ typedef struct obj_header_data_s {
             unsigned _:1, back:obj_mb_bits;
         } b;
     } f;
-    uint size;
+    obj_size_t size; /* Note, not size_t! */
     union _t {
         gs_memory_type_ptr_t type;
         size_t reloc;
@@ -162,7 +164,7 @@ typedef struct obj_header_data_s {
 #endif
 #define obj_align_mask (obj_align_mod-1)
 #define obj_align_round(siz)\
-  (size_t)(((siz) + obj_align_mask) & -obj_align_mod)
+  (obj_size_t)(((siz) + obj_align_mask) & -obj_align_mod)
 #define obj_size_round(siz)\
   obj_align_round((siz) + sizeof(obj_header_t))
 
@@ -199,16 +201,16 @@ struct obj_header_s {		/* must be a struct because of forward reference */
 
 /*
  * Define the header that free objects point back to when relocating.
- * Every chunk, including inner chunks, has one of these.
+ * Every clump, including inner clumps, has one of these.
  */
-typedef struct chunk_head_s {
+typedef struct clump_head_s {
     byte *dest;			/* destination for objects */
-#if obj_align_mod > arch_sizeof_ptr
-    byte *_pad[obj_align_mod / arch_sizeof_ptr - 1];
+#if obj_align_mod > ARCH_SIZEOF_PTR
+    byte *_pad[obj_align_mod / ARCH_SIZEOF_PTR - 1];
 #endif
     obj_header_t free;		/* header for a free object, */
     /* in case the first real object */
     /* is in use */
-} chunk_head_t;
+} clump_head_t;
 
 #endif /* gxobj_INCLUDED */

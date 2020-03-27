@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Definitions for interpreter support for file objects */
@@ -18,6 +18,9 @@
 
 #ifndef files_INCLUDED
 #  define files_INCLUDED
+
+#include "stream.h"
+#include "store.h"
 
 /*
  * File objects store a pointer to a stream in value.pfile.
@@ -96,14 +99,11 @@ int file_switch_to_write(const ref *);
         /* for zfilter.c and ziodev.c */
 extern const uint file_default_buffer_size;
 
-#ifndef gs_file_path_ptr_DEFINED
-#  define gs_file_path_ptr_DEFINED
 typedef struct gs_file_path_s *gs_file_path_ptr;
-#endif
 
 /* Procedures exported by zfile.c. */
         /* for imainarg.c */
-FILE *lib_fopen(const gs_file_path_ptr pfpath, const gs_memory_t *mem, const char *);
+gp_file *lib_fopen(const gs_file_path_ptr pfpath, const gs_memory_t *mem, const char *);
 
         /* for imain.c */
 int
@@ -111,10 +111,6 @@ lib_file_open(gs_file_path_ptr, const gs_memory_t *, i_ctx_t *,
                        const char *, uint, char *, int, uint *, ref *pfile);
 
         /* for imain.c */
-#ifndef gs_ref_memory_DEFINED
-#  define gs_ref_memory_DEFINED
-typedef struct gs_ref_memory_s gs_ref_memory_t;
-#endif
 int file_read_string(const byte *, uint, ref *, gs_ref_memory_t *);
 
         /* for os_open in ziodev.c */

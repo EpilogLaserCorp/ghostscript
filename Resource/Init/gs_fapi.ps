@@ -1,4 +1,4 @@
-% Copyright (C) 2001-2012 Artifex Software, Inc.
+% Copyright (C) 2001-2019 Artifex Software, Inc.
 % All Rights Reserved.
 %
 % This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 % of the license contained in the file LICENSE in this distribution.
 %
 % Refer to licensing information at http://www.artifex.com or contact
-% Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-% CA  94903, U.S.A., +1(415)492-9861, for further information.
+% Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+% CA 94945, U.S.A., +1(415)492-9861, for further information.
 %
 
 % Redefine Font and CIDFont categories with FAPI-handeled fonts.
@@ -372,7 +372,7 @@ bind def
   { (\nFAPIhook ) print 1 index = flush } //FAPI_hook_debug exec
   dup /FAPI known {
     { //PrintFontRef exec ( is mapped to FAPI=) print dup /FAPI get = flush } //FAPI_hook_debug exec
-    //true //.FAPIrebuildfont //ChooseDecoding exec
+    //true .FAPIrebuildfont //ChooseDecoding exec
   } {
     dup /PathLoad known dup {
       { (PathLoad known for the font ) print //PrintFontRef exec (.\n) print flush} //FAPI_hook_debug exec
@@ -403,9 +403,9 @@ bind def
     } ifelse
 
     { { (Trying to render the font ) print //PrintFontRef exec ( with FAPI...\n) print flush } //FAPI_hook_debug exec
-      //.FAPIpassfont {
+      .FAPIpassfont {
         { //PrintFontRef exec ( is being rendered with FAPI=) print dup /FAPI get = flush } //FAPI_hook_debug exec
-        //false //.FAPIrebuildfont //ChooseDecoding exec
+        //false .FAPIrebuildfont //ChooseDecoding exec
       } {
         { (Can't render ) print //PrintFontRef exec ( with FAPI, will do with native GS renderer.\n) print flush } //FAPI_hook_warn exec
       } ifelse
@@ -429,7 +429,7 @@ bind def
 % ------------------ Redefine .buildfont* with FAPI : -----------------------
 
 /.buildfont1
-{ //.buildfont1 exec exec //FAPIhook exec
+{ //.buildfont1 exec //FAPIhook exec
 } bind % 'odef' is below.
 
 /.buildfont2
@@ -454,6 +454,9 @@ bind def
 
 end % the temporary dictionary for local binding.
 odef odef odef odef odef odef
+
+% Undef these, not needed outside this file
+[ /.FAPIavailable /.FAPIpassfont /.FAPIrebuildfont ] systemdict .undefinternalnames
 
 .setlanguagelevel
 

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -25,9 +25,15 @@
 #include "gxdevice.h"
 #include "gsdevice.h"		/* for gs_copydevice */
 #include "gdevx.h"
+#include "gsbitops.h"
+
+void
+gs_shared_init(void);
 
 extern const gx_device_X gs_x11_device;
 extern const gx_device_X gs_x11alpha_device;
+
+#define X_COLOR_CACHE_SIZE 16
 
 /*
  * Define a forwarding device with a cache for the first 16 colors,
@@ -36,7 +42,7 @@ extern const gx_device_X gs_x11alpha_device;
  */
 typedef struct {
     gx_device_forward_common;
-    gx_color_index color_cache[16];
+    gx_color_index color_cache[X_COLOR_CACHE_SIZE];
     /*
      * alt_map_color returns a value >= 0 if it maps directly to the final
      * gx_color_index, or < 0 if it only sets RGB values.
@@ -69,7 +75,7 @@ x_clear_color_cache(gx_device /*gx_device_X_wrapper */  * dev)
     gx_device_X_wrapper *xdev = (gx_device_X_wrapper *) dev;
     int i;
 
-    for (i = 0; i < countof(xdev->color_cache); ++i)
+    for (i = 0; i < X_COLOR_CACHE_SIZE; ++i)
         xdev->color_cache[i] = gx_no_color_index;
     gx_device_decache_colors(dev);
 }
@@ -179,11 +185,13 @@ x_wrap_copy_color(gx_device * dev, const byte * base, int sourcex,
     gx_device *tdev;
 
 #define mapped_bytes 480	/* must be a multiple of 3 & 4 */
-    int depth_bytes, source_bits;
+    int depth_bytes, source_bits, source_bytes;
     int block_w, block_h;
     int xblock, yblock;
     byte mapped[mapped_bytes];
     int code;
+    gx_color_index mask = 0;
+    int k;
 
     fit_copy(dev, base, sourcex, raster, id, x, y, w, h);
     if ((code = get_dev_target(&tdev, dev)) < 0)
@@ -194,6 +202,13 @@ x_wrap_copy_color(gx_device * dev, const byte * base, int sourcex,
                                      x, y, w, h);
     depth_bytes = tdev->color_info.depth >> 3;
     source_bits = dev->color_info.depth;
+    if (source_bits > 8) {
+        for (k = 0; k < dev->color_info.num_components; k++) {
+            mask |= dev->color_info.comp_mask[k];
+        }
+    }
+    source_bytes = dev->color_info.depth >> 3;
+
     {
         int mapped_pixels = mapped_bytes / depth_bytes;
 
@@ -209,26 +224,50 @@ x_wrap_copy_color(gx_device * dev, const byte * base, int sourcex,
             int yend = min(yblock + block_h, y + h);
             int xcur, ycur;
             int code;
+            gx_color_index cindex;
+            uint spixel;
+            uint sbyte;
 
             for (ycur = yblock; ycur < yend; ++ycur)
                 for (xcur = xblock; xcur < xend; ++xcur) {
                     int sbit = (xcur - x + sourcex) * source_bits;
-                    uint sbyte =
-                        base[(ycur - y) * raster + (sbit >> 3)];
-                    uint spixel =
-                        ((sbyte << (sbit & 7)) & 0xff) >> (8 - source_bits);
-                    gx_color_index cindex =
-                        ((gx_device_X_wrapper *) dev)->color_cache[spixel];
+                    if (source_bits <= 8) {
+                        sbyte = base[(ycur - y) * raster + (sbit >> 3)];
+                        spixel =
+                            ((sbyte << (sbit & 7)) & 0xff) >> (8 - source_bits);
+                        if (spixel < X_COLOR_CACHE_SIZE) {
+                            cindex =
+                                ((gx_device_X_wrapper *)dev)->color_cache[spixel];
+                            if (cindex == gx_no_color_index)
+                                cindex = x_alt_map_color(dev, spixel);
+                        } else {
+                            cindex = x_alt_map_color(dev, spixel);
+                        }
+                    } else {
+                        gx_color_index temp_color1 = 0;
+                        gx_color_index temp_color2 = 0;
 
-                    if (cindex == gx_no_color_index)
-                        cindex = x_alt_map_color(dev, spixel);
+                        memcpy(&temp_color1, &(base[(ycur - y) * raster + (sbit >> 3)]), sizeof(gx_color_index));
+                        temp_color1 = (temp_color1 << (sbit & 7)) & mask;
+
+                        for (k = 0; k < source_bytes; k++) {
+                            byte color = temp_color1 & 0xff;
+                            temp_color1 >>= 8;
+                            temp_color2 += (uint32_t)(color << ((source_bytes - k - 1) * 8));
+                        }
+                        cindex = x_alt_map_color(dev, temp_color2);
+                    }
+
                     switch (depth_bytes) {
                         case 4:
                             *p++ = (byte) (cindex >> 24);
+                            /* fall through */
                         case 3:
                             *p++ = (byte) (cindex >> 16);
+                            /* fall through */
                         case 2:
                             *p++ = (byte) (cindex >> 8);
+                            /* fall through */
                         default /*case 1 */ :
                             *p++ = (byte) cindex;
                     }
@@ -291,7 +330,9 @@ x_wrap_get_bits(gx_device * dev, int y, byte * str, byte ** actual_data)
     int xi;
     int sbit;
 
-    DECLARE_LINE_ACCUM(str, depth, 0);
+    byte *l_dptr = str;
+    int l_dbit = 0;
+    byte l_dbyte = 0;
 
     if ((code = get_dev_target(&tdev, dev)) < 0)
         return code;
@@ -335,10 +376,18 @@ x_wrap_get_bits(gx_device * dev, int y, byte * str, byte ** actual_data)
                 pixel_out = (*dev_proc(dev, map_cmyk_color))(dev, cmyk);
             }
         }
-        LINE_ACCUM(pixel_out, depth);
+        if (sizeof(pixel_out) > 4) {
+            if (sample_store_next64(pixel_out, &l_dptr, &l_dbit, depth, &l_dbyte) < 0)
+                return_error(gs_error_rangecheck);
+        }
+        else {
+            if (sample_store_next32(pixel_out, &l_dptr, &l_dbit, depth, &l_dbyte) < 0)
+                return_error(gs_error_rangecheck);
+        }
     }
-    LINE_ACCUM_STORE(depth);
-  gx:gs_free_object(mem, row, "x_wrap_get_bits");
+    sample_store_flush(l_dptr, l_dbit, l_dbyte);
+gx:
+    gs_free_object(mem, row, "x_wrap_get_bits");
     if (actual_data)
         *actual_data = str;
     return code;
@@ -349,13 +398,17 @@ x_wrap_get_params(gx_device * dev, gs_param_list * plist)
 {
     gx_device *tdev;
     /* We assume that a get_params call has no side effects.... */
-    gx_device_X save_dev;
+    gx_device_X save_dev, *xdev;
     int ecode;
     int code;
 
     if ((code = get_dev_target(&tdev, dev)) < 0)
         return code;
-    save_dev = *(gx_device_X *) tdev;
+    xdev = (gx_device_X *) tdev;
+    xdev->orig_color_info = xdev->color_info;
+
+    save_dev = *xdev;
+
     if (tdev->is_open)
         tdev->color_info = dev->color_info;
     tdev->dname = dev->dname;
@@ -368,7 +421,7 @@ static int
 x_wrap_put_params(gx_device * dev, gs_param_list * plist)
 {
     gx_device *tdev;
-    gx_device_color_info cinfo;
+    gx_device_X *xdev;
     const char *dname;
     int rcode, code;
 
@@ -378,12 +431,13 @@ x_wrap_put_params(gx_device * dev, gs_param_list * plist)
      * put_params will choke if we simply feed it the output of
      * get_params; we have to substitute color_info the same way.
      */
-    cinfo = tdev->color_info;
+    xdev = (gx_device_X *) tdev;
+    xdev->orig_color_info = xdev->color_info;
     dname = tdev->dname;
     tdev->color_info = dev->color_info;
     tdev->dname = dev->dname;
     rcode = (*dev_proc(tdev, put_params)) (tdev, plist);
-    tdev->color_info = cinfo;
+    tdev->color_info = xdev->orig_color_info;
     tdev->dname = dname;
     if (rcode < 0)
         return rcode;
@@ -435,7 +489,6 @@ get_target_info(gx_device * dev)
     copy4(ImagingBBox);
     copy(ImagingBBox_set);
     copy2(HWResolution);
-    copy2(MarginsHWResolution);
     copy2(Margins);
     copy4(HWMargins);
     if (dev->color_info.num_components == 3) {
@@ -468,7 +521,7 @@ x_alt_map_color(gx_device * dev, gx_color_index color)
 
     if (color == gx_no_color_index)
         return color;
-    if (color < 16) {
+    if (color < X_COLOR_CACHE_SIZE) {
         cindex = ((gx_device_X_wrapper *) dev)->color_cache[color];
         if (cindex != gx_no_color_index)
             return cindex;
@@ -480,7 +533,7 @@ x_alt_map_color(gx_device * dev, gx_color_index color)
         cindex = result;
     else
         cindex = dev_proc(tdev, map_rgb_color)(tdev, rgb);
-    if (color < 16)
+    if (color < X_COLOR_CACHE_SIZE)
         ((gx_device_X_wrapper *) dev)->color_cache[color] = cindex;
     return cindex;
 }
@@ -611,9 +664,10 @@ static gx_color_index
 x_cmyk_map_cmyk_color(gx_device * dev, const gx_color_value cv[])
 {
     int shift = dev->color_info.depth >> 2;
-    gx_color_index pixel = cv[0] >> (gx_color_value_bits - shift);
+    gx_color_index pixel;
     gx_color_value c, m, y, k;
     c = cv[0]; m = cv[1]; y = cv[2]; k = cv[3];
+    pixel = c >> (gx_color_value_bits - shift);
     pixel = (pixel << shift) | (m >> (gx_color_value_bits - shift));
     pixel = (pixel << shift) | (y >> (gx_color_value_bits - shift));
     return (pixel << shift) | (k >> (gx_color_value_bits - shift));
@@ -851,14 +905,14 @@ extern void gs_lib_register_device(const gx_device *dev);
 void
 gs_shared_init(void)
 {
-  gs_lib_register_device(&gs_x11_device);
-  gs_lib_register_device(&gs_x11alpha_device);
-  gs_lib_register_device(&gs_x11cmyk_device);
-  gs_lib_register_device(&gs_x11cmyk2_device);
-  gs_lib_register_device(&gs_x11cmyk4_device);
-  gs_lib_register_device(&gs_x11cmyk8_device);
-  gs_lib_register_device(&gs_x11gray2_device);
-  gs_lib_register_device(&gs_x11gray4_device);
-  gs_lib_register_device(&gs_x11mono_device);
+  gs_lib_register_device((const gx_device *)&gs_x11_device);
+  gs_lib_register_device((const gx_device *)&gs_x11alpha_device);
+  gs_lib_register_device((const gx_device *)&gs_x11cmyk_device);
+  gs_lib_register_device((const gx_device *)&gs_x11cmyk2_device);
+  gs_lib_register_device((const gx_device *)&gs_x11cmyk4_device);
+  gs_lib_register_device((const gx_device *)&gs_x11cmyk8_device);
+  gs_lib_register_device((const gx_device *)&gs_x11gray2_device);
+  gs_lib_register_device((const gx_device *)&gs_x11gray4_device);
+  gs_lib_register_device((const gx_device *)&gs_x11mono_device);
 }
 #endif

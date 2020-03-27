@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -38,8 +38,8 @@ pdf_objname_is_valid(const byte *data, uint size)
 }
 
 /*
- * Look up a named object.  Return e_rangecheck if the syntax is invalid.
- * If the object is missing, return e_undefined.
+ * Look up a named object.  Return_error(gs_error_rangecheck if the syntax is invalid.
+ * If the object is missing, return gs_error_undefined.
  */
 int
 pdf_find_named(gx_device_pdf * pdev, const gs_param_string * pname,
@@ -155,7 +155,7 @@ pdf_refer_named(gx_device_pdf * pdev, const gs_param_string * pname_orig,
 
 /*
  * Look up a named object as for pdf_refer_named.  If the object already
- * exists and is not simply a forward reference, return e_rangecheck;
+ * exists and is not simply a forward reference, return gs_error_rangecheck;
  * if it exists as a forward reference, set its type and return 0;
  * otherwise, create the object with the given type and return 1.
  */
@@ -195,8 +195,8 @@ pdf_make_named_dict(gx_device_pdf * pdev, const gs_param_string * pname,
 
 /*
  * Look up a named object as for pdf_refer_named.  If the object does not
- * exist, return e_undefined; if the object exists but has the wrong type,
- * return e_typecheck.
+ * exist, return gs_error_undefined; if the object exists but has the wrong type,
+ * return gs_error_typecheck.
  */
 int
 pdf_get_named(gx_device_pdf * pdev, const gs_param_string * pname,
@@ -464,6 +464,13 @@ pdf_replace_names(gx_device_pdf * pdev, const gs_param_string * from,
         if (pco) {
             gs_sprintf(ref, " %ld 0 R ", pco->id);
             size += strlen(ref);
+            /* Special 'name' escaping convention (see gs_pdfwr.ps, /.pdf===dict
+             * the /nametype procedure). We do not want to write out the NULL
+             * characters, we'll remove them in pass 2, for now don't count
+             * them into the string size.
+             */
+            if (sname >= (start + 2) && sname[-1] == 0x00 && sname[-2] == 0x00 && next[0] == 0x00)
+                size -= 3;
         }
         scan = next;
         any |= next != sname;
@@ -492,6 +499,10 @@ pdf_replace_names(gx_device_pdf * pdev, const gs_param_string * from,
         if (pco) {
             gs_sprintf(ref, " %ld 0 R ", pco->id);
             rlen = strlen(ref);
+            if (sname >= (start + 2) && sname[-1] == 0x00 && sname[-2] == 0x00 && next[0] == 0x00) {
+                sto -= 2;
+                next++;
+            }
             memcpy(sto, ref, rlen);
             sto += rlen;
         }

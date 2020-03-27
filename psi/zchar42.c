@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -23,7 +23,7 @@
 #include "gxfixed.h"
 #include "gxfont.h"
 #include "gxfont42.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gxpath.h"
 #include "gxtext.h"
 #include "gzstate.h"		/* only for ->path */
@@ -163,16 +163,28 @@ ztype42execchar(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
     gs_font *pfont;
-    int code = font_param(op - 3, &pfont);
-    gs_font_base *const pbfont = (gs_font_base *) pfont;
-    gs_font_type42 *const pfont42 = (gs_font_type42 *) pfont;
+    int code;
+    gs_font_base *pbfont;
+    gs_font_type42 *pfont42;
     gs_text_enum_t *penum = op_show_find(i_ctx_p);
-    op_proc_t cont = (pbfont->PaintType == 0 ? type42_fill : type42_stroke), exec_cont = 0;
+    op_proc_t cont, exec_cont = 0;
     ref *cnref;
     uint glyph_index;
 
+    check_op(4);
+    check_type(*(op - 1), t_name);
+    if (!r_has_type((op - 2), t_name)) {
+        check_type(*(op - 2), t_integer);
+    }
+
+    code = font_param(op - 3, &pfont);
     if (code < 0)
         return code;
+
+    pbfont = (gs_font_base *) pfont;
+    cont = (pbfont->PaintType == 0 ? type42_fill : type42_stroke);
+    pfont42 = (gs_font_type42 *) pfont;
+
     if (penum == 0 ||
         (pfont->FontType != ft_TrueType &&
          pfont->FontType != ft_CID_TrueType)
@@ -218,7 +230,7 @@ ztype42execchar(i_ctx_t *i_ctx_p)
 
 /* Continue after a CDevProc callout. */
 static int type42_finish(i_ctx_t *i_ctx_p,
-                          int (*cont)(gs_state *));
+                          int (*cont)(gs_gstate *));
 static int
 type42_fill(i_ctx_t *i_ctx_p)
 {
@@ -238,7 +250,7 @@ type42_stroke(i_ctx_t *i_ctx_p)
 }
 /* <font> <code|name> <name> <glyph_index> %type42_{fill|stroke} - */
 static int
-type42_finish(i_ctx_t *i_ctx_p, int (*cont) (gs_state *))
+type42_finish(i_ctx_t *i_ctx_p, int (*cont) (gs_gstate *))
 {
     os_ptr op = osp;
     gs_font *pfont;

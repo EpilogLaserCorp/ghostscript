@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -24,7 +24,7 @@
 #include "gxdcolor.h"
 #include "gxfixed.h"
 #include "gxdevice.h"		/* for gzht.h */
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gzht.h"
 #include "gsserial.h"
 
@@ -215,7 +215,7 @@ gx_dc_ht_binary_get_dev_halftone(const gx_device_color * pdevc)
 
 /* Load the device color into the halftone cache if needed. */
 static int
-gx_dc_ht_binary_load(gx_device_color * pdevc, const gs_imager_state * pis,
+gx_dc_ht_binary_load(gx_device_color * pdevc, const gs_gstate * pgs,
                      gx_device * dev, gs_color_select_t select)
 {
     int component_index = pdevc->colors.binary.b_index;
@@ -226,7 +226,7 @@ gx_dc_ht_binary_load(gx_device_color * pdevc, const gs_imager_state * pis,
     gx_ht_cache *pcache = porder->cache;
 
     if (pcache->order.bit_data != porder->bit_data)
-        gx_ht_init_cache(pis->memory, pcache, porder);
+        gx_ht_init_cache(pgs->memory, pcache, porder);
     /*
      * We do not load the cache now.  Instead we wait until we are ready
      * to actually render the color.  This allows multiple colors to be
@@ -277,6 +277,7 @@ gx_dc_ht_binary_fill_rectangle(const gx_device_color * pdevc, int x, int y,
 {
     gx_rop_source_t no_source;
 
+    fit_fill(dev, x, y, w, h);
     /* Load the halftone cache for the color */
     gx_dc_ht_binary_load_cache(pdevc);
     /*
@@ -462,7 +463,7 @@ gx_dc_ht_binary_write(
     /* check if sufficient space has been provided */
     if (req_size > *psize) {
         *psize = req_size;
-        return gs_error_rangecheck;
+        return_error(gs_error_rangecheck);
     }
 
     /* write out the flag byte */
@@ -506,12 +507,12 @@ gx_dc_ht_binary_write(
  *  pdevc       pointer to the location in which to write the
  *              reconstructed device color
  *
- *  pis         pointer to the current imager state (to access the
+ *  pgs         pointer to the current gs_gstate (to access the
  *              current halftone)
  *
  *  prior_devc  pointer to the current device color (this is provided
  *              separately because the device color is not part of the
- *              imager state)
+ *              gs_gstate)
  *
  *  dev         pointer to the current device, used to retrieve process
  *              color model information
@@ -531,7 +532,7 @@ gx_dc_ht_binary_write(
 static int
 gx_dc_ht_binary_read(
     gx_device_color *       pdevc,
-    const gs_imager_state * pis,
+    const gs_gstate        * pgs,
     const gx_device_color * prior_devc,
     const gx_device *       dev,        /* ignored */
     int64_t		    offset,
@@ -553,8 +554,8 @@ gx_dc_ht_binary_read(
         memset(&devc, 0, sizeof(devc));   /* clear pointers */
     devc.type = gx_dc_type_ht_binary;
 
-    /* the halftone is always taken from the imager state */
-    devc.colors.binary.b_ht = pis->dev_ht;
+    /* the halftone is always taken from the gs_gstate */
+    devc.colors.binary.b_ht = pgs->dev_ht;
 
     /* cache is not porvided until the device color is used */
     devc.colors.binary.b_tile = 0;
@@ -601,14 +602,14 @@ gx_dc_ht_binary_read(
         devc.colors.binary.b_index = *pdata++;
     }
 
-    if (pis->dev_ht == NULL)
+    if (pgs->dev_ht == NULL)
         return_error(gs_error_unregistered); /* Must not happen. */
     /* set the phase as required (select value is arbitrary) */
     color_set_phase_mod( &devc,
-                         pis->screen_phase[0].x,
-                         pis->screen_phase[0].y,
-                         pis->dev_ht->lcm_width,
-                         pis->dev_ht->lcm_height );
+                         pgs->screen_phase[0].x,
+                         pgs->screen_phase[0].y,
+                         pgs->dev_ht->lcm_width,
+                         pgs->dev_ht->lcm_height );
 
     /* everything looks good */
     *pdevc = devc;
@@ -751,8 +752,8 @@ render_ht(gx_ht_tile * pbt, int level /* [1..num_bits-1] */ ,
     byte *data = pbt->tiles.data;
     int code;
 
-    if_debug7('H', "[H]Halftone cache slot 0x%lx: old=%d, new=%d, w=%d(%d), h=%d(%d):\n",
-              (ulong) data, pbt->level, level,
+    if_debug7('H', "[H]Halftone cache slot "PRI_INTPTR": old=%d, new=%d, w=%d(%d), h=%d(%d):\n",
+              (intptr_t)data, pbt->level, level,
               pbt->tiles.size.x, porder->width,
               pbt->tiles.size.y, porder->num_bits / porder->width);
 #ifdef DEBUG

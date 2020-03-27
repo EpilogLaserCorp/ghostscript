@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,21 +19,25 @@
 #ifndef windows__INCLUDED
 #  define windows__INCLUDED
 
-/* This is a good place to define GS_NO_UTF8 */
-
+#ifndef STRICT
 #define STRICT
+#endif
 #ifdef METRO
 #include <winapifamily.h>
 #endif
 #include <windows.h>
 #include <process.h>
 
+/* After including windows.h, we have to undef bool for VS 2014 and later */
+#if defined(_MSC_VER) && _MSC_VER>=1900
+#  undef bool
+   typedef int bool;
+#endif
+
 /* Unicode/UTF-8 wrappers that we provide */
 BOOL gp_OpenPrinter(char *device, LPHANDLE printer);
-#ifndef GS_NO_UTF8
 int utf8_to_wchar(wchar_t *out, const char *in);
 int wchar_to_utf8(char *out, const wchar_t *in);
-#endif
 
 #ifdef __WATCOMC__
 typedef RGBQUAD FAR * LPRGBQUAD;

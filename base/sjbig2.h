@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -23,6 +23,16 @@
 #include "stdint_.h"
 #include "scommon.h"
 #include <jbig2.h>
+
+typedef struct s_jbig2_callback_data_s
+{
+    gs_memory_t *memory;
+    int error;
+    char *last_message;
+    Jbig2Severity severity;
+    const char *type;
+    long repeats;
+} s_jbig2_callback_data_t;
 
 /* See zfjbig2.c for details. */
 typedef struct s_jbig2_global_data_s {
@@ -38,21 +48,23 @@ typedef struct stream_jbig2decode_state_s
     Jbig2Ctx *decode_ctx;
     Jbig2Image *image;
     long offset; /* offset into the image bitmap of the next byte to be returned */
-    int error;
+    s_jbig2_callback_data_t *callback_data; /* is allocated in non-gc memory */
 }
 stream_jbig2decode_state;
 
+struct_proc_finalize(s_jbig2decode_finalize);
+
 #define private_st_jbig2decode_state()	\
-  gs_private_st_ptrs1(st_jbig2decode_state, stream_jbig2decode_state,\
+  gs_private_st_ptrs1_final(st_jbig2decode_state, stream_jbig2decode_state,\
     "jbig2decode filter state", jbig2decode_state_enum_ptrs,\
-     jbig2decode_state_reloc_ptrs, global_struct)
+     jbig2decode_state_reloc_ptrs, s_jbig2decode_finalize, global_struct)
 extern const stream_template s_jbig2decode_template;
 
 /* call ins to process the JBIG2Globals parameter */
 int
-s_jbig2decode_make_global_data(byte *data, uint length, void **result);
+s_jbig2decode_make_global_data(gs_memory_t *mem, byte *data, uint length, void **result);
 int
-s_jbig2decode_set_global_data(stream_state *ss, s_jbig2_global_data_t *gd);
+s_jbig2decode_set_global_data(stream_state *ss, s_jbig2_global_data_t *gd, void *global_ctx);
 void
 s_jbig2decode_free_global_data(void *data);
 

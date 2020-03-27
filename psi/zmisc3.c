@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -38,6 +38,15 @@ zcliprestore(i_ctx_t *i_ctx_p)
     return gs_cliprestore(igs);
 }
 
+static inline bool
+eqproc_check_type(ref *r)
+{
+    return r_has_type(r, t_array)
+           || r_has_type(r, t_mixedarray)
+           || r_has_type(r, t_shortarray)
+           || r_has_type(r, t_oparray);
+}
+
 /* <proc1> <proc2> .eqproc <bool> */
 /*
  * Test whether two procedures are equal to depth 10.
@@ -55,6 +64,13 @@ zeqproc(i_ctx_t *i_ctx_p)
     os_ptr op = osp;
     ref2_t stack[MAX_DEPTH + 1];
     ref2_t *top = stack;
+
+    check_op(2);
+    if (!eqproc_check_type(op -1) || !eqproc_check_type(op)) {
+        make_false(op - 1);
+        pop(1);
+        return 0;
+    }
 
     make_array(&stack[0].proc1, 0, 1, op - 1);
     make_array(&stack[0].proc2, 0, 1, op);

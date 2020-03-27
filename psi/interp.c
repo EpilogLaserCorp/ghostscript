@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -84,7 +84,7 @@ do_call_operator(op_proc_t op_proc, i_ctx_t *i_ctx_p)
 {
     int code;
     code = op_proc(i_ctx_p);
-    if (gs_debug_c(gs_debug_flag_validate_chunks))
+    if (gs_debug_c(gs_debug_flag_validate_clumps))
         ivalidate_clean_spaces(i_ctx_p);
     return code; /* A good place for a conditional breakpoint. */
 }
@@ -107,7 +107,7 @@ do_call_operator_verbose(op_proc_t op_proc, i_ctx_t *i_ctx_p)
             esp-i_ctx_p->exec_stack.stack.bot,
             osp-i_ctx_p->op_stack.stack.bot);
 #endif
-    if (gs_debug_c(gs_debug_flag_validate_chunks))
+    if (gs_debug_c(gs_debug_flag_validate_clumps))
         ivalidate_clean_spaces(i_ctx_p);
     return code; /* A good place for a conditional breakpoint. */
 }
@@ -136,17 +136,18 @@ struct stats_interp_s {
 static int estack_underflow(i_ctx_t *);
 static int interp(i_ctx_t **, const ref *, ref *);
 static int interp_exit(i_ctx_t *);
-static void set_gc_signal(i_ctx_t *, int *, int);
+static int zforceinterp_exit(i_ctx_t *i_ctx_p);
+static void set_gc_signal(i_ctx_t *, int);
 static int copy_stack(i_ctx_t *, const ref_stack_t *, int skip, ref *);
 static int oparray_pop(i_ctx_t *);
 static int oparray_cleanup(i_ctx_t *);
 static int zerrorexec(i_ctx_t *);
 static int zfinderrorobject(i_ctx_t *);
-static int errorexec_find(i_ctx_t *, ref *);
 static int errorexec_pop(i_ctx_t *);
 static int errorexec_cleanup(i_ctx_t *);
 static int zsetstackprotect(i_ctx_t *);
 static int zcurrentstackprotect(i_ctx_t *);
+static int zactonuel(i_ctx_t *);
 
 /* Stack sizes */
 
@@ -280,8 +281,10 @@ const op_def interp2_op_defs[] = {
     {"2.errorexec", zerrorexec},
     {"0.finderrorobject", zfinderrorobject},
     {"0%interp_exit", interp_exit},
+    {"0.forceinterp_exit", zforceinterp_exit},
     {"0%oparray_pop", oparray_pop},
     {"0%errorexec_pop", errorexec_pop},
+    {"0.actonuel", zactonuel},
     op_def_end(0)
 };
 
@@ -296,12 +299,18 @@ gs_interp_init(i_ctx_t **pi_ctx_p, const ref *psystem_dict,
     /* Create and initialize a context state. */
     gs_context_state_t *pcst = 0;
     int code = context_state_alloc(&pcst, psystem_dict, dmem);
-
-    if (code >= 0)
+    if (code >= 0) {
         code = context_state_load(pcst);
+        if (code < 0) {
+            context_state_free(pcst);
+            pcst = NULL;
+        }
+    }
+
     if (code < 0)
-        lprintf1("Fatal error %d in gs_interp_init!", code);
+        lprintf1("Fatal error %d in gs_interp_init!\n", code);
     *pi_ctx_p = pcst;
+
     return code;
 }
 /*
@@ -428,7 +437,7 @@ int
 interp_reclaim(i_ctx_t **pi_ctx_p, int space)
 {
     i_ctx_t *i_ctx_p = *pi_ctx_p;
-    gs_gc_root_t ctx_root;
+    gs_gc_root_t ctx_root, *r = &ctx_root;
     int code;
 
 #ifdef DEBUG
@@ -436,11 +445,11 @@ interp_reclaim(i_ctx_t **pi_ctx_p, int space)
         return 0;
 #endif
 
-    gs_register_struct_root(imemory_system, &ctx_root,
+    gs_register_struct_root(imemory_system, &r,
                             (void **)pi_ctx_p, "interp_reclaim(pi_ctx_p)");
     code = (*idmemory->reclaim)(idmemory, space);
     i_ctx_p = *pi_ctx_p;        /* may have moved */
-    gs_unregister_root(imemory_system, &ctx_root, "interp_reclaim(pi_ctx_p)");
+    gs_unregister_root(imemory_system, r, "interp_reclaim(pi_ctx_p)");
     return code;
 }
 
@@ -460,17 +469,17 @@ gs_interpret(i_ctx_t **pi_ctx_p, ref * pref, int user_errors, int *pexit_code,
              ref * perror_object)
 {
     i_ctx_t *i_ctx_p = *pi_ctx_p;
-    gs_gc_root_t error_root;
+    gs_gc_root_t error_root, *r = &error_root;
     int code;
 
-    gs_register_ref_root(imemory_system, &error_root,
+    gs_register_ref_root(imemory_system, &r,
                          (void **)&perror_object, "gs_interpret");
     code = gs_call_interp(pi_ctx_p, pref, user_errors, pexit_code,
                           perror_object);
     i_ctx_p = *pi_ctx_p;
     gs_unregister_root(imemory_system, &error_root, "gs_interpret");
-    /* Avoid a dangling reference to a stack-allocated GC signal. */
-    set_gc_signal(i_ctx_p, NULL, 0);
+    /* Avoid a dangling reference to the lib context GC signal. */
+    set_gc_signal(i_ctx_p, 0);
     return code;
 }
 static int
@@ -483,22 +492,23 @@ gs_call_interp(i_ctx_t **pi_ctx_p, ref * pref, int user_errors,
     ref error_name;
     int code, ccode;
     ref saref;
-    int gc_signal = 0;
     i_ctx_t *i_ctx_p = *pi_ctx_p;
+    int *gc_signal = &imemory_system->gs_lib_ctx->gcsignal;
 
     *pexit_code = 0;
+    *gc_signal = 0;
     ialloc_reset_requested(idmemory);
 again:
     /* Avoid a dangling error object that might get traced by a future GC. */
     make_null(perror_object);
     o_stack.requested = e_stack.requested = d_stack.requested = 0;
-    while (gc_signal) {         /* Some routine below triggered a GC. */
-        gs_gc_root_t epref_root;
+    while (*gc_signal) { /* Some routine below triggered a GC. */
+        gs_gc_root_t epref_root, *r = &epref_root;
 
-        gc_signal = 0;
+        *gc_signal = 0;
         /* Make sure that doref will get relocated properly if */
         /* a garbage collection happens with epref == &doref. */
-        gs_register_ref_root(imemory_system, &epref_root,
+        gs_register_ref_root(imemory_system, &r,
                              (void **)&epref, "gs_call_interp(epref)");
         code = interp_reclaim(pi_ctx_p, -1);
         i_ctx_p = *pi_ctx_p;
@@ -516,7 +526,8 @@ again:
     /* Prevent a dangling reference to the GC signal in ticks_left */
     /* in the frame of interp, but be prepared to do a GC if */
     /* an allocation in this routine asks for it. */
-    set_gc_signal(i_ctx_p, &gc_signal, 1);
+    *gc_signal = 0;
+    set_gc_signal(i_ctx_p, 1);
     if (esp < esbot)            /* popped guard entry */
         esp = esbot;
     switch (code) {
@@ -540,11 +551,14 @@ again:
             goto again;
         case gs_error_VMreclaim:
             /* Do the GC and continue. */
-            code = interp_reclaim(pi_ctx_p,
+            /* We ignore the return value here, if it fails here
+             * we'll call it again having jumped to the "again" label.
+             * Where, assuming it fails again, we'll handle the error.
+             */
+            (void)interp_reclaim(pi_ctx_p,
                                   (osp->value.intval == 2 ?
                                    avm_global : avm_local));
             i_ctx_p = *pi_ctx_p;
-            /****** What if code < 0? ******/
             make_oper(&doref, 0, zpop);
             epref = &doref;
             goto again;
@@ -650,23 +664,64 @@ again:
         return code;
     if (gs_errorname(i_ctx_p, code, &error_name) < 0)
         return code;            /* out-of-range error code! */
-    /*
-     * For greater Adobe compatibility, only the standard PostScript errors
-     * are defined in errordict; the rest are in gserrordict.
+
+    /*  We refer to gserrordict first, which is not accessible to Postcript jobs
+     *  If we're running with SAFERERRORS all the handlers are copied to gserrordict
+     *  so we'll always find the default one. If not SAFERERRORS, only gs specific
+     *  errors are in gserrordict.
      */
-    if (dict_find_string(systemdict, "errordict", &perrordict) <= 0 ||
+    if (dict_find_string(systemdict, "gserrordict", &perrordict) <= 0 ||
         (dict_find(perrordict, &error_name, &epref) <= 0 &&
-         (dict_find_string(systemdict, "gserrordict", &perrordict) <= 0 ||
+         (dict_find_string(systemdict, "errordict", &perrordict) <= 0 ||
           dict_find(perrordict, &error_name, &epref) <= 0))
         )
         return code;            /* error name not in errordict??? */
+
     doref = *epref;
     epref = &doref;
     /* Push the error object on the operand stack if appropriate. */
     if (!GS_ERROR_IS_INTERRUPT(code)) {
+        byte buf[260], *bufptr;
+        uint rlen;
         /* Replace the error object if within an oparray or .errorexec. */
-        *++osp = *perror_object;
+        osp++;
+        if (osp >= ostop) {
+            *pexit_code = gs_error_Fatal;
+            return_error(gs_error_Fatal);
+        }
+        *osp = *perror_object;
         errorexec_find(i_ctx_p, osp);
+
+        if (!r_has_type(osp, t_string) && !r_has_type(osp, t_name)) {
+            code = obj_cvs(imemory, osp, buf + 2, 256, &rlen, (const byte **)&bufptr);
+            if (code < 0) {
+                const char *unknownstr = "--unknown--";
+                rlen = strlen(unknownstr);
+                memcpy(buf, unknownstr, rlen);
+                bufptr = buf;
+            }
+            else {
+                ref *tobj;
+                bufptr[rlen] = '\0';
+                /* Only pass a name object if the operator doesn't exist in systemdict
+                 * i.e. it's an internal operator we have hidden
+                 */
+                code = dict_find_string(systemdict, (const char *)bufptr, &tobj);
+                if (code <= 0) {
+                    buf[0] = buf[1] = buf[rlen + 2] = buf[rlen + 3] = '-';
+                    rlen += 4;
+                    bufptr = buf;
+                }
+                else {
+                    bufptr = NULL;
+                }
+            }
+            if (bufptr) {
+                code = name_ref(imemory, buf, rlen, osp, 1);
+                if (code < 0)
+                    make_null(osp);
+            }
+        }
     }
     goto again;
 }
@@ -676,9 +731,41 @@ interp_exit(i_ctx_t *i_ctx_p)
     return gs_error_InterpreterExit;
 }
 
+/* Only used (currently) with language switching:
+ * allows the PS interpreter to co-exist with the
+ * PJL interpreter.
+ */
+static int
+zforceinterp_exit(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+    stream *s;
+
+    check_file(s, op);
+    i_ctx_p->uel_position = stell(s)-1;
+    /* resetfile */
+    if (file_is_valid(s, op))
+        sreset(s);
+
+    if (!gs_lib_ctx_get_act_on_uel((gs_memory_t *)(i_ctx_p->memory.current)))
+        return 0;
+
+    gs_interp_reset(i_ctx_p);
+    /* gs_interp_reset() actually leaves the op stack one entry below
+     * the bottom of the stack, and that can cause problems depending
+     * on the interpreter state at the end of the job.
+     * So push a null object, and the return code before continuing.
+     */
+    push(2);
+    op = osp;
+    make_null(op - 1);
+    make_int(op, gs_error_InterpreterExit);
+    return_error(gs_error_Quit);
+}
+
 /* Set the GC signal for all VMs. */
 static void
-set_gc_signal(i_ctx_t *i_ctx_p, int *psignal, int value)
+set_gc_signal(i_ctx_t *i_ctx_p, int value)
 {
     gs_memory_gc_status_t stat;
     int i;
@@ -693,7 +780,6 @@ set_gc_signal(i_ctx_t *i_ctx_p, int *psignal, int value)
             mem_stable = (gs_ref_memory_t *)
                 gs_memory_stable((gs_memory_t *)mem);
             gs_memory_gc_status(mem, &stat);
-            stat.psignal = psignal;
             stat.signal_value = value;
             gs_memory_set_gc_status(mem, &stat);
             if (mem_stable == mem)
@@ -710,7 +796,8 @@ copy_stack(i_ctx_t *i_ctx_p, const ref_stack_t * pstack, int skip, ref * arr)
 {
     uint size = ref_stack_count(pstack) - skip;
     uint save_space = ialloc_space(idmemory);
-    int code;
+    int code, i;
+    ref *safety, *safe;
 
     if (size > 65535)
         size = 65535;
@@ -719,6 +806,22 @@ copy_stack(i_ctx_t *i_ctx_p, const ref_stack_t * pstack, int skip, ref * arr)
     if (code >= 0)
         code = ref_stack_store(pstack, arr, size, 0, 1, true, idmemory,
                                "copy_stack");
+    /* If we are copying the exec stack, try to replace any oparrays with
+     * with the operator than references them
+     */
+    if (pstack == &e_stack) {
+        for (i = 0; i < size; i++) {
+            if (errorexec_find(i_ctx_p, &arr->value.refs[i]) < 0)
+                make_null(&arr->value.refs[i]);
+        }
+    }
+    if (pstack == &o_stack && dict_find_string(systemdict, "SAFETY", &safety) > 0 &&
+        dict_find_string(safety, "safe", &safe) > 0 && r_has_type(safe, t_boolean) &&
+        safe->value.boolval == true) {
+        code = ref_stack_array_sanitize(i_ctx_p, arr, arr);
+        if (code < 0)
+            return code;
+    }
     ialloc_set_space(idmemory, save_space);
     return code;
 }
@@ -796,7 +899,8 @@ interp(i_ctx_t **pi_ctx_p /* context for execution, updated if resched */,
     int code;
     ref token;                  /* token read from file or string, */
                                 /* must be declared in this scope */
-    register const ref *pvalue = 0;
+    ref *pvalue;
+    ref refnull;
     uint opindex;               /* needed for oparrays */
     os_ptr whichp;
 
@@ -848,7 +952,7 @@ interp(i_ctx_t **pi_ctx_p /* context for execution, updated if resched */,
     }\
   }
 
-    int ticks_left = i_ctx_p->time_slice_ticks;
+    int *ticks_left = &imemory_system->gs_lib_ctx->gcsignal;
 
 #if defined(DEBUG_TRACE_PS_OPERATORS) || defined(DEBUG)
     int (*call_operator_fn)(op_proc_t, i_ctx_t *) = do_call_operator;
@@ -857,11 +961,18 @@ interp(i_ctx_t **pi_ctx_p /* context for execution, updated if resched */,
         call_operator_fn = do_call_operator_verbose;
 #endif
 
+    *ticks_left = i_ctx_p->time_slice_ticks;
+
+     make_null(&ierror.full);
+     ierror.obj = &ierror.full;
+     make_null(&refnull);
+     pvalue = &refnull;
+
     /*
-     * If we exceed the VMThreshold, set ticks_left to -100
+     * If we exceed the VMThreshold, set *ticks_left to -100
      * to alert the interpreter that we need to garbage collect.
      */
-    set_gc_signal(i_ctx_p, &ticks_left, -100);
+    set_gc_signal(i_ctx_p, -100);
 
     esfile_clear_cache();
     /*
@@ -932,9 +1043,9 @@ interp(i_ctx_t **pi_ctx_p /* context for execution, updated if resched */,
 
         osp = iosp;
         esp = iesp;
-        dmlprintf5(imemory, "d%u,e%u<%u>0x%lx(%d): ",
+        dmlprintf5(imemory, "d%u,e%u<%u>"PRI_INTPTR"(%d): ",
                   ref_stack_count(&d_stack), ref_stack_count(&e_stack),
-                  ref_stack_count(&o_stack), (ulong)IREF, icount);
+                  ref_stack_count(&o_stack), (intptr_t)IREF, icount);
         debug_print_ref(imemory, IREF);
         if (iosp >= osbot) {
             dmputs(imemory, " // ");
@@ -1084,14 +1195,14 @@ x_ifelse:   INCR(x_ifelse);
                 if (icount < 0)
                     goto up;    /* 0-element proc */
                 SET_IREF(whichp->value.refs);   /* 1-element proc */
-                if (--ticks_left > 0)
+                if (--(*ticks_left) > 0)
                     goto top;
             }
             ++iesp;
             /* Do a ref_assign, but also set iref. */
             iesp->tas = whichp->tas;
             SET_IREF(iesp->value.refs = whichp->value.refs);
-            if (--ticks_left > 0)
+            if (--(*ticks_left) > 0)
                 goto top;
             goto slice;
         case plain_exec(tx_op_index):
@@ -1127,7 +1238,7 @@ x_sub:      INCR(x_sub);
             /* Replace with the definition and go again. */
             INCR(exec_array);
             opindex = op_index(IREF);
-            pvalue = IREF->value.const_refs;
+            pvalue = (ref *)IREF->value.const_refs;
           opst:         /* Prepare to call a t_oparray procedure in *pvalue. */
             store_state(iesp);
           oppr:         /* Record the stack depths in case of failure. */
@@ -1144,25 +1255,29 @@ x_sub:      INCR(x_sub);
           prst:         /* Prepare to call the procedure (array) in *pvalue. */
             store_state(iesp);
           pr:                   /* Call the array in *pvalue.  State has been stored. */
+            /* We want to do this check before assigning icount so icount is correct
+             * in the event of a gs_error_execstackoverflow
+             */
+            if (iesp >= estop) {
+                return_with_error_iref(gs_error_execstackoverflow);
+            }
             if ((icount = r_size(pvalue) - 1) <= 0) {
                 if (icount < 0)
                     goto up;    /* 0-element proc */
                 SET_IREF(pvalue->value.refs);   /* 1-element proc */
-                if (--ticks_left > 0)
+                if (--(*ticks_left) > 0)
                     goto top;
             }
-            if (iesp >= estop)
-                return_with_error_iref(gs_error_execstackoverflow);
             ++iesp;
             /* Do a ref_assign, but also set iref. */
             iesp->tas = pvalue->tas;
             SET_IREF(iesp->value.refs = pvalue->value.refs);
-            if (--ticks_left > 0)
+            if (--(*ticks_left) > 0)
                 goto top;
             goto slice;
         case plain_exec(t_operator):
             INCR(exec_operator);
-            if (--ticks_left <= 0) {    /* The following doesn't work, */
+            if (--(*ticks_left) <= 0) {    /* The following doesn't work, */
                 /* and I can't figure out why. */
 /****** goto sst; ******/
             }
@@ -1191,7 +1306,7 @@ x_sub:      INCR(x_sub);
                     store_state(iesp);
                   opush:iosp = osp;
                     iesp = esp;
-                    if (--ticks_left > 0)
+                    if (--(*ticks_left) > 0)
                         goto up;
                     goto slice;
                 case o_pop_estack:      /* just go to up */
@@ -1200,9 +1315,6 @@ x_sub:      INCR(x_sub);
                         goto bot;
                     iesp = esp;
                     goto up;
-                case o_reschedule:
-                    store_state(iesp);
-                    goto res;
                 case gs_error_Remap_Color:
 oe_remap:           store_state(iesp);
 remap:              if (iesp + 2 >= estop) {
@@ -1227,7 +1339,7 @@ remap:              if (iesp + 2 >= estop) {
             pvalue = IREF->value.pname->pvalue;
             if (!pv_valid(pvalue)) {
                 uint nidx = names_index(int_nt, IREF);
-                uint htemp;
+                uint htemp = 0;
 
                 INCR(find_name);
                 if ((pvalue = dict_find_name_by_index_inline(nidx, htemp)) == 0)
@@ -1283,13 +1395,13 @@ remap:              if (iesp + 2 >= estop) {
                 case plain_exec(t_oparray):
                     INCR(name_oparray);
                     opindex = op_index(pvalue);
-                    pvalue = (const ref *)pvalue->value.const_refs;
+                    pvalue = (ref *)pvalue->value.const_refs;
                     goto opst;
                 case plain_exec(t_operator):
                     INCR(name_operator);
                     {           /* Shortcut for operators. */
                         /* See above for the logic. */
-                        if (--ticks_left <= 0) {        /* The following doesn't work, */
+                        if (--(*ticks_left) <= 0) {        /* The following doesn't work, */
                             /* and I can't figure out why. */
 /****** goto sst; ******/
                         }
@@ -1307,9 +1419,6 @@ remap:              if (iesp + 2 >= estop) {
                                 goto opush;
                             case o_pop_estack:
                                 goto opop;
-                            case o_reschedule:
-                                store_state(iesp);
-                                goto res;
                             case gs_error_Remap_Color:
                                 goto oe_remap;
                         }
@@ -1407,7 +1516,7 @@ remap:              if (iesp + 2 >= estop) {
                                 goto again;     /* stacks are unchanged */
                             case o_push_estack:
                                 esfile_clear_cache();
-                                if (--ticks_left > 0)
+                                if (--(*ticks_left) > 0)
                                     goto up;
                                 goto slice;
                         }
@@ -1457,9 +1566,12 @@ remap:              if (iesp + 2 >= estop) {
                         /* If the updated string isn't empty, push it back */
                         /* on the e-stack. */
                         {
-                            uint size = sbufavailable(&ss);
+                            /* This is just the available buffer size, so
+                               a signed int is plenty big
+                             */
+                            int size = sbufavailable(&ss);
 
-                            if (size) {
+                            if (size > 0) {
                                 if (iesp >= estop)
                                     return_with_error_iref(gs_error_execstackoverflow);
                                 ++iesp;
@@ -1480,6 +1592,7 @@ remap:              if (iesp + 2 >= estop) {
                         goto bot;
                     case scan_Refill:   /* error */
                         code = gs_note_error(gs_error_syntaxerror);
+                        /* fall through */
                     default:    /* error */
                         ref_assign_inline(&token, IREF);
                         gs_scanner_error_object(i_ctx_p, &sstate, &token);
@@ -1507,7 +1620,7 @@ remap:              if (iesp + 2 >= estop) {
                         next();
                     case pt_executable_operator:
                         index = *iref_packed & packed_value_mask;
-                        if (--ticks_left <= 0) {        /* The following doesn't work, */
+                        if (--(*ticks_left) <= 0) {        /* The following doesn't work, */
                             /* and I can't figure out why. */
 /****** goto sst_short; ******/
                         }
@@ -1517,7 +1630,7 @@ remap:              if (iesp + 2 >= estop) {
                             opindex = index;
                             /* Call the operator procedure. */
                             index -= op_def_count;
-                            pvalue = (const ref *)
+                            pvalue = (ref *)
                                 (index < r_size(&i_ctx_p->op_array_table_global.table) ?
                                  i_ctx_p->op_array_table_global.table.value.const_refs +
                                  index :
@@ -1573,9 +1686,6 @@ remap:              if (iesp + 2 >= estop) {
                                 }
                                 iesp = esp;
                                 goto up;
-                            case o_reschedule:
-                                store_state_short(iesp);
-                                goto res;
                             case gs_error_Remap_Color:
                                 store_state_short(iesp);
                                 goto remap;
@@ -1610,7 +1720,7 @@ remap:              if (iesp + 2 >= estop) {
 
                             pvalue = name_index_ptr_inline(int_nt, nidx)->pvalue;
                             if (!pv_valid(pvalue)) {
-                                uint htemp;
+                                uint htemp = 0;
 
                                 INCR(p_find_name);
                                 if ((pvalue = dict_find_name_by_index_inline(nidx, htemp)) == 0) {
@@ -1656,7 +1766,7 @@ remap:              if (iesp + 2 >= estop) {
         iref_packed = IREF_NEXT(iref_packed);
         goto top;
     }
-  up:if (--ticks_left < 0)
+  up:if (--(*ticks_left) < 0)
         goto slice;
     /* See if there is anything left on the execution stack. */
     if (!r_is_proc(iesp)) {
@@ -1672,12 +1782,6 @@ remap:              if (iesp + 2 >= estop) {
             goto up;
     }
     goto top;
-res:
-    /* Some operator has asked for context rescheduling. */
-    /* We've done a store_state. */
-    *pi_ctx_p = i_ctx_p;
-    code = (*i_ctx_p->reschedule_proc)(pi_ctx_p);
-    i_ctx_p = *pi_ctx_p;
   sched:                        /* We've just called a scheduling procedure. */
     /* The interpreter state is in memory; iref is not current. */
     if (code < 0) {
@@ -1707,18 +1811,14 @@ res:
     /* iref is not live, so we don't need to do a store_state. */
     osp = iosp;
     esp = iesp;
-    /* If ticks_left <= -100, we need to GC now. */
-    if (ticks_left <= -100) {   /* We need to garbage collect now. */
+    /* If *ticks_left <= -100, we need to GC now. */
+    if ((*ticks_left) <= -100) {   /* We need to garbage collect now. */
         *pi_ctx_p = i_ctx_p;
         code = interp_reclaim(pi_ctx_p, -1);
         i_ctx_p = *pi_ctx_p;
-    } else if (i_ctx_p->time_slice_proc != NULL) {
-        *pi_ctx_p = i_ctx_p;
-        code = (*i_ctx_p->time_slice_proc)(pi_ctx_p);
-        i_ctx_p = *pi_ctx_p;
     } else
         code = 0;
-    ticks_left = i_ctx_p->time_slice_ticks;
+    *ticks_left = i_ctx_p->time_slice_ticks;
     set_code_on_interrupt(imemory, &code);
     goto sched;
 
@@ -1749,7 +1849,7 @@ res:
         /* but it might be something else someday if we check */
         /* for interrupts in the interpreter loop itself. */
         if (iesp >= estop)
-            code = gs_error_execstackoverflow;
+            ierror.code = gs_error_execstackoverflow;
         else {
             iesp++;
             ref_assign_inline(iesp, IREF);
@@ -1867,7 +1967,7 @@ zfinderrorobject(i_ctx_t *i_ctx_p)
  * .errorexec with errobj != null, store it in *perror_object and return 1,
  * otherwise return 0;
  */
-static int
+int
 errorexec_find(i_ctx_t *i_ctx_p, ref *perror_object)
 {
     long i;
@@ -1940,5 +2040,15 @@ zcurrentstackprotect(i_ctx_t *i_ctx_p)
         return_error(gs_error_rangecheck);
     push(1);
     make_bool(op, ep->value.opproc == oparray_cleanup);
+    return 0;
+}
+
+static int
+zactonuel(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+
+    push(1);
+    make_bool(op, !!gs_lib_ctx_get_act_on_uel((gs_memory_t *)(i_ctx_p->memory.current)));
     return 0;
 }

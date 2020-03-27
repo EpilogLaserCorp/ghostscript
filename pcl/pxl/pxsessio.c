@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -41,7 +41,7 @@
 #include "pjtop.h"
 #include "pllfont.h"
 #include "pxptable.h"
-#include "pxvendor.h"
+#include "gzstate.h"
 
 /* Imported operators */
 px_operator_proc(pxCloseDataSource);
@@ -146,7 +146,7 @@ px_end_page_cleanup(px_state_t * pxs)
     pxPopGS(NULL, pxs);
     pxNewPath(NULL, pxs);
     px_purge_pattern_cache(pxs, ePagePattern);
-    pxpcl_pagestatereset();
+    pxpcl_pagestatereset(pxs);
 }
 
 /* Purge all */
@@ -175,11 +175,11 @@ px_end_session_cleanup(px_state_t * pxs)
                        gstate_pattern_cache(pxs->pgs),
                        "px_end_session_cleanup(struct)");
         {
-            gs_state *pgs = pxs->pgs;
+            gs_gstate *pgs = pxs->pgs;
 
             while (pgs) {
                 gstate_set_pattern_cache(pgs, 0);
-                pgs = gs_state_saved(pgs);
+                pgs = gs_gstate_saved(pgs);
             }
         }
     }
@@ -187,7 +187,7 @@ px_end_session_cleanup(px_state_t * pxs)
     px_dict_release(&pxs->stream_dict);
     /* delete downloaded fonts on end of session */
     px_dict_release(&pxs->font_dict);
-    pxpcl_release();
+    pxpcl_release(pxs);
 }
 
 /* ---------------- Non-operator procedures ---------------- */
@@ -275,12 +275,12 @@ pxBeginSession(px_args_t * par, px_state_t * pxs)
         /* NB reverse orientations missing */
 
         /* install the built in fonts */
-        if (pl_load_built_in_fonts
+        if (!pl_load_built_in_fonts
             (pjl_proc_fontsource_to_path(pxs->pjls, "I"), pxs->memory,
              &pxs->builtin_font_dict, pxs->font_dir, (int)pxfsInternal,
-             true /* use unicode key names */ ) < 0) {
-            dmprintf(pxs->memory, "Fatal error - no resident fonts\n");
-            return -1;
+             true /* use unicode key names */ )) {
+            errprintf(pxs->memory, "Fonts not found\n");
+            return gs_error_Fatal;
 
         }
     }
@@ -301,16 +301,17 @@ const byte apxBeginPage[] = {
     0, pxaOrientation,
     pxaMediaSource, pxaMediaSize, pxaCustomMediaSize, pxaCustomMediaSizeUnits,
     pxaSimplexPageMode, pxaDuplexPageMode, pxaDuplexPageSide,
-    pxaMediaDestination, pxaMediaType, pxaPrintableArea, 0
+    pxaMediaDestination, pxaMediaType, 0
 };
 int
 pxBeginPage(px_args_t * par, px_state_t * pxs)
 {
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     gx_device *dev = gs_currentdevice(pgs);
     gs_point page_size_pixels;
     gs_matrix points2device;
     bool no_pv_2 = false;
+    int code;
 
     /* check for 2.1 no parameter special cases */
     {
@@ -456,65 +457,70 @@ pxBeginPage(px_args_t * par, px_state_t * pxs)
         int iv;
         bool bv;
         int ecode = 0;
-        int code;
 
         fa.data = fv;
         fa.persistent = false;
 
         gs_c_param_list_write(&list, mem);
         iv = pxs->orientation;  /* might not be an int */
-        param_write_int(plist, "Orientation", &iv);
+        ecode = param_write_int(plist, "Orientation", &iv);
         ecode = px_put1(dev, &list, ecode);
+        if (ecode < 0)
+            return ecode;
 
         gs_c_param_list_write(&list, mem);
         fv[0] = pxs->media_dims.x;
         fv[1] = pxs->media_dims.y;
         fa.size = 2;
-        param_write_float_array(plist, ".MediaSize", &fa);
+        ecode = param_write_float_array(plist, ".MediaSize", &fa);
         ecode = px_put1(dev, &list, ecode);
-        gs_c_param_list_write(&list, mem);
-
-        /* Set the mis-named "Margins" (actually the offset on the page) */
-        /* to zero. */
-        gs_c_param_list_write(&list, mem);
-        fv[0] = 0;
-        fv[1] = 0;
-        fa.size = 2;
-        param_write_float_array(plist, "Margins", &fa);
-        ecode = px_put1(dev, &list, ecode);
+        if (ecode < 0)
+            return ecode;
 
         iv = pxs->media_source; /* might not be an int */
         if (iv < 0 || iv >= pxeMediaSource_next)
             px_record_warning("IllegalMediaSource", false, pxs);
         else {
             gs_c_param_list_write(&list, mem);
-            param_write_int(plist, ".MediaSource", &iv);
+            ecode = param_write_int(plist, ".MediaSource", &iv);
             ecode = px_put1(dev, &list, ecode);
+            if (ecode < 0)
+                return ecode;
         }
 
         gs_c_param_list_write(&list, mem);
-        param_write_bool(plist, "Duplex", &pxs->duplex);
+        ecode = param_write_bool(plist, "Duplex", &pxs->duplex);
         ecode = px_put1(dev, &list, ecode);
+        if (ecode < 0)
+            return ecode;
 
         gs_c_param_list_write(&list, mem);
         bv = pxs->duplex_page_mode == eDuplexHorizontalBinding;
-        param_write_bool(plist, "Tumble", &bv);
+        ecode = param_write_bool(plist, "Tumble", &bv);
         ecode = px_put1(dev, &list, ecode);
+        if (ecode < 0)
+            return ecode;
 
         gs_c_param_list_write(&list, mem);
         bv = !pxs->duplex_back_side;
-        param_write_bool(plist, "FirstSide", &bv);
+        ecode = param_write_bool(plist, "FirstSide", &bv);
         ecode = px_put1(dev, &list, ecode);
+        if (ecode < 0)
+            return ecode;
 
         gs_c_param_list_write(&list, mem);
         iv = pxs->media_destination;    /* might not be an int */
-        param_write_int(plist, ".MediaDestination", &iv);
+        ecode = param_write_int(plist, ".MediaDestination", &iv);
         ecode = px_put1(dev, &list, ecode);
+        if (ecode < 0)
+            return ecode;
 
         gs_c_param_list_write(&list, mem);
         iv = pxs->media_type;   /* might not be an int */
-        param_write_int(plist, ".MediaType", &iv);
+        ecode = param_write_int(plist, ".MediaType", &iv);
         ecode = px_put1(dev, &list, ecode);
+        if (ecode < 0)
+            return ecode;
 
         /*
          * We aren't sure what to do if the device rejects the parameter
@@ -533,9 +539,8 @@ pxBeginPage(px_args_t * par, px_state_t * pxs)
 #undef plist
     }
     {
-        int code;
-
-        px_initgraphics(pxs);
+        code = px_initgraphics(pxs);
+        if (code < 0) return code;
         gs_currentmatrix(pgs, &points2device);
         gs_dtransform(pgs, pxs->media_dims.x, pxs->media_dims.y,
                       &page_size_pixels);
@@ -601,15 +606,17 @@ pxBeginPage(px_args_t * par, px_state_t * pxs)
         args.pv[1] = &device_matrix;    /* DeviceMatrix */
         device_matrix.type = pxd_scalar | pxd_ubyte;
         device_matrix.value.i = eDeviceBest;
-        pxSetHalftoneMethod(&args, pxs);
+        code = pxSetHalftoneMethod(&args, pxs);
+        if (code < 0) return code;
     }
     /* Initialize other parts of the PCL XL state. */
     px_dict_init(&pxs->page_pattern_dict, pxs->memory, px_free_pattern);
-    gs_erasepage(pgs);
+    code = gs_erasepage(pgs);
+    if (code < 0) return code;
     pxs->have_page = false;
     /* Make sure there is a legitimate halftone installed. */
     {
-        int code = px_set_halftone(pxs);
+        code = px_set_halftone(pxs);
 
         if (code < 0)
             return code;
@@ -620,7 +627,7 @@ pxBeginPage(px_args_t * par, px_state_t * pxs)
      * this state from the stack.
      */
     {
-        int code = pxPushGS(NULL, pxs);
+        code = pxPushGS(NULL, pxs);
 
         if (code < 0)
             return code;
@@ -633,11 +640,12 @@ int
 pxBeginPageFromPassthrough(px_state_t * pxs)
 {
     int code;
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     gs_point page_size_pixels;
     gs_matrix points2device;
 
-    px_initgraphics(pxs);
+    code = px_initgraphics(pxs);
+    if (code < 0) return code;
     gs_currentmatrix(pgs, &points2device);
     gs_dtransform(pgs, pxs->media_dims.x, pxs->media_dims.y,
                   &page_size_pixels);
@@ -735,42 +743,10 @@ pxVendorUnique(px_args_t * par, px_state_t * pxs)
 {
     int code = 0;
 
-    switch (par->pv[0]->value.i) {
-	case 0x68704000:
-	    /* hpijs's usage is non-conformant to spec */
-	    if (!pxs->data_source_open) {
-		pxs->data_source_open = true;
-		pxs->data_source_big_endian = false;
-	    }
-	    return pxJR3BeginImage(par, pxs);
-	    break;
-	case 0x68704001:
-	    return pxJR3ReadImage(par, pxs);
-	    break;
-	case 0x68704002:
-	    return pxJR3EndImage(par, pxs);
-	    break;
-	case 0x68704003:	/* JR3ExecStream/VUDownloadDeviceTable */
-	case 0x04107068:	/* HP_ColorSmartRGB */
-	case 0x68702005:	/* HP_SelectTrayBinByString */
-	case 0x68702006:	/* EnterFRMode */
-	case 0x68702011:	/* FRExtension */
-	    /* 1001 - 1004: PAINT_SETCOLORTREATMENT, PAINT_SETHALFTONEMETHOD, PAINT_DOWNLOADCOLORTABLE, ColorSmartRGB
-	       2001, 2002, 2004: MEDIA_SELECTMEDIASOURCE, MEDIA_SELECTMEDIAFINISH, , SetInternalLUT
-	       2101:             JR_OPENDATASOURCE
-	       3000 - 301E:      hp_MET
-	     */
-	default:
-	    break;
-    }
     if (par->pv[1]) {
         ulong len = par->pv[1]->value.i;
         ulong copy = min(len - par->source.position,
                          par->source.available);
-	dprintf2("Unprocessed VendorUnique Extension %08X (%d)\n",
-		 par->pv[0]->value.i,
-		 (par->pv[4] ? par->pv[4]->
-		  value.i : -1 /* as good as any */ ));
         par->source.data += copy;
         par->source.available -= copy;
         par->source.position += copy;

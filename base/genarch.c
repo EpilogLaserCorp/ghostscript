@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -129,6 +129,10 @@ main(int argc, char *argv[])
         char c;
         double d;
     } sd;
+    struct {
+        char c;
+        size_t z;
+    } sz;
     long lm1 = -1;
     long lr1 = lm1 >> 1, lr2 = lm1 >> 2;
     int im1 = -1;
@@ -180,11 +184,19 @@ main(int argc, char *argv[])
     define_int(f, "ARCH_ALIGN_SHORT_MOD", OFFSET_IN(ss, s));
     define_int(f, "ARCH_ALIGN_INT_MOD", OFFSET_IN(si, i));
     define_int(f, "ARCH_ALIGN_LONG_MOD", OFFSET_IN(sl, l));
+    define_int(f, "ARCH_ALIGN_SIZE_T_MOD", OFFSET_IN(sz, z));
 
 #if defined (GS_MEMPTR_ALIGNMENT) && GS_MEMPTR_ALIGNMENT != 0
     define_int(f, "ARCH_ALIGN_PTR_MOD", GS_MEMPTR_ALIGNMENT);
 #else
+#if defined (sparc) || defined (__hpux)
+# ifndef __BIGGEST_ALIGNMENT__
+#  define __BIGGEST_ALIGNMENT__ 8
+# endif
+    define_int(f, "ARCH_ALIGN_PTR_MOD", __BIGGEST_ALIGNMENT__);
+#else
     define_int(f, "ARCH_ALIGN_PTR_MOD", OFFSET_IN(sp, p));
+#endif
 #endif
 
     define_int(f, "ARCH_ALIGN_FLOAT_MOD", OFFSET_IN(sf, f));
@@ -202,6 +214,7 @@ main(int argc, char *argv[])
     define_int(f, "ARCH_LOG2_SIZEOF_SHORT", ilog2(size_of(short)));
     define_int(f, "ARCH_LOG2_SIZEOF_INT", ilog2(size_of(int)));
     define_int(f, "ARCH_LOG2_SIZEOF_LONG", ilog2(size_of(long)));
+    define_int(f, "ARCH_LOG2_SIZEOF_SIZE_T", ilog2(size_of(size_t)));
 #if !defined(_MSC_VER) && ! (defined(__BORLANDC__) && defined(__WIN32__))
     /* MSVC does not provide 'long long' but we need this on some archs
        to define a 64 bit type. A corresponding #ifdef in stdint_.h handles
@@ -209,6 +222,7 @@ main(int argc, char *argv[])
        they have a 64 bit type at all */
     define_int(f, "ARCH_LOG2_SIZEOF_LONG_LONG", ilog2(size_of(long long)));
 #endif
+    define_int(f, "ARCH_SIZEOF_SIZE_T", size_of(size_t));
     define_int(f, "ARCH_SIZEOF_GX_COLOR_INDEX", sizeof(GX_COLOR_INDEX_TYPE));
     define_int(f, "ARCH_SIZEOF_PTR", size_of(char *));
     define_int(f, "ARCH_SIZEOF_FLOAT", size_of(float));
@@ -251,6 +265,8 @@ main(int argc, char *argv[])
     fprintf(f, "((unsigned int)~0 + (unsigned int)0)\n");
     define(f, "ARCH_MAX_ULONG");
     fprintf(f, "((unsigned long)~0L + (unsigned long)0)\n");
+    define(f, "ARCH_MAX_SIZE_T");
+    fprintf(f, "((size_t)~0L + (size_t)0)\n");
 #undef PRINT_MAX
 
     section(f, "Miscellaneous");

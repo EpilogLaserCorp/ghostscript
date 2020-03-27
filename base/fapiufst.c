@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -18,6 +18,7 @@
 
 /* GS includes : */
 #include "stdio_.h"
+#include "string_.h"
 #include "stream.h"             /* for files.h */
 #include "strmio.h"
 
@@ -860,7 +861,7 @@ fco_open(fapi_ufst_server * r, const char *font_file_path,
                                         "fco_list_elem");
         if (e == 0) {
             CGIFfco_Close(FSA fcHandle);
-            return gs_error_VMerror;
+            return_error(gs_error_VMerror);
         }
         e->open_count = 0;
         e->fcHandle = fcHandle;
@@ -868,7 +869,7 @@ fco_open(fapi_ufst_server * r, const char *font_file_path,
         if (e->file_path == 0) {
             CGIFfco_Close(FSA fcHandle);
             gs_free(r->mem, e, 0, 0, "fco_list_elem");
-            return gs_error_VMerror;
+            return_error(gs_error_VMerror);
         }
         e->next = r->fco_list;
         r->fco_list = e;
@@ -919,35 +920,23 @@ ufst_make_font_data(fapi_ufst_server * r, const char *font_file_path,
         else {
             tt_size = ff->get_long(ff, gs_fapi_font_feature_TT_size, 0);
             if (tt_size == 0)
-                return gs_error_invalidfont;
+                return_error(gs_error_invalidfont);
 /*            area_length += tt_size + (use_XL_format ? 6 : 4) + 4 + 2;*/
             area_length += tt_size + 6 + 4 + 2;
         }
 #endif
     }
     else {
-        int sind = strlen(font_file_path) - 1;
+        int sind = strlen(font_file_path);
 
-        if ((font_file_path[sind] != 'o' || font_file_path[sind] != 'O') &&
-            (font_file_path[sind - 1] != 'c'
-             || font_file_path[sind - 1] != 'C')
-            && (font_file_path[sind - 2] != 'f'
-                || font_file_path[sind - 2] != 'F')
-            && font_file_path[sind - 3] != '.') {
-#if UFST_VERSION_MAJOR < 6
+        if (strncasecmp(font_file_path + sind - 4, ".fco", 4) != 0) {
             return (gs_error_invalidaccess);
-#else
-            /* If we have the Freetype server available, always use it for non-FCO fonts */
-            if (gs_fapi_available(r->mem, (char *)"FreeType")) {
-                return (gs_error_invalidaccess);
-            }
-#endif
         }
         area_length += strlen(font_file_path) + 1;
     }
     buf = gs_malloc(r->mem, area_length, 1, "ufst font data");
     if (buf == 0)
-        return gs_error_VMerror;
+        return_error(gs_error_VMerror);
 
     memset(buf, 0x00, area_length);
 
@@ -970,12 +959,12 @@ ufst_make_font_data(fapi_ufst_server * r, const char *font_file_path,
             d->font_type = FC_FCO_TYPE;
         }
         else {
-            stream *f = sfopen(font_file_path, "rb", r->mem);
+            stream *f = sfopen(font_file_path, "r", r->mem);
 
             if (f == NULL) {
                 ufst_emprintf1(r->mem,
                           "fapiufst: Can't open %s\n", font_file_path);
-                return gs_error_undefinedfilename;
+                return_error(gs_error_undefinedfilename);
             }
             memcpy(d + 1, font_file_path, strlen(font_file_path) + 1);
             d->font_type = get_font_type(f);
@@ -1072,7 +1061,7 @@ ufst_make_font_data(fapi_ufst_server * r, const char *font_file_path,
 
             d->tt_font_body_offset = (LPUB8) fontdata - (LPUB8) d;
             if (ff->serialize_tt_font(ff, fontdata, tt_size))
-                return gs_error_invalidfont;
+                return_error(gs_error_invalidfont);
             *(fontdata + tt_size) = 255;
             *(fontdata + tt_size + 1) = 255;
             *(fontdata + tt_size + 2) = 0;
@@ -1165,9 +1154,9 @@ gs_fapi_ufst_get_scaled_font_aux(gs_fapi_server * server, gs_fapi_font * ff,
         hy *= 256;
 
         while (hx < 1.5 || hy < 1.5) {
-            world_scale += 8;
-            hx *= 256;
-            hy *= 256;
+            world_scale += 1;
+            hx *= 10;
+            hy *= 10;
         }
     }
     fc->s.m2.world_scale = world_scale;
@@ -1548,7 +1537,7 @@ export_outline(fapi_ufst_server * r, PIFOUTLINE pol, gs_fapi_path * p)
             }
             else if (*segment == 0x02) {
                 points += 2;
-                return gs_error_invalidfont;    /* This must not happen */
+                return_error(gs_error_invalidfont);   /* This must not happen */
             }
             else if (*segment == 0x03) {
                 if ((p->gs_error =
@@ -1562,7 +1551,7 @@ export_outline(fapi_ufst_server * r, PIFOUTLINE pol, gs_fapi_path * p)
                 points += 3;
             }
             else
-                return gs_error_invalidfont;    /* This must not happen */
+                return_error(gs_error_invalidfont);   /* This must not happen */
             segment++;
         }
     }
@@ -2011,7 +2000,7 @@ gs_fapi_ufst_get_char_raster(gs_fapi_server * server, gs_fapi_raster * rast)
     fapi_ufst_server *r = If_to_I(server);
 
     if (!r->bRaster)
-        return gs_error_limitcheck;
+        return_error(gs_error_unregistered);
     else if (r->char_data == NULL) {
         rast->height = rast->width = rast->line_step = 0;
         rast->p = 0;
@@ -2105,6 +2094,17 @@ gs_fapi_ufst_check_cmap_for_GID(gs_fapi_server * server, uint * index)
     return 0;
 }
 
+static gs_fapi_retcode
+gs_fapi_ufst_set_mm_weight_vector(gs_fapi_server *server, gs_fapi_font *ff, float *wvector, int length)
+{
+    (void)server;
+    (void)ff;
+    (void)wvector;
+    (void)length;
+    
+    return gs_error_invalidaccess;
+}
+
 /* --------------------- The plugin definition : ------------------------- */
 
 static void gs_fapi_ufst_destroy(gs_fapi_server ** server);
@@ -2142,7 +2142,8 @@ static const gs_fapi_server ufstserver = {
     gs_fapi_ufst_release_char_data,
     gs_fapi_ufst_release_typeface,
     gs_fapi_ufst_check_cmap_for_GID,
-    gs_fapi_ufst_get_font_info
+    gs_fapi_ufst_get_font_info,
+    gs_fapi_ufst_set_mm_weight_vector
 };
 
 int gs_fapi_ufst_init(gs_memory_t * mem, gs_fapi_server ** server);
@@ -2152,7 +2153,7 @@ gs_fapi_ufst_init(gs_memory_t * mem, gs_fapi_server ** server)
 {
     fapi_ufst_server *serv;
     int code = 0;
-    gs_memory_t *cmem = NULL;
+    gs_memory_t *cmem = mem->non_gc_memory;
 
     code = gs_memory_chunk_wrap(&(cmem), mem);
     if (code != 0) {
@@ -2164,8 +2165,10 @@ gs_fapi_ufst_init(gs_memory_t * mem, gs_fapi_server ** server)
                                                       sizeof
                                                       (fapi_ufst_server),
                                                       "fapi_ufst_server");
-    if (serv == 0)
-        return gs_error_Fatal;
+    if (serv == NULL) {
+        gs_memory_chunk_release(cmem);
+        return_error(gs_error_Fatal);
+    }
     memset(serv, 0, sizeof(*serv));
 
     serv->mem = cmem;

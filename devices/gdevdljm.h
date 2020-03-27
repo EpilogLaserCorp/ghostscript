@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Interface to generic monochrome H-P DeskJet/LaserJet driver */
@@ -19,6 +19,7 @@
 #  define gdevdljm_INCLUDED
 
 #include "gdevpcl.h"
+#include "gdevprn.h"
 
 /*
  * The notion that there is such a thing as a "PCL printer" is a fiction: no
@@ -130,14 +131,14 @@
 /* Send a page to the printer. */
 int dljet_mono_print_page(
         gx_device_printer * pdev,	/* from device-specific _print_page */
-        FILE * prn_stream,		/* ibid. */
+        gp_file * prn_stream,		/* ibid. */
         int dots_per_inch,		/* may be a multiple of y resolution */
         int features,			/* as defined above */
         const char *page_init		/* page initialization string */
                              );
 int dljet_mono_print_page_copies(
         gx_device_printer * pdev,
-        FILE * prn_stream,
+        gp_file * prn_stream,
         int num_copies,
         int dots_per_inch,
         int features,

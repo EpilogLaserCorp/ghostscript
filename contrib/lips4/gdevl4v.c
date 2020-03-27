@@ -228,9 +228,9 @@ gx_device_lips4v far_data gs_lips4v_device = {
 /* Vector device implementation */
 #if GS_VERSION_MAJOR >= 8
 static int lips4v_beginpage(gx_device_vector * vdev);
-static int lips4v_setfillcolor(gx_device_vector * vdev, const gs_imager_state * pis,
+static int lips4v_setfillcolor(gx_device_vector * vdev, const gs_gstate * pgs,
                                                                                 const gx_drawing_color * pdc);
-static int lips4v_setstrokecolor(gx_device_vector * vdev, const gs_imager_state * pis,
+static int lips4v_setstrokecolor(gx_device_vector * vdev, const gs_gstate * pgs,
                                                                         const gx_drawing_color * pdc);
 static int lips4v_setdash(gx_device_vector * vdev, const float *pattern,
                               uint count, double offset);
@@ -238,7 +238,7 @@ static int lips4v_setflat(gx_device_vector * vdev, double flatness);
 static int
 lips4v_setlogop(gx_device_vector * vdev, gs_logical_operation_t lop,
                  gs_logical_operation_t diff);
-static int lips4v_can_handle_hl_color(gx_device_vector * vdev, const gs_imager_state * pis,
+static int lips4v_can_handle_hl_color(gx_device_vector * vdev, const gs_gstate * pgs,
                   const gx_drawing_color * pdc);
 static int
 
@@ -487,7 +487,7 @@ lips4v_copy_text_char(gx_device * dev, const byte * data,
     uint width_bytes = (w + 7) >> 3;
     uint size = width_bytes * h;
     int i, j;
-    uint ccode;
+    uint ccode = 0;
     char cset_sub[9], cset[64], cset_number[8], text_color[15];
     int cell_length = (POINT * (int)dev->x_pixels_per_inch) / 72;
     bool download = TRUE;
@@ -572,18 +572,10 @@ lips4v_copy_text_char(gx_device * dev, const byte * data,
         }
     }
     /* 文字セット・アサイン番号選択命令2 */
-    if (download) {
-        if (pdev->current_font != ccode / 128) {
-            gs_sprintf(cset_number, "%c%d%%v", LIPS_CSI, ccode / 128);
-            lputs(s, cset_number);
-            pdev->current_font = ccode / 128;
-        }
-    } else {
-        if (pdev->current_font != ccode / 128) {
-            gs_sprintf(cset_number, "%c%d%%v", LIPS_CSI, ccode / 128);
-            lputs(s, cset_number);
-            pdev->current_font = ccode / 128;
-        }
+    if (pdev->current_font != ccode / 128) {
+        gs_sprintf(cset_number, "%c%d%%v", LIPS_CSI, ccode / 128);
+        lputs(s, cset_number);
+        pdev->current_font = ccode / 128;
     }
 
     /* カラー */
@@ -997,6 +989,7 @@ lips4v_setlinecap(gx_device_vector * vdev, gs_line_cap cap)
         pdev->TextMode = FALSE;
     }
     switch (cap) {
+        default:
         case 0:
         case 3:
         line_cap = 0;		/* butt */
@@ -1034,6 +1027,7 @@ lips4v_setlinejoin(gx_device_vector * vdev, gs_line_join join)
     }
 
     switch (join) {
+        default:
         case 0:
         lips_join = 2;		/* miter */
         break;
@@ -1078,7 +1072,7 @@ lips4v_setmiterlimit(gx_device_vector * vdev, double limit)
 
 #if GS_VERSION_MAJOR >= 8
 static int
-lips4v_setfillcolor(gx_device_vector * vdev, const gs_imager_state * pis, const gx_drawing_color * pdc)
+lips4v_setfillcolor(gx_device_vector * vdev, const gs_gstate * pgs, const gx_drawing_color * pdc)
 #else
 static int
 lips4v_setfillcolor(gx_device_vector * vdev, const gx_drawing_color * pdc)
@@ -1091,8 +1085,8 @@ lips4v_setfillcolor(gx_device_vector * vdev, const gx_drawing_color * pdc)
         stream *s = gdev_vector_stream(vdev);
         gx_device_lips4v *const pdev = (gx_device_lips4v *) vdev;
         gx_color_index color = gx_dc_pure_color(pdc);
-        int drawing_color;
-        float r, g, b;
+        int drawing_color = 0;
+        float r = 0.0F, g = 0.0F, b = 0.0F;
 
         if (vdev->color_info.depth == 8) {
             drawing_color = vdev->color_info.max_gray - color;
@@ -1146,7 +1140,7 @@ lips4v_setfillcolor(gx_device_vector * vdev, const gx_drawing_color * pdc)
 
 #if GS_VERSION_MAJOR >= 8
 static int
-lips4v_setstrokecolor(gx_device_vector * vdev, const gs_imager_state * pis, const gx_drawing_color * pdc)
+lips4v_setstrokecolor(gx_device_vector * vdev, const gs_gstate * pgs, const gx_drawing_color * pdc)
 #else
 static int
 lips4v_setstrokecolor(gx_device_vector * vdev, const gx_drawing_color * pdc)
@@ -1158,7 +1152,7 @@ lips4v_setstrokecolor(gx_device_vector * vdev, const gx_drawing_color * pdc)
         stream *s = gdev_vector_stream(vdev);
         gx_device_lips4v *const pdev = (gx_device_lips4v *) vdev;
         gx_color_index color = gx_dc_pure_color(pdc);
-        float r, g, b;
+        float r = 0.0F, g = 0.0F, b = 0.0F;
 
         if (vdev->color_info.depth == 24) {
             r = (color >> 16) * 1000 / 255.0;
@@ -1194,7 +1188,9 @@ lips4v_setdash(gx_device_vector * vdev, const float *pattern, uint count,
     stream *s = gdev_vector_stream(vdev);
     gx_device_lips4v *const pdev = (gx_device_lips4v *) vdev;
     int i;
+#if 0
     float scale, xscale, yscale;
+#endif
 
     if (pdev->TextMode) {
         sputc(s, LIPS_CSI);
@@ -1287,7 +1283,7 @@ lips4v_setlogop(gx_device_vector * vdev, gs_logical_operation_t lop,
 #if GS_VERSION_MAJOR >= 8
 /*--- added for Ghostscritp 8.15 ---*/
 static int
-lips4v_can_handle_hl_color(gx_device_vector * vdev, const gs_imager_state * pis1,
+lips4v_can_handle_hl_color(gx_device_vector * vdev, const gs_gstate * pgs1,
               const gx_drawing_color * pdc)
 {
     return false; /* High level color is not implemented yet. */
@@ -1309,9 +1305,10 @@ lips4v_beginpath(gx_device_vector * vdev, gx_path_type_t type)
     if (type & gx_path_type_clip) {
         lputs(s, "P(10");
         sputc(s, LIPS_IS2);
-    } else
+    } else {
         lputs(s, "P(00");
         sputc(s, LIPS_IS2);
+    }
 
     return 0;
 }
@@ -1392,11 +1389,11 @@ lips4v_endpath(gx_device_vector * vdev, gx_path_type_t type)
     lputs(s, "P)");
     sputc(s, LIPS_IS2);
     if (type & gx_path_type_rule) {
-        if (type & gx_path_type_winding_number) {
-            lputs(s, "}I1");
+        if (type & gx_path_type_even_odd) {
+            lputs(s, "}I0");
             sputc(s, LIPS_IS2);
         } else {
-            lputs(s, "}I0");
+            lputs(s, "}I1");
             sputc(s, LIPS_IS2);
         }
     }
@@ -1502,12 +1499,12 @@ lips4v_close(gx_device * dev)
 {
     gx_device_vector *const vdev = (gx_device_vector *) dev;
     gx_device_lips4v *const pdev = (gx_device_lips4v *) dev;
-    FILE *f = vdev->file;
+    gp_file *f = vdev->file;
 
-    fprintf(f, "%c0J%c", LIPS_DCS, LIPS_ST);
+    gp_fprintf(f, "%c0J%c", LIPS_DCS, LIPS_ST);
     if (pdev->pjl) {
-        fprintf(f, "%c%%-12345X@PJL SET LPARM : LIPS SW2 = OFF\n", LIPS_ESC);
-        fprintf(f,
+        gp_fprintf(f, "%c%%-12345X@PJL SET LPARM : LIPS SW2 = OFF\n", LIPS_ESC);
+        gp_fprintf(f,
                 "%c%%-12345X%c%%-12345X@PJL EOJ\n"
                 "%c%%-12345X", LIPS_ESC, LIPS_ESC, LIPS_ESC);
     }
@@ -1636,6 +1633,7 @@ lips4v_put_params(gx_device * dev, gs_param_list * plist)
         default:
         ecode = code;
       casse:param_signal_error(plist, param_name, ecode);
+        /* Fall through. */
         case 1:
         break;
     }
@@ -1648,11 +1646,11 @@ lips4v_put_params(gx_device * dev, gs_param_list * plist)
             ecode = gs_error_limitcheck;
             goto pmediae;
         } else {   /* Check the validity of ``MediaType'' characters */
-            if (strcmp(pmedia.data, "PlainPaper") != 0 &&
-                strcmp(pmedia.data, "OHP") != 0 &&
-                strcmp(pmedia.data, "TransparencyFilm") != 0 &&	/* same as OHP */
-                strcmp(pmedia.data, "GlossyFilm") != 0 &&
-                strcmp(pmedia.data, "CardBoard") != 0) {
+            if (strcmp((const char *)pmedia.data, "PlainPaper") != 0 &&
+                strcmp((const char *)pmedia.data, "OHP") != 0 &&
+                strcmp((const char *)pmedia.data, "TransparencyFilm") != 0 &&	/* same as OHP */
+                strcmp((const char *)pmedia.data, "GlossyFilm") != 0 &&
+                strcmp((const char *)pmedia.data, "CardBoard") != 0) {
                 ecode = gs_error_rangecheck;
                 goto pmediae;
             }
@@ -1661,6 +1659,7 @@ lips4v_put_params(gx_device * dev, gs_param_list * plist)
         default:
         ecode = code;
       pmediae:param_signal_error(plist, param_name, ecode);
+        /* Fall through. */
         case 1:
         pmedia.data = 0;
         break;
@@ -1691,6 +1690,7 @@ lips4v_put_params(gx_device * dev, gs_param_list * plist)
         default:
         ecode = code;
       userne:param_signal_error(plist, param_name, ecode);
+        /* Fall through. */
         case 1:
         usern.data = 0;
         break;
@@ -1712,6 +1712,7 @@ lips4v_put_params(gx_device * dev, gs_param_list * plist)
         default:
         ecode = code;
       nupe:param_signal_error(plist, param_name, ecode);
+        /* Fall through. */
         case 1:
         break;
     }
@@ -1732,6 +1733,7 @@ lips4v_put_params(gx_device * dev, gs_param_list * plist)
         default:
         ecode = code;
       tden:param_signal_error(plist, param_name, ecode);
+        /* Fall through. */
         case 1:
         break;
     }
@@ -1767,6 +1769,7 @@ lips4v_put_params(gx_device * dev, gs_param_list * plist)
             }
             ecode = code;
             param_signal_error(plist, param_name, ecode);
+            /* Fall through. */
             case 1:
             break;
         }
@@ -1791,6 +1794,7 @@ lips4v_put_params(gx_device * dev, gs_param_list * plist)
         default:
         ecode = code;
       bppe:param_signal_error(plist, param_name, ecode);
+        /* Fall through. */
         case 1:
         break;
     }
@@ -2199,7 +2203,7 @@ static const gx_image_enum_procs_t lips4v_image_enum_procs = {
 /* Start processing an image. */
 static int
 lips4v_begin_image(gx_device * dev,
-                   const gs_imager_state * pis, const gs_image_t * pim,
+                   const gs_gstate * pgs, const gs_image_t * pim,
                    gs_image_format_t format, const gs_int_rect * prect,
                    const gx_drawing_color * pdcolor,
                    const gx_clip_path * pcpath, gs_memory_t * mem,
@@ -2211,7 +2215,7 @@ lips4v_begin_image(gx_device * dev,
         gs_alloc_struct(mem, gdev_vector_image_enum_t,
                         &st_vector_image_enum, "lips4v_begin_image");
     const gs_color_space *pcs = pim->ColorSpace;
-    gs_color_space_index index;
+    gs_color_space_index index = 0;
     int num_components = 1;
     bool can_do = prect == 0 &&
         (pim->format == gs_image_format_chunky ||
@@ -2223,7 +2227,7 @@ lips4v_begin_image(gx_device * dev,
     if (pie == 0)
         return_error(gs_error_VMerror);
     pie->memory = mem;
-    code = gdev_vector_begin_image(vdev, pis, pim, format, prect,
+    code = gdev_vector_begin_image(vdev, pgs, pim, format, prect,
                                    pdcolor, pcpath, mem,
                                    &lips4v_image_enum_procs, pie);
     if (code < 0)
@@ -2263,7 +2267,7 @@ lips4v_begin_image(gx_device * dev,
         }
     }
     if (!can_do)
-        return gx_default_begin_image(dev, pis, pim, format, prect,
+        return gx_default_begin_image(dev, pgs, pim, format, prect,
                                       pdcolor, pcpath, mem,
                                       &pie->default_info);
     else if (index == gs_color_space_index_DeviceGray) {
@@ -2297,8 +2301,11 @@ lips4v_begin_image(gx_device * dev,
             lputs(s, "&}");
             pdev->TextMode = FALSE;
         }
-        gs_matrix_invert(&pim->ImageMatrix, &imat);
-        gs_matrix_multiply(&imat, &ctm_only(pis), &imat);
+        code = gs_matrix_invert(&pim->ImageMatrix, &imat);
+        if (code < 0)
+            return code;
+
+        gs_matrix_multiply(&imat, &ctm_only(pgs), &imat);
         /*
            [xx xy yx yy tx ty]
            LIPS の座標系に変換を行なう。
@@ -2462,9 +2469,10 @@ lips4v_image_end_image(gx_image_enum_common_t * info, bool draw_last)
 
     if (pdev->OneBitMask)
         pdev->OneBitMask = false;
-    else
+    else {
         lputs(s, "}Q1100");
         sputc(s, LIPS_IS2);	/* End of Image */
+    }
 
     pdev->MaskReverse = -1;
 

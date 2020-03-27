@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Device to set monochrome mode in PCL */
@@ -30,7 +30,7 @@
 #include "gsdevice.h"		/* requires gsmatrix.h */
 #include "gxdcolor.h"		/* for gx_device_black/white */
 #include "gxiparam.h"		/* for image source size */
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gxpaint.h"
 #include "gxpath.h"
 #include "gxcpath.h"
@@ -52,7 +52,7 @@ static dev_proc_get_color_mapping_procs(pcl_mono_palette_get_color_mapping_procs
 /* GC descriptor */
 #define public_st_pcl_mono_palette_device()	/* in gsdevice.c */\
   gs_public_st_complex_only(st_pcl_mono_palette_device, gx_device, "PCL_Mono_Palette",\
-    0, pcl_mono_palette_enum_ptrs, pcl_mono_palette_reloc_ptrs, gx_device_finalize)
+    0, pcl_mono_palette_enum_ptrs, pcl_mono_palette_reloc_ptrs, default_subclass_finalize)
 
 static
 ENUM_PTRS_WITH(pcl_mono_palette_enum_ptrs, gx_device *dev);
@@ -151,7 +151,9 @@ gx_device_mplt gs_pcl_mono_palette_device =
      default_subclass_strip_copy_rop2,
      default_subclass_strip_tile_rect_devn,
      default_subclass_copy_alpha_hl_color,
-     default_subclass_process_page
+     default_subclass_process_page,
+     default_subclass_transform_pixel_region,
+     default_subclass_fill_stroke_path,
     }
 };
 
@@ -181,7 +183,7 @@ pcl_gray_cs_to_cm(gx_device * dev, frac gray, frac out[])
 }
 
 static void
-pcl_rgb_cs_to_cm(gx_device * dev, const gs_imager_state * pis, frac r, frac g,
+pcl_rgb_cs_to_cm(gx_device * dev, const gs_gstate * pgs, frac r, frac g,
                  frac b, frac out[])
 {
     pcl_mono_palette_subclass_data *psubclass_data;
@@ -197,7 +199,7 @@ pcl_rgb_cs_to_cm(gx_device * dev, const gs_imager_state * pis, frac r, frac g,
         psubclass_data = dev->subclass_data;
         gray = color_rgb_to_gray(r, g, b, NULL);
 
-        psubclass_data->device_cm_procs->map_rgb(dev, pis, gray, gray, gray, out);
+        psubclass_data->device_cm_procs->map_rgb(dev, pgs, gray, gray, gray, out);
     } else
         return;
 }

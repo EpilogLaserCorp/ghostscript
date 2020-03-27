@@ -1,4 +1,4 @@
-% Copyright (C) 2001-2012 Artifex Software, Inc.
+% Copyright (C) 2001-2019 Artifex Software, Inc.
 % All Rights Reserved.
 %
 % This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 % of the license contained in the file LICENSE in this distribution.
 %
 % Refer to licensing information at http://www.artifex.com or contact
-% Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-% CA  94903, U.S.A., +1(415)492-9861, for further information.
+% Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+% CA 94945, U.S.A., +1(415)492-9861, for further information.
 %
 
 % pdf_rbld.ps - Rebuilding of broken PDF files (xref errors)
@@ -36,8 +36,9 @@
 {
   5 1 roll
   dup 65535 or 65535 ne {
-    (   **** Warning:  Generation number out of 0..65535 range, assuming 0.\n)
+    (   **** Error:  Generation number out of 0..65535 range, assuming 0.\n)
     pdfformaterror
+    (                Output may be incorrect.\n) pdfformaterror
     pop 0
   } if
         % We store generation numbers as value + 1
@@ -75,7 +76,7 @@
       %% that offset, otherwise prefer the later object.
       %% NB check first to see that the object number is in the range of the original
       %% xref. If it isn't, set the 'original' Offset to 0.
-      3 index Orig_Objects length pstack le {Orig_Objects 4 index get}{0}ifelse
+      3 index Orig_Objects length le {Orig_Objects 4 index get}{0}ifelse
       Objects 5 index get eq not
       {
         ObjectStream 4 index 4 index cvx put % Save ObjectStream object number
@@ -86,7 +87,7 @@
         % Set error flag if we have equal object and generation numbers
     Generations 4 index get 1 index eq { /dup_obj_gen_num //true def } if
   } 8 -1 roll { ifelse } { pop if } ifelse  % Run 'else' only when rebuilding.
-} bind def
+} bind executeonly def
 
 % Print the contents of the xref array.  This actually consists of three
 % arrays (Objects, Generations, and ObjectStream).
@@ -101,7 +102,7 @@
     Objects exch get ===		% print object location
   } for
   flush
-} bind def
+} bind executeonly def
 
 % Get token from string and check its type
 %   <string> <type> typed_token <false>		% no token or not match
@@ -120,7 +121,7 @@
   } {
     pop //false			% no token - pop type, set exit status
   } ifelse			% check if we got token
-} bind def
+} bind executeonly def
 
 % Allocate space for post_eof_count to be bound into procedures below.
 /post_eof_count 0 def
@@ -152,7 +153,7 @@
   } {
     pop 0                 	% no xref, should not happen, report it upstrem
   } ifelse
-} bind def
+} bind executeonly def
 
 
 %% Searches backwards from a specified point looking for a 'trailer' keyword.
@@ -164,22 +165,26 @@
 %% choose to enhance this routine further.
 %%
 /search_earlier_trailer {
-{                                             % position
+  {                                             % position
     dup 0 gt {                                  % position bool
-      dup 65535 .min exch                        % block_size position
+      dup 65535 .min exch                       % block_size position
       1 index sub                               % block_size position-block_size
       dup                                       % block_size new_position new_position
       PDFfile exch setfileposition              % block_size new position
-      exch dup string 0 1 4 -1 roll 1 sub       %
+      exch dup                                  % new position block_size block_size
+      dup string 0 1 4 -1 roll 1 sub            %
       {2 copy PDFfile read pop put pop } for    %
-                                                % new_position (...string from file....)
+                                                % new_position block size (...string from file....)
       (trailer) search {
         pop
         { search not { exit } if pop } loop
                                                 % determine where the trailer is in the file
                                                 %   trailer loc = end loc - remaing string length
-        length exch 65535 add exch sub
+        length                                  % new_position block size string length
+        3 1 roll                                % string length new_position block size
+        add exch sub                            % string length - (new_position + block size)
       } {
+        pop                                     % discard old block size
         pop 0
       } ifelse
     } {
@@ -192,7 +197,7 @@
     }if
     pop                                         % renove the zero leaving the new start position
   } loop
-} bind def
+} bind executeonly def
 
 % We want the location of the trailer dictionary at the end of file.
 % We will read the last block of data and search for the final occurance
@@ -218,7 +223,7 @@
   } {
     pop pop 0
   } ifelse
-} bind def
+} bind executeonly def
 
 % We want to find the trailer dictionary.  There is a trailer dictionary
 % for each xref object list.  We only want the trailer dictionary associated
@@ -255,13 +260,26 @@
      %   'startxref' loc = end loc - remaing string length - 9 bytes
      length sub 9 sub
      % move the file to this position and read startxref and position
+     % First, read the startxref token, this should not fail.
      PDFfile exch setfileposition PDFfile token
-     pop pop PDFfile token pop
-     dup type /integertype eq not {
-       pop
-       % startxref not followed by integer.  We will search the end of the file for trailer.
+     {
+       % Discard the startxref token and read the following token, which should be the offset.
+       pop PDFfile token_no_close
+       {
+         % Now chck its an integer
+         dup type /integertype eq not {
+           pop
+           % startxref not followed by integer.  We will search the end of the file for trailer.
+           PDFfilelen
+         } if
+       } {
+         % startxref not followed by any token.  We will search the end of the file for trailer.
+         PDFfilelen
+       } ifelse
+     } {
+       % No startxref token ?  We will search the end of the file for trailer.
        PDFfilelen
-     } if
+     } ifelse
   } {
      % startxref not found.  We will search the end of the file for trailer.
      pop pop PDFfilelen
@@ -274,7 +292,8 @@
   } ifelse
   dup 0 eq {
     pop
-    (   **** Error:  Trailer is not found.\n) pdfformaterror
+    (   **** Error:  Trailer dictionary not found.\n) pdfformaterror
+    (                Output may be incorrect.\n) pdfformaterror
   }{
   % get the trailer
   dup
@@ -284,7 +303,7 @@
 
   {
     dup /Root known not {
-     (   **** Warning: This trailer dictionary does not contain a /Root entry\n        searching for a prior trailer.\n) pdfformaterror
+     (   **** Warning: This trailer dictionary does not contain a /Root entry\n        searching for a prior trailer.\n) pdfformatwarning
       %% remove trailer dict copy, duplicate file position, then remove the length of 'trailer' so we don't
       %% find the same one again....
       pop dup 7 sub
@@ -293,6 +312,7 @@
     dup 0 eq {
     pop
     (   **** Error:  Valid trailer not found.\n) pdfformaterror
+    (                Output may be incorrect.\n) pdfformaterror
     }{
       PDFfile exch setfileposition		% set to the specified trailer location
       /dictlevelcount 0 def
@@ -302,7 +322,7 @@
   /Trailer exch def
   pop
   } ifelse
-} bind def
+} bind executeonly def
 
 % This routine will determine if there is stuff after the %%EOF.  There is
 % supposed to be only a line termination.  However many real life files
@@ -336,7 +356,7 @@
     % Can't even find startxref, assume it's all objects
     pop 0
   } ifelse
-} bind def
+} bind executeonly def
 
 % This routine will scan a file searaching for object locations to build
 % an alternate version of the data in the xref tables.
@@ -367,7 +387,7 @@
     } ifelse
     % Read a line from file.  If the line does not fit into our working string,
     % or any other error, then we will discard it.
-    PDFfile exch { readline } .internalstopped
+    PDFfile exch { readline } //.internalstopped exec
     { pop pop //false } if		% indicate no string if we stopped
     { % stack: <length> <working_str> <loc> <string>
       % Now that we have line, get obj num, ref num, and 'obj'.  Verify that each
@@ -410,17 +430,17 @@
   % numbers.
   dup_obj_gen_num {
     (   **** Warning:  There are objects with matching object and generation\n)
-    pdfformaterror
-    (   **** numbers.  The accuracy of the resulting image is unknown.\n)
-    pdfformaterror
+    pdfformatwarning
+    (   **** numbers.  The output may be incorrect.\n)
+    pdfformatwarning
   } if
   currentdict /Orig_Objects undef
-} bind def
+} bind executeonly def
 
 % Print warning message because we found a problem while reading the xref
 % tables
 /print_xref_warning
-{ (   **** Warning:  An error occurred while reading an XREF table.\n)
+{ (   **** Error:  An error occurred while reading an XREF table.\n)
   pdfformaterror
   (   **** The file has been damaged.  This may have been caused\n)
   pdfformaterror
@@ -428,7 +448,8 @@
   pdfformaterror
   (   **** Ghostscript will attempt to recover the data.\n)
   pdfformaterror
-} bind def
+  (   **** However, the output may be incorrect.\n) pdfformaterror
+} bind executeonly def
 
 % Attempt to recover the XRef data.  This is called if we have a failure
 % while reading the normal XRef tables.  This routine usually works
@@ -437,4 +458,4 @@
 { print_xref_warning		% Print warning message
   count pdfemptycount sub { pop } repeat % remove anything left by readxref
   search_objects		% Search for objects
-} bind def
+} bind executeonly def

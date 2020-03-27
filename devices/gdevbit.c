@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -24,6 +24,7 @@
 #include "gxdcconv.h"
 #include "gdevdcrd.h"
 #include "gsutil.h" /* for bittags hack */
+#include "gxdevsop.h"
 
 /* Define the device parameters. */
 #ifndef X_DPI
@@ -34,10 +35,13 @@
 #endif
 
 /* The device descriptor */
+static dev_proc_open_device(bittag_open);
 static dev_proc_get_color_mapping_procs(bittag_get_color_mapping_procs);
 static dev_proc_map_rgb_color(bittag_rgb_map_rgb_color);
 static dev_proc_map_color_rgb(bittag_map_color_rgb);
 static dev_proc_put_params(bittag_put_params);
+static dev_proc_create_buf_device(bittag_create_buf_device);
+static dev_proc_fillpage(bittag_fillpage);
 static dev_proc_map_rgb_color(bit_mono_map_color);
 #if 0 /* unused */
 static dev_proc_map_rgb_color(bit_forcemono_map_rgb_color);
@@ -50,6 +54,8 @@ static dev_proc_put_params(bit_put_params);
 static dev_proc_print_page(bit_print_page);
 static dev_proc_print_page(bittags_print_page);
 static dev_proc_put_image(bit_put_image);
+static dev_proc_dev_spec_op(bit_dev_spec_op);
+dev_proc_get_color_comp_index(gx_default_DevRGB_get_color_comp_index);
 
 #define bit_procs(encode_color)\
 {	gdev_prn_open,\
@@ -105,7 +111,20 @@ static dev_proc_put_image(bit_put_image);
         NULL,	/* get_color_mapping_procs */\
         NULL,	/* get_color_comp_index */\
         encode_color,		/* encode_color */\
-        bit_map_color_rgb	/* decode_color */\
+        bit_map_color_rgb,	/* decode_color */\
+        NULL,   /* pattern_manage */\
+        NULL,   /* fill_rectangle_hl_color */\
+        NULL,   /* include_color_space */\
+        NULL,   /* fill_linear_color_scanline */\
+        NULL,   /* fill_linear_color_trapezoid */\
+        NULL,   /* fill_linear_color_triangle */\
+        NULL,   /* update_spot_equivalent_colors */\
+        NULL,   /* ret_devn_params */\
+        NULL,   /* fillpage */\
+        NULL,   /* push_transparency_state */\
+        NULL,   /* pop_transparency_state */\
+        NULL,   /* put_image */\
+        bit_dev_spec_op\
 }
 
 /*
@@ -157,7 +176,7 @@ const gx_device_bit gs_bitcmyk_device =
 
 static const gx_device_procs bitrgbtags_procs =
     {
-        gdev_prn_open,                        /* open_device */
+        bittag_open,                        /* open_device */
         gx_default_get_initial_matrix,        /* initial_matrix */
         ((void *)0),                        /* sync_output */
         gdev_prn_output_page,                 /* output page */
@@ -207,7 +226,7 @@ static const gx_device_procs bitrgbtags_procs =
         ((void *)0),                       /* end_transparency_mask */
         ((void *)0),                       /* discard_transparency_layer */
         bittag_get_color_mapping_procs,      /* get_color_mapping_procs */
-        ((void *)0),                       /* get_color_comp_index */
+        gx_default_DevRGB_get_color_comp_index, /* get_color_comp_index */
         bittag_rgb_map_rgb_color,           /* encode_color */
         bittag_map_color_rgb,               /* decode_color */
         ((void *)0),                        /* pattern_manage */
@@ -218,10 +237,11 @@ static const gx_device_procs bitrgbtags_procs =
         ((void *)0),                        /* fill_linear_color_triangle */
         ((void *)0),                        /* update_spot_equivalent_colors */
         ((void *)0),                        /* ret_devn_params */
-        ((void *)0),                        /* fillpage */
+        bittag_fillpage,                    /* fillpage */
         ((void *)0),                        /* push_transparency_state */
         ((void *)0),                        /* pop_transparency_state */
-        bit_put_image                        /* put_image */
+        bit_put_image,                      /* put_image */
+        bit_dev_spec_op                     /* dev_spec_op */
     };
 
 const gx_device_bit gs_bitrgbtags_device =
@@ -229,16 +249,17 @@ const gx_device_bit gs_bitrgbtags_device =
         sizeof(gx_device_bit),
         &bitrgbtags_procs,
         "bitrgbtags",
-        0 ,                             /* memory */
+        0,                              /* memory */
         &st_device_printer,
-        0 ,                             /* stype_is_dynamic */
-        0 ,                             /* finalize */
-        { 0 } ,                         /* rc header */
-        0 ,                             /* retained */
-        0 ,                             /* parent */
-        0 ,                             /* child */
-        0 ,                             /* subclass data */
-        0 ,                             /* is open */
+        0,                              /* stype_is_dynamic */
+        0,                              /* finalize */
+        { 0 },                          /* rc header */
+        0,                              /* retained */
+        0,                              /* parent */
+        0,                              /* child */
+        0,                              /* subclass data */
+        0,                              /* PageList */
+        0,                              /* is open */
         0,                              /* max_fill_band */
         {                               /* color infor */
             3,                          /* max_components */
@@ -246,17 +267,17 @@ const gx_device_bit gs_bitrgbtags_device =
             GX_CINFO_POLARITY_ADDITIVE, /* polarity */
             32,                         /* depth */
             GX_CINFO_COMP_NO_INDEX,     /* gray index */
-            255 ,                         /* max_gray */
-            255 ,                         /* max_colors */
-            256 ,                         /* dither grays */
-            256 ,                         /* dither colors */
-            { 1, 1 } ,                  /* antialiasing */
-            GX_CINFO_UNKNOWN_SEP_LIN,   /* sep and linear */
-            { 16, 8, 0, 0 } ,                    /* comp shift */
-            { 8, 8, 8, 8 } ,                     /* comp bits */
-            { 0xFF0000, 0x00FF00, 0x0000FF } ,     /* comp mask */
+            255,                        /* max_gray */
+            255,                        /* max_colors */
+            256,                        /* dither grays */
+            256,                        /* dither colors */
+            { 1, 1 },                   /* antialiasing */
+            GX_CINFO_SEP_LIN_STANDARD,  /* sep and linear */
+            { 16, 8, 0, 24 },           /* comp shift */	/* tag is upper byte */
+            { 8, 8, 8, 8 },             /* comp bits */
+            { 0xFF0000, 0x00FF00, 0x0000FF, 0xFF000000 },  /* comp mask */
             ( "DeviceRGBT" ),            /* color model name */
-            GX_CINFO_OPMODE_UNKNOWN ,   /* overprint mode */
+            GX_CINFO_OPMODE_UNKNOWN,     /* overprint mode */
             0,                           /* process comps */
             0                            /* icc_locations */
         },
@@ -264,90 +285,96 @@ const gx_device_bit gs_bitrgbtags_device =
             ((gx_color_index)(~0)),
             ((gx_color_index)(~0))
         },
-        (int)((float)(85) * (X_DPI) / 10 + 0.5),
-        (int)((float)(110) * (Y_DPI) / 10 + 0.5),
+        (int)((float)(85) * (X_DPI) / 10 + 0.5), /* width */
+        (int)((float)(110) * (Y_DPI) / 10 + 0.5),/* height */
         0, /* Pad */
-        0, /* Align */
-        0, /* Num planes */
-        0,
+        0, /* log2_align_mod */
+        0, /* is_planar */
+        0, /* LeadingEdge */
         {
-            (float)(((((int)((float)(85) * (X_DPI) / 10 + 0.5)) * 72.0 + 0.5) - 0.5) / (X_DPI)) ,
-            (float)(((((int)((float)(110) * (Y_DPI) / 10 + 0.5)) * 72.0 + 0.5) - 0.5) / (Y_DPI)) },
+            (float)(((((int)((float)(85) * (X_DPI) / 10 + 0.5)) * 72.0 + 0.5) - 0.5) / (X_DPI)),
+            (float)(((((int)((float)(110) * (Y_DPI) / 10 + 0.5)) * 72.0 + 0.5) - 0.5) / (Y_DPI))
+        }, /* MediaSize */
         {
             0,
             0,
             0,
             0
-        } ,
-        0 ,
-        { X_DPI, Y_DPI } ,
-        { X_DPI, Y_DPI },
-        {(float)(-(0) * (X_DPI)),
-         (float)(-(0) * (Y_DPI))},
-        {(float)((0) * 72.0),
-         (float)((0) * 72.0),
-         (float)((0) * 72.0),
-         (float)((0) * 72.0)},
-        0 , /*FirstPage*/
-        0 , /*LastPage*/
-        0 , /*PageHandlerPushed*/
-        0 , /*DisablePageHandler*/
-        0 , /*ObjectFilter*/
-        0 , /*ObjectHandlerPushed*/
-        0 , /*PageCount*/
-        0 , /*ShowPageCount*/
-        1 , /*NumCopies*/
-        0 , /*NumCopiesSet*/
-        0 , /*IgnoreNumCopies*/
-        0 , /*UseCIEColor*/
-        0 , /*LockSafetyParams*/
+        }, /* ImagingBBox */
+        0, /* ImagingBBox_set */
+        { X_DPI, Y_DPI }, /* HWResolution*/
+        {
+          (float)(-(0) * (X_DPI)),
+          (float)(-(0) * (Y_DPI))
+        }, /* Margins */
+        {
+          (float)((0) * 72.0),
+          (float)((0) * 72.0),
+          (float)((0) * 72.0),
+          (float)((0) * 72.0)
+        }, /* HWMargins */
+        0,  /*FirstPage*/
+        0,  /*LastPage*/
+        0,  /*PageHandlerPushed*/
+        0,  /*DisablePageHandler*/
+        0,  /*ObjectFilter*/
+        0,  /*ObjectHandlerPushed*/
+        0,  /*PageCount*/
+        0,  /*ShowPageCount*/
+        1,  /*NumCopies*/
+        0,  /*NumCopiesSet*/
+        0,  /*IgnoreNumCopies*/
+        0,  /*UseCIEColor*/
+        0,  /*LockSafetyParams*/
         0,  /*band_offset_x*/
-        0,  /*band_offset_*/
+        0,  /*band_offset_y*/
+        false, /*BLS_force_memory*/
         {false}, /*sgr*/
         0, /*MaxPatternBitmap*/
         0, /*page_uses_transparency*/
-        { MAX_BITMAP, BUFFER_SPACE,
+        {
+          MAX_BITMAP, BUFFER_SPACE,
           { BAND_PARAMS_INITIAL_VALUES },
           0/*false*/, /* params_are_read_only */
           BandingAuto /* banding_type */
         }, /*space_params*/
         0, /*icc_struct*/
         GS_UNKNOWN_TAG,         /* this device supports tags */
+        1,			/* default interpolate_control */
         {
             gx_default_install,
             gx_default_begin_page,
             gx_default_end_page
-        },
-        { 0 },
-        { 0 },
-        { bittags_print_page,
+        }, /* page_procs */
+        { 0 }, /* procs */
+        { 0 }, /* skip */
+        {
+          bittags_print_page,
           gx_default_print_page_copies,
-          { gx_default_create_buf_device,
+          { bittag_create_buf_device,
             gx_default_size_buf_device,
             gx_default_setup_buf_device,
             gx_default_destroy_buf_device },
-          gx_default_get_space_params,
-          gx_default_start_render_thread,
-          gx_default_open_render_device,
-          gx_default_close_render_device,
-          gx_default_buffer_page },
-        { 0 },
-        0 ,
-        0 ,
-        0 ,
-        -1,
-        0 ,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0 ,
-        0,
-        0,
-        0
+          gx_default_get_space_params
+        }, /* printer_procs */
+        { 0 }, /* fname */
+        false, /* OpenOutputFile */
+        false, /* ReopenPerPage */
+        false, /* Duplex */
+        -1,    /* Duplex_set */
+        false, /* file_is_new */
+        NULL,  /* file */
+        0,     /* buffer_space */
+        NULL,  /* buf */
+        NULL,  /* buffer_memory */
+        NULL,  /* bandlist_memory */
+        0,     /* clist_disable_mask */
+        false, /* bg_print_requested */
+        {0},   /* bg_print */
+        0,     /* num_render_threads_requested */
+        NULL,  /* saved_pages_list */
+        {0},   /* save_procs_while_delaying_erasepage */
+        {0}    /* orig_procs */
     };
 
 static void
@@ -357,7 +384,7 @@ cmyk_cs_to_rgb_cm(gx_device * dev, frac c, frac m, frac y, frac k, frac out[])
 }
 
 static void
-private_rgb_cs_to_rgb_cm(gx_device * dev, const gs_imager_state *pis,
+private_rgb_cs_to_rgb_cm(gx_device * dev, const gs_gstate *pgs,
                                   frac r, frac g, frac b, frac out[])
 {
     out[0] = r;
@@ -530,6 +557,42 @@ bit_map_cmyk_color(gx_device * dev, const gx_color_value cv[])
     (cv[3] >> drop);
 
     return (color == gx_no_color_index ? color ^ 1 : color);
+}
+
+static int
+bittag_open(gx_device * pdev)
+{
+    gx_device_printer *ppdev = (gx_device_printer *)pdev;
+    int code;
+    /* We replace create_buf_device so we can replace copy_alpha
+     * for memory device, but not clist. We also have our own
+     * fillpage proc to fill with UNTOUCHED tag
+     */
+    ppdev->printer_procs.buf_procs.create_buf_device = bittag_create_buf_device;
+    code = gdev_prn_open(pdev);
+    return code;
+}
+
+/*
+ * Fill the page fills with unmarked white, As with the pdf14 device, we treat
+ * GS_UNTOUCHED_TAG == 0 as an invariant
+*/
+static int
+bittag_fillpage(gx_device *dev, gs_gstate * pgs, gx_device_color *pdevc)
+{
+    return (*dev_proc(dev, fill_rectangle))(dev, 0, 0, dev->width, dev->height,
+                                            0x00ffffff);	/* GS_UNTOUCHED_TAG == 0 */
+}
+
+static int
+bittag_create_buf_device(gx_device **pbdev, gx_device *target, int y,
+   const gx_render_plane_t *render_plane, gs_memory_t *mem,
+   gx_color_usage_t *color_usage)
+{
+    int code = gx_default_create_buf_device(pbdev, target, y,
+        render_plane, mem, color_usage);
+    set_dev_proc(*pbdev, fillpage, bittag_fillpage);
+    return code;
 }
 
 static int
@@ -717,7 +780,7 @@ bit_put_params(gx_device * pdev, gs_param_list * plist)
 
 /* Send the page to the printer. */
 static int
-bit_print_page(gx_device_printer * pdev, FILE * prn_stream)
+bit_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {				/* Just dump the bits on the file. */
     /* If the file is 'nul', don't even do the writes. */
     int line_size = gdev_mem_bytes_per_scan_line((gx_device *) pdev);
@@ -729,26 +792,29 @@ bit_print_page(gx_device_printer * pdev, FILE * prn_stream)
     int bottom = ((gx_device_bit *)pdev)->LastLine >= pdev->height ?  pdev->height - 1 :
                  ((gx_device_bit *)pdev)->LastLine;
     int line_count = any_abs(bottom - lnum);
-    int i, step = lnum > bottom ? -1 : 1;
+    int code = 0, i, step = lnum > bottom ? -1 : 1;
 
     if (in == 0)
         return_error(gs_error_VMerror);
     if ((lnum == 0) && (bottom == 0))
         line_count = pdev->height - 1;		/* default when LastLine == 0, FirstLine == 0 */
     for (i = 0; i <= line_count; i++, lnum += step) {
-        gdev_prn_get_bits(pdev, lnum, in, &data);
+        code = gdev_prn_get_bits(pdev, lnum, in, &data);
+        if (code < 0)
+            goto done;
         if (!nul)
-            fwrite(data, 1, line_size, prn_stream);
+            gp_fwrite(data, 1, line_size, prn_stream);
     }
+done:
     gs_free_object(pdev->memory, in, "bit_print_page(in)");
-    return 0;
+    return code;
 }
 
 /* For tags device go ahead and add in the size so that we can strip and create
    proper ppm outputs for various dimensions and not be restricted to 72dpi when
    using the tag viewer */
 static int
-bittags_print_page(gx_device_printer * pdev, FILE * prn_stream)
+bittags_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {				/* Just dump the bits on the file. */
     /* If the file is 'nul', don't even do the writes. */
     int line_size = gdev_mem_bytes_per_scan_line((gx_device *) pdev);
@@ -761,28 +827,32 @@ bittags_print_page(gx_device_printer * pdev, FILE * prn_stream)
                  ((gx_device_bit *)pdev)->LastLine;
     int line_count = any_abs(bottom - lnum);
     int i, step = lnum > bottom ? -1 : 1;
+    int code = 0;
 
     if (in == 0)
         return_error(gs_error_VMerror);
 
-    fprintf(prn_stream, "P6\n%d %d\n255\n", pdev->width, pdev->height);
+    if (!nul)
+        gp_fprintf(prn_stream, "P7\nWIDTH %d\nHEIGHT %d\nMAXVAL 255\nDEPTH 4\nTUPLTYPE RGB_TAG\nENDHDR\n", pdev->width, pdev->height);
     if ((lnum == 0) && (bottom == 0))
         line_count = pdev->height - 1;		/* default when LastLine == 0, FirstLine == 0 */
     for (i = 0; i <= line_count; i++, lnum += step) {
-        gdev_prn_get_bits(pdev, lnum, in, &data);
+        if ((code = gdev_prn_get_bits(pdev, lnum, in, &data)) < 0)
+            goto done;
         if (!nul)
-            fwrite(data, 1, line_size, prn_stream);
+            gp_fwrite(data, 1, line_size, prn_stream);
     }
+done:
     gs_free_object(pdev->memory, in, "bit_print_page(in)");
     return 0;
 }
 
 static int
-bit_put_image(gx_device *pdev, const byte *buffer, int num_chan, int xstart,
+bit_put_image(gx_device *pdev, gx_device *mdev, const byte **buffers, int num_chan, int xstart,
               int ystart, int width, int height, int row_stride,
-              int plane_stride, int alpha_plane_index, int tag_plane_index)
+              int alpha_plane_index, int tag_plane_index)
 {
-    gx_device_memory *pmemdev = (gx_device_memory *)pdev;
+    gx_device_memory *pmemdev = (gx_device_memory *)mdev;
     byte *buffer_prn;
     int yend = ystart + height;
     int xend = xstart + width;
@@ -792,9 +862,6 @@ bit_put_image(gx_device *pdev, const byte *buffer, int num_chan, int xstart,
     if (alpha_plane_index != 0)
         return 0;                /* we don't want alpha, return 0 to ask for the    */
                                  /* pdf14 device to do the alpha composition        */
-    /* Eventually, the pdf14 device might be chunky pixels, punt for now */
-    if (plane_stride == 0)
-        return 0;
     if (num_chan != 3 || tag_plane_index <= 0)
             return_error(gs_error_unknownerror);        /* can't handle these cases */
     /* Drill down to get the appropriate memory buffer pointer */
@@ -806,15 +873,30 @@ bit_put_image(gx_device *pdev, const byte *buffer, int num_chan, int xstart,
         for ( x = xstart; x < xend; x++ ) {
             /* Tag data first, then RGB */
             buffer_prn[des_position] =
-                buffer[src_position + tag_plane_index * plane_stride];
+                buffers[tag_plane_index][src_position];
                 des_position += 1;
             for ( k = 0; k < 3; k++) {
                 buffer_prn[des_position] =
-                    buffer[src_position + k * plane_stride];
+                    buffers[k][src_position];
                     des_position += 1;
             }
             src_position += 1;
         }
     }
     return height;        /* we used all of the data */
+}
+
+static int
+bit_dev_spec_op(gx_device *pdev, int dso, void *ptr, int size)
+{
+    switch (dso)
+    {
+    case gxdso_is_encoding_direct:
+        if (pdev->color_info.depth != 8 * pdev->color_info.num_components)
+            return 0;
+        return (dev_proc(pdev, encode_color) == bitrgb_rgb_map_rgb_color ||
+                dev_proc(pdev, encode_color) == bit_map_cmyk_color);
+    }
+
+    return gdev_prn_dev_spec_op(pdev, dso, ptr, size);
 }

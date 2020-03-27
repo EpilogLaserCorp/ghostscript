@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* 16-bit-per-pixel "memory" (stored bitmap) device */
@@ -74,7 +74,7 @@ mem_true16_fill_rectangle(gx_device * dev,
                           int x, int y, int w, int h, gx_color_index color)
 {
     gx_device_memory * const mdev = (gx_device_memory *)dev;
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
     const ushort color16 = (ushort)color;
 #else
     const ushort color16 = (ushort)((color << 8) | (color >> 8));
@@ -118,7 +118,7 @@ mem_true16_copy_mono(gx_device * dev,
                      gx_color_index zero, gx_color_index one)
 {
     gx_device_memory * const mdev = (gx_device_memory *)dev;
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
     const ushort zero16 = (ushort)zero;
     const ushort one16 = (ushort)one;
 #else

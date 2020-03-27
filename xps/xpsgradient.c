@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -32,6 +32,7 @@ struct stop
 {
     float offset;
     float color[4];
+    int index;
 };
 
 static int cmp_stop(const void *a, const void *b)
@@ -43,7 +44,7 @@ static int cmp_stop(const void *a, const void *b)
         return -1;
     if (diff > 0)
         return 1;
-    return 0;
+    return astop->index - bstop->index;
 }
 
 static inline float lerp(float a, float b, float x)
@@ -57,8 +58,7 @@ xps_parse_gradient_stops(xps_context_t *ctx, char *base_uri, xps_item_t *node,
 {
     unsigned short sample_in[8], sample_out[8]; /* XPS allows up to 8 bands */
     gsicc_rendering_param_t rendering_params;
-    gsicc_link_t *icclink;
-    gs_color_space *colorspace;
+    gsicc_link_t *icclink = 0;
     float sample[8];
     int before, after;
     int count;
@@ -76,7 +76,10 @@ xps_parse_gradient_stops(xps_context_t *ctx, char *base_uri, xps_item_t *node,
             char *color = xps_att(node, "Color");
             if (offset && color)
             {
+                gs_color_space *colorspace;
+
                 stops[count].offset = atof(offset);
+                stops[count].index = count;
 
                 xps_parse_color(ctx, base_uri, color, &colorspace, sample);
 
@@ -88,9 +91,8 @@ xps_parse_gradient_stops(xps_context_t *ctx, char *base_uri, xps_item_t *node,
                 rendering_params.rendering_intent = gsPERCEPTUAL;
                 rendering_params.cmm = gsCMM_DEFAULT;
                 /* Get link to map from source to sRGB */
-                icclink = gsicc_get_link((gs_imager_state*) ctx->pgs,
-                                         NULL, colorspace, ctx->srgb,
-                                         &rendering_params, ctx->memory);
+                icclink = gsicc_get_link(ctx->pgs, NULL, colorspace,
+                                ctx->srgb, &rendering_params, ctx->memory);
 
                 if (icclink != NULL && !icclink->is_identity)
                 {
@@ -98,7 +100,7 @@ xps_parse_gradient_stops(xps_context_t *ctx, char *base_uri, xps_item_t *node,
                     int num_colors = gsicc_getsrc_channel_count(colorspace->cmm_icc_profile_data);
                     for (i = 0; i < num_colors; i++)
                     {
-                        sample_in[i] = sample[i+1]*65535;
+                        sample_in[i] = (unsigned short)(sample[i+1]*65535);
                     }
                     gscms_transform_color((gx_device *)(ctx->pgs->device),
                                           icclink, sample_in, sample_out, 2);
@@ -115,6 +117,7 @@ xps_parse_gradient_stops(xps_context_t *ctx, char *base_uri, xps_item_t *node,
                     stops[count].color[2] = sample[2];
                     stops[count].color[3] = sample[3];
                 }
+                rc_decrement(colorspace, "xps_parse_gradient_stops");
 
                 count ++;
             }
@@ -603,7 +606,7 @@ xps_draw_one_linear_gradient(xps_context_t *ctx,
  * reach a reasonable limit for infinite cases.
  */
 
-static inline float point_inside_circle(float px, float py, float x, float y, float r)
+static inline int point_inside_circle(float px, float py, float x, float y, float r)
 {
     float dx = px - x;
     float dy = py - y;
@@ -614,8 +617,8 @@ static int
 xps_draw_radial_gradient(xps_context_t *ctx, xps_item_t *root, int spread, gs_function_t *func)
 {
     gs_rect bbox;
-    float x0, y0, r0;
-    float x1, y1, r1;
+    float x0 = 0, y0 = 0, r0;
+    float x1 = 0, y1 = 0, r1;
     float xrad = 1;
     float yrad = 1;
     float invscale;
@@ -638,13 +641,18 @@ xps_draw_radial_gradient(xps_context_t *ctx, xps_item_t *root, int spread, gs_fu
     if (radius_y_att)
         yrad = atof(radius_y_att);
 
-    /* scale the ctm to make ellipses */
     gs_gsave(ctx->pgs);
-    gs_scale(ctx->pgs, 1.0, yrad / xrad);
 
-    invscale = xrad / yrad;
-    y0 = y0 * invscale;
-    y1 = y1 * invscale;
+    /* scale the ctm to make ellipses */
+    if (xrad != 0)
+        gs_scale(ctx->pgs, 1.0, yrad / xrad);
+
+    if (yrad != 0)
+    {
+        invscale = xrad / yrad;
+        y0 = y0 * invscale;
+        y1 = y1 * invscale;
+    }
 
     r0 = 0.0;
     r1 = xrad;
@@ -833,8 +841,8 @@ xps_draw_linear_gradient(xps_context_t *ctx, xps_item_t *root, int spread, gs_fu
             if (dist[i] > d1) d1 = dist[i];
         }
 
-        i0 = floor(d0 / len);
-        i1 = ceil(d1 / len);
+        i0 = (int)floor(d0 / len);
+        i1 = (int)ceil(d1 / len);
 
         for (i = i0; i < i1; i++)
         {
@@ -870,9 +878,9 @@ xps_parse_gradient_brush(xps_context_t *ctx, char *base_uri, xps_resource_t *dic
     xps_item_t *node;
 
     char *opacity_att;
-    char *interpolation_att;
+    /*char *interpolation_att;*/
     char *spread_att;
-    char *mapping_att;
+    /*char *mapping_att;*/
     char *transform_att;
 
     xps_item_t *transform_tag = NULL;
@@ -891,9 +899,9 @@ xps_parse_gradient_brush(xps_context_t *ctx, char *base_uri, xps_resource_t *dic
     int has_opacity = 0;
 
     opacity_att = xps_att(root, "Opacity");
-    interpolation_att = xps_att(root, "ColorInterpolationMode");
+    /*interpolation_att = xps_att(root, "ColorInterpolationMode");*/
     spread_att = xps_att(root, "SpreadMethod");
-    mapping_att = xps_att(root, "MappingMode");
+    /*mapping_att = xps_att(root, "MappingMode");*/
     transform_att = xps_att(root, "Transform");
 
     for (node = xps_down(root); node; node = xps_next(node))
@@ -992,7 +1000,7 @@ xps_parse_gradient_brush(xps_context_t *ctx, char *base_uri, xps_resource_t *dic
             gs_end_transparency_mask(ctx->pgs, TRANSPARENCY_CHANNEL_Opacity);
 
             gs_trans_group_params_init(&tgp);
-            gs_begin_transparency_group(ctx->pgs, &tgp, &bbox);
+            gs_begin_transparency_group(ctx->pgs, &tgp, &bbox, PDF14_BEGIN_TRANS_GROUP);
             code = draw(ctx, root, spread_method, color_func);
             if (code)
             {

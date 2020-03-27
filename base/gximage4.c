@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -61,7 +61,7 @@ gs_image4_t_init(gs_image4_t * pim, gs_color_space * color_space)
 /* Start processing an ImageType 4 image. */
 static int
 gx_begin_image4(gx_device * dev,
-                const gs_imager_state * pis, const gs_matrix * pmat,
+                const gs_gstate * pgs, const gs_matrix * pmat,
                 const gs_image_common_t * pic, const gs_int_rect * prect,
                 const gx_drawing_color * pdcolor, const gx_clip_path * pcpath,
                 gs_memory_t * mem, gx_image_enum_common_t ** pinfo)
@@ -104,10 +104,13 @@ gx_begin_image4(gx_device * dev,
         }
         penum->use_mask_color = !opaque;
     }
-    code = gx_image_enum_begin(dev, pis, pmat, pic, pdcolor, pcpath, mem,
+    code = gx_image_enum_begin(dev, pgs, pmat, pic, pdcolor, pcpath, mem,
                                penum);
     if (code >= 0)
         *pinfo = (gx_image_enum_common_t *)penum;
+    else {
+        *pinfo = NULL;
+    }
     return code;
 }
 

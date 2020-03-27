@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -35,19 +35,23 @@
 */
 
 int
-gx_image_fill_masked_start(gx_device *dev, const gx_device_color *pdevc, const gx_clip_path *pcpath,
-                           gs_memory_t *mem, gx_device **cdev)
+gx_image_fill_masked_start(gx_device *dev, const gx_device_color *pdevc, bool transpose,
+                           const gx_clip_path *pcpath, gs_memory_t *mem, gs_logical_operation_t lop,
+                           gx_device **cdev)
 {
-    if (gx_dc_is_pattern2_color(pdevc) || gx_dc_is_pattern1_color_clist_based(pdevc)) {
+    if ((lop == lop_default) && (gx_dc_is_pattern2_color(pdevc) || gx_dc_is_pattern1_color_clist_based(pdevc))) {
         if (!dev_proc(dev, dev_spec_op)(dev, gxdso_pattern_can_accum, NULL, gs_no_id)) {
             extern_st(st_device_cpath_accum);
-            gx_device_cpath_accum *pcdev =  gs_alloc_struct(mem,
-                    gx_device_cpath_accum, &st_device_cpath_accum, "gx_image_fill_masked_start");
+            gx_device_cpath_accum *pcdev;
             gs_fixed_rect cbox;
 
+            if (pcpath == NULL)
+                return_error(gs_error_nocurrentpoint);	/* close enough if no clip path */
+            pcdev =  gs_alloc_struct(mem,
+                    gx_device_cpath_accum, &st_device_cpath_accum, "gx_image_fill_masked_start");
             if (pcdev == NULL)
                 return_error(gs_error_VMerror);
-            gx_cpath_accum_begin(pcdev, mem);
+            gx_cpath_accum_begin(pcdev, mem, transpose);
             gx_cpath_outer_box(pcpath, &cbox);
             gx_cpath_accum_set_cbox(pcdev, &cbox);
             pcdev->rc.memory = mem;
@@ -104,7 +108,7 @@ gx_image_fill_masked(gx_device *dev,
     gx_device *cdev = dev;
     int code;
 
-    if ((code = gx_image_fill_masked_start(dev, pdc, pcpath, dev->memory, &cdev)) < 0)
+    if ((code = gx_image_fill_masked_start(dev, pdc, false, pcpath, dev->memory, lop, &cdev)) < 0)
         return code;
 
     if (cdev == dev)

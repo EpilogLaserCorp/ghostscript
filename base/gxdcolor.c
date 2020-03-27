@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -23,6 +23,7 @@
 #include "gxpcolor.h"
 #include "gxdevice.h"
 #include "gxdevcli.h"
+#include "gxclist.h"
 
 /* Define the standard device color types. */
 
@@ -106,14 +107,14 @@ gx_color_index
 gx_device_black(gx_device *dev)
 {
     if (dev->cached_colors.black == gx_no_color_index) {
-        const gx_cm_color_map_procs * cm_procs;
-        int i, ncomps = dev->color_info.num_components;
+        subclass_color_mappings scm;
+        uchar i, ncomps = dev->color_info.num_components;
         frac cm_comps[GX_DEVICE_COLOR_MAX_COMPONENTS];
         gx_color_value cv[GX_DEVICE_COLOR_MAX_COMPONENTS];
 
-        cm_procs = get_color_mapping_procs_subclass(dev);
+        scm = get_color_mapping_procs_subclass(dev);
         /* Get color components for black (gray = 0) */
-        map_gray_subclass(cm_procs, dev, frac_0, cm_comps);
+        map_gray_subclass(scm, frac_0, cm_comps);
 
         for (i = 0; i < ncomps; i++)
             cv[i] = frac2cv(cm_comps[i]);
@@ -126,14 +127,14 @@ gx_color_index
 gx_device_white(gx_device *dev)
 {
     if (dev->cached_colors.white == gx_no_color_index) {
-        const gx_cm_color_map_procs * cm_procs;
-        int i, ncomps = dev->color_info.num_components;
+        subclass_color_mappings scm;
+        uchar i, ncomps = dev->color_info.num_components;
         frac cm_comps[GX_DEVICE_COLOR_MAX_COMPONENTS];
         gx_color_value cv[GX_DEVICE_COLOR_MAX_COMPONENTS];
 
-        cm_procs = get_color_mapping_procs_subclass(dev);
+        scm = get_color_mapping_procs_subclass(dev);
         /* Get color components for white (gray = 1) */
-        map_gray_subclass(cm_procs, dev, frac_1, cm_comps);
+        map_gray_subclass(scm, frac_1, cm_comps);
 
         for (i = 0; i < ncomps; i++)
             cv[i] = frac2cv(cm_comps[i]);
@@ -260,7 +261,7 @@ gx_dc_no_get_dev_halftone(const gx_device_color * pdevc)
 }
 
 static int
-gx_dc_no_load(gx_device_color *pdevc, const gs_imager_state *ignore_pis,
+gx_dc_no_load(gx_device_color *pdevc, const gs_gstate *ignore_pgs,
               gx_device *ignore_dev, gs_color_select_t ignore_select)
 {
     return 0;
@@ -315,7 +316,7 @@ gx_dc_no_write(
 static int
 gx_dc_no_read(
     gx_device_color *       pdevc,
-    const gs_imager_state * pis,                /* ignored */
+    const gs_gstate        * pgs,                /* ignored */
     const gx_device_color * prior_devc,         /* ignored */
     const gx_device *       dev,                /* ignored */
     int64_t		    offset,             /* ignored */
@@ -342,7 +343,7 @@ gx_dc_cannot_write(
 int
 gx_dc_cannot_read(
     gx_device_color *       pdevc,
-    const gs_imager_state * pis,                /* ignored */
+    const gs_gstate  *       pgs,                /* ignored */
     const gx_device_color * prior_devc,         /* ignored */
     const gx_device *       dev,                /* ignored */
     int64_t		    offset,             /* ignored */
@@ -365,7 +366,7 @@ gx_dc_no_get_nonzero_comps(
 /* ------ Null color ------ */
 
 static int
-gx_dc_null_load(gx_device_color *pdevc, const gs_imager_state *ignore_pis,
+gx_dc_null_load(gx_device_color *pdevc, const gs_gstate *ignore_pgs,
                 gx_device *ignore_dev, gs_color_select_t ignore_select)
 {
     return 0;
@@ -398,7 +399,7 @@ gx_dc_null_equal(const gx_device_color * pdevc1, const gx_device_color * pdevc2)
 static int
 gx_dc_null_read(
     gx_device_color *       pdevc,
-    const gs_imager_state * pis,                /* ignored */
+    const gs_gstate  *       pgs,                /* ignored */
     const gx_device_color * prior_devc,         /* ignored */
     const gx_device *       dev,                /* ignored */
     int64_t		    offset,             /* ignored */
@@ -417,12 +418,12 @@ static void
 gx_dc_devn_save_dc(const gx_device_color * pdevc, gx_device_color_saved * psdc)
 {
     psdc->type = pdevc->type;
-    memcpy(&(psdc->colors.devn.values[0]), &(pdevc->colors.devn.values[0]), 
+    memcpy(&(psdc->colors.devn.values[0]), &(pdevc->colors.devn.values[0]),
            GX_DEVICE_COLOR_MAX_COMPONENTS*sizeof(ushort));
 }
 
 static int
-gx_dc_devn_load(gx_device_color * pdevc, const gs_imager_state * ignore_pis,
+gx_dc_devn_load(gx_device_color * pdevc, const gs_gstate * ignore_pgs,
                 gx_device * ignore_dev, gs_color_select_t ignore_select)
 {
     return 0;
@@ -431,8 +432,8 @@ gx_dc_devn_load(gx_device_color * pdevc, const gs_imager_state * ignore_pis,
 /* Fill a rectangle with a devicen color. */
 static int
 gx_dc_devn_fill_rectangle(const gx_device_color * pdevc, int x, int y,
-                          int w, int h, gx_device * dev, 
-                          gs_logical_operation_t lop, 
+                          int w, int h, gx_device * dev,
+                          gs_logical_operation_t lop,
                           const gx_rop_source_t * source)
 {
     gs_fixed_rect rect;
@@ -445,8 +446,8 @@ gx_dc_devn_fill_rectangle(const gx_device_color * pdevc, int x, int y,
 }
 
 /* Fill a mask with a DeviceN color. */
-/* Note that there is no source in this case: the mask is the source. 
-   I would like to add a device proc that was fill_masked_hl for 
+/* Note that there is no source in this case: the mask is the source.
+   I would like to add a device proc that was fill_masked_hl for
    handling this instead of breaking this down to hl rect fills */
 int
 gx_dc_devn_fill_masked(const gx_device_color * pdevc, const byte * data,
@@ -538,8 +539,8 @@ gx_dc_devn_equal(const gx_device_color * pdevc1, const gx_device_color * pdevc2)
 
 /*
  * Utility to write a devn color into the clist.   We should only be here
- * if the device can handle these colors (e.g. a separation device like 
- * tiffsep).  TODO:  Reduce the size of this by removing leading zeros in 
+ * if the device can handle these colors (e.g. a separation device like
+ * tiffsep).  TODO:  Reduce the size of this by removing leading zeros in
  * the mask.
  *
  */
@@ -551,12 +552,22 @@ gx_devn_write_color(
     uint *              psize )
 {
     int                 num_bytes1, num_bytes_temp, num_bytes;
-    gx_color_index      mask, mask_temp;
-    int                 count;
-    int                 i, ncomps = dev->color_info.num_components;
+    gx_color_index      mask_temp;
+    int                 count = 0;
+    uchar               i;
+    gx_device_clist_writer* const cdev = &((gx_device_clist *)dev)->writer;
+    uchar ncomps = cdev->clist_color_info.num_components; /* Could be different than target if 1.4 device */
+    gx_color_index  mask = 0x1, comp_bits = 0;
 
-    /* Figure out the size needed.  First find the number of non zero values */
-    count = gx_dc_devn_get_nonzero_comps(pdevc, dev, &mask);
+    /* First find the number of non zero values */
+    for (i = 0; i < ncomps; i++, mask <<= 1) {
+        if (pdevc->colors.devn.values[i] != 0) {
+            comp_bits |= mask;
+            count++;
+        }
+    }
+    mask = comp_bits;
+
     num_bytes1 = sizeof(gx_color_index);
     num_bytes = num_bytes1 + count * 2;
     num_bytes_temp = num_bytes1;
@@ -662,8 +673,8 @@ gx_devn_read_color(
     int                 size )
 {
     gx_color_index      mask = 0;
-    int                 i;
-    int                 ncomps = dev->color_info.num_components;
+    uchar                 i;
+    uchar               ncomps = dev->color_info.num_components;
     int                 pos;
     int                 num_bytes;
 
@@ -688,7 +699,7 @@ gx_devn_read_color(
             values[i] = 0;
         }
         mask >>= 1;
-    } 
+    }
     return num_bytes;
 }
 
@@ -700,11 +711,11 @@ gx_devn_read_color(
  *  pdevc       pointer to the location in which to write the
  *              reconstructed device color
  *
- *  pis         pointer to the current imager state (ignored here)
+ *  pgs         pointer to the current gs_gstate (ignored here)
  *
  *  prior_devc  pointer to the current device color (this is provided
  *              separately because the device color is not part of the
- *              imager state; it is ignored here)
+ *              gs_gstate; it is ignored here)
  *
  *  dev         pointer to the current device, used to retrieve process
  *              color model information
@@ -724,7 +735,7 @@ gx_devn_read_color(
 static int
 gx_dc_devn_read(
     gx_device_color *       pdevc,
-    const gs_imager_state * pis,                /* ignored */
+    const gs_gstate  *       pgs,                /* ignored */
     const gx_device_color * prior_devc,         /* ignored */
     const gx_device *       dev,
     int64_t		    offset,             /* ignored */
@@ -736,22 +747,23 @@ gx_dc_devn_read(
     return gx_devn_read_color(&(pdevc->colors.devn.values[0]), dev, pdata, size);
 }
 
-/* Remember these are 16 bit values.   Also here we return the number of 
+/* Remember these are 16 bit values.   Also here we return the number of
    nonzero entries so we can figure out the size for the clist more
    easily.   Hopefully that does not cause any confusion in overprint
-   situations where is where this operation is also used. */
+   situations where this operation is also used. */
 int
 gx_dc_devn_get_nonzero_comps(
     const gx_device_color * pdevc,
     const gx_device *       dev,
     gx_color_index *        pcomp_bits )
 {
-    int             i, ncomps = dev->color_info.num_components;
+    uchar           i, ncomps = dev->color_info.num_components;
     gx_color_index  mask = 0x1, comp_bits = 0;
     int             count = 0;
+    ushort          white_value = (dev->color_info.polarity == GX_CINFO_POLARITY_SUBTRACTIVE) ? 0 : 1;
 
     for (i = 0; i < ncomps; i++, mask <<= 1) {
-        if (pdevc->colors.devn.values[i] != 0) {
+        if (pdevc->colors.devn.values[i] != white_value) {
             comp_bits |= mask;
             count++;
         }
@@ -771,7 +783,7 @@ gx_dc_pure_save_dc(const gx_device_color * pdevc, gx_device_color_saved * psdc)
 }
 
 static int
-gx_dc_pure_load(gx_device_color * pdevc, const gs_imager_state * ignore_pis,
+gx_dc_pure_load(gx_device_color * pdevc, const gs_gstate * ignore_pgs,
                 gx_device * ignore_dev, gs_color_select_t ignore_select)
 {
     return 0;
@@ -835,10 +847,17 @@ gx_dc_pure_fill_masked(const gx_device_color * pdevc, const byte * data,
             scolors[1] = gx_device_white(dev);
         }
         tcolors[0] = tcolors[1] = pdevc->colors.pure;
+
+        if (invert)
+            lop = rop3_invert_S(lop);
+
+        if (!rop3_uses_S(lop))
+            lop |= rop3_S;
+            
         return (*dev_proc(dev, strip_copy_rop))
             (dev, data, data_x, raster, id, scolors,
              NULL, tcolors, x, y, w, h, 0, 0,
-             (invert ? rop3_invert_S(lop) : lop) | (rop3_S | lop_S_transparent));
+             lop_sanitize(lop | lop_S_transparent));
     }
 }
 
@@ -906,11 +925,11 @@ gx_dc_pure_write(
  *  pdevc       pointer to the location in which to write the
  *              reconstructed device color
  *
- *  pis         pointer to the current imager state (ignored here)
+ *  pgs         pointer to the current gs_gstate (ignored here)
  *
  *  prior_devc  pointer to the current device color (this is provided
  *              separately because the device color is not part of the
- *              imager state; it is ignored here)
+ *              gs_gstate; it is ignored here)
  *
  *  dev         pointer to the current device, used to retrieve process
  *              color model information
@@ -930,7 +949,7 @@ gx_dc_pure_write(
 static int
 gx_dc_pure_read(
     gx_device_color *       pdevc,
-    const gs_imager_state * pis,                /* ignored */
+    const gs_gstate        * pgs,                /* ignored */
     const gx_device_color * prior_devc,         /* ignored */
     const gx_device *       dev,
     int64_t		    offset,             /* ignored */
@@ -955,7 +974,7 @@ gx_dc_pure_get_nonzero_comps(
                                          pdevc->colors.pure,
                                          cvals );
     if (code >= 0) {
-        int             i, ncomps = dev->color_info.num_components;
+        uchar           i, ncomps = dev->color_info.num_components;
         gx_color_index  mask = 0x1, comp_bits = 0;
 
         for (i = 0; i < ncomps; i++, mask <<= 1) {
@@ -1166,7 +1185,7 @@ gx_dc_read_color(
         num_bytes = sizeof(gx_color_index) + 1;
     }
 
-    /* num_bytes > arch_sizeof_color_index, discard first byte */
+    /* num_bytes > ARCH_SIZEOF_COLOR_INDEX, discard first byte */
     for (i = 0; i < num_bytes; i++)
         color = (color << 8) | pdata[i];
     *pcolor = color;

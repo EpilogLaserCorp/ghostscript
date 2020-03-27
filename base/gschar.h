@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,24 +19,17 @@
 #ifndef gschar_INCLUDED
 #  define gschar_INCLUDED
 
+#include "gsstate.h"
 #include "gsccode.h"
 #include "gscpm.h"
+#include "gsfont.h"
+#include "gxtext.h"
 
 /* String display, like image display, uses an enumeration structure */
 /* to keep track of what's going on (aka 'poor man's coroutine'). */
-#ifndef gs_show_enum_DEFINED
-#  define gs_show_enum_DEFINED
-typedef struct gs_show_enum_s gs_show_enum;
-#endif
-
-/* Define an opaque type for fonts if necessary. */
-#ifndef gs_font_DEFINED
-#  define gs_font_DEFINED
-typedef struct gs_font_s gs_font;
-#endif
 
 /* Allocate an enumerator. */
-gs_show_enum *gs_show_enum_alloc(gs_memory_t *, gs_state *, client_name_t);
+gs_show_enum *gs_show_enum_alloc(gs_memory_t *, gs_gstate *, client_name_t);
 
 /* Release the contents of an enumerator. */
 /* (This happens automatically if the enumeration finishes normally.) */
@@ -86,15 +79,15 @@ gs_char_path_mode
 
 /* Character cache and metrics operators. */
 /* gs_setcachedevice* return 1 iff the cache device was just installed. */
-int gs_setcachedevice_float(gs_show_enum *, gs_state *, const float * /*[6] */ );
-int gs_setcachedevice_double(gs_show_enum *, gs_state *, const double * /*[6] */ );
+int gs_setcachedevice_float(gs_show_enum *, gs_gstate *, const float * /*[6] */ );
+int gs_setcachedevice_double(gs_show_enum *, gs_gstate *, const double * /*[6] */ );
 #define gs_setcachedevice(penum, pgs, pw)\
   gs_setcachedevice_float(penum, pgs, pw)
-int gs_setcachedevice2_float(gs_show_enum *, gs_state *, const float * /*[10] */ );
-int gs_setcachedevice2_double(gs_show_enum *, gs_state *, const double * /*[10] */ );
+int gs_setcachedevice2_float(gs_show_enum *, gs_gstate *, const float * /*[10] */ );
+int gs_setcachedevice2_double(gs_show_enum *, gs_gstate *, const double * /*[10] */ );
 #define gs_setcachedevice2(penum, pgs, pw2)\
   gs_setcachedevice2_float(penum, pgs, pw2)
-int gs_setcharwidth(gs_show_enum *, gs_state *, double, double);
+int gs_setcharwidth(gs_show_enum *, gs_gstate *, double, double);
 
 /* Return true if we only need the width from the rasterizer */
 /* and can short-circuit the full rendering of the character, */

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,11 +19,8 @@
 #ifndef imainarg_INCLUDED
 #  define imainarg_INCLUDED
 
-/* Define an opaque type for an interpreter instance.  See imain.h. */
-#ifndef gs_main_instance_DEFINED
-#  define gs_main_instance_DEFINED
-typedef struct gs_main_instance_s gs_main_instance;
-#endif
+#include "std.h"
+#include "imain.h"
 
 /*
  * As a shortcut for very high-level clients, we define a single call
@@ -33,6 +30,13 @@ typedef struct gs_main_instance_s gs_main_instance;
  * strings (which, however, it forbids the callee to modify!).
  */
 int gs_main_init_with_args(gs_main_instance * minst, int argc, char *argv[]);
+
+/*
+ * Split init functions; gs_main_init_with_args01 and 2 together do
+ * the same as gs_main_init_with_args, but allow for additional
+ * options to be processed in between. */
+int gs_main_init_with_args01(gs_main_instance * minst, int argc, char *argv[]);
+int gs_main_init_with_args2(gs_main_instance * minst);
 
 /*
  * Run the 'start' procedure (after processing the command line).
@@ -45,7 +49,7 @@ int gs_main_run_start(gs_main_instance * minst);
  * Allocation should be done with the standard gs allocation functions, as
  * the returned string may be freed using the same.
  */
-typedef int (gs_arg_get_codepoint)(FILE *, const char **);
+typedef int (gs_arg_get_codepoint)(gp_file *, const char **);
 
 void gs_main_inst_arg_decode(gs_main_instance * minst,
                              gs_arg_get_codepoint *get_codepoint);
