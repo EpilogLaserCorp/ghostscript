@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -188,8 +188,12 @@ pl_dict_put(pl_dict_t * pdict, const byte * kdata, uint ksize, void *value)
 
     if (!ppde) {
         void *link = 0;
+        int code = pl_dict_build_new_entry(pdict, kdata, ksize, value, link);
 
-        return pl_dict_build_new_entry(pdict, kdata, ksize, value, link);
+        if (code < 0)
+            (*pdict->free_proc) (pdict->memory, value, "pl_dict_put(new value)");
+
+        return code;
     } else {                    /* Replace the value in an existing entry. */
         pl_dict_entry_t *pde;
 

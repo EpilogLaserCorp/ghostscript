@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -138,6 +138,17 @@ typedef unsigned long long uint64_t;
 #  define PRIu32 "I32u"
 #  define PRIu64 "I64u"
 #  define PRIx64 "I64x"
+#  if ARCH_SIZEOF_SIZE_T == 4
+#   define PRIxSIZE "x"
+#   define PRIuSIZE "u"
+#   define PRIdSIZE "d"
+#   define PRIiSIZE "i"
+#  else
+#   define PRIxSIZE "I64x"
+#   define PRIuSIZE "I64u"
+#   define PRIdSIZE "I64d"
+#   define PRIiSIZE "I64i"
+#  endif
 # endif
 #endif
 
@@ -162,12 +173,79 @@ typedef unsigned long long uint64_t;
 #  define PRIu32 "u"
 # endif
 
+# ifndef PRIx32
+#  define PRIx32 "x"
+# endif
+
 # ifndef PRIu64
 #  define PRIu64 "llu"
 # endif
 
-# ifndef PRIx64
-#  define PRIx64 "llx"
+# if ARCH_SIZEOF_SIZE_T == 4
+#  ifndef PRIxSIZE
+#   define PRIxSIZE "x"
+#  endif
+
+#  ifndef PRIuSIZE
+#   define PRIuSIZE "u"
+#  endif
+
+#  ifndef PRIdSIZE
+#   define PRIdSIZE "d"
+#  endif
+
+#  ifndef PRIiSIZE
+#   define PRIiSIZE "i"
+#  endif
+# else
+#  if ARCH_SIZEOF_LONG == 8
+#   ifndef PRIxSIZE
+#    define PRIxSIZE "lx"
+#   endif
+
+#   ifndef PRIuSIZE
+#    define PRIuSIZE "lu"
+#   endif
+
+#   ifndef PRIdSIZE
+#    define PRIdSIZE "ld"
+#   endif
+
+#   ifndef PRIiSIZE
+#    define PRIiSIZE "li"
+#   endif
+#  else
+#   ifndef PRIxSIZE
+#    define PRIxSIZE "llx"
+#   endif
+
+#   ifndef PRIuSIZE
+#    define PRIuSIZE "llu"
+#   endif
+
+#   ifndef PRIdSIZE
+#    define PRIdSIZE "lld"
+#   endif
+
+#   ifndef PRIiSIZE
+#    define PRIiSIZE "lli"
+#   endif
+#  endif
+#  ifndef PRIx64
+#    define PRIx64 PRIxSIZE
+#  endif
+# endif
+
+/* Pointers are hard to do in pure PRIxPTR style, as some platforms
+ * add 0x before the pointer, and others don't. To be consistent, we
+ * therefore roll our own. The difference here is that we always
+ * include the 0x and the % ourselves, and require the arg to be
+ * cast to an intptr_t.
+*/
+# if ARCH_SIZEOF_SIZE_T == 4
+#  define PRI_INTPTR "0x%"PRIx32
+# else
+#  define PRI_INTPTR "0x%"PRIx64
 # endif
 
 #endif /* stdint__INCLUDED */

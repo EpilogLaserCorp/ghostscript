@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -31,7 +31,7 @@
 
 /* ---------------- General colors and color spaces ---------------- */
 int
-gs_setcolorspace_only(gs_state * pgs, gs_color_space * pcs)
+gs_setcolorspace_only(gs_gstate * pgs, gs_color_space * pcs)
 {
     int             code = 0;
     gs_color_space  *cs_old = pgs->color[0].color_space;
@@ -43,8 +43,7 @@ gs_setcolorspace_only(gs_state * pgs, gs_color_space * pcs)
     if (pcs->id != cs_old->id) {
         rc_increment_cs(pcs);
         pgs->color[0].color_space = pcs;
-        if ( (code = pcs->type->install_cspace(pcs, pgs)) < 0          ||
-              (pgs->overprint && (code = gs_do_set_overprint(pgs)) < 0)  ) {
+        if ( (code = pcs->type->install_cspace(pcs, pgs)) < 0) {
             pgs->color[0].color_space = cs_old;
             rc_decrement_only_cs(pcs, "gs_setcolorspace");
         } else {
@@ -57,7 +56,7 @@ gs_setcolorspace_only(gs_state * pgs, gs_color_space * pcs)
 
 /* setcolorspace */
 int
-gs_setcolorspace(gs_state * pgs, gs_color_space * pcs)
+gs_setcolorspace(gs_gstate * pgs, gs_color_space * pcs)
 {
     int             code = 0;
 
@@ -73,19 +72,20 @@ gs_setcolorspace(gs_state * pgs, gs_color_space * pcs)
 
 /* currentcolorspace */
 gs_color_space *
-gs_currentcolorspace(const gs_state * pgs)
+gs_currentcolorspace(const gs_gstate * pgs)
 {
     return pgs->color[0].color_space;
 }
 
 /* setcolor */
 int
-gs_setcolor(gs_state * pgs, const gs_client_color * pcc)
+gs_setcolor(gs_gstate * pgs, const gs_client_color * pcc)
 {
     gs_color_space *    pcs = pgs->color[0].color_space;
     gs_client_color     cc_old = *pgs->color[0].ccolor;
     gx_device_color *dev_color = pgs->color[0].dev_color;
     bool do_unset  = true;
+    bool op;
 
     if (pgs->in_cachedevice)
         return_error(gs_error_undefined); /* PLRM3 page 215. */
@@ -105,19 +105,31 @@ gs_setcolor(gs_state * pgs, const gs_client_color * pcc)
     (*pcs->type->restrict_color)(pgs->color[0].ccolor, pcs);
     (*pcs->type->adjust_color_count)(&cc_old, pcs, -1);
 
+    /* If we are in a situation where we are doing overprint
+       with OPM, then we need to update the overprint
+       compositor as these values can affect what is drawn */
+    op = pgs->is_fill_color ? pgs->overprint : pgs->stroke_overprint;
+    if (pgs->color[0].effective_opm && op) {
+        if (pgs->is_fill_color) {
+            gs_setfilloverprint(pgs, op);
+        } else {
+            gs_setstrokeoverprint(pgs, op);
+        }
+    }
+
     return 0;
 }
 
 /* currentcolor */
 const gs_client_color *
-gs_currentcolor(const gs_state * pgs)
+gs_currentcolor(const gs_gstate * pgs)
 {
     return pgs->color[0].ccolor;
 }
 
 /* currentdevicecolor */
 const gx_device_color *
-gs_currentdevicecolor(const gs_state * pgs)
+gs_currentdevicecolor(const gs_gstate * pgs)
 {
     return pgs->color[0].dev_color;
 }
@@ -265,16 +277,15 @@ gx_polarity_Indexed(const gs_color_space * pcs)
 }
 
 static int
-gx_install_Indexed(gs_color_space * pcs, gs_state * pgs)
+gx_install_Indexed(gs_color_space * pcs, gs_gstate * pgs)
 {
-    return (*pcs->base_space->type->install_cspace)
-        (pcs->base_space, pgs);
+    return 0;
 }
 
 /* Color space overprint setting ditto. */
 
 static int
-gx_set_overprint_Indexed(const gs_color_space * pcs, gs_state * pgs)
+gx_set_overprint_Indexed(const gs_color_space * pcs, gs_gstate * pgs)
 {
     return (*pcs->base_space->type->set_overprint)
         ((const gs_color_space *)pcs->base_space, pgs);
@@ -478,23 +489,23 @@ gx_restrict_Indexed(gs_client_color * pcc, const gs_color_space * pcs)
 /* Color remapping for Indexed color spaces. */
 static const gs_color_space *
 gx_concrete_space_Indexed(const gs_color_space * pcs,
-                          const gs_imager_state * pis)
+                          const gs_gstate * pgs)
 {
     bool is_lab = false;
 
     if (gs_color_space_is_PSCIE(pcs->base_space)) {
         if (pcs->base_space->icc_equivalent == NULL) {
-            gs_colorspace_set_icc_equivalent(pcs->base_space,
-                                                &is_lab, pis->memory);
+            (void)gs_colorspace_set_icc_equivalent(pcs->base_space,
+                                                &is_lab, pgs->memory);
         }
         return (pcs->base_space->icc_equivalent);
     }
-    return cs_concrete_space(pcs->base_space, pis);
+    return cs_concrete_space(pcs->base_space, pgs);
 }
 
 static int
 gx_concretize_Indexed(const gs_client_color * pc, const gs_color_space * pcs,
-                      frac * pconc, const gs_imager_state * pis, gx_device *dev)
+                      frac * pconc, const gs_gstate * pgs, gx_device *dev)
 {
     gs_client_color cc;
     const gs_color_space *pbcs =
@@ -503,14 +514,14 @@ gx_concretize_Indexed(const gs_client_color * pc, const gs_color_space * pcs,
 
     if (code < 0)
         return code;
-    return (*pbcs->type->concretize_color) (&cc, pbcs, pconc, pis, dev);
+    return (*pbcs->type->concretize_color) (&cc, pbcs, pconc, pgs, dev);
 }
 
 /* We should only be here for cases where the base space is DeviceN or Sep and
    we are doing named color replacement. */
 static int
 gx_remap_IndexedNamed(const gs_client_color * pcc, const gs_color_space * pcs,
-gx_device_color * pdc, const gs_imager_state * pis, gx_device * dev,
+gx_device_color * pdc, const gs_gstate * pgs, gx_device * dev,
 gs_color_select_t select)
 {
     frac conc[GS_CLIENT_COLOR_MAX_COMPONENTS];
@@ -523,20 +534,26 @@ gs_color_select_t select)
     if (code < 0)
         return code;
 
-    pconcs = cs_concrete_space(pcs, pis);
-    /* Now see if we can do the named color replacement */
-    mapped = gx_remap_named_color(&cc, pconcs, pdc, pis, dev, select);
+    pconcs = cs_concrete_space(pcs, pgs);
+    if (pconcs) {
+        /* Now see if we can do the named color replacement */
+        mapped = gx_remap_named_color(&cc, pconcs, pdc, pgs, dev, select);
 
-    if (!mapped) {
-        /* Named color remap failed perhaps due to colorant not found. Do the 
-           old approach of concretize of the base space and remap concrete color */
-        const gs_color_space *pbcs =
-            (const gs_color_space *)pcs->base_space;
+        if (!mapped) {
+            /* Named color remap failed perhaps due to colorant not found. Do the
+               old approach of concretize of the base space and remap concrete color */
+            const gs_color_space *pbcs =
+                (const gs_color_space *)pcs->base_space;
+            cmm_dev_profile_t *dev_profile;
+            code = dev_proc(dev, get_profile)(dev, &dev_profile);
+            if (code < 0)
+                return code;
 
-        code = (*pbcs->type->concretize_color) (&cc, pbcs, conc, pis, dev);
-        if (code < 0)
-            return code;
-        code = (*pconcs->type->remap_concrete_color)(conc, pconcs, pdc, pis, dev, select);
+            code = (*pbcs->type->concretize_color) (&cc, pbcs, conc, pgs, dev);
+            if (code < 0)
+                return code;
+            code = (*pconcs->type->remap_concrete_color)(pconcs, conc, pdc, pgs, dev, select, dev_profile);
+        }
     }
 
     /* Save original color space and color info into dev color */
@@ -796,7 +813,7 @@ gx_serialize_Indexed(const gs_color_space * pcs, stream * s)
  * res_name and name_length passes the resource name.
  */
 int
-gs_includecolorspace(gs_state * pgs, const byte *res_name, int name_length)
+gs_includecolorspace(gs_gstate * pgs, const byte *res_name, int name_length)
 {
     return (*dev_proc(pgs->device, include_color_space))(pgs->device, gs_currentcolorspace_inline(pgs), res_name, name_length);
 }

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* .BMP file format driver utilities */
@@ -23,14 +23,14 @@
  */
 
 typedef ushort word;
-#if arch_sizeof_int == 4
+#if ARCH_SIZEOF_INT == 4
 typedef uint dword;
 #else
-#  if arch_sizeof_long == 4
+#  if ARCH_SIZEOF_LONG == 4
 typedef ulong dword;
 #  endif
 #endif
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
 #  define BMP_ASSIGN_WORD(a,v) a = ((v) >> 8) + ((v) << 8)
 #  define BMP_ASSIGN_DWORD(a,v)\
      a = ((v) >> 24) + (((v) >> 8) & 0xff00L) +\
@@ -92,7 +92,7 @@ typedef struct bmp_quad_s {
 
 /* Write the BMP file header. */
 static int
-write_bmp_depth_header(gx_device_printer *pdev, FILE *file, int depth,
+write_bmp_depth_header(gx_device_printer *pdev, gp_file *file, int depth,
                        const byte *palette /* [4 << depth] */,
                        int raster)
 {
@@ -103,8 +103,8 @@ write_bmp_depth_header(gx_device_printer *pdev, FILE *file, int depth,
 
     /* Write the file header. */
 
-    fputc('B', file);
-    fputc('M', file);
+    gp_fputc('B', file);
+    gp_fputc('M', file);
     {
         bmp_file_header fhdr;
 
@@ -117,7 +117,7 @@ write_bmp_depth_header(gx_device_printer *pdev, FILE *file, int depth,
         BMP_ASSIGN_DWORD(fhdr.offBits,
                      sizeof_bmp_file_header +
                      sizeof(bmp_info_header) + quads);
-        if (fwrite((const char *)&fhdr, 1, sizeof(fhdr), file) != sizeof(fhdr))
+        if (gp_fwrite((const char *)&fhdr, 1, sizeof(fhdr), file) != sizeof(fhdr))
             return_error(gs_error_ioerror);
     }
 
@@ -146,21 +146,21 @@ write_bmp_depth_header(gx_device_printer *pdev, FILE *file, int depth,
 #undef INCHES_PER_METER
         BMP_ASSIGN_DWORD(ihdr.clrUsed, 0);
         BMP_ASSIGN_DWORD(ihdr.clrImportant, 0);
-        if (fwrite((const char *)&ihdr, 1, sizeof(ihdr), file) != sizeof(ihdr))
+        if (gp_fwrite((const char *)&ihdr, 1, sizeof(ihdr), file) != sizeof(ihdr))
             return_error(gs_error_ioerror);
     }
 
     /* Write the palette. */
 
     if (depth <= 8)
-        fwrite(palette, sizeof(bmp_quad), 1 << depth, file);
+        gp_fwrite(palette, sizeof(bmp_quad), 1 << depth, file);
 
     return 0;
 }
 
 /* Write the BMP file header. */
 int
-write_bmp_header(gx_device_printer *pdev, FILE *file)
+write_bmp_header(gx_device_printer *pdev, gp_file *file)
 {
     int depth = pdev->color_info.depth;
     bmp_quad palette[256];
@@ -189,7 +189,7 @@ write_bmp_header(gx_device_printer *pdev, FILE *file)
 
 /* Write a BMP header for separated CMYK output. */
 int
-write_bmp_separated_header(gx_device_printer *pdev, FILE *file)
+write_bmp_separated_header(gx_device_printer *pdev, gp_file *file)
 {
     int depth = pdev->color_info.depth;
     int plane_depth = depth / 4;

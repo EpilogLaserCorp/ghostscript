@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2012 Artifex Software, Inc.
+# Copyright (C) 2001-2019 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 # of the license contained in the file LICENSE in this distribution.
 #
 # Refer to licensing information at http://www.artifex.com or contact
-# Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-# CA  94903, U.S.A., +1(415)492-9861, for further information.
+# Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+# CA 94945, U.S.A., +1(415)492-9861, for further information.
 #
 # $Id: lcupsi.mak 11073 2010-04-15 08:30:48Z chrisl $
 # makefile for libcupsimage as part of the monolithic gs build.
@@ -35,15 +35,15 @@ LCUPSI_CC=$(CUPS_CC) $(I_)$(LIBCUPSISRC) $(I_)$(LIBCUPSIGEN)$(D)cups $(I_)$(LCUP
          $(I_)$(ZSRCDIR) $(I_)$(PNGSRCDIR) $(I_)$(TIFFSRCDIR) $(I_)$(TIFFCONFDIR) $(I_)$(TI_) 
 
 # Define the name of this makefile.
-LCUPSI_MAK=$(GLSRC)lcupsi.mak
+LCUPSI_MAK=$(GLSRC)lcupsi.mak $(TOP_MAKEFILES)
 
 LIBCUPSI_OBJS =\
     $(LIBCUPSIOBJ)error.$(OBJ) \
     $(LIBCUPSIOBJ)interpret.$(OBJ) \
-    $(LIBCUPSIOBJ)raster.$(OBJ)
+    $(LIBCUPSIOBJ)cupsraster.$(OBJ)
 
 LIBCUPSI_DEPS	=	\
-		$(LIBCUPSISRC)common.h \
+		$(LIBCUPSISRC)common.h $(LCUPSI_MAK) \
 		$(MAKEDIRS)
 
 libcupsi.clean : libcupsi.config-clean libcupsi.clean-not-config-clean
@@ -56,18 +56,17 @@ libcupsi.config-clean :
 	$(RMN_) $(LIBCUPSIGEN)$(D)lcupsi*.dev
 
 # instantiate the requested build option (shared or compiled in)
-$(LIBCUPSIGEN)lcupsi.dev : $(TOP_MAKEFILES) $(LIBCUPSIGEN)lcupsi_$(SHARE_LCUPSI).dev\
- $(MAKEDIRS)
+$(LIBCUPSIGEN)lcupsi.dev : $(LIBCUPSIGEN)lcupsi_$(SHARE_LCUPSI).dev\
+ $(LCUPSI_MAK) $(MAKEDIRS)
 	$(CP_) $(LIBCUPSIGEN)lcupsi_$(SHARE_LCUPSI).dev $(LIBCUPSIGEN)lcupsi.dev
 
 # Define the shared version.
-$(LIBCUPSIGEN)lcupsi_1.dev : $(TOP_MAKEFILES) $(LCUPSI_MAK) $(ECHOGS_XE) \
- $(MAKEDIRS)
+$(LIBCUPSIGEN)lcupsi_1.dev : $(ECHOGS_XE) $(LCUPSI_MAK) \
+		$(LCUPSI_MAK) $(MAKEDIRS)
 	$(SETMOD) $(LIBCUPSIGEN)lcupsi_1 -link $(LCUPSI_LIBS)
 
 # Define the non-shared version.
-$(LIBCUPSIGEN)lcupsi_0.dev : $(TOP_MAKEFILES) $(LCUPSI_MAK) $(ECHOGS_XE) \
-	$(LIBCUPSI_OBJS) $(MAKEDIRS)
+$(LIBCUPSIGEN)lcupsi_0.dev : $(ECHOGS_XE) $(LIBCUPSI_OBJS) $(LIBCUPSI_DEPS)
 	$(SETMOD) $(LIBCUPSIGEN)lcupsi_0 $(LIBCUPSI_OBJS)
 
 # explicit rules for building the source files
@@ -121,6 +120,6 @@ $(LIBCUPSIOBJ)error.$(OBJ) : $(LIBCUPSISRC)error.c $(LIBCUPSI_DEPS)
 $(LIBCUPSIOBJ)interpret.$(OBJ) : $(LIBCUPSISRC)interpret.c $(LIBCUPSI_DEPS)
 	$(LCUPSI_CC) $(LCUPSIO_)interpret.$(OBJ) $(C_) $(LIBCUPSISRC)interpret.c
 	
-$(LIBCUPSIOBJ)raster.$(OBJ) : $(LIBCUPSISRC)raster.c $(LIBCUPSI_DEPS)
-	$(LCUPSI_CC) $(LCUPSIO_)raster.$(OBJ) $(C_) $(LIBCUPSISRC)raster.c
+$(LIBCUPSIOBJ)cupsraster.$(OBJ) : $(LIBCUPSISRC)cupsraster.c $(LIBCUPSI_DEPS)
+	$(LCUPSI_CC) $(LCUPSIO_)cupsraster.$(OBJ) $(C_) $(LIBCUPSISRC)cupsraster.c
 	

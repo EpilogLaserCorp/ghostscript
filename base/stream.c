@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -59,9 +59,9 @@ static RELOC_PTRS_WITH(stream_reloc_ptrs, stream *st)
             RELOC_VAR(st->cbuf);
         reloc = cbuf_old - st->cbuf;
         /* Relocate the other buffer pointers. */
-        st->srptr -= reloc;
-        st->srlimit -= reloc;	/* same as swptr */
-        st->swlimit -= reloc;
+        st->cursor.r.ptr -= reloc;
+        st->cursor.r.limit -= reloc;	/* same as swptr */
+        st->cursor.w.limit -= reloc;
     }
     RELOC_VAR(st->strm);
     RELOC_VAR(st->prev);
@@ -79,11 +79,11 @@ stream_finalize(const gs_memory_t *cmem, void *vptr)
     stream *const st = vptr;
     (void)cmem; /* unused */
 
-    if_debug2m('u', st->memory, "[u]%s 0x%lx\n",
+    if_debug2m('u', st->memory, "[u]%s "PRI_INTPTR"\n",
                (!s_is_valid(st) ? "already closed:" :
                 st->is_temp ? "is_temp set:" :
                 st->file == 0 ? "not file:" :
-                "closing file:"), (ulong) st);
+                "closing file:"), (intptr_t) st);
     if (s_is_valid(st) && !st->is_temp && st->file != 0) {
         /* Prevent any attempt to free the buffer. */
         st->cbuf = 0;
@@ -118,8 +118,8 @@ s_alloc(gs_memory_t * mem, client_name_t cname)
 {
     stream *s = gs_alloc_struct(mem, stream, &st_stream, cname);
 
-    if_debug2m('s', mem, "[s]alloc(%s) = 0x%lx\n",
-               client_name_string(cname), (ulong) s);
+    if_debug2m('s', mem, "[s]alloc(%s) = "PRI_INTPTR"\n",
+               client_name_string(cname), (intptr_t) s);
     if (s == 0)
         return 0;
     s_init(s, mem);
@@ -143,10 +143,10 @@ s_alloc_state(gs_memory_t * mem, gs_memory_type_ptr_t stype,
 {
     stream_state *st = gs_alloc_struct(mem, stream_state, stype, cname);
 
-    if_debug3m('s', mem, "[s]alloc_state %s(%s) = 0x%lx\n",
+    if_debug3m('s', mem, "[s]alloc_state %s(%s) = "PRI_INTPTR"\n",
                client_name_string(cname),
                client_name_string(stype->sname),
-               (ulong) st);
+               (intptr_t) st);
     if (st)
         s_init_state(st, NULL, mem);
     return st;
@@ -159,8 +159,8 @@ s_std_init(register stream * s, byte * ptr, uint len, const stream_procs * pp,
 {
     s->templat = &s_no_template;
     s->cbuf = ptr;
-    s->srptr = s->srlimit = s->swptr = ptr - 1;
-    s->swlimit = ptr - 1 + len;
+    s->cursor.r.ptr = s->cursor.r.limit = s->cursor.w.ptr = ptr - 1;
+    s->cursor.w.limit = ptr - 1 + len;
     s->end_status = 0;
     s->foreign = 0;
     s->modes = modes;
@@ -175,8 +175,8 @@ s_std_init(register stream * s, byte * ptr, uint len, const stream_procs * pp,
     s->file_name.data = 0;	/* in case stream is on stack */
     s->file_name.size = 0;
     if (s->memory) {
-        if_debug4m('s', s->memory, "[s]init 0x%lx, buf=0x%lx, len=%u, modes=%d\n",
-                   (ulong) s, (ulong) ptr, len, modes);
+        if_debug4m('s', s->memory, "[s]init "PRI_INTPTR", buf="PRI_INTPTR", len=%u, modes=%d\n",
+                   (intptr_t) s, (intptr_t) ptr, len, modes);
     }
 }
 
@@ -227,14 +227,14 @@ s_std_null(stream * s)
 void
 s_std_read_reset(stream * s)
 {
-    s->srptr = s->srlimit = s->cbuf - 1;
+    s->cursor.r.ptr = s->cursor.r.limit = s->cbuf - 1;
 }
 
 /* Discard the contents of the buffer when writing. */
 void
 s_std_write_reset(stream * s)
 {
-    s->swptr = s->cbuf - 1;
+    s->cursor.w.ptr = s->cbuf - 1;
 }
 
 /* Flush data to end-of-file when reading. */
@@ -242,7 +242,7 @@ int
 s_std_read_flush(stream * s)
 {
     while (1) {
-        s->srptr = s->srlimit = s->cbuf - 1;
+        s->cursor.r.ptr = s->cursor.r.limit = s->cbuf - 1;
         if (s->end_status)
             break;
         s_process_read_buf(s);
@@ -316,7 +316,7 @@ s_disable(register stream * s)
     }
     /****** SHOULD DO MORE THAN THIS ******/
     if (s->memory) {
-        if_debug1m('s', s->memory, "[s]disable 0x%lx\n", (ulong) s);
+        if_debug1m('s', s->memory, "[s]disable "PRI_INTPTR"\n", (intptr_t) s);
     }
 }
 
@@ -393,7 +393,7 @@ stell(stream * s)
      * The stream might have been closed, but the position
      * is still meaningful in this case.
      */
-    const byte *ptr = (s_is_writing(s) ? s->swptr : s->srptr);
+    const byte *ptr = (s_is_writing(s) ? s->cursor.w.ptr : s->cursor.r.ptr);
 
     return (ptr == 0 ? 0 : ptr + 1 - s->cbuf) + s->position;
 }
@@ -456,15 +456,16 @@ spgetcc(register stream * s, bool close_at_eod)
     int min_left = sbuf_min_left(s);
 
     while (status = s->end_status,
-           left = s->srlimit - s->srptr,
+           left = s->cursor.r.limit - s->cursor.r.ptr,
            left <= min_left && status >= 0
         )
         s_process_read_buf(s);
     if (left <= min_left &&
-        (left == 0 || (status != EOFC && status != ERRC))
+        (left <= 0 || (status != EOFC && status != ERRC))
         ) {
         /* Compact the stream so stell will return the right result. */
-        stream_compact(s, true);
+        if (left == 0)
+            stream_compact(s, true);
         if (status == EOFC && close_at_eod && s->close_at_eod) {
             status = sclose(s);
             if (status == 0)
@@ -473,7 +474,7 @@ spgetcc(register stream * s, bool close_at_eod)
         }
         return status;
     }
-    return *++(s->srptr);
+    return *++(s->cursor.r.ptr);
 }
 
 /* Implementing sputc when the buffer is full, */
@@ -485,7 +486,7 @@ spputc(register stream * s, byte b)
         if (s->end_status)
             return s->end_status;
         if (!sendwp(s)) {
-            *++(s->swptr) = b;
+            *++(s->cursor.w.ptr) = b;
             return b;
         }
         s_process_write_buf(s, false);
@@ -498,9 +499,13 @@ spputc(register stream * s, byte b)
 int
 sungetc(register stream * s, byte c)
 {
-    if (!s_is_reading(s) || s->srptr < s->cbuf || *(s->srptr) != c)
+    /* cbuf == NULL means this stream is stdin, and we shouldn't
+       unread from stdin, ever.
+     */
+    if (s->cbuf == NULL || !s_is_reading(s) ||
+        s->cursor.r.ptr < s->cbuf || *(s->cursor.r.ptr) != c)
         return ERRC;
-    s->srptr--;
+    s->cursor.r.ptr--;
     return 0;
 }
 
@@ -518,10 +523,10 @@ sgets(stream * s, byte * buf, uint nmax, uint * pn)
     while (cw.ptr < cw.limit) {
         int left;
 
-        if ((left = s->srlimit - s->srptr) > min_left) {
-            s->srlimit -= min_left;
+        if ((left = s->cursor.r.limit - s->cursor.r.ptr) > min_left) {
+            s->cursor.r.limit -= min_left;
             stream_move(&s->cursor.r, &cw);
-            s->srlimit += min_left;
+            s->cursor.r.limit += min_left;
         } else {
             uint wanted = cw.limit - cw.ptr;
             int c;
@@ -545,7 +550,7 @@ sgets(stream * s, byte * buf, uint nmax, uint * pn)
                  * update position.  However, we need to reset the read
                  * cursor to indicate that there is no data in the buffer.
                  */
-                s->srptr = s->srlimit = s->cbuf - 1;
+                s->cursor.r.ptr = s->cursor.r.limit = s->cbuf - 1;
                 s->position += cw.ptr - wptr;
                 if (status <= 0 || cw.ptr == cw.limit)
                     break;
@@ -572,13 +577,13 @@ sputs(register stream * s, const byte * str, uint wlen, uint * pn)
 
     if (status >= 0)
         while (len > 0) {
-            uint count = s->swlimit - s->swptr;
+            uint count = s->cursor.w.limit - s->cursor.w.ptr;
 
             if (count > 0) {
                 if (count > len)
                     count = len;
-                memcpy(s->swptr + 1, str, count);
-                s->swptr += count;
+                memcpy(s->cursor.w.ptr + 1, str, count);
+                s->cursor.w.ptr += count;
                 str += count;
                 len -= count;
             } else {
@@ -619,7 +624,7 @@ spskip(register stream * s, gs_offset_t nskip, gs_offset_t *pskipped)
         int status;
 
         n -= sbufavailable(s);
-        s->srptr = s->srlimit;
+        s->cursor.r.ptr = s->cursor.r.limit;
         if (s->end_status) {
             *pskipped = nskip - n;
             return s->end_status;
@@ -632,7 +637,7 @@ spskip(register stream * s, gs_offset_t nskip, gs_offset_t *pskipped)
         --n;
     }
     /* Note that if min_left > 0, n < 0 is possible; this is harmless. */
-    s->srptr += n;
+    s->cursor.r.ptr += n;
     *pskipped = nskip;
     return 0;
 }
@@ -811,14 +816,14 @@ sreadbuf(stream * s, stream_cursor_write * pbuf)
                 eof = strm->end_status == EOFC;
             }
             pw = (prev == 0 ? pbuf : &curr->cursor.w);
-            if_debug4m('s', s->memory, "[s]read process 0x%lx, nr=%u, nw=%u, eof=%d\n",
-                       (ulong) curr, (uint) (pr->limit - pr->ptr),
+            if_debug4m('s', s->memory, "[s]read process "PRI_INTPTR", nr=%u, nw=%u, eof=%d\n",
+                       (intptr_t) curr, (uint) (pr->limit - pr->ptr),
                        (uint) (pw->limit - pw->ptr), eof);
             oldpos = pw->ptr;
             status = (*curr->procs.process) (curr->state, pr, pw, eof);
             pr->limit += left;
-            if_debug5m('s', s->memory, "[s]after read 0x%lx, nr=%u, nw=%u, status=%d, position=%"PRId64"\n",
-                       (ulong) curr, (uint) (pr->limit - pr->ptr),
+            if_debug5m('s', s->memory, "[s]after read "PRI_INTPTR", nr=%u, nw=%u, status=%d, position=%"PRId64"\n",
+                       (intptr_t) curr, (uint) (pr->limit - pr->ptr),
                        (uint) (pw->limit - pw->ptr), status, s->position);
             if (strm == 0 || status != 0)
                 break;
@@ -895,8 +900,8 @@ swritebuf(stream * s, stream_cursor_read * pbuf, bool last)
             else
                 pr = &curr->cursor.r;
             if_debug5m('s', s->memory,
-                       "[s]write process 0x%lx(%s), nr=%u, nw=%u, end=%d\n",
-                       (ulong)curr,
+                       "[s]write process "PRI_INTPTR"(%s), nr=%u, nw=%u, end=%d\n",
+                       (intptr_t)curr,
                        gs_struct_type_name(curr->state->templat->stype),
                        (uint)(pr->limit - pr->ptr),
                        (uint)(pw->limit - pw->ptr), end);
@@ -904,8 +909,8 @@ swritebuf(stream * s, stream_cursor_read * pbuf, bool last)
             if (status >= 0) {
                 status = (*curr->procs.process)(curr->state, pr, pw, end);
                 if_debug5m('s', s->memory,
-                           "[s]after write 0x%lx, nr=%u, nw=%u, end=%d, status=%d\n",
-                           (ulong) curr, (uint) (pr->limit - pr->ptr),
+                           "[s]after write "PRI_INTPTR", nr=%u, nw=%u, end=%d, status=%d\n",
+                           (intptr_t) curr, (uint) (pr->limit - pr->ptr),
                            (uint) (pw->limit - pw->ptr), end, status);
                 if (status == 0 && end)
                     status = EOFC;
@@ -1018,19 +1023,19 @@ sread_string(register stream *s, const byte *ptr, uint len)
     s->cbuf_string.data = (byte *)ptr;
     s->cbuf_string.size = len;
     s->end_status = EOFC;
-    s->srlimit = s->swlimit;
+    s->cursor.r.limit = s->cursor.w.limit;
 }
 /* Initialize a reusable stream for reading a string. */
 static void
 s_string_reusable_reset(stream *s)
 {
-    s->srptr = s->cbuf - 1;	/* just reset to the beginning */
-    s->srlimit = s->srptr + s->bsize;  /* might have gotten reset */
+    s->cursor.r.ptr = s->cbuf - 1;	/* just reset to the beginning */
+    s->cursor.r.limit = s->cursor.r.ptr + s->bsize;  /* might have gotten reset */
 }
 static int
 s_string_reusable_flush(stream *s)
 {
-    s->srptr = s->srlimit = s->cbuf + s->bsize - 1;  /* just set to the end */
+    s->cursor.r.ptr = s->cursor.r.limit = s->cbuf + s->bsize - 1;  /* just set to the end */
     return 0;
 }
 void
@@ -1066,9 +1071,9 @@ s_string_read_seek(register stream * s, gs_offset_t pos)
 {
     if (pos < 0 || pos > s->bsize)
         return ERRC;
-    s->srptr = s->cbuf + pos - 1;
+    s->cursor.r.ptr = s->cbuf + pos - 1;
     /* We might be seeking after a reusable string reached EOF. */
-    s->srlimit = s->cbuf + s->bsize - 1;
+    s->cursor.r.limit = s->cbuf + s->bsize - 1;
     /*
      * When the file reaches EOF,
      * stream_compact sets s->position to its end.
@@ -1101,7 +1106,7 @@ s_string_write_seek(register stream * s, gs_offset_t pos)
 {
     if (pos < 0 || pos > s->bsize)
         return ERRC;
-    s->swptr = s->cbuf + pos - 1;
+    s->cursor.w.ptr = s->cbuf + pos - 1;
     return 0;
 }
 

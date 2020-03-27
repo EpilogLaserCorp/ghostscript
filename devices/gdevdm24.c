@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* High-res 24Dot-matrix printer driver */
@@ -44,27 +44,46 @@ const gx_device_printer gs_lq850_device =
 /* ------ Internal routines ------ */
 
 /* Forward references */
-static void dot24_output_run (byte *, int, int, FILE *);
+static void dot24_output_run (byte *, int, int, gp_file *);
 static void dot24_improve_bitmap (byte *, int);
 
 /* Send the page to the printer. */
 static int
-dot24_print_page (gx_device_printer *pdev, FILE *prn_stream, char *init_string, int init_len)
+dot24_print_page (gx_device_printer *pdev, gp_file *prn_stream, char *init_string, int init_len)
 {
-  int xres = (int)pdev->x_pixels_per_inch;
-  int yres = (int)pdev->y_pixels_per_inch;
-  int x_high = (xres == 360);
-  int y_high = (yres == 360);
-  int bits_per_column = (y_high ? 48 : 24);
-  uint line_size = gdev_prn_raster (pdev);
-  uint in_size = line_size * bits_per_column;
-  byte *in = (byte *) gs_malloc (pdev->memory, in_size, 1, "dot24_print_page (in)");
-  uint out_size = ((pdev->width + 7) & -8) * 3;
-  byte *out = (byte *) gs_malloc (pdev->memory, out_size, 1, "dot24_print_page (out)");
-  int y_passes = (y_high ? 2 : 1);
-  int dots_per_space = xres / 10;	/* pica space = 1/10" */
-  int bytes_per_space = dots_per_space * 3;
-  int skip = 0, lnum = 0, ypass;
+  int xres;
+  int yres;
+  int x_high;
+  int y_high;
+  int bits_per_column;
+  uint line_size;
+  uint in_size;
+  byte *in;
+  uint out_size;
+  byte *out;
+  int y_passes;
+  int dots_per_space;
+  int bytes_per_space;
+  int skip = 0, lnum = 0, code = 0, ypass;
+
+  xres = (int)pdev->x_pixels_per_inch;
+  yres = (int)pdev->y_pixels_per_inch;
+  x_high = (xres == 360);
+  y_high = (yres == 360);
+  dots_per_space = xres / 10;       /* pica space = 1/10" */
+  bytes_per_space = dots_per_space * 3;
+  if (bytes_per_space == 0) {
+    /* We divide by bytes_per_space later on. */
+    return_error(gs_error_rangecheck);
+  }
+
+  bits_per_column = (y_high ? 48 : 24);
+  line_size = gdev_prn_raster (pdev);
+  in_size = line_size * bits_per_column;
+  in = (byte *) gs_malloc (pdev->memory, in_size, 1, "dot24_print_page (in)");
+  out_size = ((pdev->width + 7) & -8) * 3;
+  out = (byte *) gs_malloc (pdev->memory, out_size, 1, "dot24_print_page (out)");
+  y_passes = (y_high ? 2 : 1);
 
   /* Check allocations */
   if (in == 0 || out == 0)
@@ -77,8 +96,8 @@ dot24_print_page (gx_device_printer *pdev, FILE *prn_stream, char *init_string, 
     }
 
   /* Initialize the printer and reset the margins. */
-  fwrite (init_string, init_len - 1, sizeof (char), prn_stream);
-  fputc ((int) (pdev->width / pdev->x_pixels_per_inch * 10) + 2,
+  gp_fwrite (init_string, init_len - 1, sizeof (char), prn_stream);
+  gp_fputc ((int) (pdev->width / pdev->x_pixels_per_inch * 10) + 2,
          prn_stream);
 
   /* Print lines of graphics */
@@ -92,7 +111,9 @@ dot24_print_page (gx_device_printer *pdev, FILE *prn_stream, char *init_string, 
       int lcnt;
 
       /* Copy 1 scan line and test for all zero. */
-      gdev_prn_copy_scan_lines (pdev, lnum, in, line_size);
+      code = gdev_prn_copy_scan_lines (pdev, lnum, in, line_size);
+      if (code < 0)
+          goto xit;
       if (in[0] == 0
           && !memcmp ((char *) in, (char *) in + 1, line_size - 1))
         {
@@ -104,42 +125,55 @@ dot24_print_page (gx_device_printer *pdev, FILE *prn_stream, char *init_string, 
       /* Vertical tab to the appropriate position. */
       while ((skip >> 1) > 255)
         {
-          fputs ("\033J\377", prn_stream);
+          gp_fputs ("\033J\377", prn_stream);
           skip -= 255 * 2;
         }
 
       if (skip)
         {
           if (skip >> 1)
-            fprintf (prn_stream, "\033J%c", skip >> 1);
+            gp_fprintf (prn_stream, "\033J%c", skip >> 1);
           if (skip & 1)
-            fputc ('\n', prn_stream);
+            gp_fputc ('\n', prn_stream);
         }
 
       /* Copy the rest of the scan lines. */
       if (y_high)
         {
+          /* NOTE: even though fixed to not ignore return < 0 from gdev_prn_copy_scan_lines, */
+          /*       this code seems wrong -- it doesn't seem to match the 'else' method.      */
           inp = in + line_size;
-          for (lcnt = 1; lcnt < 24; lcnt++, inp += line_size)
-            if (!gdev_prn_copy_scan_lines (pdev, lnum + lcnt * 2, inp,
-                                           line_size))
+          for (lcnt = 1; lcnt < 24; lcnt++, inp += line_size) {
+            code = gdev_prn_copy_scan_lines (pdev, lnum + lcnt * 2, inp, line_size);
+            if (code < 0)
+                goto xit;
+            if (code == 0)
               {
+                /* Pad with lines of zeros. */
                 memset (inp, 0, (24 - lcnt) * line_size);
                 break;
               }
+          }
           inp = in + line_size * 24;
-          for (lcnt = 0; lcnt < 24; lcnt++, inp += line_size)
-            if (!gdev_prn_copy_scan_lines (pdev, lnum + lcnt * 2 + 1, inp,
-                                           line_size))
+          for (lcnt = 0; lcnt < 24; lcnt++, inp += line_size) {
+            code = gdev_prn_copy_scan_lines (pdev, lnum + lcnt * 2 + 1, inp, line_size);
+            if (code < 0)
+                goto xit;
+            if (code == 0)
               {
+                /* Pad with lines of zeros. */
                 memset (inp, 0, (24 - lcnt) * line_size);
                 break;
               }
+          }
         }
       else
         {
-          lcnt = 1 + gdev_prn_copy_scan_lines (pdev, lnum + 1, in + line_size,
+          code = gdev_prn_copy_scan_lines (pdev, lnum + 1, in + line_size,
                                                in_size - line_size);
+          if (code < 0)
+              goto xit;
+          lcnt = code + 1;	/* FIXME: why +1 */
           if (lcnt < 24)
             /* Pad with lines of zeros. */
             memset (in + lcnt * line_size, 0, in_size - lcnt * line_size);
@@ -196,7 +230,7 @@ dot24_print_page (gx_device_printer *pdev, FILE *prn_stream, char *init_string, 
                                           x_high, prn_stream);
                         }
                       /* Tab over to the appropriate position. */
-                      fprintf (prn_stream, "\033D%c%c\t", tpos, 0);
+                      gp_fprintf (prn_stream, "\033D%c%c\t", tpos, 0);
                       out_blk = outp = newp;
                     }
                 }
@@ -211,35 +245,36 @@ dot24_print_page (gx_device_printer *pdev, FILE *prn_stream, char *init_string, 
                               prn_stream);
             }
 
-          fputc ('\r', prn_stream);
+          gp_fputc ('\r', prn_stream);
           if (ypass < y_passes - 1)
-            fputc ('\n', prn_stream);
+            gp_fputc ('\n', prn_stream);
         }
       skip = 48 - y_high;
       lnum += bits_per_column;
     }
 
   /* Eject the page and reinitialize the printer */
-  fputs ("\f\033@", prn_stream);
-  fflush (prn_stream);
+  gp_fputs ("\f\033@", prn_stream);
+  gp_fflush (prn_stream);
 
+xit:
   gs_free (pdev->memory, (char *) out, out_size, 1, "dot24_print_page (out)");
   gs_free (pdev->memory, (char *) in, in_size, 1, "dot24_print_page (in)");
 
-  return 0;
+  return code;
 }
 
 /* Output a single graphics command. */
 static void
-dot24_output_run (byte *data, int count, int x_high, FILE *prn_stream)
+dot24_output_run (byte *data, int count, int x_high, gp_file *prn_stream)
 {
   int xcount = count / 3;
-  fputc (033, prn_stream);
-  fputc ('*', prn_stream);
-  fputc ((x_high ? 40 : 39), prn_stream);
-  fputc (xcount & 0xff, prn_stream);
-  fputc (xcount >> 8, prn_stream);
-  fwrite (data, 1, count, prn_stream);
+  gp_fputc (033, prn_stream);
+  gp_fputc ('*', prn_stream);
+  gp_fputc ((x_high ? 40 : 39), prn_stream);
+  gp_fputc (xcount & 0xff, prn_stream);
+  gp_fputc (xcount >> 8, prn_stream);
+  gp_fwrite (data, 1, count, prn_stream);
 }
 
 /* If xdpi == 360, the P6 / LQ850 cannot print adjacent pixels.  Clear the
@@ -264,7 +299,7 @@ dot24_improve_bitmap (byte *data, int count)
 }
 
 static int
-necp6_print_page(gx_device_printer *pdev, FILE *prn_stream)
+necp6_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
   char necp6_init_string [] = "\033@\033P\033l\000\r\034\063\001\033Q";
 
@@ -272,7 +307,7 @@ necp6_print_page(gx_device_printer *pdev, FILE *prn_stream)
 }
 
 static int
-lq850_print_page(gx_device_printer *pdev, FILE *prn_stream)
+lq850_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
   char lq850_init_string [] = "\033@\033P\033l\000\r\033\053\001\033Q";
 

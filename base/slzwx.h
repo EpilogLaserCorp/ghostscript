@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,6 +19,8 @@
 
 #ifndef slzwx_INCLUDED
 #  define slzwx_INCLUDED
+
+#include "scommon.h"
 
 typedef struct lzw_decode_s lzw_decode;
 typedef struct lzw_encode_table_s lzw_encode_table;
@@ -32,7 +34,8 @@ typedef struct stream_LZW_state_s {
      */
     bool FirstBitLowOrder;	/* decoding only */
     bool BlockData;		/* decoding only */
-    int EarlyChange;		/* decoding only */
+    bool EarlyChange;		/* decoding only */
+    bool OldTiff;		/* decoding only */
     /* The following are updated dynamically. */
     uint bits;			/* buffer for input bits */
     int bits_left;		/* Decode: # of valid bits left, [0..7] */
@@ -64,6 +67,7 @@ extern_st(st_LZW_state);
    (ss)->FirstBitLowOrder = false,\
    (ss)->BlockData = false,\
    (ss)->EarlyChange = 1,\
+   (ss)->OldTiff = 0,\
    /* Clear pointers */\
    (ss)->table.decode /*=encode*/ = 0)
 extern const stream_template s_LZWD_template;

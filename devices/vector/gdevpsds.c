@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -25,7 +25,8 @@
 #include "gsdcolor.h"
 #include "gscspace.h"
 #include "gxdevcli.h"
-#include "gxistate.h"
+#include "gxgstate.h"
+#include "gsicc_manage.h"
 
 /* ---------------- Convert between 1/2/4/12 and 8 bits ---------------- */
 
@@ -223,7 +224,8 @@ s_16_8_process(stream_state * st, stream_cursor_read * pr,
 {
     BEGIN_1248;
 
-    n = ss->samples_per_row;	/* misuse n to avoid a compiler warning */
+    (void)n;  /* misuse n to avoid a compiler warning */
+    (void)ss;
     status = 0;
     for (; rlimit - p >= 2; ++q) {
         if (q >= wlimit) {
@@ -348,9 +350,9 @@ private_st_C2R_state();
 
 /* Initialize a CMYK => RGB conversion stream. */
 int
-s_C2R_init(stream_C2R_state *ss, const gs_imager_state *pis)
+s_C2R_init(stream_C2R_state *ss, const gs_gstate *pgs)
 {
-    ss->pis = pis;
+    ss->pgs = pgs;
     return 0;
 }
 
@@ -360,7 +362,7 @@ s_C2R_set_defaults(stream_state * st)
 {
     stream_C2R_state *const ss = (stream_C2R_state *) st;
 
-    ss->pis = 0;
+    ss->pgs = 0;
 }
 
 /* Process one buffer. */
@@ -379,7 +381,7 @@ s_C2R_process(stream_state * st, stream_cursor_read * pr,
         frac rgb[3];
 
         color_cmyk_to_rgb(byte2frac(bc), byte2frac(bm), byte2frac(by),
-                          byte2frac(bk), ss->pis, rgb, ss->pis->memory);
+                          byte2frac(bk), ss->pgs, rgb, ss->pgs->memory);
         q[1] = frac2byte(rgb[0]);
         q[2] = frac2byte(rgb[1]);
         q[3] = frac2byte(rgb[2]);
@@ -557,7 +559,7 @@ const stream_template s_IE_template = {
 int
 s_Downsample_size_out(int size_in, float factor, bool pad)
 {
-    return ((pad ? size_in + factor - 1 : size_in) / factor);
+    return (int)((pad ? size_in + factor - 1 : size_in) / factor);
 }
 
 static void
@@ -586,7 +588,7 @@ static int
 s_Subsample_init(stream_state * st)
 {
     stream_Subsample_state *const ss = (stream_Subsample_state *) st;
-    int xf = ss->XFactor;
+    int xf = (int)ss->XFactor;
 
     if ((float)xf != ss->XFactor) {
         dmprintf1(st->memory,
@@ -609,7 +611,7 @@ s_Subsample_process(stream_state * st, stream_cursor_read * pr,
     byte *wlimit = pw->limit;
     int spp = ss->Colors;
     int width = ss->WidthIn, height = ss->HeightIn;
-    int xf = ss->XFactor, yf = ss->YFactor;
+    int xf = (int)ss->XFactor, yf = (int)ss->YFactor;
     int xf2 = xf / 2, yf2 = yf / 2;
     int xlimit = (width / xf) * xf, ylimit = (height / yf) * yf;
     int xlast =
@@ -670,7 +672,7 @@ static int
 s_Average_init(stream_state * st)
 {
     stream_Average_state *const ss = (stream_Average_state *) st;
-    int xf = ss->XFactor;
+    int xf = (int)ss->XFactor;
 
     if ((float)xf != ss->XFactor) {
         dmprintf1(st->memory,
@@ -715,7 +717,7 @@ s_Average_process(stream_state * st, stream_cursor_read * pr,
     byte *wlimit = pw->limit;
     int spp = ss->Colors;
     int width = ss->WidthIn;
-    int xf = ss->XFactor, yf = ss->YFactor;
+    int xf = (int)ss->XFactor, yf = (int)ss->YFactor;
     int x = ss->x, y = ss->y;
     uint *sums = ss->sums;
     int status = 0;
@@ -840,7 +842,7 @@ s_Bicubic_interpolate_pixel(stream_Bicubic_state *const ss, int x_out,
     double x = x_out * ss->XFactor;
     double y = y_out * ss->YFactor;
     double dx = x - floor(x), dy = y - floor(y);
-    int start_x = floor(x) - 1, start_y = floor(y) - 1;
+    int start_x = (int)floor(x) - 1, start_y = (int)floor(y) - 1;
     int c, i, k;
 
     for (c = 0; c < ss->Colors; c++) {
@@ -866,7 +868,7 @@ s_Bicubic_process(stream_state * st, stream_cursor_read * pr,
 
     for (;;) {
         /* Find required y-offset in data buffer before doing more work */
-        req_y = floor(ss->y * ss->YFactor) - 1;
+        req_y = (int)floor(ss->y * ss->YFactor) - 1;
         if (req_y < 0)
             req_y = 0;
 
@@ -1090,7 +1092,7 @@ s_compr_chooser__unpack_and_recognize(stream_compr_chooser_state *const ss,
     int l = length;
 
     while (l) {
-        if (ss->bits_left < 8) {
+        if (ss->bits_left <= 8) {
             uint k = (sizeof(ss->packed_data) * 8 - ss->bits_left) / 8;
 
             k = min(k, l);
@@ -1159,7 +1161,7 @@ s_compr_chooser__get_choice(stream_compr_chooser_state *ss, bool force)
     return 0;
 }
 
-/* ---------------- Am image color conversion filter ---------------- */
+/* ---------------- An image color conversion filter ---------------- */
 
 private_st_image_colors_state();
 
@@ -1187,7 +1189,7 @@ s_image_colors_init(stream_state * st)
     ss->convert_color = 0;
     ss->pcs = 0;
     ss->pdev = 0;
-    ss->pis = 0;
+    ss->pgs = 0;
     return 0;
 }
 
@@ -1212,25 +1214,30 @@ s_image_colors_convert_to_device_color(stream_image_colors_state * ss)
     int i, code;
     double v0 = (1 << ss->bits_per_sample) - 1;
     double v1 = (1 << ss->output_bits_per_sample) - 1;
+    gx_device *target;
+
+    target = ss->pdev;
+    while(target->child)
+        target = target->child;
 
     for (i = 0; i < ss->depth; i++)
         cc.paint.values[i] = ss->input_color[i] *
                 (ss->Decode[i * 2 + 1] - ss->Decode[i * 2]) / v0 + ss->Decode[i * 2];
 
-    code = ss->pcs->type->remap_color(&cc, ss->pcs, &dc, ss->pis,
-                              ss->pdev, gs_color_select_texture);
+    code = ss->pcs->type->remap_color(&cc, ss->pcs, &dc, ss->pgs,
+                              target, gs_color_select_texture);
     if (code < 0)
         return code;
     for (i = 0; i < ss->output_depth; i++) {
-        uint m = (1 << ss->pdev->color_info.comp_bits[i]) - 1;
-        uint w = (dc.colors.pure >> ss->pdev->color_info.comp_shift[i]) & m;
+        uint m = (1 << target->color_info.comp_bits[i]) - 1;
+        uint w = (dc.colors.pure >> target->color_info.comp_shift[i]) & m;
 
         ss->output_color[i] = (uint)(v1 * w / m + 0.5);
     }
     return 0;
 }
 
-/* Set masc colors dimensions. */
+/* Set mask colors dimensions. */
 void
 s_image_colors_set_mask_colors(stream_image_colors_state * ss, uint *MaskColor)
 {
@@ -1241,20 +1248,21 @@ s_image_colors_set_mask_colors(stream_image_colors_state * ss, uint *MaskColor)
 /* Set image dimensions. */
 void
 s_image_colors_set_dimensions(stream_image_colors_state * ss,
-                               int width, int height, int depth, int bits_per_sample)
+                              int width, int height, int input_width,
+                              int depth, int bits_per_sample)
 {
     ss->width = width;
     ss->height = height;
     ss->depth = depth;
     ss->bits_per_sample = bits_per_sample;
-    ss->row_bits = bits_per_sample * depth * width;
+    ss->row_bits = bits_per_sample * depth * input_width;
     ss->raster = bitmap_raster(ss->row_bits);
     ss->row_alignment_bytes = 0; /* (ss->raster * 8 - ss->row_bits) / 8) doesn't work. */
 }
 
 void
 s_image_colors_set_color_space(stream_image_colors_state * ss, gx_device *pdev,
-                               const gs_color_space *pcs, const gs_imager_state *pis,
+                               const gs_color_space *pcs, const gs_gstate *pgs,
                                float *Decode)
 {
     ss->output_depth = pdev->color_info.num_components;
@@ -1262,23 +1270,11 @@ s_image_colors_set_color_space(stream_image_colors_state * ss, gx_device *pdev,
     ss->output_bits_per_sample = pdev->color_info.comp_bits[0]; /* Same precision for all components. */
     ss->convert_color = s_image_colors_convert_to_device_color;
     ss->pdev = pdev;
-    ss->pcs = pcs;
-    ss->pis = pis;
-    memcpy(ss->Decode, Decode, ss->depth * sizeof(Decode[0]) * 2);
-}
+    while(ss->pdev->parent)
+        ss->pdev = ss->pdev->parent;
 
-void
-s_new_image_colors_set_color_space(stream_image_colors_state * ss, gx_device *pdev,
-                               const gs_color_space *pcs, const gs_imager_state *pis,
-                               float *Decode)
-{
-    ss->output_depth = pdev->color_info.num_components;
-    ss->output_component_index = ss->output_depth;
-    ss->output_bits_per_sample = pdev->color_info.comp_bits[0]; /* Same precision for all components. */
-    ss->convert_color = s_image_colors_convert_to_device_color;
-    ss->pdev = pdev;
     ss->pcs = pcs;
-    ss->pis = pis;
+    ss->pgs = pgs;
     memcpy(ss->Decode, Decode, ss->depth * sizeof(Decode[0]) * 2);
 }
 

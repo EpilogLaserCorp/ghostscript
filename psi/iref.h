@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,6 +20,10 @@
 #  define iref_INCLUDED
 
 #include "stdint_.h"
+#include "gsdevice.h"
+#include "gxalloc.h"
+#include "scommon.h"
+#include "gsnamecl.h"
 
 /*
  * Note: this file defines a large number of macros.  Many of these are
@@ -29,11 +33,7 @@
  * macros have names beginning with an underscore (_).
  */
 
-/* The typedef for object references */
-#ifndef ref_DEFINED
-typedef struct ref_s ref;
-#  define ref_DEFINED
-#endif
+typedef struct ref_stack_s ref_stack_t;
 
 /*
  * Define the type for packed object references.  This is opaque here:
@@ -41,8 +41,8 @@ typedef struct ref_s ref;
  */
 typedef ushort ref_packed;
 
-#define log2_sizeof_ref_packed arch_log2_sizeof_short
-#define sizeof_ref_packed (1 << log2_sizeof_ref_packed)
+#define ARCH_LOG2_SIZEOF_REF_PACKED ARCH_LOG2_SIZEOF_SHORT
+#define ARCH_SIZEOF_REF_PACKED (1 << ARCH_LOG2_SIZEOF_REF_PACKED)
 
 /* PS integer objects default to 64 bit, and the relevant operator
  * C functions have code to allow the QL tests to pass when
@@ -168,8 +168,13 @@ typedef enum {
 /*
  * We now continue with individual types.
  */
-    t_fontID,			/* @    value.pstruct */
+/* t_integer and t_real must be consecutive and start at a
+ * multiple of 2, for the sake of r_is_number.
+ */
+#define _REF_T_NUMBER_SPAN 2
     t_integer,			/*      value.intval */
+    t_real,			/*      value.realval */
+    t_fontID,			/* @    value.pstruct */
     t_mark,			/*        (no value) */
 /*
  * Name objects use the a_space field because they really are composite
@@ -183,7 +188,6 @@ typedef enum {
  * disguised procedures.  (Real operators always have a_space = 0.)
  */
     t_operator,			/* @! # value.opproc, uses size for index */
-    t_real,			/*      value.realval */
     t_save,			/*      value.saveid, see isave.h for why */
                                 /*        this isn't a t_struct */
     t_string,			/* @!+# value.bytes */
@@ -232,13 +236,13 @@ extern const byte ref_type_properties[1 << 6];	/* r_type_bits */
   _REF_TYPE_USES_ACCESS | _REF_TYPE_USES_SIZE, /* (unused array type) */\
   0,				/* t_struct */\
   _REF_TYPE_USES_ACCESS,		/* t_astruct */\
-  0,				/* t_fontID */\
   0,				/* t_integer */\
+  0,				/* t_real */\
+  0,				/* t_fontID */\
   0,				/* t_mark */\
   _REF_TYPE_USES_SIZE,		/* t_name */\
   _REF_TYPE_IS_NULL,		/* t_null, uses size only on e-stack */\
   _REF_TYPE_USES_SIZE,		/* t_operator */\
-  0,				/* t_real */\
   0,				/* t_save */\
   _REF_TYPE_USES_ACCESS | _REF_TYPE_USES_SIZE, /* t_string */\
   _REF_TYPE_USES_ACCESS,		/* t_device */\
@@ -274,8 +278,8 @@ extern const byte ref_type_properties[1 << 6];	/* r_type_bits */
   "INVL","bool","dict","file",\
   "arry","mpry","spry","u?ry",\
   "STRC","ASTR",\
-  "font","int ","mark","name","null",\
-  "oper","real","save","str ",\
+  "int ","real","font","mark","name","null",\
+  "oper","save","str ",\
   "devc","opry"
 /*
  * Define the type names for the type operator.
@@ -284,8 +288,8 @@ extern const byte ref_type_properties[1 << 6];	/* r_type_bits */
   0,"booleantype","dicttype","filetype",\
   "arraytype","packedarraytype","packedarraytype","arraytype",\
   0,0,\
-  "fonttype","integertype","marktype","nametype","nulltype",\
-  "operatortype","realtype","savetype","stringtype",\
+  "integertype","realtype","fonttype","marktype","nametype","nulltype",\
+  "operatortype","savetype","stringtype",\
   "devicetype","operatortype"
 /*
  * Define the type names for obj_cvp (the == operator).  We only need these
@@ -294,8 +298,8 @@ extern const byte ref_type_properties[1 << 6];	/* r_type_bits */
 #define REF_TYPE_PRINT_STRINGS\
   0,0,"-dict-","-file-",\
   "-array-","-packedarray-","-packedarray-","-array-",\
-  0,0,\
-  "-fontID-",0,"-mark-",0,0,\
+  0,0,0,0,\
+  "-fontID-","-mark-",0,\
   0,0,"-save-","-string-",\
   "-device-",0
 
@@ -390,28 +394,11 @@ typedef struct ref_attr_print_mask_s {
 typedef struct dict_s dict;
 typedef struct name_s name;
 
-#ifndef stream_DEFINED
-#  define stream_DEFINED
-typedef struct stream_s stream;
-#endif
-#ifndef gx_device_DEFINED
-#  define gx_device_DEFINED
-typedef struct gx_device_s gx_device;
-#endif
-#ifndef obj_header_DEFINED
-#  define obj_header_DEFINED
-typedef struct obj_header_s obj_header_t;
-#endif
-
 /*
  * Define the argument type for operator procedures.  Note that the
  * argument name is not arbitrary: it is used in access macros, so all
  * operator procedures must use it.
  */
-#ifndef i_ctx_t_DEFINED
-#  define i_ctx_t_DEFINED
-typedef struct gs_context_state_s i_ctx_t;
-#endif
 typedef int (*op_proc_t)(i_ctx_t *i_ctx_p);
 /* real_opproc is a holdover.... */
 #define real_opproc(pref) ((pref)->value.opproc)
@@ -498,7 +485,7 @@ struct ref_s {
  * faster dispatch in the interpreter -- see interp.h for more information).
  */
 #if r_type_shift == 8
-#  if arch_is_big_endian
+#  if ARCH_IS_BIG_ENDIAN
 #    define r_type(rp) (((const byte *)&((rp)->tas.type_attrs))[sizeof(ushort)-2])
 #  else
 #    define r_type(rp) (((const byte *)&((rp)->tas.type_attrs))[1])
@@ -521,6 +508,8 @@ struct ref_s {
   _REF_HAS_MASKED_TYPE_ATTRS(rp,t_array,_REF_T_ARRAY_SPAN,a_execute+a_executable)
 #define r_is_struct(rp)\
   _REF_HAS_MASKED_TYPE_ATTRS(rp,t_struct,_REF_T_STRUCT_SPAN,0)
+#define r_is_number(rp)\
+  _REF_HAS_MASKED_TYPE_ATTRS(rp,t_integer,_REF_T_NUMBER_SPAN,0)
 
 /*
  * Test whether a ref is a struct or astruct with a specific structure type
@@ -606,7 +595,7 @@ struct ref_s {
               /*rsize*/ 0 } }
 
 /* Define the size of a ref. */
-#define arch_sizeof_ref sizeof(ref)
+#define ARCH_SIZEOF_REF sizeof(ref)
 /* Define the required alignment for refs. */
 /* We assume all alignment values are powers of 2. */
 #define ARCH_ALIGN_REF_MOD\
@@ -614,7 +603,7 @@ struct ref_s {
    (ARCH_ALIGN_PTR_MOD - 1)) + 1)
 
 /* Select reasonable values for PDF interpreter */
-/* The maximum array size cannot exceed max_uint/arch_sizeof_ref */
+/* The maximum array size cannot exceed max_uint/ARCH_SIZEOF_REF */
 /* because the allocator cannot allocate a block larger than max_uint. */
 #define max_array_size  (16*1024*1024)
 #define max_string_size (16*1024*1024)

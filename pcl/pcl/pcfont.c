@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -179,12 +179,29 @@ pcl_secondary_pitch(pcl_args_t * pargs, pcl_state_t * pcs)
     return pcl_pitch(float_arg(pargs), pcs, 1);
 }
 
+/*
+ * Experiments on HP printers indicate height command parameters are truncated to
+ * the documented range .25 - 999.75.
+ */
+
+static inline double
+height_clamp(double ht)
+{
+    if (ht < .25)
+        return .25;
+    else if (ht > 999.75)
+        return 999.75;
+    else
+        return ht;
+}
+
 static int
 pcl_height(pcl_args_t * pargs, pcl_state_t * pcs, int set)
 {
-    uint height_4ths = (uint) (float_arg(pargs) * 4 + 0.5);
-    pcl_font_selection_t *pfs = &pcs->font_selection[set];
 
+    uint height_4ths =
+        (uint) (height_clamp(float_arg(pargs)) * 4 + 0.5);
+    pcl_font_selection_t *pfs = &pcs->font_selection[set];
     pfs->params.height_4ths = height_4ths;
     pcl_decache_font(pcs, set, true);
     return 0;
@@ -529,9 +546,16 @@ pcl_set_current_font_environment(pcl_state_t * pcs)
                     (pjl_proc_fontsource_to_path(pcs->pjls, fontsource),
                      pcs->memory, &pcs->built_in_fonts, pcs->font_dir,
                      (int)pcds_internal,
-                     false /* do not use unicode font names for keys */ ))
-                    /* simply continue without fonts if none are found */
-                    return 0;
+                     false /* do not use unicode font names for keys */ )) {
+
+                    /* PCL requires the fonts, RTL does not use the fonts */
+                    if (pcs->personality == rtl)
+                        return 0;
+                    else {
+                        errprintf(pcs->memory, "Fonts not found\n");
+                        return gs_error_Fatal;
+                    }
+                }
                 pcl_data_storage = pcds_internal;
                 break;
             case 'S':
@@ -561,7 +585,7 @@ pcl_set_current_font_environment(pcl_state_t * pcs)
                 pcl_data_storage = pcds_all_simms;
                 break;
             default:
-                dmprintf(pcs->memory, "pcfont.c: unknown pjl resource\n");
+                errprintf(pcs->memory, "pcfont.c: unknown pjl resource\n");
                 return -1;
         }
         {
@@ -651,26 +675,27 @@ pcl_unload_resident_fonts(pcl_state_t * pcs)
     }
 }
 
-/* Purge all */
-static bool
-purge_all(const gs_memory_t * mem, cached_char * cc, void *dummy)
-{
-    return true;
-}
-
-static void
+static int
 pcfont_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
+    int code;
+
     if ((type & pcl_reset_initial) != 0) {
         pcs->font_dir = gs_font_dir_alloc(pcs->memory);
+        if (pcs->font_dir == NULL)
+            return_error(gs_error_VMerror);
         if (pcs->nocache)
             gs_setcachelimit(pcs->font_dir, 0);
         /* disable hinting at high res */
-        if (gs_currentdevice(pcs->pgs)->HWResolution[0] >= 300)
-            gs_setgridfittt(pcs->font_dir, 0);
+        if (gs_currentdevice(pcs->pgs)->HWResolution[0] >= 300) {
+            code = gs_setgridfittt(pcs->font_dir, 0);
+            if (code < 0)
+                return code;
+        }
         pcs->font = 0;
         pcs->font_selection[0].font = pcs->font_selection[1].font = 0;
         pcs->font_selected = primary;
+        pcs->pjl_dlfont_number = 1;
         pl_dict_init(&pcs->built_in_fonts, pcs->memory, pl_free_font);
         pl_dict_init(&pcs->soft_fonts, pcs->memory, pl_free_font);
         pl_dict_init(&pcs->cartridge_fonts, pcs->memory, pl_free_font);
@@ -686,7 +711,7 @@ pcfont_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
             code = pcl_set_current_font_environment(pcs);
         /* corrupt configuration */
         if (code != 0)
-            exit(1);
+            return code;
     }
     if (type & pcl_reset_permanent) {
         pcl_unload_resident_fonts(pcs);
@@ -696,34 +721,11 @@ pcfont_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
         pl_dict_release(&pcs->simm_fonts);
 
         if (pcs->font_dir) {
-            gx_purge_selected_cached_chars(pcs->font_dir,
-                                           purge_all,
-                                           (void *)NULL);
-            /* free character cache machinery */
-            gs_free_object(pcs->font_dir->memory, pcs->font_dir->fmcache.mdata, "pcsfont_do_reset");
-            {
-                /* free the circular list of memory chunks first */
-                gx_bits_cache_chunk *chunk = pcs->font_dir->ccache.chunks;
-                gx_bits_cache_chunk *start_chunk = chunk;
-                gx_bits_cache_chunk *prev_chunk;
-                while (1) {
-                    if (start_chunk == chunk->next) {
-                        gs_free_object(pcs->font_dir->ccache.bits_memory, chunk->data, "pcsfont_do_reset");
-                        gs_free_object(pcs->font_dir->ccache.bits_memory, chunk, "pcsfont_do_reset");
-                        break;
-                    }
-                    prev_chunk = chunk;
-                    chunk = chunk->next;
-                    gs_free_object(pcs->font_dir->ccache.bits_memory, prev_chunk->data, "pcsfont_do_reset");
-                    gs_free_object(pcs->font_dir->ccache.bits_memory, prev_chunk, "pcsfont_do_reset");
-                }
-
-                gs_free_object(pcs->font_dir->memory, pcs->font_dir->ccache.table, "pcfont_do_reset");
-                gs_free_object(pcs->font_dir->memory, pcs->font_dir, "pcfont_do_reset");
-                pcs->font_dir = 0;
-            }
+            gs_free_object(pcs->font_dir->memory, pcs->font_dir, "pcfont_do_reset");
+            pcs->font_dir = 0;
         }
     }
+    return 0;
 }
 
 const pcl_init_t pcfont_init = {

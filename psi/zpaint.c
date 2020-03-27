@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,6 +19,8 @@
 #include "oper.h"
 #include "gspaint.h"
 #include "igstate.h"
+#include "store.h"
+#include "estack.h"
 
 /* - fill - */
 static int
@@ -39,6 +41,60 @@ static int
 zstroke(i_ctx_t *i_ctx_p)
 {
     return gs_stroke(igs);
+}
+
+static int
+fillstroke_cont(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+    int restart, code;
+
+    check_type(*op, t_integer);
+    restart = (int)op->value.intval;
+    code = gs_fillstroke(igs, &restart);
+    if (code == gs_error_Remap_Color) {
+        op->value.intval = restart;
+        return code;
+    }
+    pop(1);
+    return code;
+}
+
+static int
+zfillstroke(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+    push(1);
+    make_int(op, 0);		/* 0 implies we are at fill color, need to swap first */
+    push_op_estack(fillstroke_cont);
+    return o_push_estack;
+}
+
+static int
+eofillstroke_cont(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+    int restart, code;
+
+    check_type(*op, t_integer);
+    restart = (int)op->value.intval;
+    code = gs_eofillstroke(igs, &restart);
+    if (code == gs_error_Remap_Color) {
+        op->value.intval = restart;
+        return code;
+    }
+    pop(1);
+    return code;
+}
+
+static int
+zeofillstroke(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+    push(1);
+    make_int(op, 0);
+    push_op_estack(eofillstroke_cont);
+    return o_push_estack;
 }
 
 /* ------ Non-standard operators ------ */
@@ -80,5 +136,9 @@ const op_def zpaint_op_defs[] =
                 /* Non-standard operators */
     {"0.fillpage", zfillpage},
     {"3.imagepath", zimagepath},
+    {"0.eofillstroke", zeofillstroke},
+    {"0.fillstroke", zfillstroke},
+    {"0%eofillstroke_cont", eofillstroke_cont },
+    {"0%fillstroke_cont", fillstroke_cont },
     op_def_end(0)
 };

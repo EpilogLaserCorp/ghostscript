@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -23,6 +23,7 @@
 #include "gsrefct.h"
 #include "gscspace.h"
 #include "stdint_.h"
+#include "gsfunc.h"
 
 /* Define the names of the known blend modes. */
 typedef enum {
@@ -42,7 +43,8 @@ typedef enum {
     BLEND_MODE_Hue,
     BLEND_MODE_Saturation,
     BLEND_MODE_Color,
-#define MAX_BLEND_MODE BLEND_MODE_Color
+    BLEND_MODE_CompatibleOverprint,
+#define MAX_BLEND_MODE BLEND_MODE_CompatibleOverprint
 
     /* For compatibility with old PDFs */
     BLEND_MODE_Compatible
@@ -51,24 +53,27 @@ typedef enum {
   "Normal", "Multiply", "Screen", "Difference",\
   "Darken", "Lighten", "ColorDodge", "ColorBurn", "Exclusion",\
   "HardLight", "Overlay", "SoftLight", "Luminosity", "Hue",\
-  "Saturation", "Color", "Compatible"
+  "Saturation", "Color", "CompatibleOverprint", "Compatible"
+
+#define blend_is_idempotent(B)       \
+    (((((1<<BLEND_MODE_Multiply)   | \
+        (1<<BLEND_MODE_Screen)     | \
+        (1<<BLEND_MODE_Overlay)    | \
+        (1<<BLEND_MODE_ColorDodge) | \
+        (1<<BLEND_MODE_ColorBurn)  | \
+        (1<<BLEND_MODE_HardLight)  | \
+        (1<<BLEND_MODE_SoftLight)  | \
+        (1<<BLEND_MODE_Difference) | \
+        (1<<BLEND_MODE_Exclusion)) >> (B)) & 1) == 0)
 
 /* Define the parameter structure for a transparency group. */
-#ifndef gs_color_space_DEFINED
-#  define gs_color_space_DEFINED
-typedef struct gs_color_space_s gs_color_space;
-#endif
-#ifndef gs_function_DEFINED
-typedef struct gs_function_s gs_function_t;
-#  define gs_function_DEFINED
-#endif
-
 /* (Update gs_trans_group_params_init if these change.) */
 typedef struct gs_transparency_group_params_s {
     const gs_color_space *ColorSpace;
     bool Isolated;
     bool Knockout;
     bool image_with_SMask;
+    int text_group;
     bool idle;
     uint mask_id;
     int group_color_numcomps;
@@ -93,7 +98,9 @@ typedef struct gs_transparency_mask_params_s {
     const gs_color_space *ColorSpace;
     gs_transparency_mask_subtype_t subtype;
     int Background_components;
+    int Matte_components;
     float Background[GS_CLIENT_COLOR_MAX_COMPONENTS];
+    float Matte[GS_CLIENT_COLOR_MAX_COMPONENTS];
     float GrayBackground;
     int (*TransferFunction)(double in, float *out, void *proc_data);
     gs_function_t *TransferFunction_data;
@@ -110,13 +117,15 @@ typedef struct gx_transparency_mask_params_s {
     int group_color_numcomps;
     gs_transparency_color_t group_color;
     int Background_components;
+    int Matte_components;
     float Background[GS_CLIENT_COLOR_MAX_COMPONENTS];
+    float Matte[GS_CLIENT_COLOR_MAX_COMPONENTS];
     float GrayBackground;
     bool function_is_identity;
     bool idle;
     bool replacing;
     uint mask_id;
-    byte transfer_fn[MASK_TRANSFER_FUNCTION_SIZE];
+    byte transfer_fn[MASK_TRANSFER_FUNCTION_SIZE*2+2];
     int64_t icc_hashcode;                    /* Needed when we are doing clist reading */
     cmm_profile_t *iccprofile;               /* The profile  */
 } gx_transparency_mask_params_t;
@@ -131,10 +140,11 @@ typedef struct gx_transparency_mask_params_s {
              1 + sizeof(float) * 6 /* See sput_matrix. */ + \
              sizeof(((gs_pdf14trans_params_t *)0)->subtype) + \
              sizeof(((gs_pdf14trans_params_t *)0)->group_color_numcomps) + \
-             4 /* group color, replacing, function_is_identity, Background_components */ + \
+             5 /* group color, replacing, function_is_identity, Background_components, Matte_components */ + \
              sizeof(((gs_pdf14trans_params_t *)0)->bbox) + \
              sizeof(((gs_pdf14trans_params_t *)0)->mask_id) + \
              sizeof(((gs_pdf14trans_params_t *)0)->Background) + \
+             sizeof(((gs_pdf14trans_params_t *)0)->Matte) + \
              sizeof(float)*4 + /* If cmyk background */ \
              sizeof(((gs_pdf14trans_params_t *)0)->GrayBackground) + \
              sizeof(int64_t)) /* ICC band information */

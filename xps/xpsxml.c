@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -24,7 +24,7 @@
 
 #define NS_XPS "http://schemas.microsoft.com/xps/2005/06"
 #define NS_MC "http://schemas.openxmlformats.org/markup-compatibility/2006"
-
+#define NS_OXPS "http://schemas.openxps.org/oxps/v1.0"
 typedef struct xps_parser_s xps_parser_t;
 
 struct xps_parser_s
@@ -32,8 +32,7 @@ struct xps_parser_s
     xps_context_t *ctx;
     xps_item_t *root;
     xps_item_t *head;
-    char *error;
-    int compat;
+    const char *error;
     char *base; /* base of relative URIs */
 };
 
@@ -47,17 +46,17 @@ struct xps_item_s
     xps_item_t *next;
 };
 
-static char *
-skip_namespace(char *s)
+static const char *
+skip_namespace(const char *s)
 {
-    char *p = strchr(s, ' ');
+    const char *p = strchr(s, ' ');
     if (p)
         return p + 1;
     return s;
 }
 
 static void
-on_open_tag(void *zp, char *ns_name, char **atts)
+on_open_tag(void *zp, const char *ns_name, const char **atts)
 {
     xps_parser_t *parser = zp;
     xps_context_t *ctx = parser->ctx;
@@ -66,7 +65,8 @@ on_open_tag(void *zp, char *ns_name, char **atts)
     int namelen;
     int attslen;
     int textlen;
-    char *name, *p;
+    const char *name;
+    char *p;
     int i;
 
     if (parser->error)
@@ -86,7 +86,12 @@ on_open_tag(void *zp, char *ns_name, char **atts)
     if (p == ns_name)
     {
         name = strchr(ns_name, ' ') + 1;
-        parser->compat = 1;
+    }
+
+    p = strstr(ns_name, NS_OXPS);
+    if (p == ns_name)
+    {
+        name = strchr(ns_name, ' ') + 1;
     }
 
     if (!name)
@@ -163,7 +168,7 @@ on_open_tag(void *zp, char *ns_name, char **atts)
 }
 
 static void
-on_close_tag(void *zp, char *name)
+on_close_tag(void *zp, const char *name)
 {
     xps_parser_t *parser = zp;
 
@@ -185,7 +190,7 @@ on_text(void *zp, char *buf, int len)
 {
     xps_parser_t *parser = zp;
     xps_context_t *ctx = parser->ctx;
-    char *atts[3];
+    const char *atts[3];
     int i;
 
     if (parser->error)
@@ -217,13 +222,6 @@ on_text(void *zp, char *buf, int len)
     }
 }
 
-static xps_item_t *
-xps_process_compatibility(xps_context_t *ctx, xps_item_t *root)
-{
-    gs_warn("XPS document uses markup compatibility tags");
-    return root;
-}
-
 xps_item_t *
 xps_parse_xml(xps_context_t *ctx, byte *buf, int len)
 {
@@ -235,7 +233,6 @@ xps_parse_xml(xps_context_t *ctx, byte *buf, int len)
     parser.root = NULL;
     parser.head = NULL;
     parser.error = NULL;
-    parser.compat = 0;
 
     xp = XML_ParserCreateNS(NULL, ' ');
     if (!xp)
@@ -263,9 +260,6 @@ xps_parse_xml(xps_context_t *ctx, byte *buf, int len)
     }
 
     XML_ParserFree(xp);
-
-    if (parser.compat)
-        xps_process_compatibility(ctx, parser.root);
 
     return parser.root;
 }
@@ -299,6 +293,18 @@ xps_att(xps_item_t *item, const char *att)
 }
 
 void
+xps_detach_and_free_remainder(xps_context_t *ctx, xps_item_t *root, xps_item_t *item)
+{
+    if (item->up)
+        item->up->down = NULL;
+
+    xps_free_item(ctx, item->next);
+    item->next = NULL;
+
+    xps_free_item(ctx, root);
+}
+
+void
 xps_free_item(xps_context_t *ctx, xps_item_t *item)
 {
     xps_item_t *next;
@@ -315,7 +321,7 @@ xps_free_item(xps_context_t *ctx, xps_item_t *item)
 static void indent(int n)
 {
     while (n--)
-        printf("  ");
+        dlprintf("  ");
 }
 
 static void
@@ -328,23 +334,23 @@ xps_debug_item_imp(xps_item_t *item, int level, int loop)
         indent(level);
 
         if (strlen(item->name) == 0)
-            printf("%s\n", item->atts[1]);
+            dlprintf1("%s\n", item->atts[1]);
         else
         {
-            printf("<%s", item->name);
+            dlprintf1("<%s", item->name);
 
             for (i = 0; item->atts[i]; i += 2)
-                printf(" %s=\"%s\"", item->atts[i], item->atts[i+1]);
+                dlprintf2(" %s=\"%s\"", item->atts[i], item->atts[i+1]);
 
             if (item->down)
             {
-                printf(">\n");
+                dlprintf(">\n");
                 xps_debug_item_imp(item->down, level + 1, 1);
                 indent(level);
-                printf("</%s>\n", item->name);
+                dlprintf1("</%s>\n", item->name);
             }
             else
-                printf(" />\n");
+                dlprintf(" />\n");
         }
 
         item = item->next;

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -52,8 +52,8 @@
 #define DEFAULT_WIDTH_10THS_US_LETTER 85
 #define DEFAULT_HEIGHT_10THS_US_LETTER 110
 /* A4 paper (210mm x 297mm), we use 595pt x 842pt. */
-#define DEFAULT_WIDTH_10THS_A4 82.6389
-#define DEFAULT_HEIGHT_10THS_A4 116.9444
+#define DEFAULT_WIDTH_10THS_A4 82.6389f
+#define DEFAULT_HEIGHT_10THS_A4 116.9444f
 /* Choose a default.  A4 may be set in the makefile. */
 #ifdef A4
 #  define DEFAULT_WIDTH_10THS DEFAULT_WIDTH_10THS_A4
@@ -64,7 +64,7 @@
 #endif
 
 /* Define parameters for machines with little dinky RAMs.... */
-#if arch_small_memory
+#if ARCH_SMALL_MEMORY
 #   define MAX_BITMAP 32000
 #   define BUFFER_SPACE 25000
 #   define MIN_MEMORY_LEFT 32000
@@ -98,10 +98,11 @@
  * Note also that the macro does not initialize procs, which is
  * the next element of the structure.
  */
-#define std_device_part1_(devtype, ptr_procs, dev_name, stype, open_init)\
+    #define std_device_part1_(devtype, ptr_procs, dev_name, stype, open_init)\
         sizeof(devtype), ptr_procs, dev_name,\
         0 /*memory*/, stype, 0 /*stype_is_dynamic*/, 0 /*finalize*/,\
-        { 0 } /*rc*/, 0 /*retained*/, 0 /* parent */, 0 /* child */, 0 /* subclass_data */, open_init() /*is_open, max_fill_band*/
+        { 0 } /*rc*/, 0 /*retained*/, 0 /* parent */, 0 /* child */, 0 /* subclass_data */, 0, /* PageList */\
+        open_init() /*is_open, max_fill_band*/
         /* color_info goes here */
 /*
  * The MetroWerks compiler has some bizarre bug that produces a spurious
@@ -114,14 +115,15 @@
         { (float)((((width) * 72.0 + 0.5) - 0.5) / (x_dpi))/*MediaSize[0]*/,\
           (float)((((height) * 72.0 + 0.5) - 0.5) / (y_dpi))/*MediaSize[1]*/},\
         { 0, 0, 0, 0 }/*ImagingBBox*/, 0/*ImagingBBox_set*/,\
-        { x_dpi, y_dpi }/*HWResolution*/, { x_dpi, y_dpi }/*MarginsHWResolution*/
+        { x_dpi, y_dpi }/*HWResolution*/
 
 /* offsets and margins go here */
 #define std_device_part3_()\
         0/*FirstPage*/, 0/*LastPage*/, 0/*PageHandlerPushed*/, 0/*DisablePageHandler*/, 0/* Object Filter*/, 0/*ObjectHandlerPushed*/,\
         0/*PageCount*/, 0/*ShowpageCount*/, 1/*NumCopies*/, 0/*NumCopies_set*/,\
         0/*IgnoreNumCopies*/, 0/*UseCIEColor*/, 0/*LockSafetyParams*/,\
-        0/*band_offset_x*/, 0/*band_offset_y*/, {false}/* sgr */,\
+        0/*band_offset_x*/, 0/*band_offset_y*/, false /*BLS_force_memory*/, \
+        {false}/* sgr */,\
         0/* MaxPatternBitmap */, 0/*page_uses_transparency*/,\
         { MAX_BITMAP, BUFFER_SPACE,\
              { BAND_PARAMS_INITIAL_VALUES },\
@@ -129,7 +131,8 @@
            BandingAuto /* banding_type */\
         }, /*space_params*/\
         0/*Profile Array*/,\
-        0/* graphics_type_tag default GS_UNKNOWN_TAG */,\
+        0/* graphics_type_tag default GS_UNTOUCHED_TAG */,\
+        1/* interpolate_control default 1, uses image /Interpolate flag, full device resolution */,\
         { gx_default_install, gx_default_begin_page, gx_default_end_page }
 /*
  * We need a number of different variants of the std_device_ macro simply
@@ -310,6 +313,20 @@ dev_proc_strip_copy_rop2(gx_default_strip_copy_rop2);
 dev_proc_strip_tile_rect_devn(gx_default_strip_tile_rect_devn);
 dev_proc_copy_alpha_hl_color(gx_default_copy_alpha_hl_color);
 dev_proc_process_page(gx_default_process_page);
+dev_proc_transform_pixel_region(gx_default_transform_pixel_region);
+dev_proc_fill_stroke_path(gx_default_fill_stroke_path);
+dev_proc_begin_transparency_group(gx_default_begin_transparency_group);
+dev_proc_end_transparency_group(gx_default_end_transparency_group);
+dev_proc_begin_transparency_mask(gx_default_begin_transparency_mask);
+dev_proc_end_transparency_mask(gx_default_end_transparency_mask);
+dev_proc_discard_transparency_layer(gx_default_discard_transparency_layer);
+dev_proc_pattern_manage(gx_default_pattern_manage);
+dev_proc_push_transparency_state(gx_default_push_transparency_state);
+dev_proc_pop_transparency_state(gx_default_pop_transparency_state);
+dev_proc_put_image(gx_default_put_image);
+dev_proc_copy_alpha_hl_color(gx_default_no_copy_alpha_hl_color);
+dev_proc_copy_planes(gx_default_copy_planes);
+
 /* BACKWARD COMPATIBILITY */
 #define gx_non_imaging_create_compositor gx_null_create_compositor
 
@@ -393,6 +410,7 @@ dev_proc_fill_linear_color_triangle(gx_forward_fill_linear_color_triangle);
 dev_proc_update_spot_equivalent_colors(gx_forward_update_spot_equivalent_colors);
 dev_proc_ret_devn_params(gx_forward_ret_devn_params);
 dev_proc_fillpage(gx_forward_fillpage);
+dev_proc_put_image(gx_forward_put_image);
 dev_proc_copy_planes(gx_forward_copy_planes);
 dev_proc_create_compositor(gx_forward_create_compositor);
 dev_proc_get_profile(gx_forward_get_profile);
@@ -400,6 +418,8 @@ dev_proc_set_graphics_type_tag(gx_forward_set_graphics_type_tag);
 dev_proc_strip_copy_rop2(gx_forward_strip_copy_rop2);
 dev_proc_strip_tile_rect_devn(gx_forward_strip_tile_rect_devn);
 dev_proc_copy_alpha_hl_color(gx_forward_copy_alpha_hl_color);
+dev_proc_transform_pixel_region(gx_forward_transform_pixel_region);
+dev_proc_fill_stroke_path(gx_forward_fill_stroke_path);
 
 /* ---------------- Implementation utilities ---------------- */
 int gx_default_get_param(gx_device *dev, char *Param, void *list);
@@ -419,6 +439,11 @@ void gx_device_forward_color_procs(gx_device_forward *);
  * for each colorant.  For more info see the routine's header.
  */
 void check_device_separable(gx_device * dev);
+/*
+ * Check if the device's encode_color routine uses a pdf14 compatible
+ * encoding.  For more info see the routine's header.
+ */
+void check_device_compatible_encoding(gx_device * dev);
 /*
  * If a device has a linear and separable encode color function then
  * set up the comp_bits, comp_mask, and comp_shift fields.
@@ -478,11 +503,11 @@ bool gx_outputfile_is_separate_pages(const char *fname, gs_memory_t *memory);
  */
 int gx_device_open_output_file(const gx_device * dev, char *fname,
                                bool binary, bool positionable,
-                               FILE ** pfile);
+                               gp_file ** pfile);
 
 /* Close the output file for a device. */
 int gx_device_close_output_file(const gx_device * dev, const char *fname,
-                                FILE *file);
+                                gp_file *file);
 
 /* Delete the current output file for a device (file must be closed first) */
 int gx_device_delete_output_file(const gx_device * dev, const char *fname);
@@ -494,7 +519,7 @@ int gx_device_delete_output_file(const gx_device * dev, const char *fname);
 
 /*
  * Determine whether a given device needs to halftone.  Eventually this
- * should take an imager state as an additional argument.
+ * should take a gs_gstate as an additional argument.
  */
 #define gx_device_must_halftone(dev)\
   ((gx_device_has_color(dev) ? (dev)->color_info.max_color :\
@@ -642,21 +667,23 @@ void gx_device_request_leadingedge(gx_device *dev, int le_req);
 int gs_is_pdf14trans_compositor(const gs_composite_t * pct);
 
 #define subclass_common\
-    t_dev_proc_create_compositor *saved_compositor_method
+    t_dev_proc_create_compositor *saved_compositor_method;\
+    gx_device_forward *forwarding_dev
 
-typedef int (t_dev_proc_create_compositor) (gx_device *dev, gx_device **pcdev, const gs_composite_t *pcte, gs_imager_state *pis, gs_memory_t *memory, gx_device *cdev);
+typedef int (t_dev_proc_create_compositor) (gx_device *dev, gx_device **pcdev, const gs_composite_t *pcte, gs_gstate *pgs, gs_memory_t *memory, gx_device *cdev);
 
 typedef struct {
     t_dev_proc_create_compositor *saved_compositor_method;
+    gx_device_forward *forwarding_dev;
 } generic_subclass_data;
 
 
-int gx_copy_device_procs(gx_device_procs *dest_procs, gx_device_procs *src_procs, gx_device_procs *prototype_procs);
+int gx_copy_device_procs(gx_device *dest, gx_device *src, gx_device *prototype);
 int gx_device_subclass(gx_device *dev_to_subclass, gx_device *new_prototype, unsigned int private_data_size);
 int gx_device_unsubclass(gx_device *dev);
 int gx_update_from_subclass(gx_device *dev);
 int gx_subclass_create_compositor(gx_device *dev, gx_device **pcdev, const gs_composite_t *pcte,
-    gs_imager_state *pis, gs_memory_t *memory, gx_device *cdev);
+    gs_gstate *pgs, gs_memory_t *memory, gx_device *cdev);
 
 
 #endif /* gxdevice_INCLUDED */

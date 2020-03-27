@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /*
@@ -35,13 +35,13 @@ const gx_device_printer far_data gs_m8510_device =
 /* ------ forward declarations ------ */
 
 static void m8510_output_run(gx_device_printer *pdev,
-        byte *out, int pass, FILE *prn_stream);
+        byte *out, int pass, gp_file *prn_stream);
 
 /* ------ internal routines ------ */
 
 /* Send the page to the printer. */
 static int
-m8510_print_page(gx_device_printer *pdev, FILE *prn_stream)
+m8510_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
         int line_size = gdev_mem_bytes_per_scan_line((gx_device *)pdev);
         byte *in1 = (byte *) gs_malloc(pdev->memory, 8, line_size, "m8510_print_page(in1)");
@@ -62,15 +62,19 @@ m8510_print_page(gx_device_printer *pdev, FILE *prn_stream)
          * NLQ mode, proportional print (160x144 dpi).
          * and 16/144" linefeeds.
          */
-        fwrite("\033m2\033P\033T16", 1, 9, prn_stream);
+        gp_fwrite("\033m2\033P\033T16", 1, 9, prn_stream);
 
         /* Transfer pixels to printer */
         while ( lnum < pdev->height ) {
                 /* get a raster */
                 for (i = 7; i >= 0; i--) {
-                        gdev_prn_copy_scan_lines(pdev, lnum, &in1[i*line_size], line_size);
+                        code = gdev_prn_copy_scan_lines(pdev, lnum, &in1[i*line_size], line_size);
+                        if (code < 0)
+                            goto out;
                         lnum++;
-                        gdev_prn_copy_scan_lines(pdev, lnum, &in2[i*line_size], line_size);
+                        code = gdev_prn_copy_scan_lines(pdev, lnum, &in2[i*line_size], line_size);
+                        if (code < 0)
+                            goto out;
                         lnum++;
                 }
 
@@ -92,8 +96,8 @@ m8510_print_page(gx_device_printer *pdev, FILE *prn_stream)
         }
 
         /* reset the printer. */
-        fwrite("\033c1", 1, 3, prn_stream);
-        fflush(prn_stream);
+        gp_fwrite("\033c1", 1, 3, prn_stream);
+        gp_fflush(prn_stream);
 
 out:;
         if (out) gs_free(pdev->memory, (char *) out, 8, line_size, "m8510_print_page(out)");
@@ -105,9 +109,9 @@ out:;
 
 static void
 m8510_output_run(gx_device_printer *pdev,
-        byte *out, int pass, FILE *prn_stream)
+        byte *out, int pass, gp_file *prn_stream)
 {
-        byte *out_end = out + pdev->width;
+        byte *out_end = out + ((pdev->width + 7) & -8);	/* round up to multiple of 8 */
         char tmp[10];
         int count;
 
@@ -128,12 +132,12 @@ m8510_output_run(gx_device_printer *pdev,
 
         /* Transfer the line of data. */
         count = out_end - out;
-        if (count) {
+        if (count > 0) {
                 gs_sprintf(tmp, "\033g%03d", count/8);
-                fwrite(tmp, 1, 5, prn_stream);
-                fwrite(out, 1, count, prn_stream);
-                fwrite("\r", 1, 1, prn_stream);
+                gp_fwrite(tmp, 1, 5, prn_stream);
+                gp_fwrite(out, 1, count, prn_stream);
+                gp_fwrite("\r", 1, 1, prn_stream);
         }
 
-        if (pass) fwrite("\n", 1, 1, prn_stream);
+        if (pass) gp_fwrite("\n", 1, 1, prn_stream);
 }

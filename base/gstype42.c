@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,19 +9,21 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
 /* Type 42 (TrueType) font library routines */
+#include <stdlib.h>		/* for qsort */
+
 #include "memory_.h"
 #include "stdint_.h"
 #include "gx.h"
 #include "gserrors.h"
 #include "gsstruct.h"
 #include "gsccode.h"
-#include "gsline.h"		/* for gs_imager_setflat */
+#include "gsline.h"		/* for gs_gstate_setflat */
 #include "gsmatrix.h"
 #include "gsutil.h"
 #include "gxchrout.h"
@@ -34,10 +36,15 @@
 #include "gxtext.h"
 #include "gxchar.h"
 #include "gxfcache.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gzstate.h"
 #include "stream.h"
-#include <stdlib.h>		/* for qsort */
+
+/* For WOFF Support */
+#include "strimpl.h"
+#include "stream.h"
+#include "strmio.h"
+#include "szlibx.h"
 
 /* Structure descriptor */
 public_st_gs_font_type42();
@@ -58,6 +65,9 @@ font_proc_font_info(gs_truetype_font_info); /* Type check. */
 #define U16(p) (((uint)((p)[0]) << 8) + (p)[1])
 #define S16(p) (int)((U16(p) ^ 0x8000) - 0x8000)
 #define u32(p) get_u32_msb(p)
+
+#define PUTU16(p, n, offs) {(p + offs)[0] = n >> 8  & 255; (p + offs)[1] = n & 255;}
+
 
 /* ---------------- Font level ---------------- */
 
@@ -145,7 +155,7 @@ gs_type42_font_init(gs_font_type42 * pfont, int subfontID)
     byte TableDirectory[MAX_NUM_TT_TABLES * 16];
     uint i;
     int code;
-    byte head_box[8];
+    byte head_box[8] = {0};
     ulong loca_size = 0;
     ulong glyph_start, glyph_offset, glyph_length, glyph_size = 0;
     uint numFonts, version;
@@ -196,10 +206,15 @@ gs_type42_font_init(gs_font_type42 * pfont, int subfontID)
 
         if (!memcmp(tab, "cmap", 4))
             pfont->data.cmap = offset;
+        else if (!memcmp(tab, "post", 4)) {
+            pfont->data.post_offset = offset;
+        }
         else if (!memcmp(tab, "glyf", 4)) {
             pfont->data.glyf = offset;
             glyph_size = (uint)u32(tab + 12);
         } else if (!memcmp(tab, "GSUB", 4)) {
+            if (pfont->data.gsub_size != 0)
+                return_error(gs_error_invalidfont);
             pfont->data.gsub_size = u32(tab + 12);
             pfont->data.gsub = gs_alloc_byte_array(pfont->memory, pfont->data.gsub_size, 1,
                                                         "gs_type42_font_init(GSUB)");
@@ -257,19 +272,6 @@ gs_type42_font_init(gs_font_type42 * pfont, int subfontID)
     loca_size >>= pfont->data.indexToLocFormat + 1;
     pfont->data.numGlyphs = (loca_size == 0 ? 0 : loca_size - 1);
     if (pfont->data.numGlyphs > pfont->data.trueNumGlyphs) {
-        /* Some fonts have excessive data at end of 'loca' table -
-           see bug 688467.
-           We're not sure why old versions of Ghostscript maintain
-           two different fileds - numGlyphs and trueNumGlyphs.
-           (A related comment in gxfont42.h isn't explanatory about important cases.)
-           Our reading of TrueType specification and FreeType experience
-           is that only trueNumGlyphs should be used.
-           Maybe (I guess) sometimes somebody observed a font,
-           in which trueNumGlyphs counts real glyphs,
-           and numGlyphs counts all subglyphs ?
-           Continue using trueNumGlyphs since the document of
-           the bug 688467 fails otherwise.
-         */
         /* pfont->key_name.chars is ASCIIZ due to copy_font_name. */
         char buf[gs_font_name_max + 2];
 
@@ -297,13 +299,12 @@ gs_type42_font_init(gs_font_type42 * pfont, int subfontID)
                 if (glyph_offset < glyph_size)
                     break;
             }
-            if (i > pfont->data.trueNumGlyphs) {
-                /* loca contains more good offsets, fix maxp.numGlyphs.
+            if (i > pfont->data.numGlyphs) {
+                /* loca contains more good offsets .
                    Note a code below will fix bad offsets if any. */
-                 pfont->data.numGlyphs = pfont->data.trueNumGlyphs = loca_size - 1;
+                 pfont->data.numGlyphs = loca_size - 1;
             }
         }
-        pfont->data.numGlyphs = pfont->data.trueNumGlyphs;
         loca_size = pfont->data.numGlyphs + 1;
     }
 
@@ -343,8 +344,10 @@ gs_type42_font_init(gs_font_type42 * pfont, int subfontID)
             if (pfont->data.len_glyphs == 0)
                 return_error(gs_error_VMerror);
             code = gs_font_notify_register((gs_font *)pfont, gs_len_glyphs_release, (void *)pfont);
-            if (code < 0)
+            if (code < 0) {
+                gs_free_object(pfont->memory, pfont->data.len_glyphs, "gs_len_glyphs_release");
                 return code;
+            }
             
             /* The 'loca' may not be in order, so we construct a glyph length array */
             /* Since 'loca' is usually sorted, first try the simple linear scan to  */
@@ -469,6 +472,341 @@ gs_gsub_release(void *data, void *event)
 
 /* ---------------- Glyph level ---------------- */
 
+mac_glyph_ordering_t MacintoshOrdering[] =
+{
+    {0, ".notdef"},
+    {1, ".null"},
+    {2, "nonmarkingreturn"},
+    {3, "space"},
+    {4, "exclam"},
+    {5, "quotedbl"},
+    {6, "numbersign"},
+    {7, "dollar"},
+    {8, "percent"},
+    {9, "ampersand"},
+    {10, "quotesingle"},
+    {11, "parenleft"},
+    {12, "parenright"},
+    {13, "asterisk"},
+    {14, "plus"},
+    {15, "comma"},
+    {16, "hyphen"},
+    {17, "period"},
+    {18, "slash"},
+    {19, "zero"},
+    {20, "one"},
+    {21, "two"},
+    {22, "three"},
+    {23, "four"},
+    {24, "five"},
+    {25, "six"},
+    {26, "seven"},
+    {27, "eight"},
+    {28, "nine"},
+    {29, "colon"},
+    {30, "semicolon"},
+    {31, "less"},
+    {32, "equal"},
+    {33, "greater"},
+    {34, "question"},
+    {35, "at"},
+    {36, "A"},
+    {37, "B"},
+    {38, "C"},
+    {39, "D"},
+    {40, "E"},
+    {41, "F"},
+    {42, "G"},
+    {43, "H"},
+    {44, "I"},
+    {45, "J"},
+    {46, "K"},
+    {47, "L"},
+    {48, "M"},
+    {49, "N"},
+    {50, "O"},
+    {51, "P"},
+    {52, "Q"},
+    {53, "R"},
+    {54, "S"},
+    {55, "T"},
+    {56, "U"},
+    {57, "V"},
+    {58, "W"},
+    {59, "X"},
+    {60, "Y"},
+    {61, "Z"},
+    {62, "bracketleft"},
+    {63, "backslash"},
+    {64, "bracketright"},
+    {65, "asciicircum"},
+    {66, "underscore"},
+    {67, "grave"},
+    {68, "a"},
+    {69, "b"},
+    {70, "c"},
+    {71, "d"},
+    {72, "e"},
+    {73, "f"},
+    {74, "g"},
+    {75, "h"},
+    {76, "i"},
+    {77, "j"},
+    {78, "k"},
+    {79, "l"},
+    {80, "m"},
+    {81, "n"},
+    {82, "o"},
+    {83, "p"},
+    {84, "q"},
+    {85, "r"},
+    {86, "s"},
+    {87, "t"},
+    {88, "u"},
+    {89, "v"},
+    {90, "w"},
+    {91, "x"},
+    {92, "y"},
+    {93, "z"},
+    {94, "braceleft"},
+    {95, "bar"},
+    {96, "braceright"},
+    {97, "asciitilde"},
+    {98, "Adieresis"},
+    {99, "Aring"},
+    {100, "Ccedilla"},
+    {101, "Eacute"},
+    {102, "Ntilde"},
+    {103, "Odieresis"},
+    {104, "Udieresis"},
+    {105, "aacute"},
+    {106, "agrave"},
+    {107, "acircumflex"},
+    {108, "adieresis"},
+    {109, "atilde"},
+    {110, "aring"},
+    {111, "ccedilla"},
+    {112, "eacute"},
+    {113, "egrave"},
+    {114, "ecircumflex"},
+    {115, "edieresis"},
+    {116, "iacute"},
+    {117, "igrave"},
+    {118, "icircumflex"},
+    {119, "idieresis"},
+    {120, "ntilde"},
+    {121, "oacute"},
+    {122, "ograve"},
+    {123, "ocircumflex"},
+    {124, "odieresis"},
+    {125, "otilde"},
+    {126, "uacute"},
+    {127, "ugrave"},
+    {128, "ucircumflex"},
+    {129, "udieresis"},
+    {130, "dagger"},
+    {131, "degree"},
+    {132, "cent"},
+    {133, "sterling"},
+    {134, "section"},
+    {135, "bullet"},
+    {136, "paragraph"},
+    {137, "germandbls"},
+    {138, "registered"},
+    {139, "copyright"},
+    {140, "trademark"},
+    {141, "acute"},
+    {142, "dieresis"},
+    {143, "notequal"},
+    {144, "AE"},
+    {145, "Oslash"},
+    {146, "infinity"},
+    {147, "plusminus"},
+    {148, "lessequal"},
+    {149, "greaterequal"},
+    {150, "yen"},
+    {151, "mu"},
+    {152, "partialdiff"},
+    {153, "summation"},
+    {154, "product"},
+    {155, "pi"},
+    {156, "integral"},
+    {157, "ordfeminine"},
+    {158, "ordmasculine"},
+    {159, "Omega"},
+    {160, "ae"},
+    {161, "oslash"},
+    {162, "questiondown"},
+    {163, "exclamdown"},
+    {164, "logicalnot"},
+    {165, "radical"},
+    {166, "florin"},
+    {167, "approxequal"},
+    {168, "Delta"},
+    {169, "guillemotleft"},
+    {170, "guillemotright"},
+    {171, "ellipsis"},
+    {172, "nonbreakingspace"},
+    {173, "Agrave"},
+    {174, "Atilde"},
+    {175, "Otilde"},
+    {176, "OE"},
+    {177, "oe"},
+    {178, "endash"},
+    {179, "emdash"},
+    {180, "quotedblleft"},
+    {181, "quotedblright"},
+    {182, "quoteleft"},
+    {183, "quoteright"},
+    {184, "divide"},
+    {185, "lozenge"},
+    {186, "ydieresis"},
+    {187, "Ydieresis"},
+    {188, "fraction"},
+    {189, "currency"},
+    {190, "guilsinglleft"},
+    {191, "guilsinglright"},
+    {192, "fi"},
+    {193, "fl"},
+    {194, "daggerdbl"},
+    {195, "periodcentered"},
+    {196, "quotesinglbase"},
+    {197, "quotedblbase"},
+    {198, "perthousand"},
+    {199, "Acircumflex"},
+    {200, "Ecircumflex"},
+    {201, "Aacute"},
+    {202, "Edieresis"},
+    {203, "Egrave"},
+    {204, "Iacute"},
+    {205, "Icircumflex"},
+    {206, "Idieresis"},
+    {207, "Igrave"},
+    {208, "Oacute"},
+    {209, "Ocircumflex"},
+    {210, "apple"},
+    {211, "Ograve"},
+    {212, "Uacute"},
+    {213, "Ucircumflex"},
+    {214, "Ugrave"},
+    {215, "dotlessi"},
+    {216, "circumflex"},
+    {217, "tilde"},
+    {218, "macron"},
+    {219, "breve"},
+    {220, "dotaccent"},
+    {221, "ring"},
+    {222, "cedilla"},
+    {223, "hungarumlaut"},
+    {224, "ogonek"},
+    {225, "caron"},
+    {226, "Lslash"},
+    {227, "lslash"},
+    {228, "Scaron"},
+    {229, "scaron"},
+    {230, "Zcaron"},
+    {231, "zcaron"},
+    {232, "brokenbar"},
+    {233, "Eth"},
+    {234, "eth"},
+    {235, "Yacute"},
+    {236, "yacute"},
+    {237, "Thorn"},
+    {238, "thorn"},
+    {239, "minus"},
+    {240, "multiply"},
+    {241, "onesuperior"},
+    {242, "twosuperior"},
+    {243, "threesuperior"},
+    {244, "onehalf"},
+    {245, "onequarter"},
+    {246, "threequarters"},
+    {247, "franc"},
+    {248, "Gbreve"},
+    {249, "gbreve"},
+    {250, "Idotaccent"},
+    {251, "Scedilla"},
+    {252, "scedilla"},
+    {253, "Cacute"},
+    {254, "cacute"},
+    {255, "Ccaron"},
+    {256, "ccaron"},
+    {257, "dcroat"},
+    {-1, NULL}
+};
+
+/* Use the post table to find a glyph name */
+int
+gs_type42_find_post_name(gs_font_type42 * pfont, gs_glyph glyph, gs_string *gname)
+{
+    int code = 0;
+    if (pfont->FontType == ft_TrueType) {
+        if (pfont->data.post_offset != 0) {
+            byte ver[4];
+            byte const ver10[4] = {0x00, 0x01, 0x00, 0x00};
+            byte const ver20[4] = {0x00, 0x02, 0x00, 0x00};
+
+            READ_SFNTS(pfont, pfont->data.post_offset, 4, ver);
+            if (!memcmp(ver, ver10, 4)){
+                if (glyph > 257) glyph = 0;
+                gname->data = (byte *)MacintoshOrdering[glyph].name;
+                gname->size = strlen(MacintoshOrdering[glyph].name);
+            }
+            else if (!memcmp(ver, ver20, 4)) {
+                byte val[2];
+                unsigned short gind;
+                READ_SFNTS(pfont, pfont->data.post_offset + 34 + glyph * 2, 2, val);
+                gind = U16(val);
+                if (gind < 258) {
+                    gname->data = (byte *)MacintoshOrdering[gind].name;
+                    gname->size = strlen(MacintoshOrdering[gind].name);
+                }
+                else {
+                    int i;
+                    byte val[2];
+                    short numglyphs;
+                    uint offs;
+
+                    READ_SFNTS(pfont, pfont->data.post_offset + 32, 2, val);
+                    numglyphs = U16(val);
+                    gind -= 258;
+                    if (gind < numglyphs) {
+                        offs = pfont->data.post_offset + 34 + numglyphs * 2;
+                       for (i = 0; i < numglyphs; i++) {
+                           if (i == gind) {
+                               READ_SFNTS(pfont, offs, 1, val);
+                               code = pfont->data.string_proc(pfont, offs + 1, (uint)val[0], (const byte **)&(gname->data));
+                               if (code > 0)
+                                   gname->size = val[0];
+                               break;
+                           }
+                           else {
+                               READ_SFNTS(pfont, offs, 1, val);
+                               offs += (uint)val[0] + 1;
+                           }
+                       }
+                    }
+                    else {
+                        gname->data = (byte *)MacintoshOrdering[0].name;
+                        gname->size = strlen(MacintoshOrdering[0].name);
+                    }
+                }
+            }
+            else {
+                gname->data = (byte *)MacintoshOrdering[0].name;
+                gname->size = strlen(MacintoshOrdering[0].name);
+            }
+        }
+        else {
+            gname->data = (byte *)MacintoshOrdering[0].name;
+            gname->size = strlen(MacintoshOrdering[0].name);
+        }
+    }
+    else
+        code = gs_note_error(gs_error_invalidfont);
+    return code;
+}
+
 /*
  * Parse the definition of one component of a composite glyph.  We don't
  * bother to parse the component index, since the caller can do this so
@@ -548,6 +886,7 @@ no_scale:
     *psmat = mat;
 }
 
+#if 0 /* not called */
 /* Compute the total number of points in a (possibly composite) glyph. */
 static int
 total_points(gs_font_type42 *pfont, uint glyph_index)
@@ -592,6 +931,7 @@ total_points(gs_font_type42 *pfont, uint glyph_index)
     gs_glyph_data_free(&glyph_data, "total_points");
     return total;
 }
+#endif /* not called */
 
 /*
  * Define the default implementation for getting the glyph index from a
@@ -618,7 +958,7 @@ default_get_outline(gs_font_type42 * pfont, uint glyph_index,
     uint glyph_length;
     int code;
 
-     if (glyph_index >= pfont->data.trueNumGlyphs)
+     if (glyph_index >= pfont->data.numGlyphs)
         return_error(gs_error_invalidfont);
     glyph_start = get_glyph_offset(pfont, glyph_index);
     if (pfont->data.len_glyphs)
@@ -790,7 +1130,7 @@ gs_type42_substitute_glyph_index_vertical(gs_font_type42 *pfont, uint glyph_inde
     LookupListTable lookup_list_table;
     byte *lookup_list_ptr;
 
-    if (WMode == 0)
+    if (WMode == 0 || gsub_ptr == NULL)
         return glyph_index;
 
     /* GSUB header */
@@ -827,6 +1167,7 @@ gs_type42_substitute_glyph_index_vertical(gs_font_type42 *pfont, uint glyph_inde
                     subst.SubstFormat = format; /* Debug purpose. */
                     subst.Coverage = U16(subtable_ptr + offset_of(SingleSubstFormat1, Coverage));
                     subst.DeltaGlyphId = U16(subtable_ptr + offset_of(SingleSubstFormat1, DeltaGlyphId));
+                    format = subst.SubstFormat; /* Stops gcc warning */
                 } else {
                     SingleSubstFormat2 subst;
                     byte *coverage_ptr;
@@ -860,7 +1201,6 @@ gs_type42_substitute_glyph_index_vertical(gs_font_type42 *pfont, uint glyph_inde
                                         return new_glyph;
                                     }
                                 } else if (k0 >= k1 - 1) {
-                                    k += 0; /* A place for breakpoint. */
                                     break; /* Not found. */
                                 } else if (glyph_index < glyph)
                                     k1 = k;
@@ -899,7 +1239,6 @@ gs_type42_substitute_glyph_index_vertical(gs_font_type42 *pfont, uint glyph_inde
                                         return new_glyph;
                                     }
                                 } else if (k0 >= k1 - 1) {
-                                    k += 0; /* A place for breakpoint. */
                                     break; /* Not found. */
                                 } else if (glyph_index < rr.Start)
                                     k1 = k;
@@ -989,6 +1328,12 @@ gs_type42_glyph_outline(gs_font *font, int WMode, gs_glyph glyph, const gs_matri
         return code;
     if (pmat == 0)
         pmat = &imat;
+    if (!pair->ttf) {
+        void *FAPI_store = ((gs_font_base *)font)->FAPI;
+        ((gs_font_base *)font)->FAPI = NULL;
+        gx_provide_fm_pair_attributes(font->dir, font, pair, pmat, &log2_scale, false);
+        ((gs_font_base *)font)->FAPI = FAPI_store;
+    }
     if ((code = gx_path_current_point(ppath, &origin)) < 0 ||
         (code = append_outline_fitted(glyph_index, pmat, ppath, pair,
                                         &log2_scale, design_grid)) < 0 ||
@@ -1204,6 +1549,11 @@ gs_type42_default_get_metrics(gs_font_type42 * pfont, uint glyph_index,
             do {
                 uint comp_index = U16(gdata + 2);
 
+                if (comp_index == glyph_index) {
+                    result = gs_note_error(gs_error_invalidfont);
+                    goto done;
+                }
+
                 gs_type42_parse_component(&gdata, &flags, &mat, NULL, pfont, &mat);
                 if (flags & TT_CG_USE_MY_METRICS) {
                     result = pfont->data.get_metrics(pfont, comp_index, wmode, sbw);
@@ -1238,7 +1588,7 @@ gs_type42_get_metrics(gs_font_type42 * pfont, uint glyph_index,
 /* Append a TrueType outline to a path. */
 /* Note that this does not append the final moveto for the width. */
 int
-gs_type42_append(uint glyph_index, gs_state * pgs,
+gs_type42_append(uint glyph_index, gs_gstate * pgs,
                  gx_path * ppath, gs_text_enum_t *penum, gs_font *pfont,
                  bool charpath_flag)
 {
@@ -1263,12 +1613,11 @@ gs_type42_append(uint glyph_index, gs_state * pgs,
         }
         return code;
     }
-    code = gx_setcurrentpoint_from_path((gs_imager_state *)pgs, ppath);
+    code = gx_setcurrentpoint_from_path(pgs, ppath);
     if (code < 0)
         return code;
     /* Set the flatness for curve rendering. */
-    return gs_imager_setflat((gs_imager_state *)pgs,
-                gs_char_flatness((gs_imager_state *)pgs, 1.0));
+    return gs_gstate_setflat(pgs, gs_char_flatness(pgs, 1.0));
 }
 #if 0
 /* Used only by add_simple below, which has been removed as unused. */
@@ -1659,9 +2008,13 @@ gs_truetype_font_info(gs_font *font, const gs_point *pscale, int members,
     if (pfont->data.name_offset == 0)
         return 0;
     if (!(info->members & FONT_INFO_COPYRIGHT) && (members & FONT_INFO_COPYRIGHT)) {
-        code = get_from_names_table(pfont, info, &info->Copyright, FONT_INFO_COPYRIGHT, 0);
-        if (code < 0)
-            return code;
+        /* One way we can arrive here is from gs_copy_font() -> z42_font_info(), in
+         * that case we definitely want to copy the copyright informatoin if there is any,
+         * but we don't want to throw an error if we find a Type 42 font which has no
+         * copyright information. So get the informaton, but ignore the return code.
+         * Bug #696174.
+         */
+        get_from_names_table(pfont, info, &info->Copyright, FONT_INFO_COPYRIGHT, 0);
     }
     if (!(info->members & FONT_INFO_FAMILY_NAME) && (members & FONT_INFO_FAMILY_NAME)) {
         code = get_from_names_table(pfont, info, &info->FamilyName, FONT_INFO_FAMILY_NAME, 1);
@@ -1686,4 +2039,222 @@ gs_type42_font_info(gs_font *font, const gs_point *pscale, int members,
     if (code < 0)
         return code;
     return gs_truetype_font_info(font, pscale, members, info);
+}
+
+/******************** WOFF Support *************************/
+static int
+gs_woff_tabdir_compare (const void *a, const void *b)
+{
+    uint32_t poffs, qoffs;
+
+    poffs = u32((*(byte **)a) + 4);
+    qoffs = u32((*(byte **)b) + 4);
+
+    return poffs > qoffs ? 1 : poffs < qoffs ? -1 : 0;
+}
+
+static stream *
+gs_woff_push_flate_filter(stream *s)
+{
+    gs_memory_t *mem = s->memory;
+    stream *fs, *ffs = NULL;
+    byte *buf;
+    stream_zlib_state *st;
+
+    fs = s_alloc(mem, "gs_woff_push_flate_filter(fs)");
+    buf = gs_alloc_bytes(mem, 4096, "gs_woff_push_flate_filter(buf)");
+    st = gs_alloc_struct(mem, stream_zlib_state, s_zlibD_template.stype, "gs_woff_push_flate_filter(st)");
+    if (fs == 0 || st == 0 || buf == 0) {
+        gs_free_object(mem, fs, "gs_woff_push_flate_filter(fs)");
+        gs_free_object(mem, buf, "gs_woff_push_flate_filter(buf)");
+        gs_free_object(mem, st, "gs_woff_push_flate_filter(st)");
+        goto done;
+    }
+    s_std_init(fs, buf, 4096, &s_filter_read_procs, s_mode_read);
+    st->memory = mem;
+    st->templat = &s_zlibD_template;
+    fs->state = (stream_state *) st;
+    fs->procs.process = s_zlibD_template.process;
+    fs->strm = s;
+    (*s_zlibD_template.set_defaults) ((stream_state *) st);
+    (*s_zlibD_template.init) ((stream_state *) st);
+    ffs = fs;
+done:
+    return ffs;
+}
+
+static stream *
+gs_woff_pop_flate_filter(stream *s)
+{
+    gs_memory_t *mem = s->memory;
+    stream *strm = s->strm;
+    byte *buf = s->cbuf;
+
+    sclose(s);
+    gs_free_object(mem, s, "gs_woff_pop_flate_filter(s)");
+    gs_free_object(mem, buf, "gs_woff_pop_flate_filter(buf)");
+
+    return strm;
+}
+
+#define WOFFHDR_LEN 44
+#define WOFFHDR_SFNT_FLAVOR_OFFS 4
+#define WOFFHDR_SFNT_NUMTABS_OFFS 12
+#define WOFFHDR_SFNT_LEN_OFFS 16
+
+#define WOFF_TABDIR_ENT_LEN 20
+#define WOFF_TABDIR_TAG_OFFS 0
+#define WOFF_TABDIR_OFFSET_OFFS 4
+#define WOFF_TABDIR_CLEN_OFFS 8
+#define WOFF_TABDIR_OLEN_OFFS 12
+#define WOFF_TABDIR_CSUM_OFFS 16
+
+#define WOFF_TABDIR_FIELD_LEN 4
+
+#define SFNT_TABDIR_ENT_LEN 16
+#define SFNT_TABDIR_CSUM_OFFS 4
+#define SFNT_TABDIR_OFFSET_OFFS 8
+#define SFNT_TABDIR_LEN_OFFS 12
+
+
+static int
+gs_woff2sfnt(gs_memory_t *mem, stream *s, byte *outbuf, int *outbuflen)
+{
+    int code = 0;
+    gs_offset_t start;
+    uint32_t sfntlen, ntables, sr, es, rs, i;
+    byte woffhdr[44], *tabbuf = NULL;
+    byte **tabbufptrs = NULL;
+    byte *obuf = outbuf, *tdir;
+
+    if (!sseekable(s)) {
+        code = gs_note_error(gs_error_ioerror);
+        goto done;
+    }
+    start = stell(s);
+    if (s->bsize < 44){
+        code = gs_note_error(gs_error_invalidfont);
+        goto done;
+    }
+
+    if ((code = sfread(woffhdr, WOFFHDR_LEN, 1, s)) < 0)
+        goto done;
+
+    if (memcmp(woffhdr, "wOFF", 4) != 0
+     || memcmp(woffhdr + WOFFHDR_SFNT_FLAVOR_OFFS, "OTTO", 4) == 0) {
+        (void)sseek(s, start);
+        code = gs_note_error(gs_error_invalidfont);
+        goto done;
+    }
+    sfntlen = u32(woffhdr + WOFFHDR_SFNT_LEN_OFFS);
+    if (!outbuf || *outbuflen < sfntlen) {
+        *outbuflen = sfntlen;
+        (void)sseek(s, start);
+        goto done;
+    }
+    ntables = U16(woffhdr + WOFFHDR_SFNT_NUMTABS_OFFS);
+    memcpy(obuf, woffhdr + WOFFHDR_SFNT_FLAVOR_OFFS, 4);
+    obuf += 4;
+    memcpy(obuf, woffhdr + WOFFHDR_SFNT_NUMTABS_OFFS, 2);
+    obuf += 2;
+    sr = ntables;
+    sr |= (sr >> 1);
+    sr |= (sr >> 2);
+    sr |= (sr >> 4);
+    sr |= (sr >> 8);
+    sr &= ~(sr >> 1);
+    sr *= 16;
+    PUTU16(obuf, (ushort)sr, 0)
+    rs = ntables * 16 - sr;
+    es = 0;
+    while (sr > 16) {
+        es++;
+        sr >>= 1;
+    }
+    PUTU16(obuf, (ushort)es, 2)
+    PUTU16(obuf, (ushort)rs, 4);
+    obuf += 6;
+
+    tabbuf = gs_alloc_bytes(mem, WOFF_TABDIR_ENT_LEN * ntables, "gs_woff2sfnt(tabbuf)");
+    tabbufptrs = (byte **)gs_alloc_bytes(mem, (ntables + 1) * sizeof(byte *), "gs_woff2sfnt(tabbufptrs)");
+    if (!tabbuf || !tabbufptrs) {
+        code = gs_note_error(gs_error_VMerror);
+        goto done;
+    }
+    if ((code = sfread(tabbuf, WOFF_TABDIR_ENT_LEN * ntables, 1, s)) < 0)
+        goto done;
+
+    for (i = 0; i < ntables; i++)
+        tabbufptrs[i] = tabbuf + (i * WOFF_TABDIR_ENT_LEN);
+    tabbufptrs[i] = NULL;
+    qsort(tabbufptrs, ntables, sizeof(byte *), gs_woff_tabdir_compare);
+
+    /* Two pointers into the output buffer: tdir and obuf.
+     * tdir is the beginning of the current entry in the table directory
+     * and obuf is the beginning of the current table.
+     */
+    tdir = obuf;
+    obuf += (16 * ntables);
+    for (i = 0; i < ntables; i++) {
+        byte *tdirent = tabbufptrs[i];
+        uint32_t len, clen, pad;
+        len = u32(tdirent + WOFF_TABDIR_OLEN_OFFS);
+        clen = u32(tdirent + WOFF_TABDIR_CLEN_OFFS);
+        /* Build the sfnts table directory entry.
+         * For those cases where encoded fields are the same in WOFF and SFNT,
+         * we just copy the bytes over
+         */
+        memcpy(tdir, tdirent, WOFF_TABDIR_FIELD_LEN);
+        memcpy(tdir + SFNT_TABDIR_CSUM_OFFS, tdirent + WOFF_TABDIR_CSUM_OFFS, WOFF_TABDIR_FIELD_LEN);
+        memcpy(tdir + SFNT_TABDIR_LEN_OFFS, tdirent + WOFF_TABDIR_OLEN_OFFS, WOFF_TABDIR_FIELD_LEN);
+        put_u32_msb(tdir, (uint32_t)(obuf - outbuf), SFNT_TABDIR_OFFSET_OFFS);
+        tdir += SFNT_TABDIR_ENT_LEN;
+        /* Now handle the actual table data */
+        sseek(s, u32(tdirent + WOFF_TABDIR_OFFSET_OFFS));
+        if (clen != len)
+            s = gs_woff_push_flate_filter(s);
+        code = sfread(obuf, 1, len, s);
+        if (clen != len)
+            s = gs_woff_pop_flate_filter(s);
+        if (code < 0)
+            goto done;
+        obuf += len;
+        /* TTF requires each table to start on a 4 byte boundary, and
+         * padding to be zeroed bytes.
+         */
+        pad = ((len + 3) & ~3) - len;
+        while (pad > 0) {
+            *obuf = (byte)0;
+            obuf++;
+            pad--;
+        }
+    }
+done:
+    gs_free_object(mem, tabbuf, "gs_woff2sfnt(tabbuf)");
+    gs_free_object(mem, tabbufptrs, "gs_woff2sfnt(tabbufptrs)");
+    return code;
+}
+
+int
+gs_woff2sfnt_stream(gs_memory_t *mem, stream *s, byte *outbuf, int *outbuflen)
+{
+    return gs_woff2sfnt(mem, s, outbuf, outbuflen);
+}
+
+int
+gs_woff2sfnt_buffer(gs_memory_t *mem, byte *inbuf, int inbuflen, byte *outbuf, int *outbuflen)
+{
+    stream *sstrm;
+    int code = 0;
+    sstrm = file_alloc_stream(mem, "gs_woff2sfnt_buffer(buf stream)");
+    if (sstrm) {
+        sread_string(sstrm, inbuf, inbuflen);
+        code = gs_woff2sfnt(mem,sstrm , outbuf, outbuflen);
+        sclose(sstrm);
+        gs_free_object(mem, sstrm, "gs_woff2sfnt_buffer(buf stream)");
+    }
+    else {
+        code = gs_note_error(gs_error_VMerror);
+    }
+    return code;
 }

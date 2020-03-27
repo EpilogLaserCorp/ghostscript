@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -54,6 +54,7 @@
 #include "gscspace.h"   /* Needed for checking if current pgs colorspace is CIE */
 #include "iddict.h"	/* for idict_put_string */
 #include "zfrsd.h"      /* for make_rss() */
+#include "smd5.h"   /* To hash CIE colour spaces, in order to check equality in ICC cache */
 
 /* Reject color spaces with excessive values of various parameters */
 /* to avoid dealing with overflows, INF, NaN during cache generation */
@@ -63,7 +64,9 @@
 static const float default_0_1[] = {0, 1, 0, 1, 0, 1, 0, 1};
 
 /* imported from gsht.c */
-extern  void    gx_set_effective_transfer(gs_state *);
+extern  void    gx_set_effective_transfer(gs_gstate *);
+extern_st(st_pattern1_instance);
+extern_st(st_pattern2_instance);
 
 /* Essential forward declarations */
 static int validate_spaces(i_ctx_t *i_ctx_p, ref *arr, int *depth);
@@ -267,7 +270,7 @@ static int
 zsetcolor(i_ctx_t * i_ctx_p)
 {
     os_ptr                  op = osp;
-    es_ptr ep = esp;
+    es_ptr ep;
     const gs_color_space *  pcs = gs_currentcolorspace(igs);
     gs_client_color         cc;
     int                     n_comps, n_numeric_comps, num_offset = 0, code, depth;
@@ -282,11 +285,15 @@ zsetcolor(i_ctx_t * i_ctx_p)
         if (r_has_type(op, t_dictionary)) {
             ref     *pImpl, pPatInst;
 
-            code = dict_find_string(op, "Implementation", &pImpl);
-            if (code != 0) {
+            if ((code = dict_find_string(op, "Implementation", &pImpl)) < 0)
+                return code;
+            if (code > 0) {
                 code = array_get(imemory, pImpl, 0, &pPatInst);
                 if (code < 0)
                     return code;
+                if (!r_is_struct(&pPatInst) || (!r_has_stype(&pPatInst, imemory, st_pattern1_instance) && !r_has_stype(&pPatInst, imemory, st_pattern2_instance)))
+                    return_error(gs_error_typecheck);
+
                 cc.pattern = r_ptr(&pPatInst, gs_pattern_instance_t);
                 n_numeric_comps = ( pattern_instance_uses_base_space(cc.pattern)
                       ? n_comps - 1
@@ -303,11 +310,6 @@ zsetcolor(i_ctx_t * i_ctx_p)
     code = float_params(op - num_offset, n_numeric_comps, cc.paint.values);
     if (code < 0)
         return code;
-    /* The values are copied to graphic state and compared with */
-    /* other colors by memcmp() in gx_hld_saved_color_equal()   */
-    /* This is the easiest way to avoid indeterminism */
-    memset(cc.paint.values + n_numeric_comps, 0,
-            sizeof(cc.paint.values) - sizeof(*cc.paint.values)*n_numeric_comps);
 
     code = get_space_object(i_ctx_p, &istate->colorspace[0].array, &space);
     if (code < 0)
@@ -325,7 +327,6 @@ zsetcolor(i_ctx_t * i_ctx_p)
 
         if (n_comps > n_numeric_comps) {
             istate->pattern[0] = *op;      /* save pattern dict or null */
-            n_comps = n_numeric_comps + 1;
         }
     }
 
@@ -471,7 +472,7 @@ static int
 zsetcolorspace(i_ctx_t * i_ctx_p)
 {
     os_ptr  op = osp;
-    es_ptr ep = esp;
+    es_ptr ep;
     int code, depth;
     bool is_CIE;
 
@@ -529,6 +530,55 @@ zsetcolorspace(i_ctx_t * i_ctx_p)
 }
 
 /*
+ * This is a copy of the zsetcolorspace code above, but it is for *internal* use by
+ * the PostScript interpreter colour space handlign code only. It replicates the
+ * behaviour of zsetcolorspace but does not check to see if the current 'interpreter'
+ * colour space is the same as the one we are setting. That is because this code is
+ * used when setting alternate or subsidiary colour spaces, and we absolutely do
+ * not want to break out of processing the space in this case.
+ */
+static int
+absolute_setcolorspace(i_ctx_t * i_ctx_p)
+{
+    os_ptr  op = osp;
+    es_ptr ep;
+    int code, depth;
+
+    /* Make sure we have an operand... */
+    check_op(1);
+    /* Check its either a name (base space) or an array */
+    if (!r_has_type(op, t_name))
+        if (!r_is_array(op))
+            return_error(gs_error_typecheck);
+
+    code = validate_spaces(i_ctx_p, op, &depth);
+    if (code < 0)
+        return code;
+
+    /* Set up for the continuation procedure which will do the work */
+    /* Make sure the exec stack has enough space */
+    check_estack(5);
+    /* Store the initial value of CIE substitution (not substituting) */
+    ep = esp += 1;
+    make_int(ep, 0);
+    /* Store the 'depth' of the space returned during checking above */
+    ep = esp += 1;
+    make_int(ep, depth);
+    /* Store the 'stage' of processing (initially 0) */
+    ep = esp += 1;
+    make_int(ep, 0);
+    /* Store a pointer to the color space stored on the operand stack
+     * as the stack may grow unpredictably making further access
+     * to the space difficult
+     */
+    ep = esp += 1;
+    *ep = *op;
+    /* Finally, the actual continuation routine */
+    push_op_estack(setcolorspace_cont);
+    return o_push_estack;
+}
+
+/*
  * A special version of the setcolorspace operation above. This sets the
  * CIE substitution flag to true before starting, which prevents any further
  * CIE substitution taking place.
@@ -537,7 +587,7 @@ static int
 setcolorspace_nosubst(i_ctx_t * i_ctx_p)
 {
     os_ptr  op = osp;
-    es_ptr ep = esp;
+    es_ptr ep;
     int code, depth;
 
     /* Make sure we have an operand... */
@@ -660,7 +710,7 @@ zcolor_remap_one(
     i_ctx_t *           i_ctx_p,
     const ref *         pproc,
     gx_transfer_map *   pmap,
-    const gs_state *    pgs,
+    const gs_gstate *    pgs,
     op_proc_t           finish_proc )
 {
     os_ptr              op;
@@ -686,6 +736,7 @@ zcolor_remap_one(
     ++esp;
     make_struct(esp, imemory_space((gs_ref_memory_t *) pgs->memory),
                 pmap);
+    rc_increment(pmap);
     push_op_estack(finish_proc);
     push_op_estack(zfor_samples);
     return o_push_estack;
@@ -698,6 +749,7 @@ zcolor_remap_one_store(i_ctx_t *i_ctx_p, double min_value)
     int i;
     gx_transfer_map *pmap = r_ptr(esp, gx_transfer_map);
 
+    rc_decrement_only(pmap, "zcolor_remap_one_store");
     if (ref_stack_count(&o_stack) < transfer_map_size)
         return_error(gs_error_stackunderflow);
     for (i = 0; i < transfer_map_size; i++) {
@@ -740,200 +792,10 @@ int
 zcolor_remap_color(i_ctx_t *i_ctx_p)
 {
     /* Remap both colors. This should never hurt. */
-    gs_swapcolors(igs);
+    gs_swapcolors_quick(igs);
     gx_unset_dev_color(igs);
-    gs_swapcolors(igs);
+    gs_swapcolors_quick(igs);
     gx_unset_dev_color(igs);
-    return 0;
-}
-
-/*
- * <param1> ... <paramN> .color_test <param1> ... <paramN>
- *
- * encode and decode color to allow mapping to be tested.
- */
-static int
-zcolor_test(i_ctx_t *i_ctx_p)
-{
-    gx_color_value cv[GX_DEVICE_COLOR_MAX_COMPONENTS];
-    gx_device *dev = gs_currentdevice(igs);
-    int ncomp = dev->color_info.num_components;
-    gx_color_index color;
-    os_ptr op = osp - (ncomp-1);
-    int i;
-    if (ref_stack_count(&o_stack) < ncomp)
-        return_error(gs_error_stackunderflow);
-    for (i = 0; i < ncomp; i++) {
-        if (r_has_type(op+i, t_real))
-            cv[i] = (gx_color_value)
-                (op[i].value.realval * gx_max_color_value);
-        else if (r_has_type(op+i, t_integer))
-            cv[i] = (gx_color_value)
-                (op[i].value.intval * gx_max_color_value);
-        else
-            return_error(gs_error_typecheck);
-    }
-    color = (*dev_proc(dev, encode_color)) (dev, cv);
-    (*dev_proc(dev, decode_color)) (dev, color, cv);
-    for (i = 0; i < ncomp; i++)
-        make_real(op+i, (float)cv[i] / (float)gx_max_color_value);
-    return 0;
-}
-
-/*
- * <levels> .color_test_all <value0> ... <valueN>
- *
- * Test encode/decode color procedures for a range of values.
- * Return value with the worst error in a single component.
- */
-static int
-zcolor_test_all(i_ctx_t *i_ctx_p)
-{
-    os_ptr                  op = osp;
-    gx_color_value cv[GX_DEVICE_COLOR_MAX_COMPONENTS];
-    gx_color_value cvout[GX_DEVICE_COLOR_MAX_COMPONENTS];
-    gx_color_value cvbad[GX_DEVICE_COLOR_MAX_COMPONENTS];
-    int counter[GX_DEVICE_COLOR_MAX_COMPONENTS];
-    gx_device *dev = gs_currentdevice(igs);
-    int ncomp = dev->color_info.num_components;
-    int steps;
-    int maxerror = 0;
-    int err;
-    int acceptable_error;
-    int linsep = dev->color_info.separable_and_linear == GX_CINFO_SEP_LIN;
-    int linsepfailed = 0;
-    int lsmaxerror = 0;
-    gx_color_index color, lscolor;
-    int i, j, k;
-    int finished = 0;
-
-    if (ncomp == 1)
-        acceptable_error = gx_max_color_value / dev->color_info.max_gray + 1;
-    else
-        acceptable_error = gx_max_color_value / dev->color_info.max_color + 1;
-
-    if (ref_stack_count(&o_stack) < 1)
-        return_error(gs_error_stackunderflow);
-    if (!r_has_type(&osp[0], t_integer))
-        return_error(gs_error_typecheck);
-    steps = osp[0].value.intval;
-    for (i = 0; i < ncomp; i++) {
-        counter[i] = 0;
-        cvbad[i] = 0;
-    }
-
-    dmprintf1(dev->memory, "Number of components = %d\n", ncomp);
-    dmprintf1(dev->memory, "Depth = %d\n", dev->color_info.depth);
-    dmprintf2(dev->memory, "max_gray = %d   dither_grays = %d\n",
-              dev->color_info.max_gray, dev->color_info.dither_grays);
-    dmprintf2(dev->memory, "max_color = %d   dither_colors = %d\n",
-              dev->color_info.max_color, dev->color_info.dither_colors);
-    dmprintf1(dev->memory, "polarity = %s\n",
-      dev->color_info.polarity == GX_CINFO_POLARITY_ADDITIVE ? "Additive" :
-      dev->color_info.polarity == GX_CINFO_POLARITY_SUBTRACTIVE ?"Subtractive":
-      "Unknown");
-    /* Indicate color index value with all colorants = zero */
-    for (i = 0; i < ncomp; i++)
-        cv[i] = 0;
-    color = (*dev_proc(dev, encode_color)) (dev, cv);
-    if (sizeof(color) <= sizeof(ulong))
-        dmprintf1(dev->memory, "Zero color index:  %8lx\n", (ulong)color);
-    else
-        dmprintf2(dev->memory, "Zero color index:  %8lx%08lx\n",
-            (ulong)(color >> 8*(sizeof(color) - sizeof(ulong))), (ulong)color);
-
-    dmprintf1(dev->memory, "separable_and_linear = %s\n",
-      linsep == GX_CINFO_SEP_LIN_NONE ? "No" :
-      linsep == GX_CINFO_SEP_LIN ? "Yes" :
-      "Unknown");
-    if (dev->color_info.gray_index == GX_CINFO_COMP_INDEX_UNKNOWN)
-        dmprintf(dev->memory, "gray_index is unknown\n");
-    else
-        dmprintf1(dev->memory, "gray_index = %d\n", dev->color_info.gray_index);
-    if (linsep) {
-        dmprintf(dev->memory, " Shift     Mask  Bits\n");
-        for (i = 0; i < ncomp; i++) {
-            dmprintf3(dev->memory, " %5d %8x  %4d\n",
-                (int)(dev->color_info.comp_shift[i]),
-                (int)(dev->color_info.comp_mask[i]),
-                (int)(dev->color_info.comp_bits[i]));
-        }
-    }
-
-    while (!finished) {
-        for (j = 0; j <= steps; j++) {
-            for (i = 0; i < ncomp; i++)
-                cv[i] = counter[i] * gx_max_color_value / steps;
-            color = (*dev_proc(dev, encode_color)) (dev, cv);
-            if (linsep) {
-                /* Derive it the other way */
-                lscolor = gx_default_encode_color(dev, cv);
-                if ((color != lscolor) && (linsepfailed < 5)) {
-                    linsepfailed++;
-                    dmprintf(dev->memory, "Failed separable_and_linear for");
-                    for (i = 0; i < ncomp; i++)
-                        dmprintf1(dev->memory, " %d", cv[i]);
-                    dmprintf(dev->memory, "\n");
-                    dmprintf2(dev->memory, "encode_color=%x  gx_default_encode_color=%x\n",
-                        (int)color, (int)lscolor);
-                }
-            }
-            (*dev_proc(dev, decode_color)) (dev, color, cvout);
-            for (i = 0; i < ncomp; i++) {
-                err = (int)cvout[i] - (int)cv[i];
-                if (err < 0)
-                    err = -err;
-                if (err > maxerror) {
-                    maxerror = err;
-                    for (k=0; k < ncomp; k++)
-                        cvbad[k] = cv[k];
-                }
-            }
-            if (linsep) {
-                gx_default_decode_color(dev, color, cvout);
-                for (i = 0; i < ncomp; i++) {
-                    err = (int)cvout[i] - (int)cv[i];
-                    if (err < 0)
-                        err = -err;
-                    if (err > lsmaxerror) {
-                        lsmaxerror = err;
-                    }
-                }
-            }
-            counter[0] += 1;
-        }
-        counter[0] = 0;
-        i = 1;
-        while (i < ncomp) {
-            counter[i] += 1;
-            if (counter[i] > steps) {
-                counter[i] = 0;
-                i++;
-            }
-            else
-                break;
-        }
-        if (i >= ncomp)
-            finished = 1;
-    }
-
-    dmprintf2(dev->memory, "Maximum error %g %s\n",
-        (float)maxerror / (float)gx_max_color_value,
-        maxerror <= acceptable_error ? "is Ok" :
-        maxerror <= 3*acceptable_error/2 ? "is POOR" : "FAILED");
-
-    if (linsep)
-      dmprintf2(dev->memory, "Maximum linear_and_separable error %g %s\n",
-        (float)lsmaxerror / (float)gx_max_color_value,
-        lsmaxerror <= acceptable_error ? "is Ok" :
-        lsmaxerror <= 3*acceptable_error/2 ? "is POOR" : "FAILED");
-
-    /* push worst value */
-    push(ncomp-1);
-    op -= ncomp - 1;
-    for (i = 0; i < ncomp; i++)
-        make_real(op+i, (float)cvbad[i] / (float)gx_max_color_value);
-
     return 0;
 }
 
@@ -1066,6 +928,7 @@ static int hsb2rgb(float *HSB)
     switch ((int)floor(6.0 * HSB[0])) {
         case 6:
             HSB[0] = (float)0;
+            /* fall through */
         default: /* Shuts up compiler warning about RGB being uninited */
         case 0:
             RGB[0] = HSB[2];
@@ -1313,7 +1176,7 @@ static int grayvalidate(i_ctx_t *i_ctx_p, ref *space, float *values, int num_com
 {
     os_ptr op = osp;
 
-    if (!r_has_type(op, t_integer) && !r_has_type(op, t_real))
+    if (!r_is_number(op))
         return_error(gs_error_typecheck);
 
     if (num_comps < 1)
@@ -1658,7 +1521,7 @@ static int rgbvalidate(i_ctx_t *i_ctx_p, ref *space, float *values, int num_comp
 
     op -= 2;
     for (i=0;i<3;i++) {
-        if (!r_has_type(op, t_integer) && !r_has_type(op, t_real))
+        if (!r_is_number(op))
             return_error(gs_error_typecheck);
         op++;
     }
@@ -1735,6 +1598,9 @@ static int setcmykspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int CI
                 pcs = gs_cspace_new_DeviceCMYK(imemory);
                 if (pcs == NULL)
                     return_error(gs_error_VMerror);
+                /* Bug 693816 unset device color prior to possible overprint 
+                   colorant check */
+                gx_unset_dev_color(igs);
                 code = gs_setcolorspace(igs, pcs);
                 if (code >= 0) {
                     gs_client_color *pcc = gs_currentcolor_inline(igs);
@@ -1925,7 +1791,7 @@ static int cmykvalidate(i_ctx_t *i_ctx_p, ref *space, float *values, int num_com
 
     op -= 3;
     for (i=0;i < 4;i++) {
-        if (!r_has_type(op, t_integer) && !r_has_type(op, t_real))
+        if (!r_is_number(op))
             return_error(gs_error_typecheck);
         op++;
     }
@@ -1977,6 +1843,8 @@ static int comparearrays(i_ctx_t * i_ctx_p, ref *m1, ref *m2)
             return 0;
 
         code = r_type(&ref1);
+        if (code < 0)
+            return code;
         switch(r_type(&ref1)) {
             case t_null:
                 break;
@@ -2058,7 +1926,90 @@ static int comparedictkey(i_ctx_t * i_ctx_p, ref *CIEdict1, ref *CIEdict2, char 
     if (r_type(tempref1) == t_null)
         return 1;
 
-    return comparearrays(i_ctx_p, tempref1, tempref2);
+    code = comparearrays(i_ctx_p, tempref1, tempref2);
+
+    if (code > 0)
+        return 1;
+    else
+        return 0;
+}
+
+static int hasharray(i_ctx_t * i_ctx_p, ref *m1, gs_md5_state_t *md5)
+{
+    int i, code;
+    ref ref1;
+
+    for (i=0;i < r_size(m1);i++) {
+        code = array_get(imemory, m1, i, &ref1);
+        if (code < 0)
+            return 0;
+
+        code = r_type(&ref1);
+        if (code < 0)
+            return code;
+        switch(r_type(&ref1)) {
+            case t_null:
+                break;
+            case t_boolean:
+                gs_md5_append(md5, (const gs_md5_byte_t *)&ref1.value.boolval, sizeof(ref1.value.boolval));
+                break;
+            case t_integer:
+                gs_md5_append(md5, (const gs_md5_byte_t *)&ref1.value.intval, sizeof(ref1.value.intval));
+                break;
+            case t_real:
+                gs_md5_append(md5, (const gs_md5_byte_t *)&ref1.value.realval, sizeof(ref1.value.realval));
+                break;
+            case t_name:
+                gs_md5_append(md5, (const gs_md5_byte_t *)&ref1.value.pname, sizeof(ref1.value.pname));
+                break;
+            case t_string:
+                gs_md5_append(md5, (const gs_md5_byte_t *)ref1.value.const_bytes, r_size(&ref1));
+                break;
+            case t_array:
+            case t_mixedarray:
+            case t_shortarray:
+                if (!hasharray(i_ctx_p, &ref1, md5))
+                    return 0;
+                break;
+            case t_oparray:
+                break;
+            case t_operator:
+                gs_md5_append(md5, (const gs_md5_byte_t *)&ref1.value.opproc, sizeof(ref1.value.opproc));
+                break;
+            case t__invalid:
+            case t_dictionary:
+            case t_file:
+            case t_unused_array_:
+            case t_struct:
+            case t_astruct:
+            case t_fontID:
+            case t_save:
+            case t_mark:
+            case t_device:
+                return 0;
+            default:
+                /* Some high frequency operators are defined starting at t_next_index
+                 * I think as long as the 'type' of each is the same, we are OK
+                 */
+                break;
+        }
+    }
+    return 1;
+}
+
+static int hashdictkey(i_ctx_t * i_ctx_p, ref *CIEdict1, char *key, gs_md5_state_t *md5)
+{
+    int code;
+    ref *tempref1;
+
+    code = dict_find_string(CIEdict1, key, &tempref1);
+    if (code <= 0)
+        return 1;
+
+    if (r_type(tempref1) == t_null)
+        return 1;
+
+    return hasharray(i_ctx_p, tempref1, md5);
 }
 
 static int get_cie_param_array(const gs_memory_t *mem, const ref *src,  int n, float *dst) {
@@ -2195,11 +2146,47 @@ static int checkMatrixLMN(i_ctx_t * i_ctx_p, ref *CIEdict)
 }
 
 /* CIEBasedA */
+static int hashcieaspace(i_ctx_t *i_ctx_p, ref *space, gs_md5_state_t *md5)
+{
+    int code = 0;
+    ref CIEdict1, spacename;
+
+    code = array_get(imemory, space, 0, &spacename);
+    if (code < 0)
+        return 0;
+    gs_md5_append(md5, (const gs_md5_byte_t *)&spacename.value.pname, sizeof(spacename.value.pname));
+
+    code = array_get(imemory, space, 1, &CIEdict1);
+    if (code < 0)
+        return 0;
+    check_read_type(CIEdict1, t_dictionary);
+
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"WhitePoint", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"BlackPoint", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"RangeA", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"DecodeA", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"MatrixA", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"RangeLMN", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"DecodeLMN", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"MatrixMN", md5))
+        return 0;
+    return 1;
+}
+
 static int setcieaspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int CIESubst)
 {
     int code = 0;
     ref CIEDict, *nocie;
-    ulong dictkey;
+    uint64_t dictkey;
+    gs_md5_state_t md5;
+    byte key[16];
 
     if (i_ctx_p->language_level < 2)
         return_error(gs_error_undefined);
@@ -2225,7 +2212,24 @@ static int setcieaspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int CI
         *stage = 0;
         return code;
     }
-    dictkey = r->value.refs->value.saveid;
+    gs_md5_init(&md5);
+    /* If the hash (dictkey) is 0, we don't check for an existing
+     * ICC profile for this space. So if we get an error hashing
+     * the space, we construct a new profile.
+     */
+    dictkey = 0;
+    if (hashcieaspace(i_ctx_p, r, &md5)) {
+        /* Ideally we would use the whole md5 hash, but the ICC code only
+         * expects a long. I'm 'slightly' concerned about collisions here
+         * but I think its unlikely really. If it ever becomes a problem
+         * we could add the hash bytes up, or modify the ICC cache to store
+         * the full 16 byte hashs.
+         */
+        gs_md5_finish(&md5, key);
+        dictkey = *(uint64_t *)&key[sizeof(key) - sizeof(uint64_t)];
+    } else {
+        gs_md5_finish(&md5, key);
+    }
     code = cieaspace(i_ctx_p, &CIEDict, dictkey);
     (*stage)++;
     *cont = 1;
@@ -2362,7 +2366,7 @@ static int cieavalidate(i_ctx_t *i_ctx_p, ref *space, float *values, int num_com
     if (num_comps < 1)
         return_error(gs_error_stackunderflow);
 
-    if (!r_has_type(op, t_integer) && !r_has_type(op, t_real))
+    if (!r_is_number(op))
         return_error(gs_error_typecheck);
 
     return 0;
@@ -2398,11 +2402,45 @@ static int cieacompareproc(i_ctx_t *i_ctx_p, ref *space, ref *testspace)
 }
 
 /* CIEBasedABC */
+static int hashcieabcspace(i_ctx_t * i_ctx_p, ref *space, gs_md5_state_t *md5)
+{
+    int code = 0;
+    ref CIEdict1, spacename;
+
+    code = array_get(imemory, space, 0, &spacename);
+    if (code < 0)
+        return 0;
+    gs_md5_append(md5, (const gs_md5_byte_t *)&spacename.value.pname, sizeof(spacename.value.pname));
+
+    code = array_get(imemory, space, 1, &CIEdict1);
+    if (code < 0)
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"WhitePoint", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"BlackPoint", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"RangeABC", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"DecodeABC", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"MatrixABC", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"RangeLMN", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"DecodeLMN", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"MatrixMN", md5))
+        return 0;
+    return 1;
+}
+
 static int setcieabcspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int CIESubst)
 {
     int code = 0;
     ref CIEDict, *nocie;
-    ulong dictkey;
+    uint64_t dictkey;
+    gs_md5_state_t md5;
+    byte key[16];
 
     if (i_ctx_p->language_level < 2)
         return_error(gs_error_undefined);
@@ -2431,7 +2469,24 @@ static int setcieabcspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int 
         *stage = 0;
         return code;
     }
-    dictkey = r->value.refs->value.saveid;
+    gs_md5_init(&md5);
+    /* If the hash (dictkey) is 0, we don't check for an existing
+     * ICC profile dor this space. So if we get an error hashing
+     * the space, we construct a new profile.
+     */
+    dictkey = 0;
+    if (hashcieabcspace(i_ctx_p, r, &md5)) {
+        /* Ideally we would use the whole md5 hash, but the ICC code only
+         * expects a long. I'm 'slightly' concerned about collisions here
+         * but I think its unlikely really. If it ever becomes a problem
+         * we could add the hash bytes up, or modify the ICC cache to store
+         * the full 16 byte hashs.
+         */
+        gs_md5_finish(&md5, key);
+        dictkey = *(uint64_t *)&key[sizeof(key) - sizeof(uint64_t)];
+    } else {
+        gs_md5_finish(&md5, key);
+    }
     code = cieabcspace(i_ctx_p, &CIEDict,dictkey);
     *cont = 1;
     (*stage)++;
@@ -2572,7 +2627,7 @@ static int cieabcvalidate(i_ctx_t *i_ctx_p, ref *space, float *values, int num_c
 
     op -= 2;
     for (i=0;i<3;i++) {
-        if (!r_has_type(op, t_integer) && !r_has_type(op, t_real))
+        if (!r_is_number(op))
             return_error(gs_error_typecheck);
         op++;
     }
@@ -2610,11 +2665,53 @@ static int cieabccompareproc(i_ctx_t *i_ctx_p, ref *space, ref *testspace)
 }
 
 /* CIEBasedDEF */
+static int hashciedefspace(i_ctx_t *i_ctx_p, ref *space, gs_md5_state_t *md5)
+{
+    int code = 0;
+    ref CIEdict1, spacename;
+
+    code = array_get(imemory, space, 0, &spacename);
+    if (code < 0)
+        return 0;
+    gs_md5_append(md5, (const gs_md5_byte_t *)&spacename.value.pname, sizeof(spacename.value.pname));
+
+    code = array_get(imemory, space, 1, &CIEdict1);
+    if (code < 0)
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"WhitePoint", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"BlackPoint", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"RangeABC", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"DecodeABC", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"MatrixABC", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"RangeLMN", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"DecodeLMN", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"MatrixMN", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"RangeDEF", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"DecodeDEF", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"RangeHIJ", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"Table", md5))
+        return 0;
+    return 1;
+}
+
 static int setciedefspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int CIESubst)
 {
     int code = 0;
     ref CIEDict, *nocie;
-    ulong dictkey;
+    uint64_t dictkey;
+    gs_md5_state_t md5;
+    byte key[16];
 
     if (i_ctx_p->language_level < 3)
         return_error(gs_error_undefined);
@@ -2642,7 +2739,24 @@ static int setciedefspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int 
         *stage = 0;
         return code;
     }
-    dictkey = r->value.refs->value.saveid;
+    gs_md5_init(&md5);
+    /* If the hash (dictkey) is 0, we don't check for an existing
+     * ICC profile dor this space. So if we get an error hashing
+     * the space, we construct a new profile.
+     */
+    dictkey = 0;
+    if (hashciedefspace(i_ctx_p, r, &md5)) {
+        /* Ideally we would use the whole md5 hash, but the ICC code only
+         * expects a long. I'm 'slightly' concerned about collisions here
+         * but I think its unlikely really. If it ever becomes a problem
+         * we could add the hash bytes up, or modify the ICC cache to store
+         * the full 16 byte hashs.
+         */
+        gs_md5_finish(&md5, key);
+        dictkey = *(uint64_t *)&key[sizeof(key) - sizeof(uint64_t)];
+    } else {
+        gs_md5_finish(&md5, key);
+    }
     code = ciedefspace(i_ctx_p, &CIEDict, dictkey);
     *cont = 1;
     (*stage)++;
@@ -2803,7 +2917,7 @@ static int ciedefvalidate(i_ctx_t *i_ctx_p, ref *space, float *values, int num_c
 
     op -= 2;
     for (i=0;i<3;i++) {
-        if (!r_has_type(op, t_integer) && !r_has_type(op, t_real))
+        if (!r_is_number(op))
             return_error(gs_error_typecheck);
         op++;
     }
@@ -2849,11 +2963,56 @@ static int ciedefcompareproc(i_ctx_t *i_ctx_p, ref *space, ref *testspace)
 }
 
 /* CIEBasedDEFG */
+static int hashciedefgspace(i_ctx_t *i_ctx_p, ref *space, gs_md5_state_t *md5)
+{
+    /* If the problems mentioned above are resolved, then this code could
+     * be re-instated.
+     */
+    int code = 0;
+    ref CIEdict1, spacename;
+
+    code = array_get(imemory, space, 0, &spacename);
+    if (code < 0)
+        return 0;
+    gs_md5_append(md5, (const gs_md5_byte_t *)&spacename.value.pname, sizeof(spacename.value.pname));
+
+    code = array_get(imemory, space, 1, &CIEdict1);
+    if (code < 0)
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"WhitePoint", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"BlackPoint", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"RangeABC", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"DecodeABC", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"MatrixABC", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"RangeLMN", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"DecodeLMN", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"MatrixMN", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"RangeDEFG", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"DecodeDEFG", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"RangeHIJK", md5))
+        return 0;
+    if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"Table", md5))
+        return 0;
+    return 1;
+}
+
 static int setciedefgspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int CIESubst)
 {
     int code = 0;
     ref CIEDict, *nocie;
-    ulong dictkey;
+    uint64_t dictkey;
+    gs_md5_state_t md5;
+    byte key[16];
 
     if (i_ctx_p->language_level < 3)
         return_error(gs_error_undefined);
@@ -2881,7 +3040,24 @@ static int setciedefgspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int
         *stage = 0;
         return code;
     }
-    dictkey = r->value.refs->value.saveid;
+    gs_md5_init(&md5);
+    /* If the hash (dictkey) is 0, we don't check for an existing
+     * ICC profile dor this space. So if we get an error hashing
+     * the space, we construct a new profile.
+     */
+    dictkey = 0;
+    if (hashciedefgspace(i_ctx_p, r, &md5)) {
+        /* Ideally we would use the whole md5 hash, but the ICC code only
+         * expects a long. I'm 'slightly' concerned about collisions here
+         * but I think its unlikely really. If it ever becomes a problem
+         * we could add the hash bytes up, or modify the ICC cache to store
+         * the full 16 byte hashs.
+         */
+        gs_md5_finish(&md5, key);
+        dictkey = *(uint64_t *)&key[sizeof(key) - sizeof(uint64_t)];
+    } else {
+        gs_md5_finish(&md5, key);
+    }
     code = ciedefgspace(i_ctx_p, &CIEDict,dictkey);
     *cont = 1;
     (*stage)++;
@@ -3053,7 +3229,7 @@ static int ciedefgvalidate(i_ctx_t *i_ctx_p, ref *space, float *values, int num_
 
     op -= 3;
     for (i=0;i < 4;i++) {
-        if (!r_has_type(op, t_integer) && !r_has_type(op, t_real))
+        if (!r_is_number(op))
             return_error(gs_error_typecheck);
         op++;
     }
@@ -3263,6 +3439,9 @@ static int setseparationspace(i_ctx_t * i_ctx_p, ref *sepspace, int *stage, int 
         pop (1);
     }
 
+    if (pfn == NULL)
+        return_error(gs_error_typecheck);
+
     *stage = 0;
     if ((code = name_ref(imemory, (const byte *)"All", 3, &name_all, 0)) < 0)
         return code;
@@ -3290,8 +3469,14 @@ static int setseparationspace(i_ctx_t * i_ctx_p, ref *sepspace, int *stage, int 
     if (code < 0)
         return code;
     pcs->params.separation.sep_type = sep_type;
-    pcs->params.separation.sep_name = name_index(imemory, &sname);
-    pcs->params.separation.get_colorname_string = gs_get_colorname_string;
+    pcs->params.separation.mem = imemory->non_gc_memory;
+    name_string_ref(imemory, &sname, &sname);
+    pcs->params.separation.sep_name = (char *)gs_alloc_bytes(pcs->params.separation.mem, r_size(&sname) + 1, "Separation name");
+    if (pcs->params.separation.sep_name == NULL)
+        return_error(gs_error_VMerror);
+
+    memcpy(pcs->params.separation.sep_name, sname.value.bytes, r_size(&sname));
+    pcs->params.separation.sep_name[r_size(&sname)] = 0x00;
     code = array_get(imemory, sepspace, 1, &proc);
     if (code < 0)
         return code;
@@ -3502,7 +3687,7 @@ static int sepvalidate(i_ctx_t *i_ctx_p, ref *space, float *values, int num_comp
     if (num_comps < 1)
         return_error(gs_error_stackunderflow);
 
-    if (!r_has_type(op, t_integer) && !r_has_type(op, t_real))
+    if (!r_is_number(op))
         return_error(gs_error_typecheck);
 
     if (*values > 1.0)
@@ -3581,11 +3766,11 @@ static int sepinitialproc(i_ctx_t *i_ctx_p, ref *space)
 /* DeviceN */
 static int devicencolorants_cont(i_ctx_t *i_ctx_p)
 {
-    ref dict, *pdict = &dict, space[2], sname;
+    ref dict, *pdict = &dict, space[2];
     int index, code, depth, stage;
     es_ptr ep = esp, pindex, pstage;
     os_ptr op = osp;
-    gs_separation_name sep_name;
+    char *sep_name;
 
     pindex = &ep[-2];
     pstage = &ep[-1];
@@ -3594,32 +3779,24 @@ static int devicencolorants_cont(i_ctx_t *i_ctx_p)
     ref_assign(&dict, ep);
 
     do {
-        if (index >= dict_length(pdict)) {
+        index = dict_next(pdict, index, (ref *)&space);
+        if (index == -1) {
             esp -= 4;
             return o_pop_estack;
         }
 
         if (stage == 0) {
             code = gs_gsave(igs);
-            if (code < 0)
-                return code;
-
-            code = dict_index_entry(pdict, index, (ref *)&space);
             if (code < 0) {
-                make_int(pindex, ++index);
-                code = gs_grestore(igs);
-                if (code < 0)
-                    return code;
-                continue;
+                esp -= 4;
+                return code;
             }
 
             code = validate_spaces(i_ctx_p, &space[1], &depth);
             if (code < 0) {
-                make_int(pindex, ++index);
-                code = gs_grestore(igs);
-                if (code < 0)
-                    return code;
-                return o_push_estack;
+                (void)gs_grestore(igs);
+                esp -= 4;
+                return code;
             }
 
             /* If we get a continuation from a sub-procedure, we will want to come back
@@ -3633,36 +3810,136 @@ static int devicencolorants_cont(i_ctx_t *i_ctx_p)
 
             make_int(pstage, 1);
             *op = space[1];
-            code = zsetcolorspace(i_ctx_p);
-            if (code != 0)
+            code = absolute_setcolorspace(i_ctx_p);
+            if (code == 0)
+                return o_push_estack;
+
+            if (code < 0) {
+                (void)gs_grestore(igs);
+                esp -= 4;
+                return code;
+            } else
                 return code;
         } else {
+            gs_memory_t *mem;
+            gs_gstate *pgs = igs;
+            gs_color_space *devn_cs;
+
             stage = 0;
-            code = dict_index_entry(pdict, index, (ref *)&space);
-            if (code == 0) {
-                switch (r_type(&space[0])) {
-                    case t_string:
-                        code = name_from_string(imemory, &space[0], &sname);
-                        if (code == 0)
-                            sep_name = name_index(imemory, &sname);
-                        break;
-                    case t_name:
-                        sep_name = name_index(imemory, &space[0]);
-                        break;
-                    default:
-                        code = gs_error_typecheck;
-                }
+
+            /* This is a little awkward. We need the 'mem' parameter stored in
+             * the DeviceN structure, so that we can allocate the C string below in the
+             * correct memory. But the current space has been set (above) to the separation
+             * space we are handling. However, we did a gsave before that, so the saved
+             * colour space is the one we want.
+             */
+            if (!pgs->saved) {
+                esp -= 4;
+                return gs_note_error(gs_error_unknownerror);
             }
-            make_int(pindex, ++index);
+            devn_cs = gs_currentcolorspace_inline(pgs->saved);
+            mem = devn_cs->params.device_n.mem->non_gc_memory;
+            switch (r_type(&space[0])) {
+                case t_string:
+                    sep_name = (char *)gs_alloc_bytes(mem, r_size(&space[0]) + 1, "devicencolorants_cont");
+                    if (sep_name == NULL)
+                        return_error(gs_error_VMerror);
+                    memcpy(sep_name, space[0].value.bytes, r_size(&space[0]));
+                    sep_name[r_size(&space[0])] = 0x00;
+                    break;
+                case t_name:
+                    {
+                        ref nref;
+
+                        name_string_ref(imemory, &space[0], &nref);
+                        sep_name = (char *)gs_alloc_bytes(mem, r_size(&nref) + 1, "devicencolorants_cont");
+                        if (sep_name == NULL)
+                            return_error(gs_error_VMerror);
+                        memcpy(sep_name, nref.value.bytes, r_size(&nref));
+                        sep_name[r_size(&nref)] = 0x00;
+                    }
+                    break;
+                default:
+                    (void)gs_grestore(igs);
+                    return_error(gs_error_typecheck);
+                    break;
+            }
+            make_int(pindex, index);
             make_int(pstage, stage);
-            if (code == 0)
-                gs_attachattributecolorspace(sep_name, igs);
+            gs_attachcolorant(sep_name, igs);
+
             code = gs_grestore(igs);
-            if (code < 0)
+            if (code < 0) {
+                esp -= 4;
                 return code;
+            }
         }
     }
     while(1);
+}
+
+static int devicenprocess_cont(i_ctx_t *i_ctx_p)
+{
+    ref dict;
+    int index, code, stage;
+    es_ptr ep = esp, pindex, pstage;
+    os_ptr op = osp;
+
+    pindex = &ep[-2];
+    pstage = &ep[-1];
+    index = (int)pindex->value.intval;
+    stage = (int)pstage->value.intval;
+    ref_assign(&dict, ep);
+
+    if (stage == 0) {
+        code = gs_gsave(igs);
+        if (code < 0) {
+            esp -= 4;
+            return code;
+        }
+        /* If we get a continuation from a sub-procedure, we will want to come back
+         * here afterward, to do any remaining stages. We need to set up for that now.
+         * so that our continuation is ahead of the sub-proc's continuation.
+         */
+        check_estack(1);
+        push(1);
+        /* The push_op_estack macro increments esp before use, so we don't need to */
+        push_op_estack(devicenprocess_cont);
+
+        make_int(pstage, 1);
+        ref_assign(op, &dict);
+        code = absolute_setcolorspace(i_ctx_p);
+        if (code == 0)
+            return o_push_estack;
+
+        if (code < 0) {
+            (void)gs_grestore(igs);
+            esp -= 4;
+            return code;
+        } else
+            return code;
+    } else {
+        gs_color_space *process, *devn_cs;
+
+        stage = 0;
+
+        make_int(pindex, index);
+        make_int(pstage, stage);
+
+        process = gs_currentcolorspace_inline(igs);
+        rc_increment_cs(process);
+
+        code = gs_grestore(igs);
+        if (code < 0) {
+            esp -= 4;
+            return code;
+        }
+        devn_cs = gs_currentcolorspace_inline(igs);
+        devn_cs->params.device_n.devn_process_space = process;
+    }
+
+    esp -= 4;
+    return o_pop_estack;
 }
 
 static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int *cont, int CIESubst)
@@ -3674,7 +3951,7 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
     gs_color_space *pcs;
     gs_color_space * pacs;
     gs_function_t *pfn = NULL;
-    gs_separation_name *names;
+    char **names;
     gs_client_color cc;
 
     if (i_ctx_p->language_level < 3)
@@ -3682,8 +3959,9 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
 
     *cont = 0;
     if ((*stage) == 2) {
+        /* Check for the existence of an attributes dictionary */
         if (r_size(devicenspace) == 5) {
-            /* We have a Colorants dictionary from a PDF file. We need to handle this by
+            /* We may have a Colorants dictionary from a PDF file. We need to handle this by
              * temporarily setting each of the spaces in the dict, and attaching the
              * resulting space to the DeviceN array. This is complicated, because
              * each space must be fully set up, and may result in running tint transform
@@ -3697,15 +3975,17 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
                 return code;
             if (!r_has_type(&sref, t_dictionary)) {
                 *stage = 0;
-                return 0;
+                return gs_note_error(gs_error_typecheck);
             }
             if (dict_find_string(&sref, "Colorants", &colorants) <= 0) {
-                *stage = 0;
+                /* Even if there is no Colorants dictionary, there may still be a /Process dictionary */
+                *stage = 3;
+                *cont = 1;
                 return 0;
             }
             if (!r_has_type(colorants, t_dictionary)) {
                 *stage = 0;
-                return 0;
+                return gs_note_error(gs_error_typecheck);
             }
             *stage = 3;
             *cont = 1;
@@ -3713,7 +3993,7 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
             push_mark_estack(es_other, colour_cleanup);
             esp++;
             /* variable to hold index of the space we are dealing with */
-            make_int(esp, 0);
+            make_int(esp, dict_first(colorants));
             esp++;
             /* variable to hold processing step */
             make_int(esp, 0);
@@ -3729,6 +4009,111 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
         }
     }
     if ((*stage) == 3) {
+        /* Check for the existence of an attributes dictionary */
+        if (r_size(devicenspace) == 5) {
+            ref *process, *cspace, *parr, name, *subtype;
+            gs_color_space *devn_cs;
+
+            /* We have an attributes dictionary, does it contain a /Process sub-dictionary ?
+             * NB this is not optional if the Subtype is NChannel and the space includes components of
+             * a process colour space.
+             */
+            devn_cs = gs_currentcolorspace_inline(igs);
+            code = array_get(imemory, devicenspace, 4, &sref);
+
+            devn_cs->params.device_n.subtype = gs_devicen_DeviceN;
+            code  = dict_find_string(&sref, "Subtype", &subtype);
+            if (code < 0 && code != gs_error_undefined) {
+                *stage = 0;
+                return code;
+            }
+            if (code > 0) {
+                if (r_has_type(subtype, t_name)) {
+                    name_string_ref(imemory, subtype, subtype);
+                } else {
+                    if (!r_has_type(subtype, t_string)) {
+                        *stage = 0;
+                        return gs_note_error(gs_error_typecheck);
+                    }
+                }
+                if (memcmp(subtype->value.bytes, "NChannel", 8) == 0)
+                    devn_cs->params.device_n.subtype = gs_devicen_NChannel;
+            }
+            if (!r_has_type(&sref, t_dictionary)) {
+                *stage = 0;
+                return gs_note_error(gs_error_typecheck);
+            }
+            if (dict_find_string(&sref, "Process", &process) <= 0) {
+                *stage = 4;
+                return 0;
+            }
+            if (!r_has_type(process, t_dictionary)) {
+                *stage = 0;
+                return gs_note_error(gs_error_typecheck);
+            }
+            /* We have a /Process dictionary, in this case the Components entry is required */
+            if (dict_find_string(process, "Components", &parr) <= 0) {
+                *stage = 0;
+                return gs_note_error(gs_error_undefined);
+            }
+            if (!r_is_array(parr)) {
+                *stage = 0;
+                return gs_note_error(gs_error_typecheck);
+            } else {
+                int ix = 0;
+                ref name_string;
+
+                /* Pull out each of the Component names in turn from the Components array
+                 * convert them into a C string and store them in the graphics state colour
+                 * space structure. Note, using non-GC memory for storage.
+                 */
+                devn_cs->params.device_n.num_process_names = r_size(parr);
+                devn_cs->params.device_n.process_names = (char **)gs_alloc_bytes(devn_cs->params.device_n.mem->non_gc_memory, devn_cs->params.device_n.num_process_names * sizeof(char *), "DeviceN Process Components array");
+                if (devn_cs->params.device_n.process_names == NULL)
+                    return_error(gs_error_VMerror);
+
+                for (ix = 0;ix < r_size(parr);ix++) {
+                    code = array_get(imemory, parr, ix, &name);
+                    if (code < 0) {
+                        *stage = 0;
+                        return code;
+                    }
+                    if (!r_has_type(&name, t_name)) {
+                        *stage = 0;
+                        return gs_note_error(gs_error_typecheck);
+                    }
+                    name_string_ref(devn_cs->params.device_n.mem, &name, &name_string);
+                    devn_cs->params.device_n.process_names[ix] = (char *)gs_alloc_bytes(devn_cs->params.device_n.mem->non_gc_memory, r_size(&name_string) + 1, "Component name");
+                    if (devn_cs->params.device_n.process_names[ix] == NULL)
+                        return_error(gs_error_VMerror);
+                    memcpy(devn_cs->params.device_n.process_names[ix], name_string.value.bytes, r_size(&name_string));
+                    devn_cs->params.device_n.process_names[ix][r_size(&name_string)] = 0x00;
+                }
+            }
+            /* We have a /Process dictionary, in this case the ColorSpace entry is required */
+            if (dict_find_string(process, "ColorSpace", &cspace) <= 0) {
+                *stage = 0;
+                return gs_note_error(gs_error_undefined);
+            }
+            *stage = 4;
+            *cont = 1;
+            check_estack(5);
+            push_mark_estack(es_other, colour_cleanup);
+            esp++;
+            /* variable to hold index of the space we are dealing with */
+            make_int(esp, 0);
+            esp++;
+            /* variable to hold processing step */
+            make_int(esp, 0);
+            esp++;
+            /* Store a pointer to the Colorants dictionary
+             */
+            ref_assign(esp, cspace);
+            push_op_estack(devicenprocess_cont);
+            return o_push_estack;
+        }
+    }
+    if ((*stage) == 4) {
         *stage = 0;
         return 0;
     }
@@ -3801,8 +4186,13 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
             if (code < 0)
                 return code;
             pcs->params.separation.sep_type = sep_type;
-            pcs->params.separation.sep_name = name_index(imemory, &sname);
-            pcs->params.separation.get_colorname_string = gs_get_colorname_string;
+            pcs->params.separation.mem = imemory->non_gc_memory;
+            name_string_ref(imemory, &sname, &sname);
+            pcs->params.separation.sep_name = (char *)gs_alloc_bytes(pcs->params.separation.mem, r_size(&sname) + 1, "Separation name");
+            if (pcs->params.separation.sep_name == NULL)
+                return_error(gs_error_VMerror);
+            memcpy(pcs->params.separation.sep_name, sname.value.bytes, r_size(&sname));
+            pcs->params.separation.sep_name[r_size(&sname)] = 0x00;
             code = array_get(imemory, &namesarray, (long)0, &sname);
             if (code < 0)
                 return code;
@@ -3831,7 +4221,6 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
     if (code < 0)
         return code;
     names = pcs->params.device_n.names;
-    pcs->params.device_n.get_colorname_string = gs_get_colorname_string;
 
     /* Pick up the names of the components */
     {
@@ -3841,15 +4230,15 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
         for (i = 0; i < num_components; ++i) {
             array_get(imemory, &namesarray, (long)i, &sname);
             switch (r_type(&sname)) {
-                case t_string:
-                    code = name_from_string(imemory, &sname, &sname);
-                    if (code < 0) {
-                        rc_decrement_cs(pcs, "setdevicenspace");
-                        return code;
-                    }
-                    /* falls through */
                 case t_name:
-                    names[i] = name_index(imemory, &sname);
+                    name_string_ref(imemory, &sname, &sname);
+                    /* falls through */
+                case t_string:
+                    names[i] = (char *)gs_alloc_bytes(pcs->params.device_n.mem->non_gc_memory, r_size(&sname) + 1, "Ink name");
+                    if (names[i] == NULL)
+                        return_error(gs_error_VMerror);
+                    memcpy(names[i], sname.value.bytes, r_size(&sname));
+                    names[i][r_size(&sname)] = 0x00;
                     break;
                 default:
                     rc_decrement_cs(pcs, "setdevicenspace");
@@ -3857,7 +4246,6 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
             }
         }
     }
-
     /* Now set the current color space as DeviceN */
 
     cspace_old = istate->colorspace[0];
@@ -4141,7 +4529,7 @@ static int devicenvalidate(i_ctx_t *i_ctx_p, ref *space, float *values, int num_
     op -= r_size(&narray) - 1;
 
     for (i=0;i < r_size(&narray); i++) {
-        if (!r_has_type(op, t_integer) && !r_has_type(op, t_real))
+        if (!r_is_number(op))
             return_error(gs_error_typecheck);
 
         if (values[i] > 1.0)
@@ -4234,8 +4622,10 @@ indexed_cont(i_ctx_t *i_ctx_p)
         int m = (int)ep[csme_num_components].value.intval;
         int code = float_params(op, m, &r_ptr(&ep[csme_map], gs_indexed_map)->values[i * m]);
 
-        if (code < 0)
+        if (code < 0) {
+            esp -= num_csme;
             return code;
+        }
         pop(m);
         op -= m;
         if (i == (int)ep[csme_hival].value.intval) {	/* All done. */
@@ -4298,7 +4688,7 @@ static int setindexedspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int
         /* If we have a named color profile and the base space is DeviceN or
            Separation use a different set of procedures to ensure the named
            color remapping code is used */
-        if (igs->icc_manager->device_named != NULL && 
+        if (igs->icc_manager->device_named != NULL &&
             (base_type == gs_color_space_index_Separation ||
              base_type == gs_color_space_index_DeviceN))
             pcs = gs_cspace_alloc(imemory, &gs_color_space_type_Indexed_Named);
@@ -4321,7 +4711,6 @@ static int setindexedspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int
         pcs->params.indexed.lookup.table.size = num_values;
         pcs->params.indexed.use_proc = 0;
         make_null(pproc);
-        code = 0;
     } else {
         gs_indexed_map *map;
 
@@ -4530,14 +4919,15 @@ static int indexedbasecolor(i_ctx_t * i_ctx_p, ref *space, int base, int *stage,
 }
 static int indexedvalidate(i_ctx_t *i_ctx_p, ref *space, float *values, int num_comps)
 {
-    int code;
+    int code, integer;
+    float fraction;
     ref hival;
     os_ptr op = osp;
 
     if (num_comps < 1)
         return_error(gs_error_stackunderflow);
 
-    if (!r_has_type(op, t_integer) && !r_has_type(op, t_real))
+    if (!r_is_number(op))
         return_error(gs_error_typecheck);
 
     code = array_get(imemory, space, 2, &hival);
@@ -4552,8 +4942,20 @@ static int indexedvalidate(i_ctx_t *i_ctx_p, ref *space, float *values, int num_
 
     /* The PLRM says 'If it is a real number, it is rounded to the nearest integer
      * but in fact Acrobat simply floors the value.
+     *
+     * KAS 29/08/2017 the comment above is incorrect, at least for recent versions of Acrobat.
+     * In addition the PDF 2.0 specification states that real numbers should be rounded to
+     * the nearest integer (0.5 rounds up) and if it is outside 0->hival then it should
+     * be adjusted to the nearest value within that range (which is done above). The Quality
+     * Logic 2.0 FTS includes a test for this which Acrobat X fails.
      */
-    *values = floor(*values);
+    integer = (int)floor(*values);
+    fraction = *values - integer;
+
+    if (fraction >= 0.5)
+        *values = (float)(integer + 1);
+    else
+        *values = (float)integer;
 
     return 0;
 }
@@ -4906,14 +5308,20 @@ static int setlabspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont,
 /* Get all the parts */
     code = dict_floats_param( imemory, &labdict, "Range", 4, range_buff,
                               dflt_range );
+    if (code < 0)
+        return code;
     for (i = 0; i < 4 && range_buff[i + 1] >= range_buff[i]; i += 2);
     if (i != 4)
         return_error(gs_error_rangecheck);
     code = dict_floats_param( imemory, &labdict, "BlackPoint", 3, black,
                               dflt_black );
-     code = dict_floats_param( imemory, &labdict, "WhitePoint", 3, white,
+    if (code < 0)
+        return code;
+    code = dict_floats_param( imemory, &labdict, "WhitePoint", 3, white,
                               dflt_white );
-     if (white[0] <= 0 || white[1] != 1.0 || white[2] <= 0)
+    if (code < 0)
+        return code;
+    if (white[0] <= 0 || white[1] != 1.0 || white[2] <= 0)
         return_error(gs_error_rangecheck);
     code = seticc_lab(i_ctx_p, white, black, range_buff);
     if ( code < 0)
@@ -4939,7 +5347,7 @@ static int validatelabspace(i_ctx_t * i_ctx_p, ref **r)
     code = array_get(imemory, space, 1, &labdict);
     if (code < 0)
         return code;
-    check_type(labdict, t_dictionary);
+    check_read_type(labdict, t_dictionary);
     /* Check the white point, which is required. */
     code = checkWhitePoint(i_ctx_p, &labdict);
     if (code != 0)
@@ -5051,7 +5459,7 @@ static int labvalidate(i_ctx_t *i_ctx_p, ref *space, float *values, int num_comp
         return_error(gs_error_stackunderflow);
     op -= 2;
     for (i=0;i<3;i++) {
-        if (!r_has_type(op, t_integer) && !r_has_type(op, t_real))
+        if (!r_is_number(op))
             return_error(gs_error_typecheck);
         op++;
     }
@@ -5136,20 +5544,27 @@ static int setcalgrayspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int
 /* Get all the parts */
     code = dict_float_param(&graydict, "Gamma",
                  dflt_gamma, &gamma);
-    if (gamma <= 0 ) return_error(gs_error_rangecheck);
-     code = dict_floats_param( imemory,
+    if (code < 0)
+        return code;
+    if (gamma <= 0 )
+        return_error(gs_error_rangecheck);
+    code = dict_floats_param( imemory,
                               &graydict,
                               "BlackPoint",
                               3,
                               black,
                               dflt_black );
-     code = dict_floats_param( imemory,
+    if (code < 0)
+        return code;
+    code = dict_floats_param( imemory,
                               &graydict,
                               "WhitePoint",
                               3,
                               white,
                               dflt_white );
-     if (white[0] <= 0 || white[1] != 1.0 || white[2] <= 0)
+    if (code < 0)
+        return code;
+    if (white[0] <= 0 || white[1] != 1.0 || white[2] <= 0)
         return_error(gs_error_rangecheck);
     code = seticc_cal(i_ctx_p, white, black, &gamma, NULL, 1,
                         graydict.value.saveid);
@@ -5175,7 +5590,7 @@ static int validatecalgrayspace(i_ctx_t * i_ctx_p, ref **r)
     code = array_get(imemory, space, 1, &calgraydict);
     if (code < 0)
         return code;
-    check_type(calgraydict, t_dictionary);
+    check_read_type(calgraydict, t_dictionary);
     /* Check the white point, which is required */
     /* We have to have a white point */
     /* Check white point exists, and is an array of three numbers */
@@ -5217,28 +5632,36 @@ static int setcalrgbspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int 
                               3,
                               gamma,
                               dflt_gamma );
-     if (gamma[0] <= 0 || gamma[1] <= 0 || gamma[2] <= 0)
+    if (code < 0)
+        return code;
+    if (gamma[0] <= 0 || gamma[1] <= 0 || gamma[2] <= 0)
         return_error(gs_error_rangecheck);
-     code = dict_floats_param( imemory,
+    code = dict_floats_param( imemory,
                               &rgbdict,
                               "BlackPoint",
                               3,
                               black,
                               dflt_black );
-     code = dict_floats_param( imemory,
+    if (code < 0)
+        return code;
+    code = dict_floats_param( imemory,
                               &rgbdict,
                               "WhitePoint",
                               3,
                               white,
                               dflt_white );
-     if (white[0] <= 0 || white[1] != 1.0 || white[2] <= 0)
+    if (code < 0)
+        return code;
+    if (white[0] <= 0 || white[1] != 1.0 || white[2] <= 0)
         return_error(gs_error_rangecheck);
-     code = dict_floats_param( imemory,
+    code = dict_floats_param( imemory,
                               &rgbdict,
                               "Matrix",
                               9,
                               matrix,
                               dflt_matrix );
+    if (code < 0)
+        return code;
     code = seticc_cal(i_ctx_p, white, black, gamma, matrix, 3, rgbdict.value.saveid);
     if ( code < 0)
         return gs_rethrow(code, "setting CalRGB  color space");
@@ -5263,8 +5686,8 @@ static int validatecalrgbspace(i_ctx_t * i_ctx_p, ref **r)
     code = array_get(imemory, space, 1, &calrgbdict);
     if (code < 0)
         return code;
-    if (!r_has_type(&calrgbdict, t_dictionary))
-        return_error(gs_error_typecheck);
+    check_read_type(calrgbdict, t_dictionary);
+
     /* Check the white point, which is required */
     code = checkWhitePoint(i_ctx_p, &calrgbdict);
     if (code != 0)
@@ -5307,11 +5730,16 @@ static int seticcspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int CIE
                 code = array_get(imemory, r, 1, &ICCdict);
                 if (code < 0)
                     return code;
+                check_read_type(ICCdict, t_dictionary);
+
                 code = dict_find_string(&ICCdict, "N", &tempref);
                 if (code < 0)
                     return code;
                 if (code == 0)
                     return gs_note_error(gs_error_undefined);
+                if (r_type(tempref) != t_integer)
+                    return gs_note_error(gs_error_typecheck);
+
                 components = tempref->value.intval;
                 if (components > count_of(range)/2)
                     return_error(gs_error_rangecheck);
@@ -5350,10 +5778,20 @@ static int seticcspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int CIE
                     if (r_has_type(tempref, t_string)){
                         uint n = r_size(tempref);
                         ref rss;
+                        byte *body;
+                        uint save_space = icurrent_space;
 
-                        code = make_rss(i_ctx_p, &rss, tempref->value.const_bytes, n, r_space(tempref), 0L, n, false);
-                        if (code < 0)
+                        ialloc_set_space(idmemory, avm_system);
+                        body = ialloc_string(n, "seticcspace");
+                        ialloc_set_space(idmemory, save_space);
+                        if (!body)
+                            return_error(gs_error_VMerror);
+                        memcpy(body, tempref->value.const_bytes, n);
+                        code = make_rss(i_ctx_p, &rss, body, n, avm_system, 0L, n, false);
+                        if (code < 0) {
+                            ifree_string(body, n, "seticcspace");
                             return code;
+                        }
                         ref_assign(tempref, &rss);
                     }
                     /* Make space on operand stack to pass the ICC dictionary */
@@ -5374,7 +5812,7 @@ static int seticcspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int CIE
                             if (CIESubst)
                                 return setcolorspace_nosubst(i_ctx_p);
                             else
-                                return zsetcolorspace(i_ctx_p);
+                                return absolute_setcolorspace(i_ctx_p);
                         } else {
                             /* We have no /Alternate in the ICC space, use hte /N key to
                              * determine an 'appropriate' default space.
@@ -5417,12 +5855,16 @@ static int iccompareproc(i_ctx_t *i_ctx_p, ref *space, ref *testspace)
         return 0;
 
     /* As a quick check see if current is same as new */
-    if (ICCdict1.value.bytes == ICCdict2.value.bytes) 
+    if (ICCdict1.value.bytes == ICCdict2.value.bytes)
          return 1;
 
     /* Need to check all the various parts */
     code1 = dict_find_string(&ICCdict1, "N", &tempref1);
     code2 = dict_find_string(&ICCdict2, "N", &tempref2);
+
+    if (!r_has_type(tempref1, t_integer) || !r_has_type(tempref2, t_integer))
+        return 0;
+
     if (code1 != code2)
         return 0;
     if (tempref1->value.intval != tempref2->value.intval)
@@ -5437,7 +5879,7 @@ static int iccompareproc(i_ctx_t *i_ctx_p, ref *space, ref *testspace)
     code2 = dict_find_string(&ICCdict2, "DataSource", &tempref2);
     if (code2 <= 0)
         return 0;
-    if (r_size(tempref1) != r_size(tempref2)) 
+    if (r_size(tempref1) != r_size(tempref2))
         return 0;
 
     buff_size = r_size(tempref1);
@@ -5463,7 +5905,7 @@ static int validateiccspace(i_ctx_t * i_ctx_p, ref **r)
     if (code < 0)
         return code;
 
-    check_type(ICCdict, t_dictionary);
+    check_read_type(ICCdict, t_dictionary);
 
     code = dict_find_string(&ICCdict, "N", &tempref);
     if (code < 0)
@@ -5496,7 +5938,7 @@ static int validateiccspace(i_ctx_t * i_ctx_p, ref **r)
             code = array_get(imemory, tempref, i, &valref);
             if (code < 0)
                 return code;
-            if (!r_has_type(&valref, t_integer) && !r_has_type(&valref, t_real))
+            if (!r_is_number(&valref))
                 return_error(gs_error_typecheck);
         }
     }
@@ -5539,6 +5981,8 @@ static int validateiccspace(i_ctx_t * i_ctx_p, ref **r)
             default:
                 return_error(gs_error_rangecheck);
         }
+        if (code < 0)
+            return code;
         /* In case this space is the /ALternate for a previous ICCBased space
          * insert the named space into the ICC dictionary. If we simply returned
          * the named space, as before, then we are replacing the second ICCBased
@@ -5574,6 +6018,8 @@ static int iccalternatespace(i_ctx_t * i_ctx_p, ref *space, ref **r, int *CIESub
         return code;
     if (code == 0)
         return gs_note_error(gs_error_undefined);
+    if (!r_has_type(tempref, t_integer))
+        return_error(gs_error_typecheck);
 
     components = tempref->value.intval;
 
@@ -5612,6 +6058,9 @@ static int icccomponents(i_ctx_t * i_ctx_p, ref *space, int *n)
         return code;
     if (code == 0)
         return gs_note_error(gs_error_undefined);
+    if (!r_has_type(tempref, t_integer))
+        return gs_note_error(gs_error_typecheck);
+
     *n = tempref->value.intval;
     return 0;
 }
@@ -5628,6 +6077,9 @@ static int iccdomain(i_ctx_t * i_ctx_p, ref *space, float *ptr)
         return code;
     if (code == 0)
         return gs_note_error(gs_error_undefined);
+    if (!r_has_type(tempref, t_integer))
+        return gs_note_error(gs_error_typecheck);
+
     components = tempref->value.intval;
     code = dict_find_string(&ICCdict, "Range", &tempref);
     if (code > 0 && !r_has_type(tempref, t_null)) {
@@ -5661,6 +6113,8 @@ static int iccrange(i_ctx_t * i_ctx_p, ref *space, float *ptr)
         return code;
     if (code == 0)
         return gs_note_error(gs_error_undefined);
+    if (!r_has_type(tempref, t_integer))
+        return gs_note_error(gs_error_typecheck);
     components = tempref->value.intval;
     code = dict_find_string(&ICCdict, "Range", &tempref);
     if (code > 0 && !r_has_type(tempref, t_null)) {
@@ -5768,8 +6222,11 @@ int get_space_object(i_ctx_t *i_ctx_p, ref *arr, PS_colour_space_t **obj)
     int i, nprocs = sizeof(colorProcs) / sizeof(PS_colour_space_t), code;
 
     /* If the spaece is an array, the first element is always the name */
-    if (r_is_array(arr))
+    if (r_is_array(arr)) {
         code = array_get(imemory, arr, 0, &spacename);
+        if (code < 0)
+            return code;
+    }
     else
         ref_assign(&spacename, arr);
 
@@ -5836,11 +6293,12 @@ setcolor_cont(i_ctx_t *i_ctx_p)
 {
     ref arr, *parr = &arr;
     es_ptr ep = esp;
-    int i=0, code = 0,depth, usealternate, stage, stack_depth, CIESubst = 0;
+    int i=0, code = 0, usealternate, stage, stack_depth, CIESubst = 0, IsICC = 0;
+    unsigned int depth;
     PS_colour_space_t *obj;
 
     stack_depth = (int)ep[-3].value.intval;
-    depth = (int)ep[-2].value.intval;
+    depth = (unsigned int)ep[-2].value.intval;
     stage = (int)ep[-1].value.intval;
     /* If we get a continuation from a sub-procedure, we will want to come back
      * here afterward, to do any remaining spaces. We need to set up for that now.
@@ -5856,31 +6314,55 @@ setcolor_cont(i_ctx_t *i_ctx_p)
          */
         for (i=0;i<=depth;i++) {
             code = get_space_object(i_ctx_p, parr, &obj);
-            if (code < 0)
+            if (code < 0) {
+                esp -= 5;
                 return code;
+            }
+
+            if (strcmp(obj->name, "ICCBased") == 0)
+                IsICC = 1;
 
             if (i < (depth)) {
                 if (!obj->alternateproc) {
                     return_error(gs_error_typecheck);
                 }
                 code = obj->alternateproc(i_ctx_p, parr, &parr, &CIESubst);
-                if (code < 0)
+                if (code < 0) {
+                    esp -= 5;
                     return code;
+                }
             }
         }
         if (obj->runtransformproc) {
             code = obj->runtransformproc(i_ctx_p, &istate->colorspace[0].array, &usealternate, &stage, &stack_depth);
             make_int(&ep[-3], stack_depth);
             make_int(&ep[-1], stage);
-            if (code != 0) {
+            if (code < 0) {
+                esp -= 5;
                 return code;
             }
+            if (code != 0)
+                return code;
+
             make_int(&ep[-2], ++depth);
             if (!usealternate)
                 break;
         } else
             break;
     }
+    /* Hack to work around broken PDF files in Bug696690 and Bug696120
+     * We want setcolor to actually exercise the link creation in case
+     * the profile is broken, in whcih case we may choose to use a different
+     * colour space altogether.
+     */
+    if (IsICC && depth == 0) {
+        code = gx_set_dev_color(i_ctx_p->pgs);
+        if (code < 0) {
+            esp -= 5;
+            return code;
+        }
+    }
+
     /* Remove our next continuation and our data */
     obj->numcomponents(i_ctx_p, parr, &i);
     pop(i);
@@ -5907,7 +6389,8 @@ setcolorspace_cont(i_ctx_t *i_ctx_p)
     ref arr, *parr = &arr;
     os_ptr op = osp;
     es_ptr ep = esp, pdepth, pstage, pCIESubst;
-    int i, code = 0,depth, stage, cont, CIESubst = 0;
+    int i, code = 0, stage, cont, CIESubst = 0;
+    unsigned int depth;
     PS_colour_space_t *obj;
 
     pCIESubst = &ep[-3];
@@ -5915,7 +6398,7 @@ setcolorspace_cont(i_ctx_t *i_ctx_p)
     pstage = &ep[-1];
 
     CIESubst = (int)pCIESubst->value.intval;
-    depth = (int)pdepth->value.intval;
+    depth = (unsigned int)pdepth->value.intval;
     stage = (int)pstage->value.intval;
     /* If we get a continuation from a sub-procedure, we will want to come back
      * here afterward, to do any remaining stages. We need to set up for that now.
@@ -5931,23 +6414,28 @@ setcolorspace_cont(i_ctx_t *i_ctx_p)
          */
         for (i = 0;i < depth;i++) {
             code = get_space_object(i_ctx_p, parr, &obj);
-            if (code < 0)
+            if (code < 0) {
+                esp -= 5;
                 return code;
+            }
 
             if (i < (depth - 1)) {
                 if (!obj->alternateproc) {
+                    esp -= 5;
                     return_error(gs_error_typecheck);
                 }
                 code = obj->alternateproc(i_ctx_p, parr, &parr, &CIESubst);
-                if (code < 0)
+                if (code < 0) {
+                    esp -= 5;
                     return code;
+                }
             }
         }
 
         code = obj->setproc(i_ctx_p, parr, &stage, &cont, CIESubst);
         make_int(pstage, stage);
         if (code != 0) {
-            if (code < 0)
+            if (code < 0 && code != gs_error_stackoverflow)
                 esp -= 5;
             return code;
         }
@@ -6017,15 +6505,25 @@ setdevicecolor_cont(i_ctx_t *i_ctx_p)
                         code = name_enter_string(imemory, "DeviceCMYK", op);
                         break;
                 }
-                if (code < 0)
+                if (code < 0) {
+                    esp -= 3;
                     return code;
-                code = zsetcolorspace(i_ctx_p);
+                }
+                code = absolute_setcolorspace(i_ctx_p);
+                if (code < 0) {
+                    esp -= 3;
+                    return code;
+                }
                 if (code != 0)
                     return code;
                 break;
             case 1:
                 make_int(pstage, ++stage);
                 code = zsetcolor(i_ctx_p);
+                if (code < 0) {
+                    esp -= 3;
+                    return code;
+                }
                 if (code != 0)
                     return code;
                 break;
@@ -6214,13 +6712,23 @@ currentbasecolor_cont(i_ctx_t *i_ctx_p)
 {
     ref arr, *parr = &arr;
     es_ptr ep = esp;
-    int i, code = 0,depth, stage, base, cont=1, stack_depth = 0, CIESubst=0;
+    int i, code = 0, stage, base, cont=1, stack_depth = 0, CIESubst=0;
+    unsigned int depth;
     PS_colour_space_t *obj;
 
     stack_depth = (int)ep[-4].value.intval;
     base = (int)ep[-3].value.intval;
-    depth = (int)ep[-2].value.intval;
+    depth = (unsigned int)ep[-2].value.intval;
     stage = (int)ep[-1].value.intval;
+
+    /* This shouldn't be possible, all the procedures which call this should
+     * set the depth to at *least* 1.
+     */
+    if (depth < 1) {
+        esp -= 7;
+        return_error(gs_error_unknownerror);
+    }
+
     /* If we get a continuation from a sub-procedure, we will want to come back
      * here afterward, to do any remaining stages. We need to set up for that now.
      * so that our continuation is ahead of the sub-proc's continuation.
@@ -6237,28 +6745,33 @@ currentbasecolor_cont(i_ctx_t *i_ctx_p)
          */
         for (i = 0;i < depth;i++) {
             code = get_space_object(i_ctx_p, parr, &obj);
-            if (code < 0)
+            if (code < 0) {
+                esp -= 7;
                 return code;
+            }
 
             if (i < (depth - 1)) {
                 if (!obj->alternateproc) {
+                    esp -= 7;
                     return_error(gs_error_typecheck);
                 }
                 code = obj->alternateproc(i_ctx_p, parr, &parr, &CIESubst);
-                if (code < 0)
+                if (code < 0) {
+                    esp -= 7;
                     return code;
+                }
             }
         }
 
         code = obj->basecolorproc(i_ctx_p, parr, base, &stage, &cont, &stack_depth);
         make_int(&ep[-4], stack_depth);
         make_int(&ep[-1], stage);
-        if (code != 0)
+        if (code > 0)
             return code;
         /* Completed that space, increment the 'depth' */
         make_int(&ep[-2], ++depth);
     }
-    if (code == 0) {
+    if (code <= 0) {
         /* Remove our next continuation and our data */
         esp -= 7;
         code = o_pop_estack;
@@ -6416,7 +6929,80 @@ zswapcolors(i_ctx_t * i_ctx_p)
     istate->pattern[0] = istate->pattern[1];
     istate->pattern[1] = tmp_pat;
 
-    return gs_swapcolors(igs);
+    gs_swapcolors_quick(igs);
+    return 0;
+}
+
+static int
+zsetfillcolor(i_ctx_t * i_ctx_p)
+{
+    return zsetcolor(i_ctx_p);
+}
+static int
+zsetfillcolorspace(i_ctx_t * i_ctx_p)
+{
+    return zsetcolorspace(i_ctx_p);
+}
+static int
+setstrokecolor_cont(i_ctx_t * i_ctx_p)
+{
+    return zswapcolors(i_ctx_p);
+}
+static int
+zsetstrokecolor(i_ctx_t * i_ctx_p)
+{
+    int code;
+    es_ptr iesp = esp;  /* preserve exec stack in case of error */
+
+    code = zswapcolors(i_ctx_p);
+    if (code < 0)
+        return code;
+
+    /* Set up for the continuation procedure which will finish by restoring the fill colour space */
+    /* Make sure the exec stack has enough space */
+    check_estack(1);
+    /* Now, the actual continuation routine */
+    push_op_estack(setstrokecolor_cont);
+
+    code = zsetcolor(i_ctx_p);
+
+    if (code >= 0)
+        return o_push_estack;
+
+    /* Something went wrong, swap back to the non-stroking colour and restore the exec stack */
+    esp = iesp;
+    (void)zswapcolors(i_ctx_p);
+    return code;
+}
+static int
+setstrokecolorspace_cont(i_ctx_t * i_ctx_p)
+{
+    return zswapcolors(i_ctx_p);
+}
+static int
+zsetstrokecolorspace(i_ctx_t * i_ctx_p)
+{
+    int code;
+    es_ptr iesp = esp;  /* preserve exec stack in case of error */
+
+    code = zswapcolors(i_ctx_p);
+    if (code < 0)
+        return code;
+
+    /* Set up for the continuation procedure which will finish by restoring the fill colour space */
+    /* Make sure the exec stack has enough space */
+    check_estack(1);
+    /* Now, the actual continuation routine */
+    push_op_estack(setstrokecolorspace_cont);
+
+    code = zsetcolorspace(i_ctx_p);
+    if (code >= 0)
+        return o_push_estack;
+
+    /* Something went wrong, swap back to the non-stroking space and restore the exec stack */
+    esp = iesp;
+    (void)zswapcolors(i_ctx_p);
+    return code;
 }
 
 /* ------ Initialization procedure ------ */
@@ -6440,8 +7026,6 @@ const op_def    zcolor_op_defs[] =
     { "1%zcolor_remap_one_signed_finish", zcolor_remap_one_signed_finish },
     { "0%zcolor_reset_transfer", zcolor_reset_transfer },
     { "0%zcolor_remap_color", zcolor_remap_color },
-    { "0.color_test", zcolor_test },
-    { "1.color_test_all", zcolor_test_all },
 
     /* high level device support */
     { "0.includecolorspace", zincludecolorspace },
@@ -6461,7 +7045,7 @@ const op_def    zcolor_ext_op_defs[] =
 
     /* Operators to deal with setting stroking/non-stroking colors
      * individually */
-    { "1.swapcolors", zswapcolors },
+    { "0.swapcolors", zswapcolors },
 
     /* internal operators, entries here only used for error reporting */
     { "0%setcolorspace_cont", setcolorspace_cont },
@@ -6470,5 +7054,14 @@ const op_def    zcolor_ext_op_defs[] =
     { "0%indexed_cont", indexed_cont },
     { "0%setdevicecolor_cont", setdevicecolor_cont },
     { "0%currentbasecolor_cont", currentbasecolor_cont },
+op_def_end(0)
+};
+
+const op_def    zcolor_pdf_op_defs[] =
+{
+    { "1.setfillcolor", zsetfillcolor },
+    { "1.setfillcolorspace", zsetfillcolorspace },
+    { "1.setstrokecolor", zsetstrokecolor },
+    { "1.setstrokecolorspace", zsetstrokecolorspace },
 op_def_end(0)
 };

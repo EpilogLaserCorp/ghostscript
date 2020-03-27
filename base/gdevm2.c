@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* 2-bit-per-pixel "memory" (stored bitmap) device */
@@ -116,7 +116,7 @@ mem_mapped2_copy_mono(gx_device * dev,
             } else {		/* Filling a mask. */
                 for ( ; ; ) {
                     if (sbyte & bit)
-                        *pptr = (*pptr & ~mask) + (b1 & mask);
+                        *pptr = (*pptr & ~mask) | (b1 & mask);
                     if (--count <= 0)
                         break;
                     if ((bit >>= 1) == 0)
@@ -129,7 +129,7 @@ mem_mapped2_copy_mono(gx_device * dev,
             for ( ; ; ) {
                 if (!(sbyte & bit)) {
                     if (zero != gx_no_color_index)
-                        *pptr = (*pptr & ~mask) + (b0 & mask);
+                        *pptr = (*pptr & ~mask) | (b0 & mask);
                 }
                 if (--count <= 0)
                     break;
@@ -170,7 +170,7 @@ mem_mapped2_copy_color(gx_device * dev,
 /* Note that on a big-endian machine, this is the same as the */
 /* standard byte-oriented-device. */
 
-#if !arch_is_big_endian
+#if !ARCH_IS_BIG_ENDIAN
 
 /* Procedures */
 declare_mem_procs(mem2_word_copy_mono, mem2_word_copy_color, mem2_word_fill_rectangle);
@@ -246,4 +246,4 @@ mem2_word_copy_color(gx_device * dev,
     return code;
 }
 
-#endif /* !arch_is_big_endian */
+#endif /* !ARCH_IS_BIG_ENDIAN */

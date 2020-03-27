@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -129,7 +129,7 @@ shading_param(const_os_ptr op, const gs_shading_t ** ppsh)
          * no way to check whether a structure is actually a shading.
          */
     if (!r_is_struct(op) ||
-        r_has_masked_attrs(op, a_executable | a_execute, a_all)
+        r_has_masked_attrs(op, a_execute, a_all)
         )
         return_error(gs_error_typecheck);
     *ppsh = (gs_shading_t *) op->value.pstruct;
@@ -229,8 +229,10 @@ build_shading(i_ctx_t *i_ctx_p, build_shading_proc_t proc)
         goto fail;
     if (gx_color_space_needs_cie_caches(psh->params.ColorSpace)) {
         rc_decrement(psh->params.cie_joint_caches, "build_shading");
-        psh->params.cie_joint_caches = gx_currentciecaches(igs);
-        rc_increment(psh->params.cie_joint_caches);
+        /* gx_currentciecaches_for_mem passes us a new reference */
+        psh->params.cie_joint_caches = gx_get_cie_caches_ref(igs, imemory);
+        if (psh->params.cie_joint_caches == NULL)
+            return gs_error_VMerror;
     }
     make_istruct_new(op, 0, psh);
     return code;

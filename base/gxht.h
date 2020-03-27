@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -89,7 +89,7 @@ typedef struct gs_threshold_halftone_common_s {
 typedef struct gs_threshold_halftone_s {
     GS_THRESHOLD_HALFTONE_COMMON; /* must be first */
     gs_const_string thresholds;
-    gs_mapping_proc transfer;	/* OBSOLETE */
+    gs_mapping_proc transfer;
 } gs_threshold_halftone;
 
 #define st_threshold_halftone_max_ptrs 2
@@ -101,15 +101,14 @@ typedef struct gs_threshold2_halftone_s {
     int height2;
     int bytes_per_sample;	/* 1 or 2 */
     gs_const_bytestring thresholds; /* nota bene */
+    gs_mapping_proc transfer;
 } gs_threshold2_halftone;
 
 /* Client-defined halftone that generates a halftone order. */
 typedef struct gs_client_order_halftone_s gs_client_order_halftone;
 
-#ifndef gx_ht_order_DEFINED
-#  define gx_ht_order_DEFINED
 typedef struct gx_ht_order_s gx_ht_order;
-#endif
+
 typedef struct gs_client_order_ht_procs_s {
 
     /*
@@ -118,7 +117,7 @@ typedef struct gs_client_order_ht_procs_s {
      */
 
     int (*create_order) (gx_ht_order * porder,
-                         gs_state * pgs,
+                         gs_gstate * pgs,
                          const gs_client_order_halftone * phcop,
                          gs_memory_t * mem);
 
@@ -213,7 +212,7 @@ void gs_setaccuratescreens(gs_memory_t *, bool);
 bool gs_currentaccuratescreens(gs_memory_t *);
 
 /* Initiate screen sampling with optional AccurateScreens. */
-int gs_screen_init_memory(gs_screen_enum *, gs_state *,
+int gs_screen_init_memory(gs_screen_enum *, gs_gstate *,
                           gs_screen_halftone *, bool, gs_memory_t *);
 
 #define gs_screen_init_accurate(penum, pgs, phsp, accurate)\

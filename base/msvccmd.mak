@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2012 Artifex Software, Inc.
+# Copyright (C) 2001-2019 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 # of the license contained in the file LICENSE in this distribution.
 #
 # Refer to licensing information at http://www.artifex.com or contact
-# Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-# CA  94903, U.S.A., +1(415)492-9861, for further information.
+# Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+# CA 94945, U.S.A., +1(415)492-9861, for further information.
 #
 # Command definition section for Microsoft Visual C++ 4.x/5.x,
 # Windows NT or Windows 95 platform.
@@ -99,6 +99,8 @@ CDCC=/Zi
 
 !if "$(CPU_FAMILY)"=="i386"
 
+!if ($(MSVC_VERSION) <= 12)
+# GB and QI0f were removed at (or before) VS2015
 !if ($(MSVC_VERSION) >= 8) || defined(WIN64)
 # MSVC 8 (2005) attempts to produce code good for all processors.
 # and doesn't used /G5 or /GB.
@@ -111,6 +113,7 @@ CPFLAGS=/G5 $(QI0f)
 CPFLAGS=/GB $(QI0f)
 !else
 CPFLAGS=/GB $(QI0f)
+!endif
 !endif
 !endif
 
@@ -165,7 +168,7 @@ DEBUGSYM=0
 !if $(TDEBUG)!=0
 # /Fd designates the directory for the .pdb file.
 # Note that it must be followed by a space.
-CT=/Od /Fd$(GLOBJDIR) $(NULL) $(CDCC) $(CPCH)
+CT=/Od /Fd$(GLOBJDIR)\ $(NULL) $(CDCC) $(CPCH)
 LCT=/DEBUG /INCREMENTAL:YES
 COMPILE_FULL_OPTIMIZED=    # no optimization when debugging
 COMPILE_WITH_FRAMES=    # no optimization when debugging
@@ -176,20 +179,23 @@ CMT=/MTd
 CT=
 LCT=
 CMT=/MT
+COMPILE_WITHOUT_FRAMES=/Oy
 !else
-CT=/Zi /Fd$(GLOBJDIR) $(NULL)
-LCT=/DEBUG
+# Assume that DEBUGSYM != 0 implies a PROFILE build
+CT=/Zi /Fd$(GLOBJDIR)\ $(NULL) $(CDCC) $(CPCH)
+LCT=/DEBUG /PROFILE /OPT:REF /OPT:ICF
 CMT=/MTd
+# Do not disable frame pointers in profile builds.
+COMPILE_WITHOUT_FRAMES=/Oy-
 !endif
 !if $(MSVC_VERSION) == 5
 # NOTE: With MSVC++ 5.0, /O2 produces a non-working executable.
 # We believe the following list of optimizations works around this bug.
-COMPILE_FULL_OPTIMIZED=/GF /Ot /Oi /Ob2 /Oy /Oa- /Ow-
+COMPILE_FULL_OPTIMIZED=/GF /Ot /Oi /Ob2 /Oa- /Ow- $(COMPILE_WITHOUT_FRAMES)
 !else
-COMPILE_FULL_OPTIMIZED=/GF /O2 /Ob2
+COMPILE_FULL_OPTIMIZED=/GF /O2 /Ob2 $(COMPILE_WITHOUT_FRAMES)
 !endif
-COMPILE_WITH_FRAMES=
-COMPILE_WITHOUT_FRAMES=/Oy
+COMPILE_WITH_FRAMES=/Oy-
 !endif
 
 !if $(MSVC_VERSION) >= 8
@@ -197,7 +203,11 @@ COMPILE_WITHOUT_FRAMES=/Oy
 CS=
 !else
 !if $(DEBUG)!=0 || $(TDEBUG)!=0
+!if $(MSVC_VERSION) < 14
+# This flag (Enable stack checks for all functions) has gone in
+# VS2015.
 CS=/Ge
+!endif
 !else
 CS=/Gs
 !endif

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -28,14 +28,14 @@
 #include "gxdevice.h"
 #include "gxcmap.h"
 #include "gxdcolor.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gxdevmem.h"
 #include "gxcpath.h"
 #include "gximage.h"
 
 /* ---------------- Unpacking procedures ---------------- */
 
-static const byte *
+const byte *
 sample_unpack_16(byte * bptr, int *pdata_x, const byte * data,
                  int data_x, uint dsize, const sample_map *ignore_smap, int spread,
                  int ignore_num_components_per_plane)
@@ -59,7 +59,7 @@ sample_unpack_16(byte * bptr, int *pdata_x, const byte * data,
     return bptr;
 }
 
-static const byte *
+const byte *
 sample_unpackicc_16(byte * bptr, int *pdata_x, const byte * data,
                  int data_x, uint dsize, const sample_map *ignore_smap, int spread,
                  int ignore_num_components_per_plane)

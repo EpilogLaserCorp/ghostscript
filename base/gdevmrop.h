@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Definitions for device RasterOp implementations. */
@@ -19,11 +19,9 @@
 #ifndef gdevmrop_INCLUDED
 #  define gdevmrop_INCLUDED
 
-/*
- * Compute the effective RasterOp for the 1-bit case,
- * taking transparency into account.
- */
-gs_rop3_t gs_transparent_rop(gs_logical_operation_t lop);
+#include "gsropt.h"
+#include "gxdevcli.h"
+#include "gximage.h"
 
 #ifdef DEBUG
 /* Trace a [strip_]copy_rop call. */
@@ -45,15 +43,6 @@ void trace_copy_rop(const char *cname, gx_device * dev,
  * The texture is a gx_device_color; it may be any type of color, even a
  * pattern.
  */
-#ifndef gx_device_color_DEFINED
-#  define gx_device_color_DEFINED
-typedef struct gx_device_color_s gx_device_color;
-#endif
-
-#ifndef gx_device_rop_texture_DEFINED
-#  define gx_device_rop_texture_DEFINED
-typedef struct gx_device_rop_texture_s gx_device_rop_texture;
-#endif
 
 struct gx_device_rop_texture_s {
     gx_device_forward_common;

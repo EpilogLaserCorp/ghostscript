@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -45,11 +45,10 @@ struct gx_device_tfax_s {
     gx_fax_device_common;
     long MaxStripSize;          /* 0 = no limit, other is UNCOMPRESSED limit */
                                 /* The type and range of FillOrder follows TIFF 6 spec  */
-    int  FillOrder;             /* 1 = lowest column in the high-order bit, 2 = reverse */
     bool  BigEndian;            /* true = big endian; false = little endian*/
     bool UseBigTIFF;
     uint16 Compression;         /* same values as TIFFTAG_COMPRESSION */
-
+    bool write_datetime;
     TIFF *tif;                  /* For TIFF output only */
 };
 typedef struct gx_device_tfax_s gx_device_tfax;
@@ -64,11 +63,11 @@ static const gx_device_procs gdev_tfax_std_procs =
 {\
     FAX_DEVICE_BODY(gx_device_tfax, gdev_tfax_std_procs, dname, print_page),\
     TIFF_DEFAULT_STRIP_SIZE     /* strip size byte count */,\
-    1                           /* lowest column in the high-order bit */,\
-    arch_is_big_endian          /* default to native endian (i.e. use big endian iff the platform is so*/,\
+    ARCH_IS_BIG_ENDIAN          /* default to native endian (i.e. use big endian iff the platform is so*/,\
     false,                      /* default to not using bigtiff */\
     compr,\
-    NULL\
+    true, /* write_datetime */ \
+    NULL \
 }
 
 const gx_device_tfax gs_tiffcrle_device =
@@ -125,14 +124,14 @@ tfax_get_params(gx_device * dev, gs_param_list * plist)
 
     if ((code = param_write_long(plist, "MaxStripSize", &tfdev->MaxStripSize)) < 0)
         ecode = code;
-    if ((code = param_write_int(plist, "FillOrder", &tfdev->FillOrder)) < 0)
-        ecode = code;
     if ((code = param_write_bool(plist, "BigEndian", &tfdev->BigEndian)) < 0)
         ecode = code;
 #if (TIFFLIB_VERSION >= 20111221)
-    if ((code = param_write_bool(plist, "UseBigTiff", &tfdev->UseBigTIFF)) < 0)
+    if ((code = param_write_bool(plist, "UseBigTIFF", &tfdev->UseBigTIFF)) < 0)
         ecode = code;
 #endif
+    if ((code = param_write_bool(plist, "TIFFDateTime", &tfdev->write_datetime)) < 0)
+        ecode = code;
     if ((code = tiff_compression_param_string(&comprstr, tfdev->Compression)) < 0 ||
         (code = param_write_string(plist, "Compression", &comprstr)) < 0)
         ecode = code;
@@ -151,6 +150,7 @@ tfax_put_params(gx_device * dev, gs_param_list * plist)
     const char *param_name;
     bool big_endian = tfdev->BigEndian;
     bool usebigtiff = tfdev->UseBigTIFF;
+    bool write_datetime = tfdev->write_datetime;
     uint16 compr = tfdev->Compression;
     gs_param_string comprstr;
 
@@ -195,7 +195,7 @@ tfax_put_params(gx_device * dev, gs_param_list * plist)
     }
 
     /* Read UseBigTIFF option as bool */
-    switch (code = param_read_bool(plist, (param_name = "UseBigTiff"), &usebigtiff)) {
+    switch (code = param_read_bool(plist, (param_name = "UseBigTIFF"), &usebigtiff)) {
         default:
             ecode = code;
             param_signal_error(plist, param_name, ecode);
@@ -209,6 +209,15 @@ tfax_put_params(gx_device * dev, gs_param_list * plist)
         dmlprintf(dev->memory, "Warning: this version of libtiff does not support BigTIFF, ignoring parameter\n");
     usebigtiff = false;
 #endif
+
+    switch (code = param_read_bool(plist, (param_name = "TIFFDateTime"), &write_datetime)) {
+        default:
+            ecode = code;
+            param_signal_error(plist, param_name, ecode);
+        case 0:
+        case 1:
+            break;
+    }
 
     /* Read Compression */
     switch (code = param_read_string(plist, (param_name = "Compression"), &comprstr)) {
@@ -235,6 +244,7 @@ tfax_put_params(gx_device * dev, gs_param_list * plist)
     tfdev->BigEndian = big_endian;
     tfdev->UseBigTIFF = usebigtiff;
     tfdev->Compression = compr;
+    tfdev->write_datetime = write_datetime;
     return code;
 }
 
@@ -255,9 +265,10 @@ const gx_device_tfax gs_tifflzw_device = {
                         1, tifflzw_print_page),
     0/* AdjustWidth */,
     0                           /* MinFeatureSize */,
+    1,                          /* FillOrder */
+    true,                       /* BlackIs1 */
     TIFF_DEFAULT_STRIP_SIZE     /* strip size byte count */,
-    1                           /* lowest column in the high-order bit, not used */,
-    arch_is_big_endian          /* default to native endian (i.e. use big endian iff the platform is so*/,
+    ARCH_IS_BIG_ENDIAN          /* default to native endian (i.e. use big endian iff the platform is so*/,
     false                       /* defauilt to *not* UseBigTIFF */,
     COMPRESSION_LZW
 };
@@ -270,15 +281,16 @@ const gx_device_tfax gs_tiffpack_device = {
                         1, tiffpack_print_page),
     0                           /* AdjustWidth */,
     0                           /* MinFeatureSize */,
+    1,                          /* FillOrder */
+    true,                       /* BlackIs1 */
     TIFF_DEFAULT_STRIP_SIZE     /* strip size byte count */,
-    1                           /* lowest column in the high-order bit, not used */,
-    arch_is_big_endian          /* default to native endian (i.e. use big endian iff the platform is so*/,
+    ARCH_IS_BIG_ENDIAN          /* default to native endian (i.e. use big endian iff the platform is so*/,
     false                       /* defauilt to *not* UseBigTIFF */,
     COMPRESSION_PACKBITS
 };
 
 /* Forward references */
-static int tfax_begin_page(gx_device_tfax * tfdev, FILE * file);
+static int tfax_begin_page(gx_device_tfax * tfdev, gp_file * file);
 
 static void
 tfax_set_fields(gx_device_tfax *tfdev)
@@ -297,7 +309,7 @@ tfax_set_fields(gx_device_tfax *tfdev)
 }
 
 static int
-tiffcrle_print_page(gx_device_printer * dev, FILE * prn_stream)
+tiffcrle_print_page(gx_device_printer * dev, gp_file * prn_stream)
 {
     gx_device_tfax *tfdev = (gx_device_tfax *)dev;
 
@@ -309,7 +321,7 @@ tiffcrle_print_page(gx_device_printer * dev, FILE * prn_stream)
 }
 
 static int
-tiffg3_print_page(gx_device_printer * dev, FILE * prn_stream)
+tiffg3_print_page(gx_device_printer * dev, gp_file * prn_stream)
 {
     gx_device_tfax *tfdev = (gx_device_tfax *)dev;
 
@@ -323,7 +335,7 @@ tiffg3_print_page(gx_device_printer * dev, FILE * prn_stream)
 }
 
 static int
-tiffg32d_print_page(gx_device_printer * dev, FILE * prn_stream)
+tiffg32d_print_page(gx_device_printer * dev, gp_file * prn_stream)
 {
     gx_device_tfax *tfdev = (gx_device_tfax *)dev;
 
@@ -337,7 +349,7 @@ tiffg32d_print_page(gx_device_printer * dev, FILE * prn_stream)
 }
 
 static int
-tiffg4_print_page(gx_device_printer * dev, FILE * prn_stream)
+tiffg4_print_page(gx_device_printer * dev, gp_file * prn_stream)
 {
     gx_device_tfax *tfdev = (gx_device_tfax *)dev;
 
@@ -352,7 +364,7 @@ tiffg4_print_page(gx_device_printer * dev, FILE * prn_stream)
 
 /* Print an LZW page. */
 static int
-tifflzw_print_page(gx_device_printer * dev, FILE * prn_stream)
+tifflzw_print_page(gx_device_printer * dev, gp_file * prn_stream)
 {
     gx_device_tfax *const tfdev = (gx_device_tfax *)dev;
 
@@ -365,7 +377,7 @@ tifflzw_print_page(gx_device_printer * dev, FILE * prn_stream)
 
 /* Print a PackBits page. */
 static int
-tiffpack_print_page(gx_device_printer * dev, FILE * prn_stream)
+tiffpack_print_page(gx_device_printer * dev, gp_file * prn_stream)
 {
     gx_device_tfax *const tfdev = (gx_device_tfax *)dev;
 
@@ -378,7 +390,7 @@ tiffpack_print_page(gx_device_printer * dev, FILE * prn_stream)
 
 /* Begin a TIFF fax page. */
 static int
-tfax_begin_page(gx_device_tfax * tfdev, FILE * file)
+tfax_begin_page(gx_device_tfax * tfdev, gp_file * file)
 {
     gx_device_printer *const pdev = (gx_device_printer *)tfdev;
     int code;
@@ -390,6 +402,6 @@ tfax_begin_page(gx_device_tfax * tfdev, FILE * file)
             return_error(gs_error_invalidfileaccess);
     }
 
-    code = tiff_set_fields_for_printer(pdev, tfdev->tif, 1, tfdev->AdjustWidth);
+    code = tiff_set_fields_for_printer(pdev, tfdev->tif, 1, tfdev->AdjustWidth, tfdev->write_datetime);
     return code;
 }

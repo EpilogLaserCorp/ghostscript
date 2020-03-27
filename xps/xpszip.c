@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -18,30 +18,30 @@
 
 #include "ghostxps.h"
 
-static int isfile(char *path)
+static int isfile(gs_memory_t *mem, char *path)
 {
-    FILE *file = gp_fopen(path, "rb");
+    gp_file *file = gp_fopen(mem, path, "rb");
     if (file)
     {
-        fclose(file);
+        gp_fclose(file);
         return 1;
     }
     return 0;
 }
 
-static inline int getshort(FILE *file)
+static inline int getshort(gp_file *file)
 {
-    int a = getc(file);
-    int b = getc(file);
+    int a = xps_getc(file);
+    int b = xps_getc(file);
     return a | (b << 8);
 }
 
-static inline int getlong(FILE *file)
+static inline int getlong(gp_file *file)
 {
-    int a = getc(file);
-    int b = getc(file);
-    int c = getc(file);
-    int d = getc(file);
+    int a = xps_getc(file);
+    int b = xps_getc(file);
+    int c = xps_getc(file);
+    int d = xps_getc(file);
     return a | (b << 8) | (c << 16) | (d << 24);
 }
 
@@ -71,7 +71,7 @@ xps_compare_entries(const void *a0, const void *b0)
 }
 
 static xps_entry_t *
-xps_find_zip_entry(xps_context_t *ctx, char *name)
+xps_find_zip_entry(xps_context_t *ctx, const char *name)
 {
     int l = 0;
     int r = ctx->zip_count - 1;
@@ -105,14 +105,18 @@ xps_read_zip_entry(xps_context_t *ctx, xps_entry_t *ent, unsigned char *outbuf)
 
     if_debug1m('|', ctx->memory, "zip: inflating entry '%s'\n", ent->name);
 
-    fseek(ctx->file, ent->offset, 0);
+    if (xps_fseek(ctx->file, ent->offset, 0) < 0)
+        return gs_throw1(-1, "seek to offset %d failed.", ent->offset);
 
     sig = getlong(ctx->file);
     if (sig != ZIP_LOCAL_FILE_SIG)
         return gs_throw1(-1, "wrong zip local file signature (0x%x)", sig);
 
     version = getshort(ctx->file);
+    (void)version; /* Avoid unused variable compiler warning */
     general = getshort(ctx->file);
+    if (general & ZIP_ENCRYPTED_FLAG)
+        return gs_throw(-1, "zip file content is encrypted");
     method = getshort(ctx->file);
     (void) getshort(ctx->file); /* file time */
     (void) getshort(ctx->file); /* file date */
@@ -122,20 +126,32 @@ xps_read_zip_entry(xps_context_t *ctx, xps_entry_t *ent, unsigned char *outbuf)
     namelength = getshort(ctx->file);
     extralength = getshort(ctx->file);
 
-    fseek(ctx->file, namelength + extralength, 1);
+    if (namelength < 0 || namelength > 65535)
+        return gs_rethrow(gs_error_ioerror, "Illegal namelength (can't happen).\n");
+    if (extralength < 0 || extralength > 65535)
+        return gs_rethrow(gs_error_ioerror, "Illegal extralength (can't happen).\n");
+
+    if (xps_fseek(ctx->file, namelength + extralength, 1) != 0)
+        return gs_throw1(gs_error_ioerror, "xps_fseek to %d failed.\n", namelength + extralength);
 
     if (method == 0)
     {
-        fread(outbuf, 1, ent->usize, ctx->file);
+        code = xps_fread(outbuf, 1, ent->usize, ctx->file);
+        if (code != ent->usize)
+            return gs_throw1(gs_error_ioerror, "Failed to read %d bytes", ent->usize);
     }
     else if (method == 8)
     {
         inbuf = xps_alloc(ctx, ent->csize);
         if (!inbuf) {
-            return gs_throw(gs_error_VMerror, "out of memory.\n");
+            return gs_rethrow(gs_error_VMerror, "out of memory.\n");
         }
 
-        fread(inbuf, 1, ent->csize, ctx->file);
+        code = xps_fread(inbuf, 1, ent->csize, ctx->file);
+        if (code != ent->csize) {
+            xps_free(ctx, inbuf);
+            return gs_throw1(gs_error_ioerror, "Failed to read %d bytes", ent->csize);
+        }
 
         memset(&stream, 0, sizeof(z_stream));
         stream.zalloc = (alloc_func) xps_zip_alloc_items;
@@ -167,6 +183,13 @@ xps_read_zip_entry(xps_context_t *ctx, xps_entry_t *ent, unsigned char *outbuf)
         }
 
         xps_free(ctx, inbuf);
+
+        /* If the stream has less data than advertised, then zero the remainder. */
+        if (stream.avail_out > 0)
+        {
+            gs_warn("truncated zipfile entry; possibly corrupt data");
+            memset(stream.next_out, 0, stream.avail_out);
+        }
     }
     else
     {
@@ -184,11 +207,12 @@ static int
 xps_read_zip_dir(xps_context_t *ctx, int start_offset)
 {
     int sig;
-    int offset, count;
+    int offset, count, read;
     int namesize, metasize, commentsize;
     int i;
 
-    fseek(ctx->file, start_offset, 0);
+    if (xps_fseek(ctx->file, start_offset, 0) != 0)
+        return gs_throw1(gs_error_ioerror, "xps_fseek to %d failed.", start_offset);
 
     sig = getlong(ctx->file);
     if (sig != ZIP_END_OF_CENTRAL_DIRECTORY_SIG)
@@ -201,14 +225,18 @@ xps_read_zip_dir(xps_context_t *ctx, int start_offset)
     (void) getlong(ctx->file); /* size of central directory */
     offset = getlong(ctx->file); /* offset to central directory */
 
+    if (count < 0 || count > 65535)
+        return gs_rethrow(gs_error_rangecheck, "invalid number of entries in central directory disk (can't happen)");
+
     ctx->zip_count = count;
     ctx->zip_table = xps_alloc(ctx, sizeof(xps_entry_t) * count);
     if (!ctx->zip_table)
-        return gs_throw(gs_error_VMerror, "cannot allocate zip entry table");
+        return gs_rethrow(gs_error_VMerror, "cannot allocate zip entry table");
 
     memset(ctx->zip_table, 0, sizeof(xps_entry_t) * count);
 
-    fseek(ctx->file, offset, 0);
+    if (xps_fseek(ctx->file, offset, 0) != 0)
+        return gs_throw1(gs_error_ioerror, "xps_fseek to offset %d failed", offset);
 
     for (i = 0; i < count; i++)
     {
@@ -226,6 +254,8 @@ xps_read_zip_dir(xps_context_t *ctx, int start_offset)
         ctx->zip_table[i].csize = getlong(ctx->file);
         ctx->zip_table[i].usize = getlong(ctx->file);
         namesize = getshort(ctx->file);
+        if (namesize < 0 || namesize > 65535)
+            return gs_rethrow(gs_error_rangecheck, "illegal namesize (can't happen)");
         metasize = getshort(ctx->file);
         commentsize = getshort(ctx->file);
         (void) getshort(ctx->file); /* disk number start */
@@ -233,15 +263,23 @@ xps_read_zip_dir(xps_context_t *ctx, int start_offset)
         (void) getlong(ctx->file); /* ext file atts */
         ctx->zip_table[i].offset = getlong(ctx->file);
 
+	if (ctx->zip_table[i].csize < 0 || ctx->zip_table[i].usize < 0)
+            return gs_throw(gs_error_ioerror, "cannot read zip entries larger than 2GB");
+
         ctx->zip_table[i].name = xps_alloc(ctx, namesize + 1);
         if (!ctx->zip_table[i].name)
-            return gs_throw(gs_error_VMerror, "cannot allocate zip entry name");
+            return gs_rethrow(gs_error_VMerror, "cannot allocate zip entry name");
 
-        fread(ctx->zip_table[i].name, 1, namesize, ctx->file);
+        read = xps_fread(ctx->zip_table[i].name, 1, namesize, ctx->file);
+        if (read != namesize)
+            return gs_throw1(gs_error_ioerror, "failed to read %d bytes", namesize);
+
         ctx->zip_table[i].name[namesize] = 0;
 
-        fseek(ctx->file, metasize, 1);
-        fseek(ctx->file, commentsize, 1);
+        if (xps_fseek(ctx->file, metasize, 1) != 0)
+            return gs_throw1(gs_error_ioerror, "xps_fseek to offset %d failed", metasize);
+        if (xps_fseek(ctx->file, commentsize, 1) != 0)
+            return gs_throw1(gs_error_ioerror, "xps_fseek to offset %d failed", commentsize);
     }
 
     qsort(ctx->zip_table, count, sizeof(xps_entry_t), xps_compare_entries);
@@ -264,17 +302,20 @@ xps_find_and_read_zip_dir(xps_context_t *ctx)
     int i, n;
     char buf[512];
 
-    fseek(ctx->file, 0, SEEK_END);
-    filesize = ftell(ctx->file);
+    if (xps_fseek(ctx->file, 0, SEEK_END) < 0)
+        return gs_throw(-1, "seek to end failed.");
+
+    filesize = xps_ftell(ctx->file);
 
     maxback = MIN(filesize, 0xFFFF + sizeof buf);
     back = MIN(maxback, sizeof buf);
 
     while (back < maxback)
     {
-        fseek(ctx->file, filesize - back, 0);
+        if (xps_fseek(ctx->file, filesize - back, 0) < 0)
+            return gs_throw1(gs_error_ioerror, "xps_fseek to %d failed.\n", filesize - back);
 
-        n = fread(buf, 1, sizeof buf, ctx->file);
+        n = xps_fread(buf, 1, sizeof buf, ctx->file);
         if (n < 0)
             return gs_throw(-1, "cannot read end of central directory");
 
@@ -293,13 +334,15 @@ xps_find_and_read_zip_dir(xps_context_t *ctx)
  */
 
 static xps_part_t *
-xps_read_zip_part(xps_context_t *ctx, char *partname)
+xps_read_zip_part(xps_context_t *ctx, const char *partname)
 {
     char buf[2048];
     xps_entry_t *ent;
     xps_part_t *part;
     int count, size, offset, i;
-    char *name;
+    int code = 0;
+    const char *name;
+    int seen_last = 0;
 
     name = partname;
     if (name[0] == '/')
@@ -310,14 +353,23 @@ xps_read_zip_part(xps_context_t *ctx, char *partname)
     if (ent)
     {
         part = xps_new_part(ctx, partname, ent->usize);
-        xps_read_zip_entry(ctx, ent, part->data);
+        if (part != NULL)
+            code = xps_read_zip_entry(ctx, ent, part->data);
+        else
+            return NULL;
+        if (code < 0)
+        {
+            xps_free_part(ctx, part);
+            gs_rethrow1(-1, "cannot read zip entry '%s'", name);
+            return NULL;
+        }
         return part;
     }
 
     /* Count the number of pieces and their total size */
     count = 0;
     size = 0;
-    while (1)
+    while (!seen_last)
     {
         gs_sprintf(buf, "%s/[%d].piece", name, count);
         ent = xps_find_zip_entry(ctx, buf);
@@ -325,11 +377,17 @@ xps_read_zip_part(xps_context_t *ctx, char *partname)
         {
             gs_sprintf(buf, "%s/[%d].last.piece", name, count);
             ent = xps_find_zip_entry(ctx, buf);
+            seen_last = !!ent;
         }
         if (!ent)
             break;
         count ++;
         size += ent->usize;
+    }
+    if (!seen_last)
+    {
+        gs_throw1(-1, "cannot find all pieces for part '%s'", partname);
+        return NULL;
     }
 
     /* Inflate the pieces */
@@ -348,7 +406,13 @@ xps_read_zip_part(xps_context_t *ctx, char *partname)
                 gs_warn("missing piece");
             else
             {
-                xps_read_zip_entry(ctx, ent, part->data + offset);
+                code = xps_read_zip_entry(ctx, ent, part->data + offset);
+                if (code < 0)
+                {
+                    xps_free_part(ctx, part);
+                    gs_rethrow1(-1, "cannot read zip entry '%s'", buf);
+                    return NULL;
+                }
                 offset += ent->usize;
             }
         }
@@ -363,27 +427,43 @@ xps_read_zip_part(xps_context_t *ctx, char *partname)
  */
 
 static xps_part_t *
-xps_read_dir_part(xps_context_t *ctx, char *name)
+xps_read_dir_part(xps_context_t *ctx, const char *name)
 {
     char buf[2048];
     xps_part_t *part;
-    FILE *file;
+    gp_file *file;
     int count, size, offset, i, n;
 
-    xps_strlcpy(buf, ctx->directory, sizeof buf);
-    xps_strlcat(buf, name, sizeof buf);
+    gs_strlcpy(buf, ctx->directory, sizeof buf);
+    gs_strlcat(buf, name, sizeof buf);
 
     /* All in one piece */
-    file = gp_fopen(buf, "rb");
+    file = gp_fopen(ctx->memory, buf, "rb");
     if (file)
     {
-        fseek(file, 0, SEEK_END);
-        size = ftell(file);
-        fseek(file, 0, SEEK_SET);
+        if (xps_fseek(file, 0, SEEK_END) != 0) {
+            gp_fclose(file);
+            return NULL;
+        }
+
+        size = xps_ftell(file);
+        if (size < 0) {
+            gp_fclose(file);
+            return NULL;
+        }
+
+        if (xps_fseek(file, 0, SEEK_SET) != 0) {
+            gp_fclose(file);
+            return NULL;
+        }
+
         part = xps_new_part(ctx, name, size);
-        fread(part->data, 1, size, file);
-        fclose(file);
-        return part;
+        count = xps_fread(part->data, 1, size, file);
+        gp_fclose(file);
+        if (count == size)
+            return part;
+        else
+            return NULL;
     }
 
     /* Count the number of pieces and their total size */
@@ -392,18 +472,19 @@ xps_read_dir_part(xps_context_t *ctx, char *name)
     while (1)
     {
         gs_sprintf(buf, "%s%s/[%d].piece", ctx->directory, name, count);
-        file = gp_fopen(buf, "rb");
+        file = gp_fopen(ctx->memory, buf, "rb");
         if (!file)
         {
             gs_sprintf(buf, "%s%s/[%d].last.piece", ctx->directory, name, count);
-            file = gp_fopen(buf, "rb");
+            file = gp_fopen(ctx->memory, buf, "rb");
         }
         if (!file)
             break;
         count ++;
-        fseek(file, 0, SEEK_END);
-        size += ftell(file);
-        fclose(file);
+        if (xps_fseek(file, 0, SEEK_END) < 0)
+            break;;
+        size += xps_ftell(file);
+        gp_fclose(file);
     }
 
     /* Inflate the pieces */
@@ -417,10 +498,10 @@ xps_read_dir_part(xps_context_t *ctx, char *name)
                 gs_sprintf(buf, "%s%s/[%d].piece", ctx->directory, name, i);
             else
                 gs_sprintf(buf, "%s%s/[%d].last.piece", ctx->directory, name, i);
-            file = gp_fopen(buf, "rb");
-            n = fread(part->data + offset, 1, size - offset, file);
+            file = gp_fopen(ctx->memory, buf, "rb");
+            n = xps_fread(part->data + offset, 1, size - offset, file);
             offset += n;
-            fclose(file);
+            gp_fclose(file);
         }
         return part;
     }
@@ -429,7 +510,7 @@ xps_read_dir_part(xps_context_t *ctx, char *name)
 }
 
 xps_part_t *
-xps_read_part(xps_context_t *ctx, char *partname)
+xps_read_part(xps_context_t *ctx, const char *partname)
 {
     if (ctx->directory)
         return xps_read_dir_part(ctx, partname);
@@ -441,7 +522,7 @@ xps_read_part(xps_context_t *ctx, char *partname)
  */
 
 static int
-xps_read_and_process_metadata_part(xps_context_t *ctx, char *name)
+xps_read_and_process_metadata_part(xps_context_t *ctx, const char *name)
 {
     xps_part_t *part;
     int code;
@@ -489,7 +570,7 @@ xps_read_and_process_page_part(xps_context_t *ctx, char *name)
  */
 
 int
-xps_process_file(xps_context_t *ctx, char *filename)
+xps_process_file(xps_context_t *ctx, const char *filename)
 {
     char buf[2048];
     xps_document_t *doc;
@@ -497,7 +578,7 @@ xps_process_file(xps_context_t *ctx, char *filename)
     int code;
     char *p;
 
-    ctx->file = gp_fopen(filename, "rb");
+    ctx->file = xps_fopen(ctx->memory, filename, "rb");
     if (!ctx->file)
         return gs_throw1(-1, "cannot open file: '%s'", filename);
 
@@ -507,7 +588,7 @@ xps_process_file(xps_context_t *ctx, char *filename)
         int size;
 
         if_debug0m('|', ctx->memory, "zip: single page mode\n");
-        xps_strlcpy(buf, filename, sizeof buf);
+        gs_strlcpy(buf, filename, sizeof buf);
         while (1)
         {
             p = strrchr(buf, '/');
@@ -515,9 +596,9 @@ xps_process_file(xps_context_t *ctx, char *filename)
                 p = strrchr(buf, '\\');
             if (!p)
                 break;
-            xps_strlcpy(p, "/_rels/.rels", buf + sizeof buf - p);
+            gs_strlcpy(p, "/_rels/.rels", buf + sizeof buf - p);
             if_debug1m('|', ctx->memory, "zip: testing if '%s' exists\n", buf);
-            if (isfile(buf))
+            if (isfile(ctx->memory, buf))
             {
                 *p = 0;
                 ctx->directory = xps_strdup(ctx, buf);
@@ -532,11 +613,29 @@ xps_process_file(xps_context_t *ctx, char *filename)
             ctx->directory = xps_strdup(ctx, "");
         }
 
-        fseek(ctx->file, 0, SEEK_END);
-        size = ftell(ctx->file);
-        fseek(ctx->file, 0, SEEK_SET);
+        if (xps_fseek(ctx->file, 0, SEEK_END) != 0) {
+            code = gs_rethrow(gs_error_ioerror, "xps_fseek to file end failed");
+            goto cleanup;
+        }
+
+        size = xps_ftell(ctx->file);
+        if (size < 0) {
+            code = gs_rethrow(gs_error_ioerror, "xps_ftell raised an error");
+            goto cleanup;
+        }
+
+        if (xps_fseek(ctx->file, 0, SEEK_SET) != 0) {
+            code = gs_rethrow(gs_error_ioerror, "xps_fseek to file begin failed");
+            goto cleanup;
+        }
+
         part = xps_new_part(ctx, filename, size);
-        fread(part->data, 1, size, ctx->file);
+        code = xps_fread(part->data, 1, size, ctx->file);
+        if (code != size) {
+            code = gs_rethrow1(gs_error_ioerror, "failed to read %d bytes", size);
+            xps_free_part(ctx, part);
+            goto cleanup;
+        }
 
         code = xps_parse_fixed_page(ctx, part);
         if (code)
@@ -553,7 +652,7 @@ xps_process_file(xps_context_t *ctx, char *filename)
 
     if (strstr(filename, "/_rels/.rels") || strstr(filename, "\\_rels\\.rels"))
     {
-        xps_strlcpy(buf, filename, sizeof buf);
+        gs_strlcpy(buf, filename, sizeof buf);
         p = strstr(buf, "/_rels/.rels");
         if (!p)
             p = strstr(buf, "\\_rels\\.rels");
@@ -617,6 +716,6 @@ cleanup:
     if (ctx->directory)
         xps_free(ctx, ctx->directory);
     if (ctx->file)
-        fclose(ctx->file);
+        xps_fclose(ctx->file);
     return code;
 }

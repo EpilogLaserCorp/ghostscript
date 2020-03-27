@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -68,12 +68,14 @@ z_jbig2decode(i_ctx_t * i_ctx_p)
        z_jbig2makeglobalctx() below to create an astruct wrapping the
        global decoder data and store it under the .jbig2globalctx key
      */
-    s_jbig2decode_set_global_data((stream_state*)&state, NULL);
+    s_jbig2decode_set_global_data((stream_state*)&state, NULL, NULL);
     if (r_has_type(op, t_dictionary)) {
         check_dict_read(*op);
         if ( dict_find_string(op, ".jbig2globalctx", &sop) > 0) {
+            if (!r_is_struct(sop) || !r_has_stype(sop, imemory, st_jbig2_global_data_t))
+                return_error(gs_error_typecheck);
             gref = r_ptr(sop, s_jbig2_global_data_t);
-            s_jbig2decode_set_global_data((stream_state*)&state, gref);
+            s_jbig2decode_set_global_data((stream_state*)&state, gref, gref->data);
         }
     }
 
@@ -102,7 +104,7 @@ z_jbig2makeglobalctx(i_ctx_t * i_ctx_p)
         size = gs_object_size(imemory, op->value.pstruct);
         data = r_ptr(op, byte);
 
-        code = s_jbig2decode_make_global_data(data, size,
+        code = s_jbig2decode_make_global_data(imemory->non_gc_memory, data, size,
                         &global);
         if (size > 0 && global == NULL) {
             dmlprintf(imemory, "failed to create parsed JBIG2GLOBALS object.");

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -25,12 +25,13 @@
 #include "gstypes.h"
 #include "gxfcache.h"
 #include "gxdevcli.h"
-#include "gxdcolor.h"		/* for gs_state_color_load */
+#include "gxdcolor.h"		/* for gs_gstate_color_load */
 #include "gxfont.h"		/* for init_fstack */
 #include "gxpath.h"
 #include "gxtext.h"
 #include "gzstate.h"
 #include "gsutil.h"
+#include "gxdevsop.h"
 
 /* GC descriptors */
 public_st_gs_text_params();
@@ -94,7 +95,7 @@ static ENUM_PTRS_WITH(text_enum_enum_ptrs, gs_text_enum_t *eptr)
 }
 case 0: return ENUM_OBJ(gx_device_enum_ptr(eptr->dev));
 case 1: return ENUM_OBJ(gx_device_enum_ptr(eptr->imaging_dev));
-ENUM_PTR3(2, gs_text_enum_t, pis, orig_font, path);
+ENUM_PTR3(2, gs_text_enum_t, pgs, orig_font, path);
 ENUM_PTR3(5, gs_text_enum_t, pdcolor, pcpath, current_font);
 ENUM_PTRS_END
 
@@ -105,7 +106,7 @@ static RELOC_PTRS_WITH(text_enum_reloc_ptrs, gs_text_enum_t *eptr)
     RELOC_USING(st_gs_text_params, &eptr->text, sizeof(eptr->text));
     eptr->dev = gx_device_reloc_ptr(eptr->dev, gcst);
     eptr->imaging_dev = gx_device_reloc_ptr(eptr->imaging_dev, gcst);
-    RELOC_PTR3(gs_text_enum_t, pis, orig_font, path);
+    RELOC_PTR3(gs_text_enum_t, pgs, orig_font, path);
     RELOC_PTR3(gs_text_enum_t, pdcolor, pcpath, current_font);
     if (eptr->pair != NULL)
         eptr->pair = (cached_fm_pair *)RELOC_OBJ(eptr->pair - eptr->pair->index) +
@@ -117,7 +118,7 @@ RELOC_PTRS_END
 
 /* Begin processing text. */
 int
-gx_device_text_begin(gx_device * dev, gs_imager_state * pis,
+gx_device_text_begin(gx_device * dev, gs_gstate * pgs,
                      const gs_text_params_t * text, gs_font * font,
                      gx_path * path,	/* unless DO_NONE & !RETURN_WIDTH */
                      const gx_device_color * pdcolor,	/* DO_DRAW */
@@ -138,7 +139,7 @@ gx_device_text_begin(gx_device * dev, gs_imager_state * pis,
            Since the accumulation may happen while stringwidth.
            we pass the device color unconditionally. */
         return dev_proc(dev, text_begin)
-            (dev, pis, text, font, tpath, pdcolor, tcpath, mem, ppte);
+            (dev, pgs, text, font, tpath, pdcolor, tcpath, mem, ppte);
     }
 }
 
@@ -149,6 +150,9 @@ gx_device_text_begin(gx_device * dev, gs_imager_state * pis,
 static int
 gs_text_enum_init_dynamic(gs_text_enum_t *pte, gs_font *font)
 {
+    uint operation = pte->text.operation;
+    bool propagate_charpath = (operation & TEXT_DO_DRAW) != 0;
+
     pte->current_font = font;
     pte->index = 0;
     pte->xy_index = 0;
@@ -157,11 +161,29 @@ gs_text_enum_init_dynamic(gs_text_enum_t *pte, gs_font *font)
     pte->device_disabled_grid_fitting = 0;
     pte->outer_CID = GS_NO_GLYPH;
     pte->single_byte_space = false;
+    pte->cc = NULL;
+
+    /* We need to set the charpath_flag, as the PCL interpreter calls the
+     * graphics lib to do some measurement operations, which relies on the
+     * charpath_flag. See bug 700577 for more details. */
+    if (operation & TEXT_DO_ANY_CHARPATH)
+        pte->charpath_flag =
+            (operation & TEXT_DO_FALSE_CHARPATH ? cpm_false_charpath :
+             operation & TEXT_DO_TRUE_CHARPATH ? cpm_true_charpath :
+             operation & TEXT_DO_FALSE_CHARBOXPATH ? cpm_false_charboxpath :
+             operation & TEXT_DO_TRUE_CHARBOXPATH ? cpm_true_charboxpath :
+             operation & TEXT_DO_CHARWIDTH ? cpm_charwidth :
+             cpm_show /* can't happen */ );
+    else
+        pte->charpath_flag =
+        (propagate_charpath ? (pte->pgs ? pte->pgs->in_charpath : 0) : cpm_show);
+    pte->is_pure_color = pte->pgs ? gs_color_writes_pure(pte->pgs) : 0;
+
     return font->procs.init_fstack(pte, font);
 }
 int
 gs_text_enum_init(gs_text_enum_t *pte, const gs_text_enum_procs_t *procs,
-                  gx_device *dev, gs_imager_state *pis,
+                  gx_device *dev, gs_gstate *pgs,
                   const gs_text_params_t *text, gs_font *font, gx_path *path,
                   const gx_device_color *pdcolor, const gx_clip_path *pcpath,
                   gs_memory_t *mem)
@@ -171,7 +193,7 @@ gs_text_enum_init(gs_text_enum_t *pte, const gs_text_enum_procs_t *procs,
     pte->text = *text;
     pte->dev = dev;
     pte->imaging_dev = NULL;
-    pte->pis = pis;
+    pte->pgs = pgs;
     pte->orig_font = font;
     pte->path = path;
     pte->pdcolor = pdcolor;
@@ -195,6 +217,25 @@ gs_text_enum_init(gs_text_enum_t *pte, const gs_text_enum_procs_t *procs,
     return code;
 }
 
+gs_text_enum_t *
+gs_text_enum_alloc(gs_memory_t * mem, gs_gstate * pgs, client_name_t cname)
+{
+    gs_text_enum_t *penum;
+
+    rc_alloc_struct_1(penum, gs_text_enum_t, &st_gs_text_enum, mem,
+                      return 0, cname);
+    penum->rc.free = rc_free_text_enum;
+
+    /* Initialize pointers for GC */
+    penum->text.operation = 0;  /* no pointers relevant */
+    penum->dev = 0;
+    penum->pgs = pgs;
+    penum->fapi_log2_scale.x = penum->fapi_log2_scale.y = -1;
+    penum->fapi_glyph_shift.x = penum->fapi_glyph_shift.y = 0;
+    penum->fstack.depth = -1;
+    return penum;
+}
+
 /*
  * Copy the dynamically changing elements from one enumerator to another.
  * This is useful primarily for enumerators that sometimes pass the
@@ -208,6 +249,7 @@ gs_text_enum_copy_dynamic(gs_text_enum_t *pto, const gs_text_enum_t *pfrom,
 
     pto->current_font = pfrom->current_font;
     pto->index = pfrom->index;
+    pto->bytes_decoded = pfrom->bytes_decoded;
     pto->xy_index = pfrom->xy_index;
     pto->fstack.depth = depth;
     pto->FontBBox_as_Metrics2 = pfrom->FontBBox_as_Metrics2;
@@ -225,11 +267,17 @@ gs_text_enum_copy_dynamic(gs_text_enum_t *pto, const gs_text_enum_t *pfrom,
 
 /* Begin processing text based on a graphics state. */
 int
-gs_text_begin(gs_state * pgs, const gs_text_params_t * text,
+gs_text_begin(gs_gstate * pgs, const gs_text_params_t * text,
               gs_memory_t * mem, gs_text_enum_t ** ppte)
 {
     gx_clip_path *pcpath = 0;
     int code;
+    gs_overprint_params_t op_params = { 0 };
+    bool op_active = dev_proc(pgs->device, dev_spec_op)(pgs->device, gxdso_overprint_active, NULL, 0);
+    bool text_op_fill = ((pgs->overprint || (!pgs->overprint && op_active)) &&
+        (pgs->text_rendering_mode == 0));
+    bool text_op_stroke = ((pgs->stroke_overprint || (!pgs->stroke_overprint && op_active)) &&
+        (pgs->text_rendering_mode == 1));
 
     /*
      * Detect nocurrentpoint now, even if the string is empty, for Adobe
@@ -244,6 +292,7 @@ gs_text_begin(gs_state * pgs, const gs_text_params_t * text,
        to compute a text width.
        Note : FontType 3 throws error in setcachedevice. */
     if (pgs->font->FontType != ft_user_defined &&
+        pgs->font->FontType != ft_PDF_user_defined &&
         pgs->font->FontType != ft_GL2_stick_user_defined &&
         pgs->font->FontType != ft_PCL_user_defined &&
         pgs->font->FontMatrix.xx == 0 && pgs->font->FontMatrix.xy == 0 &&
@@ -260,16 +309,50 @@ gs_text_begin(gs_state * pgs, const gs_text_params_t * text,
        Unfortunately we can't effectively know a leaf font type here,
        so we load the color unconditionally . */
     /* Processing a text object operation */
-    dev_proc(pgs->device, set_graphics_type_tag)(pgs->device, GS_TEXT_TAG);
+    ensure_tag_is_set(pgs, pgs->device, GS_TEXT_TAG);	/* NB: may unset_dev_color */
 
     code = gx_set_dev_color(pgs);
     if (code != 0)
         return code;
-    code = gs_state_color_load(pgs);
+    code = gs_gstate_color_load(pgs);
     if (code < 0)
         return code;
+
+    if (text_op_stroke) {
+        if_debug0m(gs_debug_flag_overprint, pgs->memory,
+            "[overprint] Stroke Text Overprint\n");
+        code = gs_do_set_overprint(pgs);
+        if (code < 0)
+            return code;
+    } else if (text_op_fill) {
+        if_debug0m(gs_debug_flag_overprint, pgs->memory,
+            "[overprint] Fill Text Overprint\n");
+        code = gs_do_set_overprint(pgs);
+        if (code < 0)
+            return code;
+    }
+
+    /* If overprint is true, push the compositor action to set the op device state */
+    if ((pgs->overprint  && pgs->text_rendering_mode == 0) ||
+        (pgs->stroke_overprint && pgs->text_rendering_mode == 1) ||
+        op_active) {
+        gx_device* dev = pgs->device;
+        cmm_dev_profile_t* dev_profile;
+
+        dev_proc(dev, get_profile)(dev, &dev_profile);
+        if (dev_profile->sim_overprint && dev_profile->device_profile[0]->data_cs == gsCMYK) {
+            if (pgs->text_rendering_mode == 0) {
+                op_params.op_state = OP_STATE_FILL;
+                gs_gstate_update_overprint(pgs, &op_params);
+            } else if (pgs->text_rendering_mode == 1) {
+                op_params.op_state = OP_STATE_STROKE;
+                gs_gstate_update_overprint(pgs, &op_params);
+            }
+        }
+    }
+
     pgs->device->sgr.stroke_stored = false;
-    return gx_device_text_begin(pgs->device, (gs_imager_state *) pgs,
+    return gx_device_text_begin(pgs->device, pgs,
                                 text, pgs->font, pgs->path,
                                 gs_currentdevicecolor_inline(pgs),
                                 pcpath, mem, ppte);
@@ -280,7 +363,7 @@ gs_text_begin(gs_state * pgs, const gs_text_params_t * text,
  * cshow procedure may have changed the current color).
  */
 int
-gs_text_update_dev_color(gs_state * pgs, gs_text_enum_t * pte)
+gs_text_update_dev_color(gs_gstate * pgs, gs_text_enum_t * pte)
 {
     /*
      * The text enumerator holds a device color pointer, which may be a
@@ -291,7 +374,7 @@ gs_text_update_dev_color(gs_state * pgs, gs_text_enum_t * pte)
      * well.
      */
     /* Processing a text object operation */
-    dev_proc(pgs->device, set_graphics_type_tag)(pgs->device, GS_TEXT_TAG);
+    ensure_tag_is_set(pgs, pgs->device, GS_TEXT_TAG);	/* NB: may unset_dev_color */
 
     if (pte->pdcolor != 0) {
         int code = gx_set_dev_color(pgs);
@@ -301,7 +384,7 @@ gs_text_update_dev_color(gs_state * pgs, gs_text_enum_t * pte)
     return 0;
 }
 
-static inline uint text_do_draw(gs_state * pgs)
+static inline uint text_do_draw(gs_gstate * pgs)
 {
     return (pgs->text_rendering_mode == 3 ?
         TEXT_DO_NONE | TEXT_RENDER_MODE_3 : TEXT_DO_DRAW);
@@ -309,7 +392,7 @@ static inline uint text_do_draw(gs_state * pgs)
 
 /* Begin PostScript-equivalent text operations. */
 int
-gs_show_begin(gs_state * pgs, const byte * str, uint size,
+gs_show_begin(gs_gstate * pgs, const byte * str, uint size,
               gs_memory_t * mem, gs_text_enum_t ** ppte)
 {
     gs_text_params_t text;
@@ -319,7 +402,7 @@ gs_show_begin(gs_state * pgs, const byte * str, uint size,
     return gs_text_begin(pgs, &text, mem, ppte);
 }
 int
-gs_ashow_begin(gs_state * pgs, double ax, double ay, const byte * str, uint size,
+gs_ashow_begin(gs_gstate * pgs, double ax, double ay, const byte * str, uint size,
                gs_memory_t * mem, gs_text_enum_t ** ppte)
 {
     gs_text_params_t text;
@@ -332,7 +415,7 @@ gs_ashow_begin(gs_state * pgs, double ax, double ay, const byte * str, uint size
     return gs_text_begin(pgs, &text, mem, ppte);
 }
 int
-gs_widthshow_begin(gs_state * pgs, double cx, double cy, gs_char chr,
+gs_widthshow_begin(gs_gstate * pgs, double cx, double cy, gs_char chr,
                    const byte * str, uint size,
                    gs_memory_t * mem, gs_text_enum_t ** ppte)
 {
@@ -347,7 +430,7 @@ gs_widthshow_begin(gs_state * pgs, double cx, double cy, gs_char chr,
     return gs_text_begin(pgs, &text, mem, ppte);
 }
 int
-gs_awidthshow_begin(gs_state * pgs, double cx, double cy, gs_char chr,
+gs_awidthshow_begin(gs_gstate * pgs, double cx, double cy, gs_char chr,
                     double ax, double ay, const byte * str, uint size,
                     gs_memory_t * mem, gs_text_enum_t ** ppte)
 {
@@ -365,7 +448,7 @@ gs_awidthshow_begin(gs_state * pgs, double cx, double cy, gs_char chr,
     return gs_text_begin(pgs, &text, mem, ppte);
 }
 int
-gs_kshow_begin(gs_state * pgs, const byte * str, uint size,
+gs_kshow_begin(gs_gstate * pgs, const byte * str, uint size,
                gs_memory_t * mem, gs_text_enum_t ** ppte)
 {
     gs_text_params_t text;
@@ -387,7 +470,7 @@ gs_get_text_params(gs_text_enum_t *pte)
 }
 
 int
-gs_xyshow_begin(gs_state * pgs, const byte * str, uint size,
+gs_xyshow_begin(gs_gstate * pgs, const byte * str, uint size,
                 const float *x_widths, const float *y_widths,
                 uint widths_size, gs_memory_t * mem, gs_text_enum_t ** ppte)
 {
@@ -437,7 +520,7 @@ setup_FontBBox_as_Metrics2 (gs_text_enum_t * pte, gs_font * pfont)
 }
 
 int
-gs_glyphshow_begin(gs_state * pgs, gs_glyph glyph,
+gs_glyphshow_begin(gs_gstate * pgs, gs_glyph glyph,
                    gs_memory_t * mem, gs_text_enum_t ** ppte)
 {
     gs_text_params_t text;
@@ -452,7 +535,7 @@ gs_glyphshow_begin(gs_state * pgs, gs_glyph glyph,
     return result;
 }
 int
-gs_cshow_begin(gs_state * pgs, const byte * str, uint size,
+gs_cshow_begin(gs_gstate * pgs, const byte * str, uint size,
                gs_memory_t * mem, gs_text_enum_t ** ppte)
 {
     gs_text_params_t text;
@@ -462,7 +545,7 @@ gs_cshow_begin(gs_state * pgs, const byte * str, uint size,
     return gs_text_begin(pgs, &text, mem, ppte);
 }
 int
-gs_stringwidth_begin(gs_state * pgs, const byte * str, uint size,
+gs_stringwidth_begin(gs_gstate * pgs, const byte * str, uint size,
                      gs_memory_t * mem, gs_text_enum_t ** ppte)
 {
     gs_text_params_t text;
@@ -472,7 +555,7 @@ gs_stringwidth_begin(gs_state * pgs, const byte * str, uint size,
     return gs_text_begin(pgs, &text, mem, ppte);
 }
 int
-gs_charpath_begin(gs_state * pgs, const byte * str, uint size, bool stroke_path,
+gs_charpath_begin(gs_gstate * pgs, const byte * str, uint size, bool stroke_path,
                   gs_memory_t * mem, gs_text_enum_t ** ppte)
 {
     gs_text_params_t text;
@@ -483,7 +566,7 @@ gs_charpath_begin(gs_state * pgs, const byte * str, uint size, bool stroke_path,
     return gs_text_begin(pgs, &text, mem, ppte);
 }
 int
-gs_charboxpath_begin(gs_state * pgs, const byte * str, uint size,
+gs_charboxpath_begin(gs_gstate * pgs, const byte * str, uint size,
                 bool stroke_path, gs_memory_t * mem, gs_text_enum_t ** ppte)
 {
     gs_text_params_t text;
@@ -494,7 +577,7 @@ gs_charboxpath_begin(gs_state * pgs, const byte * str, uint size,
     return gs_text_begin(pgs, &text, mem, ppte);
 }
 int
-gs_glyphpath_begin(gs_state * pgs, gs_glyph glyph, bool stroke_path,
+gs_glyphpath_begin(gs_gstate * pgs, gs_glyph glyph, bool stroke_path,
                    gs_memory_t * mem, gs_text_enum_t ** ppte)
 {
     gs_text_params_t text;
@@ -510,7 +593,7 @@ gs_glyphpath_begin(gs_state * pgs, gs_glyph glyph, bool stroke_path,
     return result;
 }
 int
-gs_glyphwidth_begin(gs_state * pgs, gs_glyph glyph,
+gs_glyphwidth_begin(gs_gstate * pgs, gs_glyph glyph,
                     gs_memory_t * mem, gs_text_enum_t ** ppte)
 {
     gs_text_params_t text;
@@ -704,7 +787,7 @@ gs_default_next_char_glyph(gs_text_enum_t *pte, gs_char *pchr, gs_glyph *pglyph)
         if (pte->outer_CID != GS_NO_GLYPH)
             *pglyph = pte->outer_CID;
         else
-            *pglyph = gs_no_glyph;
+            *pglyph = GS_NO_GLYPH;
     } else if (pte->text.operation & TEXT_FROM_SINGLE_GLYPH) {
         /* glyphshow or glyphpath */
         *pchr = gs_no_char;
@@ -714,10 +797,10 @@ gs_default_next_char_glyph(gs_text_enum_t *pte, gs_char *pchr, gs_glyph *pglyph)
         *pglyph = pte->text.data.glyphs[pte->index];
     } else if (pte->text.operation & TEXT_FROM_SINGLE_CHAR) {
         *pchr = pte->text.data.d_char;
-        *pglyph = gs_no_glyph;
+        *pglyph = GS_NO_GLYPH;
     } else if (pte->text.operation & TEXT_FROM_CHARS) {
         *pchr = pte->text.data.chars[pte->index];
-        *pglyph = gs_no_glyph;
+        *pglyph = GS_NO_GLYPH;
     } else
         return_error(gs_error_rangecheck); /* shouldn't happen */
     pte->index++;
@@ -726,7 +809,7 @@ gs_default_next_char_glyph(gs_text_enum_t *pte, gs_char *pchr, gs_glyph *pglyph)
 
 /* Dummy (ineffective) BuildChar/BuildGlyph procedure */
 int
-gs_no_build_char(gs_show_enum *pte, gs_state *pgs, gs_font *pfont,
+gs_no_build_char(gs_show_enum *pte, gs_gstate *pgs, gs_font *pfont,
                  gs_char chr, gs_glyph glyph)
 {
     return 1;			/* failure, but not error */

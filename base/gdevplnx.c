@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -28,7 +28,7 @@
 #include "gxdither.h"
 #include "gxgetbit.h"
 #include "gxiparam.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gdevplnx.h"
 
 /* Define the size of the locally allocated bitmap buffers. */
@@ -560,14 +560,14 @@ plane_copy_alpha(gx_device *dev, const byte *data, int data_x,
 
 static int
 plane_fill_path(gx_device *dev,
-    const gs_imager_state *pis, gx_path *ppath,
+    const gs_gstate *pgs, gx_path *ppath,
     const gx_fill_params *params,
     const gx_drawing_color *pdevc, const gx_clip_path *pcpath)
 {
     gx_device_plane_extract * const edev = (gx_device_plane_extract *)dev;
     gx_device * const plane_dev = edev->plane_dev;
     gs_logical_operation_t lop_orig =
-        gs_current_logical_op((const gs_state *)pis);
+        gs_current_logical_op((const gs_gstate *)pgs);
     gs_logical_operation_t lop = lop_orig;
     gx_device_color dcolor;
 
@@ -575,32 +575,32 @@ plane_fill_path(gx_device *dev,
     case REDUCE_SKIP:
         return 0;
     case REDUCE_DRAW: {
-        gs_imager_state lopis;
-        const gs_imager_state *pis_draw = pis;
+        gs_gstate lopgs;
+        const gs_gstate *pgs_draw = pgs;
 
         if (lop != lop_orig) {
-            lopis = *pis;
-            gs_set_logical_op((gs_state *)&lopis, lop);
-            pis_draw = &lopis;
+            lopgs = *pgs;
+            gs_set_logical_op((gs_gstate *)&lopgs, lop);
+            pgs_draw = &lopgs;
         }
         return dev_proc(plane_dev, fill_path)
-            (plane_dev, pis_draw, ppath, params, &dcolor, pcpath);
+            (plane_dev, pgs_draw, ppath, params, &dcolor, pcpath);
     }
     default /*REDUCE_FAILED*/:
-        return gx_default_fill_path(dev, pis, ppath, params, pdevc, pcpath);
+        return gx_default_fill_path(dev, pgs, ppath, params, pdevc, pcpath);
     }
 }
 
 static int
 plane_stroke_path(gx_device *dev,
-    const gs_imager_state *pis, gx_path *ppath,
+    const gs_gstate *pgs, gx_path *ppath,
     const gx_stroke_params *params,
     const gx_drawing_color *pdevc, const gx_clip_path *pcpath)
 {
     gx_device_plane_extract * const edev = (gx_device_plane_extract *)dev;
     gx_device * const plane_dev = edev->plane_dev;
     gs_logical_operation_t lop_orig =
-        gs_current_logical_op((const gs_state *)pis);
+        gs_current_logical_op((const gs_gstate *)pgs);
     gs_logical_operation_t lop = lop_orig;
     gx_device_color dcolor;
 
@@ -608,19 +608,19 @@ plane_stroke_path(gx_device *dev,
     case REDUCE_SKIP:
         return 0;
     case REDUCE_DRAW: {
-        gs_imager_state lopis;
-        const gs_imager_state *pis_draw = pis;
+        gs_gstate lopgs;
+        const gs_gstate *pgs_draw = pgs;
 
         if (lop != lop_orig) {
-            lopis = *pis;
-            gs_set_logical_op((gs_state *)&lopis, lop);
-            pis_draw = &lopis;
+            lopgs = *pgs;
+            gs_set_logical_op((gs_gstate *)&lopgs, lop);
+            pgs_draw = &lopgs;
         }
         return dev_proc(plane_dev, stroke_path)
-            (plane_dev, pis_draw, ppath, params, &dcolor, pcpath);
+            (plane_dev, pgs_draw, ppath, params, &dcolor, pcpath);
     }
     default /*REDUCE_FAILED*/:
-        return gx_default_stroke_path(dev, pis, ppath, params, pdevc, pcpath);
+        return gx_default_stroke_path(dev, pgs, ppath, params, pdevc, pcpath);
     }
 }
 
@@ -751,7 +751,7 @@ plane_strip_copy_rop(gx_device *dev,
 {
     gx_device_plane_extract * const edev = (gx_device_plane_extract *)dev;
     gx_device * const plane_dev = edev->plane_dev;
-    gs_rop3_t rop = lop_rop(lop);
+    gs_rop3_t rop = lop_sanitize(lop);
     struct crp_ {
         gx_color_index pixels[2];
         gx_color_index *colors;
@@ -765,11 +765,6 @@ plane_strip_copy_rop(gx_device *dev,
     const gx_strip_bitmap *plane_textures = NULL;
     int code;
 
-    /* We should do better than this on transparency.... */
-    if (lop & (lop_S_transparent | lop_T_transparent))
-        return gx_default_strip_copy_rop(dev, sdata, sourcex, sraster, id,
-                                         scolors, textures, tcolors,
-                                         x, y, w, h, phase_x, phase_y, lop);
     if (!rop3_uses_S(rop)) {
         sdata = 0;
         source.colors = 0;
@@ -800,7 +795,7 @@ plane_strip_copy_rop(gx_device *dev,
         if (code < 0)
             return gx_default_strip_copy_rop(dev, sdata, sourcex, sraster, id,
                                              scolors, textures, tcolors,
-                                             x, y, w, h, phase_x, phase_y, lop);
+                                             x, y, w, h, phase_x, phase_y, rop);
         plane_source = source.state.buffer.data;
         plane_raster = source.state.buffer.raster;
     } else
@@ -828,7 +823,7 @@ plane_strip_copy_rop(gx_device *dev,
         code = dev_proc(plane_dev, strip_copy_rop)
             (plane_dev, plane_source, sourcex, plane_raster, gx_no_bitmap_id,
              source.colors, plane_textures, texture.colors,
-             x, y, w, h, phase_x, phase_y, lop);
+             x, y, w, h, phase_x, phase_y, rop);
     } while (code >= 0 && sdata && next_tile(&source.state));
     if (textures)
         end_tiling(&texture.state);
@@ -843,85 +838,85 @@ plane_strip_copy_rop(gx_device *dev,
 typedef struct plane_image_enum_s {
     gx_image_enum_common;
     gx_image_enum_common_t *info; /* plane device enumerator */
-    const gs_imager_state *pis;	/* original imager state */
-    gs_imager_state *pis_image;	/* modified imager state */
+    const gs_gstate *pgs;	/* original gs_gstate */
+    gs_gstate *pgs_image;	/* modified gs_gstate state */
 } plane_image_enum_t;
 gs_private_st_suffix_add3(st_plane_image_enum, plane_image_enum_t,
   "plane_image_enum_t", plane_image_enum_enum_ptrs,
-  plane_image_enum_reloc_ptrs, st_gx_image_enum_common, info, pis, pis_image);
+  plane_image_enum_reloc_ptrs, st_gx_image_enum_common, info, pgs, pgs_image);
 
 /*
  * Reduce drawing colors returned by color mapping.  Note that these
  * assume that the call of reduce_drawing_color will not fail:
  * plane_begin_typed_image must ensure this.
  *
- * In the imager state passed to these procedures, the client data is
+ * In the gs_gstate passed to these procedures, the client data is
  * the plane_image_enum_t.
  */
 
 static void
 plane_cmap_gray(frac gray, gx_device_color * pdc,
-    const gs_imager_state *pis_image, gx_device *dev, gs_color_select_t select)
+    const gs_gstate *pgs_image, gx_device *dev, gs_color_select_t select)
 {
     const plane_image_enum_t *ppie =
-        (const plane_image_enum_t *)pis_image->client_data;
+        (const plane_image_enum_t *)pgs_image->client_data;
     gx_device_plane_extract * const edev =
         (gx_device_plane_extract *)ppie->dev;
-    gs_logical_operation_t lop = gs_current_logical_op_inline(pis_image);
+    gs_logical_operation_t lop = gs_current_logical_op_inline(pgs_image);
     gx_device_color dcolor;
 
-    gx_remap_concrete_gray(gray, &dcolor, ppie->pis,
+    gx_remap_concrete_gray(gray, &dcolor, ppie->pgs,
                            (gx_device *)edev, select);
     reduce_drawing_color(pdc, edev, &dcolor, &lop);
 }
 static void
 plane_cmap_rgb(frac r, frac g, frac b, gx_device_color * pdc,
-    const gs_imager_state *pis_image, gx_device *dev, gs_color_select_t select)
+    const gs_gstate *pgs_image, gx_device *dev, gs_color_select_t select)
 {
     const plane_image_enum_t *ppie =
-        (const plane_image_enum_t *)pis_image->client_data;
+        (const plane_image_enum_t *)pgs_image->client_data;
     gx_device_plane_extract * const edev =
         (gx_device_plane_extract *)ppie->dev;
-    gs_logical_operation_t lop = gs_current_logical_op_inline(pis_image);
+    gs_logical_operation_t lop = gs_current_logical_op_inline(pgs_image);
     gx_device_color dcolor;
 
-    gx_remap_concrete_rgb(r, g, b, &dcolor, ppie->pis,
+    gx_remap_concrete_rgb(r, g, b, &dcolor, ppie->pgs,
                           (gx_device *)edev, select);
     reduce_drawing_color(pdc, edev, &dcolor, &lop);
 }
 static void
 plane_cmap_cmyk(frac c, frac m, frac y, frac k, gx_device_color * pdc,
-    const gs_imager_state *pis_image, gx_device *dev, gs_color_select_t select,
+    const gs_gstate *pgs_image, gx_device *dev, gs_color_select_t select,
     const gs_color_space *source_pcs)
 {
     const plane_image_enum_t *ppie =
-        (const plane_image_enum_t *)pis_image->client_data;
+        (const plane_image_enum_t *)pgs_image->client_data;
     gx_device_plane_extract * const edev =
         (gx_device_plane_extract *)ppie->dev;
-    gs_logical_operation_t lop = gs_current_logical_op_inline(pis_image);
+    gs_logical_operation_t lop = gs_current_logical_op_inline(pgs_image);
     gx_device_color dcolor;
 
-    gx_remap_concrete_cmyk(c, m, y, k, &dcolor, ppie->pis,
+    gx_remap_concrete_cmyk(c, m, y, k, &dcolor, ppie->pgs,
                            (gx_device *)edev, select, NULL);
     reduce_drawing_color(pdc, edev, &dcolor, &lop);
 }
 static void
 plane_cmap_rgb_alpha(frac r, frac g, frac b, frac alpha, gx_device_color * pdc,
-    const gs_imager_state *pis_image, gx_device *dev, gs_color_select_t select)
+    const gs_gstate *pgs_image, gx_device *dev, gs_color_select_t select)
 {
     const plane_image_enum_t *ppie =
-        (const plane_image_enum_t *)pis_image->client_data;
+        (const plane_image_enum_t *)pgs_image->client_data;
     gx_device_plane_extract * const edev =
         (gx_device_plane_extract *)ppie->dev;
-    gs_logical_operation_t lop = gs_current_logical_op_inline(pis_image);
+    gs_logical_operation_t lop = gs_current_logical_op_inline(pgs_image);
     gx_device_color dcolor;
 
-    gx_remap_concrete_rgb_alpha(r, g, b, alpha, &dcolor, ppie->pis,
+    gx_remap_concrete_rgb_alpha(r, g, b, alpha, &dcolor, ppie->pgs,
                                 (gx_device *)edev, select);
     reduce_drawing_color(pdc, edev, &dcolor, &lop);
 }
 static bool
-plane_cmap_is_halftoned(const gs_imager_state *pis_image, gx_device *dev)
+plane_cmap_is_halftoned(const gs_gstate *pgs_image, gx_device *dev)
 {
     return false;
 }
@@ -931,7 +926,7 @@ static const gx_color_map_procs plane_color_map_procs = {
     NULL, NULL, plane_cmap_is_halftoned
 };
 static const gx_color_map_procs *
-plane_get_cmap_procs(const gs_imager_state *pis, const gx_device *dev)
+plane_get_cmap_procs(const gs_gstate *pgs, const gx_device *dev)
 {
     return &plane_color_map_procs;
 }
@@ -945,22 +940,22 @@ static const gx_image_enum_procs_t plane_image_enum_procs = {
 
 static int
 plane_begin_typed_image(gx_device * dev,
-                        const gs_imager_state * pis, const gs_matrix * pmat,
+                        const gs_gstate * pgs, const gs_matrix * pmat,
                    const gs_image_common_t * pic, const gs_int_rect * prect,
               const gx_drawing_color * pdcolor, const gx_clip_path * pcpath,
                       gs_memory_t * memory, gx_image_enum_common_t ** pinfo)
 {
     /*
-     * For images, we intercept the imager state's cmap_procs and apply
+     * For images, we intercept the gs_gstate's cmap_procs and apply
      * reduce_drawing_color to the colors as they are returned to the image
      * processing code.  For reasons explained above, we can't do this in
      * some cases of RasterOp that include transparency.
      */
     gx_device_plane_extract * const edev = (gx_device_plane_extract *)dev;
-    gs_logical_operation_t lop = gs_current_logical_op((const gs_state *)pis);
+    gs_logical_operation_t lop = gs_current_logical_op((const gs_gstate *)pgs);
     const gs_pixel_image_t *pim;
     plane_image_enum_t *info = 0;
-    gs_imager_state *pis_image = 0;
+    gs_gstate *pgs_image = 0;
     gx_device_color dcolor;
     bool uses_color = false;
     int code;
@@ -982,10 +977,7 @@ plane_begin_typed_image(gx_device * dev,
         goto fail;
     }
     pim = (const gs_pixel_image_t *)pic;
-    if ((lop & lop_S_transparent) ||
-        ((uses_color || pim->CombineWithColor) && (lop & lop_T_transparent))
-        )
-        goto fail;
+    lop = lop_sanitize(lop);
     if (uses_color || (pim->CombineWithColor && lop_uses_T(lop))) {
         if (reduce_drawing_color(&dcolor, edev, pdcolor, &lop) ==
             REDUCE_FAILED)
@@ -999,14 +991,14 @@ plane_begin_typed_image(gx_device * dev,
     }
     info = gs_alloc_struct(memory, plane_image_enum_t, &st_plane_image_enum,
                            "plane_image_begin_typed(info)");
-    pis_image = gs_imager_state_copy(pis, memory);
-    if (pis_image == 0 || info == 0)
+    pgs_image = gs_gstate_copy_temp(pgs, memory);
+    if (pgs_image == 0 || info == 0)
         goto fail;
-    *pis_image = *pis;
-    pis_image->client_data = info;
-    pis_image->get_cmap_procs = plane_get_cmap_procs;
+    *pgs_image = *pgs;
+    pgs_image->client_data = info;
+    pgs_image->get_cmap_procs = plane_get_cmap_procs;
     code = dev_proc(edev->plane_dev, begin_typed_image)
-        (edev->plane_dev, pis_image, pmat, pic, prect,
+        (edev->plane_dev, pgs_image, pmat, pic, prect,
          &dcolor, pcpath, memory, &info->info);
     if (code < 0)
         goto fail;
@@ -1015,14 +1007,14 @@ plane_begin_typed_image(gx_device * dev,
     info->dev = (gx_device *)edev;
     info->id = gs_next_ids(memory, 1);
     info->memory = memory;
-    info->pis = pis;
-    info->pis_image = pis_image;
+    info->pgs = pgs;
+    info->pgs_image = pgs_image;
     *pinfo = (gx_image_enum_common_t *)info;
     return code;
 fail:
-    gs_free_object(memory, pis_image, "plane_image_begin_typed(pis_image)");
+    gs_free_object(memory, pgs_image, "plane_image_begin_typed(pgs_image)");
     gs_free_object(memory, info, "plane_image_begin_typed(info)");
-    return gx_default_begin_typed_image(dev, pis, pmat, pic, prect,
+    return gx_default_begin_typed_image(dev, pgs, pmat, pic, prect,
                                         pdcolor, pcpath, memory, pinfo);
 }
 
@@ -1042,8 +1034,8 @@ plane_image_end_image(gx_image_enum_common_t * info, bool draw_last)
     plane_image_enum_t * const ppie = (plane_image_enum_t *)info;
     int code = gx_image_end(ppie->info, draw_last);
 
-    gs_free_object(ppie->memory, ppie->pis_image,
-                   "plane_image_end_image(pis_image)");
+    gs_free_object(ppie->memory, ppie->pgs_image,
+                   "plane_image_end_image(pgs_image)");
     gx_image_free_enum(&info);
     return code;
 }
@@ -1059,7 +1051,7 @@ plane_get_bits_rectangle(gx_device * dev, const gs_int_rect * prect,
     int plane_index = edev->plane.index;
     gs_get_bits_options_t options = params->options;
     gs_get_bits_params_t plane_params;
-    int plane;
+    uchar plane;
     int code;
 
     /*

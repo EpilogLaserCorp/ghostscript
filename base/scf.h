@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -40,7 +40,7 @@
  * hence 1.5 * ceil(N / 2560) bytes.  Taking the largest safe stream
  * buffer size as 32K, we arrive at the following maximum width:
  */
-#if arch_sizeof_int > 2
+#if ARCH_SIZEOF_INT > 2
 #  define cfe_max_width (2560 * 32000 * 2 / 3)
 #else
 #  define cfe_max_width (max_int - 40)	/* avoid overflows */
@@ -154,7 +154,7 @@ extern const cfd_node cf_uncompressed_decode[];
 
 #if defined(SKIP_PIXELS_USING_INTS) && (ARCH_LOG2_SIZEOF_INT >= 2) && (ARCH_ALIGN_INT_MOD <= 4) && (ARCH_LOG2_SIZEOF_SHORT >= 1) && (ARCH_ALIGN_SHORT_MOD <= 2)
 
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
 #define BYTE0OF2(S) ((byte)(S>>8))
 #define BYTE1OF2(S) ((byte)S)
 #define BYTE0OF4(S) ((byte)(S>>24))

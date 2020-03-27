@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -66,9 +66,9 @@ name_print(const char *msg, const name_table *nt, uint nidx, const int *pflag)
     dmlprintf1(nt->memory, "[n]%s", msg);
     if (pflag)
         dmprintf1(nt->memory, "(%d)", *pflag);
-    dmprintf2(nt->memory, " (0x%lx#%u)", (ulong)pname, nidx);
+    dmprintf2(nt->memory, " ("PRI_INTPTR"#%u)", (intptr_t)pname, nidx);
     debug_print_string(nt->memory, str, pnstr->string_size);
-    dmprintf2(nt->memory, "(0x%lx,%u)\n", (ulong)str, pnstr->string_size);
+    dmprintf2(nt->memory, "("PRI_INTPTR",%u)\n", (intptr_t)str, pnstr->string_size);
 }
 #  define if_debug_name(msg, nt, nidx, pflag)\
      if ( gs_debug_c('n') ) name_print(msg, nt, nidx, pflag)
@@ -102,9 +102,7 @@ names_init(ulong count, gs_ref_memory_t *imem)
         int code = name_alloc_sub(nt);
 
         if (code < 0) {
-            while (nt->sub_next > 0)
-                name_free_sub(nt, --(nt->sub_next), false);
-            gs_free_object(mem, nt, "name_init(nt)");
+            names_free(nt);
             return 0;
         }
     }
@@ -129,6 +127,17 @@ names_init(ulong count, gs_ref_memory_t *imem)
     nt->free = 0;
     names_trace_finish(nt, NULL);
     return nt;
+}
+
+/* Free a name table */
+void
+names_free(name_table *nt)
+{
+    if (nt == NULL) return;
+
+    while (nt->sub_count > 0)
+        name_free_sub(nt, --(nt->sub_count), false);
+    gs_free_object(nt->memory, nt, "name_init(nt)");
 }
 
 static void

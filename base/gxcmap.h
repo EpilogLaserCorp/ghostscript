@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -23,39 +23,32 @@
 #include "gscsel.h"
 #include "gxfmap.h"
 #include "gscspace.h"
-
-#ifndef gx_device_DEFINED
-#  define gx_device_DEFINED
-typedef struct gx_device_s gx_device;
-#endif
-#ifndef gx_device_color_DEFINED
-#  define gx_device_color_DEFINED
-typedef struct gx_device_color_s gx_device_color;
-#endif
+#include "gsdcolor.h"
+#include "gsdevice.h"
 
 /* Procedures for rendering colors specified by fractions. */
 
 #define cmap_proc_gray(proc)\
-  void proc(frac, gx_device_color *, const gs_imager_state *,\
+  void proc(frac, gx_device_color *, const gs_gstate *,\
             gx_device *, gs_color_select_t)
 #define cmap_proc_rgb(proc)\
-  void proc(frac, frac, frac, gx_device_color *, const gs_imager_state *,\
+  void proc(frac, frac, frac, gx_device_color *, const gs_gstate *,\
             gx_device *, gs_color_select_t)
 #define cmap_proc_cmyk(proc)\
   void proc(frac, frac, frac, frac, gx_device_color *,\
-            const gs_imager_state *, gx_device *, gs_color_select_t,\
+            const gs_gstate *, gx_device *, gs_color_select_t,\
             const gs_color_space *)
 #define cmap_proc_rgb_alpha(proc)\
   void proc(frac, frac, frac, frac, gx_device_color *,\
-               const gs_imager_state *, gx_device *, gs_color_select_t)
+               const gs_gstate *, gx_device *, gs_color_select_t)
 #define cmap_proc_separation(proc)\
-  void proc(frac, gx_device_color *, const gs_imager_state *,\
-               gx_device *, gs_color_select_t)
+  void proc(frac, gx_device_color *, const gs_gstate *,\
+               gx_device *, gs_color_select_t, const gs_color_space *)
 #define cmap_proc_devicen(proc)\
-  void proc(const frac *, gx_device_color *, const gs_imager_state *, \
-               gx_device *, gs_color_select_t)
+  void proc(const frac *, gx_device_color *, const gs_gstate *, \
+               gx_device *, gs_color_select_t, const gs_color_space *)
 #define cmap_proc_is_halftoned(proc)\
-  bool proc(const gs_imager_state *, gx_device *)
+  bool proc(const gs_gstate *, gx_device *)
 
 /*
  * List of mapping functions from the standard color spaces to the
@@ -67,7 +60,7 @@ typedef struct gx_device_color_s gx_device_color;
 
 #define cm_map_proc_rgb(proc) \
     void proc (gx_device * dev, \
-              const gs_imager_state *pis, \
+              const gs_gstate *pgs, \
               frac r, frac g, frac b, \
               frac * out)
 
@@ -107,7 +100,7 @@ cm_map_proc_cmyk(cmyk_cs_to_cmyk_cm);
  * applying the current transfer function or halftone.
  *
  * The routine pointed to by get_cmap_procs (a field in the image
- * state; see gxistate.h) should initialize the cm_color_map_procs
+ * state; see gxgstate.h) should initialize the cm_color_map_procs
  * pointer, using the get_color_mapping_procs method of the device.
  *
  * Because of a bug in the Watcom C compiler, we have to split the
@@ -126,63 +119,39 @@ typedef struct gx_color_map_procs_s gx_color_map_procs;
 
 /*
  * Determine the color mapping procedures for a device.  Even though this
- * does not currently use information from the imager state, it must be
+ * does not currently use information from the gs_gstate, it must be
  * a virtual procedure of the state for internal reasons.
  */
 const gx_color_map_procs *
-    gx_get_cmap_procs(const gs_imager_state *, const gx_device *);
+    gx_get_cmap_procs(const gs_gstate *, const gx_device *);
 const gx_color_map_procs *
-    gx_default_get_cmap_procs(const gs_imager_state *, const gx_device *);
+    gx_default_get_cmap_procs(const gs_gstate *, const gx_device *);
 
 /*
  * Set the color mapping procedures in the graphics state.  This is
  * currently only needed when switching devices, but might be used more
  * often in the future.
  */
-void gx_set_cmap_procs(gs_imager_state *, const gx_device *);
+void gx_set_cmap_procs(gs_gstate *, const gx_device *);
 
 /* Remap a concrete (frac) gray, RGB or CMYK color. */
 /* These cannot fail, and do not return a value. */
-#define gx_remap_concrete_gray(cgray, pdc, pis, dev, select)\
-  ((pis)->cmap_procs->map_gray)(cgray, pdc, pis, dev, select)
-#define gx_remap_concrete_rgb(cr, cg, cb, pdc, pis, dev, select)\
-  ((pis)->cmap_procs->map_rgb)(cr, cg, cb, pdc, pis, dev, select)
-#define gx_remap_concrete_cmyk(cc, cm, cy, ck, pdc, pis, dev, select, pcs)\
-  ((pis)->cmap_procs->map_cmyk)(cc, cm, cy, ck, pdc, pis, dev, select, pcs)
-#define gx_remap_concrete_rgb_alpha(cr, cg, cb, ca, pdc, pis, dev, select)\
-  ((pis)->cmap_procs->map_rgb_alpha)(cr, cg, cb, ca, pdc, pis, dev, select)
-#define gx_remap_concrete_separation(pcc, pdc, pis, dev, select)\
-  ((pis)->cmap_procs->map_separation)(pcc, pdc, pis, dev, select)
-#define gx_remap_concrete_devicen(pcc, pdc, pis, dev, select)\
-  ((pis)->cmap_procs->map_devicen)(pcc, pdc, pis, dev, select)
+#define gx_remap_concrete_gray(cgray, pdc, pgs, dev, select)\
+  ((pgs)->cmap_procs->map_gray)(cgray, pdc, pgs, dev, select)
+#define gx_remap_concrete_rgb(cr, cg, cb, pdc, pgs, dev, select)\
+  ((pgs)->cmap_procs->map_rgb)(cr, cg, cb, pdc, pgs, dev, select)
+#define gx_remap_concrete_cmyk(cc, cm, cy, ck, pdc, pgs, dev, select, pcs)\
+  ((pgs)->cmap_procs->map_cmyk)(cc, cm, cy, ck, pdc, pgs, dev, select, pcs)
+#define gx_remap_concrete_rgb_alpha(cr, cg, cb, ca, pdc, pgs, dev, select)\
+  ((pgs)->cmap_procs->map_rgb_alpha)(cr, cg, cb, ca, pdc, pgs, dev, select)
+#define gx_remap_concrete_separation(pcc, pdc, pgs, dev, select, pcs)\
+  ((pgs)->cmap_procs->map_separation)(pcc, pdc, pgs, dev, select, pcs)
+#define gx_remap_concrete_devicen(pcc, pdc, pgs, dev, select, pcs)\
+  ((pgs)->cmap_procs->map_devicen)(pcc, pdc, pgs, dev, select, pcs)
 
 /* Map a color */
 #include "gxcindex.h"
 #include "gxcvalue.h"
-
-/*
- * These are the default routines for converting a color space into
- * a list of device colorants.
- */
-extern cm_map_proc_gray(gx_default_gray_cs_to_gray_cm);
-extern cm_map_proc_rgb(gx_default_rgb_cs_to_gray_cm);
-extern cm_map_proc_cmyk(gx_default_cmyk_cs_to_gray_cm);
-
-extern cm_map_proc_gray(gx_default_gray_cs_to_rgb_cm);
-extern cm_map_proc_rgb(gx_default_rgb_cs_to_rgb_cm);
-extern cm_map_proc_cmyk(gx_default_cmyk_cs_to_rgb_cm);
-
-extern cm_map_proc_gray(gx_default_gray_cs_to_cmyk_cm);
-extern cm_map_proc_rgb(gx_default_rgb_cs_to_cmyk_cm);
-extern cm_map_proc_cmyk(gx_default_cmyk_cs_to_cmyk_cm);
-
-extern cm_map_proc_gray(gx_default_gray_cs_to_cmyk_cm);
-extern cm_map_proc_rgb(gx_default_rgb_cs_to_cmyk_cm);
-extern cm_map_proc_cmyk(gx_default_cmyk_cs_to_cmyk_cm);
-
-extern cm_map_proc_gray(gx_error_gray_cs_to_cmyk_cm);
-extern cm_map_proc_rgb(gx_error_rgb_cs_to_cmyk_cm);
-extern cm_map_proc_cmyk(gx_error_cmyk_cs_to_cmyk_cm);
 
 /*
   Get the mapping procedures appropriate for the currently set
@@ -288,15 +257,34 @@ frac gx_unit_frac(float fvalue);
 /* Determine if the device is using the standard color mapping procs.  In
    such a case, we can make use of the faster icc color conversions for
    images */
-bool gx_device_uses_std_cmap_procs(gx_device * dev, 
-                                   const gs_imager_state * pis);
+bool gx_device_uses_std_cmap_procs(gx_device * dev,
+                                   const gs_gstate * pgs);
 bool fwd_uses_fwd_cmap_procs(gx_device * dev);
 const gx_cm_color_map_procs* fwd_get_target_cmap_procs(gx_device * dev);
 void cmap_transfer_halftone(gx_color_value *pconc, gx_device_color * pdc,
-     const gs_imager_state * pis, gx_device * dev, bool has_transfer,
+     const gs_gstate * pgs, gx_device * dev, bool has_transfer,
      bool has_halftone, gs_color_select_t select);
-void cmap_transfer(gx_color_value *pconc, const gs_imager_state * pis,
+void cmap_transfer(gx_color_value *pconc, const gs_gstate * pgs,
                    gx_device * dev);
-void cmap_transfer_plane(gx_color_value *pconc, const gs_imager_state *pis, 
+void cmap_transfer_plane(gx_color_value *pconc, const gs_gstate *pgs,
                     gx_device *dev, int plane);
+
+typedef struct gx_cmapper_s gx_cmapper_t;
+
+typedef void (gx_cmapper_fn)(gx_cmapper_t *cmapper);
+
+struct gx_cmapper_s {
+    gx_color_value conc[GX_DEVICE_COLOR_MAX_COMPONENTS];
+    const gs_gstate *pgs;
+    gx_device *dev;
+    gs_color_select_t select;
+    gx_device_color devc;
+    gx_cmapper_fn *set_color;
+    int direct;
+};
+
+void gx_get_cmapper(gx_cmapper_t *cmapper, const gs_gstate *pgs,
+                    gx_device *dev, bool has_transfer, bool has_halftone,
+                    gs_color_select_t select);
+
 #endif /* gxcmap_INCLUDED */

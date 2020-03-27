@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -70,9 +70,16 @@ dctd_skip_input_data(j_decompress_ptr dinfo, long num_bytes)
         src->bytes_in_buffer -= num_bytes;
     }
 }
+
 static void
 dctd_term_source(j_decompress_ptr dinfo)
 {
+    jpeg_decompress_data *jddp =
+    (jpeg_decompress_data *) ((char *)dinfo -
+                              offset_of(jpeg_decompress_data, dinfo));
+
+    stream_dct_end_passthrough(jddp);
+    return;
 }
 
 /* Set the defaults for the DCTDecode filter. */
@@ -173,6 +180,7 @@ s_DCTD_process(stream_state * st, stream_cursor_read * pr,
     jpeg_decompress_data *jddp = ss->data.decompress;
     struct jpeg_source_mgr *src = jddp->dinfo.src;
     int code;
+    byte *Buf;
 
     if_debug3m('w', st->memory, "[wdd]process avail=%u, skip=%u, last=%d\n",
                (uint) (pr->limit - pr->ptr), (uint) jddp->skip, last);
@@ -180,17 +188,25 @@ s_DCTD_process(stream_state * st, stream_cursor_read * pr,
         long avail = pr->limit - pr->ptr;
 
         if (avail < jddp->skip) {
+            if (jddp->PassThrough && jddp->PassThroughfn)
+                (jddp->PassThroughfn)(jddp->device, (byte *)pr->ptr + 1, (byte *)pr->limit - (byte *)pr->ptr);
+
             jddp->skip -= avail;
             pr->ptr = pr->limit;
             if (!last)
                 return 0;	/* need more data */
             jddp->skip = 0;	/* don't skip past input EOD */
         }
+        Buf = (byte *)pr->ptr + 1;
         pr->ptr += jddp->skip;
+        if (jddp->PassThrough && jddp->PassThroughfn)
+            (jddp->PassThroughfn)(jddp->device, Buf, pr->ptr - (Buf - 1));
+
         jddp->skip = 0;
     }
     src->next_input_byte = pr->ptr + 1;
     src->bytes_in_buffer = pr->limit - pr->ptr;
+    Buf = (byte *)pr->ptr + 1;
     jddp->input_eod = last;
     switch (ss->phase) {
         case 0:		/* not initialized yet */
@@ -199,23 +215,38 @@ s_DCTD_process(stream_state * st, stream_cursor_read * pr,
              * even though neither the standard nor Adobe's own
              * documentation mention this.
              */
+            if (jddp->PassThrough && jddp->PassThroughfn && !jddp->StartedPassThrough) {
+                jddp->StartedPassThrough = 1;
+                (jddp->PassThroughfn)(jddp->device, NULL, 1);
+            }
             while (pr->ptr < pr->limit && pr->ptr[1] != 0xff)
                 pr->ptr++;
-            if (pr->ptr == pr->limit)
+            if (pr->ptr == pr->limit) {
+                if (jddp->PassThrough && jddp->PassThroughfn)
+                    (jddp->PassThroughfn)(jddp->device, Buf, pr->ptr - (Buf - 1));
                 return 0;
+            }
             src->next_input_byte = pr->ptr + 1;
             src->bytes_in_buffer = pr->limit - pr->ptr;
             ss->phase = 1;
             /* falls through */
         case 1:		/* reading header markers */
             if (ss->data.common->Height != 0)
-                update_jpeg_header_height(pr->ptr + 1, src->bytes_in_buffer, ss->data.common->Height);
+            {
+               /* Deliberate and naughty. We cast away a const pointer
+                * here and write to a supposedly read-only stream. */
+                union { const byte *c; byte *u; } u;
+                u.c = pr->ptr+1;
+                update_jpeg_header_height(u.u, src->bytes_in_buffer, ss->data.common->Height);
+            }
             if ((code = gs_jpeg_read_header(ss, TRUE)) < 0)
                 return ERRC;
             pr->ptr =
                 (jddp->faked_eoi ? pr->limit : src->next_input_byte - 1);
             switch (code) {
                 case JPEG_SUSPENDED:
+                    if (jddp->PassThrough && jddp->PassThroughfn)
+                        (jddp->PassThroughfn)(jddp->device, Buf, pr->ptr - (Buf - 1));
                     return 0;
                     /*case JPEG_HEADER_OK: */
             }
@@ -254,8 +285,11 @@ s_DCTD_process(stream_state * st, stream_cursor_read * pr,
                 return ERRC;
             pr->ptr =
                 (jddp->faked_eoi ? pr->limit : src->next_input_byte - 1);
-            if (code == 0)
+            if (code == 0) {
+                if (jddp->PassThrough && jddp->PassThroughfn)
+                    (jddp->PassThroughfn)(jddp->device, Buf, pr->ptr - (Buf - 1));
                 return 0;
+            }
             ss->scan_line_size =
                 jddp->dinfo.output_width * jddp->dinfo.output_components;
             if_debug4m('w', ss->memory, "[wdd]width=%u, components=%d, scan_line_size=%u, min_out_size=%u\n",
@@ -299,7 +333,12 @@ s_DCTD_process(stream_state * st, stream_cursor_read * pr,
                     ((jddp->bytes_in_scanline == 0) && (tomove > 0) && /* 1 scancopy completed */
                      (avail < tomove) && /* still room for 1 more scan */
                      (jddp->dinfo.output_height > jddp->dinfo.output_scanline))) /* more scans to do */
+                {
+                     if (jddp->PassThrough && jddp->PassThroughfn) {
+                        (jddp->PassThroughfn)(jddp->device, Buf, pr->ptr - (Buf - 1));
+                    }
                     return 1;	/* need more room */
+                }
             }
             /* while not done with image, decode 1 scan, otherwise fall into phase 4 */
             while (jddp->dinfo.output_height > jddp->dinfo.output_scanline) {
@@ -309,8 +348,12 @@ s_DCTD_process(stream_state * st, stream_cursor_read * pr,
                 if (jddp->scanline_buffer != NULL)
                     samples = jddp->scanline_buffer;
                 else {
-                    if ((uint) (pw->limit - pw->ptr) < ss->scan_line_size)
+                    if ((uint) (pw->limit - pw->ptr) < ss->scan_line_size) {
+                        if (jddp->PassThrough && jddp->PassThroughfn) {
+                            (jddp->PassThroughfn)(jddp->device, Buf, pr->ptr - (Buf - 1));
+                        }
                         return 1;	/* need more room */
+                    }
                     samples = pw->ptr + 1;
                 }
                 read = gs_jpeg_read_scanlines(ss, &samples, 1);
@@ -339,6 +382,9 @@ s_DCTD_process(stream_state * st, stream_cursor_read * pr,
                         (pr->limit - pr->ptr >= ss->templat->min_in_size) &&
                         (compact_jpeg_buffer(pr) == 0))
                         return ERRC;
+                    if (jddp->PassThrough && jddp->PassThroughfn) {
+                        (jddp->PassThroughfn)(jddp->device, Buf, pr->ptr - (Buf - 1));
+                    }
                     return 0;	/* need more data */
                 }
                 if (jddp->scanline_buffer != NULL) {
@@ -350,6 +396,8 @@ s_DCTD_process(stream_state * st, stream_cursor_read * pr,
             ss->phase = 4;
             /* falls through */
         case 4:		/* end of image; scan for EOI */
+            if (jddp->PassThrough && jddp->PassThroughfn)
+                (jddp->PassThroughfn)(jddp->device, Buf, pr->ptr - (Buf - 1));
             if ((code = gs_jpeg_finish_decompress(ss)) < 0)
                 return ERRC;
             pr->ptr =

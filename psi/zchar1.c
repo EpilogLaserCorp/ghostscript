@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -27,6 +27,7 @@
 #include "gxtype1.h"
 #include "gxfcid.h"
 #include "gxchar.h"
+#include "gxfcache.h"           /* for gs_purge_font_from_char_caches_completely */
 #include "gzstate.h"		/* for path for gs_type1_init */
                                 /* (should only be gsstate.h) */
 #include "gscencs.h"
@@ -85,7 +86,7 @@ font_uses_charstrings(const gs_font *pfont)
 /* Initialize a Type 1 interpreter. */
 static int
 type1_exec_init(gs_type1_state *pcis, gs_text_enum_t *penum,
-                gs_state *pgs, gs_font_type1 *pfont1)
+                gs_gstate *pgs, gs_font_type1 *pfont1)
 {
     /*
      * We have to disregard penum->pis and penum->path, and render to
@@ -106,7 +107,7 @@ type1_exec_init(gs_type1_state *pcis, gs_text_enum_t *penum,
         /* Keep consistency with alpha_buffer_init() */
         log2_subpixels.x = log2_subpixels.y = ilog2(alpha_bits);
     }
-    return gs_type1_interp_init(pcis, (gs_imager_state *)pgs, pgs->path,
+    return gs_type1_interp_init(pcis, pgs, pgs->path,
                                 &penum->log2_scale, &log2_subpixels,
                                 (penum->text.operation & TEXT_DO_ANY_CHARPATH) != 0 ||
                                 penum->device_disabled_grid_fitting,
@@ -166,7 +167,7 @@ static int bbox_finish_stroke(i_ctx_t *);
 static int bbox_fill(i_ctx_t *);
 static int bbox_stroke(i_ctx_t *);
 static int nobbox_finish(i_ctx_t *, gs_type1exec_state *);
-static int nobbox_draw(i_ctx_t *, int (*)(gs_state *));
+static int nobbox_draw(i_ctx_t *, int (*)(gs_gstate *));
 static int nobbox_fill(i_ctx_t *);
 static int nobbox_stroke(i_ctx_t *);
 
@@ -594,7 +595,7 @@ bbox_continue(i_ctx_t *i_ctx_p)
  * Returns exec_cont - a function, which must be called by caller after this function.
  */
 static int
-bbox_draw(i_ctx_t *i_ctx_p, int (*draw)(gs_state *), op_proc_t *exec_cont)
+bbox_draw(i_ctx_t *i_ctx_p, int (*draw)(gs_gstate *), op_proc_t *exec_cont)
 {
     os_ptr op = osp;
     gs_rect bbox;
@@ -912,7 +913,7 @@ nobbox_finish(i_ctx_t *i_ctx_p, gs_type1exec_state * pcxs)
 }
 /* Finish by popping the operands and filling or stroking. */
 static int
-nobbox_draw(i_ctx_t *i_ctx_p, int (*draw)(gs_state *))
+nobbox_draw(i_ctx_t *i_ctx_p, int (*draw)(gs_gstate *))
 {
     int code = draw(igs);
 
@@ -949,6 +950,7 @@ zsetweightvector(i_ctx_t *i_ctx_p)
     int code = font_param(op - 1, &pfont);
     gs_font_type1 *pfont1;
     int size;
+    float wv[max_WeightVector];
 
     if (code < 0) {
         /* The font was not defined yet. Just ignore. See lib/gs_type1.ps . */
@@ -961,9 +963,14 @@ zsetweightvector(i_ctx_t *i_ctx_p)
     size = r_size(op);
     if (size != pfont1->data.WeightVector.count)
         return_error(gs_error_invalidfont);
-    code = process_float_array(imemory, op, size, pfont1->data.WeightVector.values);
+    code = process_float_array(imemory, op, size, wv);
     if (code < 0)
         return code;
+    if (memcmp(wv, pfont1->data.WeightVector.values,
+        sizeof(pfont1->data.WeightVector.values[0]) * size) != 0) {
+        memcpy(pfont1->data.WeightVector.values, wv, size);
+        gs_purge_font_from_char_caches_completely(pfont);
+    }
     pop(2);
     return 0;
 }
@@ -1110,7 +1117,7 @@ zcharstring_outline(gs_font_type1 *pfont1, int WMode, const ref *pgref,
     gs_type1_state *const pcis = &cxs.cis;
     const gs_type1_data *pdata;
     int value;
-    gs_imager_state gis;
+    gs_gstate gs;
     double wv[4];
     gs_point mpt;
 
@@ -1140,15 +1147,15 @@ zcharstring_outline(gs_font_type1 *pfont1, int WMode, const ref *pgref,
     cxs.present = code;
     /* Initialize just enough of the imager state. */
     if (pmat)
-        gs_matrix_fixed_from_matrix(&gis.ctm, pmat);
+        gs_matrix_fixed_from_matrix(&gs.ctm, pmat);
     else {
         gs_matrix imat;
 
         gs_make_identity(&imat);
-        gs_matrix_fixed_from_matrix(&gis.ctm, &imat);
+        gs_matrix_fixed_from_matrix(&gs.ctm, &imat);
     }
-    gis.flatness = 0;
-    code = gs_type1_interp_init(&cxs.cis, &gis, ppath, NULL, NULL, true, 0,
+    gs.flatness = 0;
+    code = gs_type1_interp_init(&cxs.cis, &gs, ppath, NULL, NULL, true, 0,
                                 pfont1);
     if (code < 0)
         return code;

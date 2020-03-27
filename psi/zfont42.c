@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -265,7 +265,10 @@ glyph_to_index(const gs_font *font, gs_glyph glyph)
         ) {
         gs_glyph index_glyph = pcstr->value.intval + GS_MIN_GLYPH_INDEX;
 
-        if (index_glyph >= GS_MIN_GLYPH_INDEX && index_glyph <= gs_max_glyph)
+        /* We don't need to check the upper limit of the value, since the
+         * upper limit is the maximum value of the data type
+         */
+        if (index_glyph >= GS_MIN_GLYPH_INDEX)
             return index_glyph;
     }
     return GS_MIN_GLYPH_INDEX;	/* glyph 0 is notdef */
@@ -362,8 +365,8 @@ z42_gdir_enumerate_glyph(gs_font *font, int *pindex,
         pgdict = &pfont_data(font)->CharStrings;
     /* A trick : use zchar_enumerate_glyph to enumerate GIDs : */
     code = zchar_enumerate_glyph(font->memory, pgdict, pindex, pglyph);
-    if (*pindex != 0 && *pglyph >= gs_min_cid_glyph)
-        *pglyph	= *pglyph - gs_min_cid_glyph + GS_MIN_GLYPH_INDEX;
+    if (*pindex != 0 && *pglyph >= GS_MIN_CID_GLYPH)
+        *pglyph	= *pglyph - GS_MIN_CID_GLYPH + GS_MIN_GLYPH_INDEX;
     return code;
 }
 
@@ -376,7 +379,7 @@ z42_encode_char(gs_font *font, gs_char chr, gs_glyph_space_t glyph_space)
 {
     gs_glyph glyph = zfont_encode_char(font, chr, glyph_space);
 
-    return (glyph_space == GLYPH_SPACE_INDEX && glyph != gs_no_glyph ?
+    return (glyph_space == GLYPH_SPACE_INDEX && glyph != GS_NO_GLYPH ?
             glyph_to_index(font, glyph) : glyph);
 }
 static int

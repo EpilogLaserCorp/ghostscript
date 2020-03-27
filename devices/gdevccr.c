@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* CalComp Raster Format driver */
@@ -21,12 +21,12 @@
  * if you have any questions about this driver.
  */
 
-#define CCFILESTART(p) putc(0x02, p)
-#define CCFILEEND(p) putc(0x04, p)
-#define CCNEWPASS(p) putc(0x0c, p)
-#define CCEMPTYLINE(p) putc(0x0a, p)
-#define CCLINESTART(len,p) do{ putc(0x1b,p);putc(0x4b,p);putc(len>>8,p); \
-                               putc(len&0xff,p);} while(0)
+#define CCFILESTART(p) gp_fputc(0x02, p)
+#define CCFILEEND(p) gp_fputc(0x04, p)
+#define CCNEWPASS(p) gp_fputc(0x0c, p)
+#define CCEMPTYLINE(p) gp_fputc(0x0a, p)
+#define CCLINESTART(len,p) do{ gp_fputc(0x1b,p);gp_fputc(0x4b,p);gp_fputc(len>>8,p); \
+                               gp_fputc(len&0xff,p);} while(0)
 
 #define CPASS (0)
 #define MPASS (1)
@@ -57,7 +57,7 @@ typedef struct cmyrow_s
 static int alloc_rb( gs_memory_t *mem, cmyrow **rb, int rows);
 static int alloc_line( gs_memory_t *mem, cmyrow *row, int cols);
 static void add_cmy8(cmyrow *rb, char c, char m, char y);
-static void write_cpass(cmyrow *buf, int rows, int pass, FILE * pstream);
+static void write_cpass(cmyrow *buf, int rows, int pass, gp_file * pstream);
 static void free_rb_line( gs_memory_t *mem, cmyrow *rbuf, int rows, int cols);
 
 struct gx_device_ccr_s {
@@ -135,7 +135,7 @@ ccr_map_color_rgb(gx_device *pdev, gx_color_index color, ushort rgb[3])
 /* ------ print page routine ------ */
 
 static int
-ccr_print_page(gx_device_printer *pdev, FILE *pstream)
+ccr_print_page(gx_device_printer *pdev, gp_file *pstream)
 {
   cmyrow *linebuf;
   int line_size = gdev_prn_raster((gx_device *)pdev);
@@ -145,6 +145,7 @@ ccr_print_page(gx_device_printer *pdev, FILE *pstream)
   int cmy, c, m, y;
   byte *in;
   byte *data;
+  int code = 0;
 
   if((in = (byte *)gs_malloc(pdev->memory, line_size, 1, "gsline")) == NULL)
      return_error(gs_error_VMerror);
@@ -156,7 +157,9 @@ ccr_print_page(gx_device_printer *pdev, FILE *pstream)
     }
 
   for ( l = 0; l < lnum; l++ )
-     {	gdev_prn_get_bits(pdev, l, in, &data);
+     {  code = gdev_prn_get_bits(pdev, l, in, &data);
+        if (code < 0)
+            goto xit;
         if(alloc_line(pdev->memory, &linebuf[l], pixnum))
           {
             gs_free(pdev->memory, in, line_size, 1, "gsline");
@@ -191,9 +194,10 @@ write_cpass(linebuf, lnum, CPASS, pstream);
 CCFILEEND(pstream);
 
 /* clean up */
+xit:
 gs_free(pdev->memory, in, line_size, 1, "gsline");
 free_rb_line( pdev->memory, linebuf, lnum, pixnum );
-return 0;
+return code;
 }
 
 /* ------ Internal routines ------ */
@@ -252,7 +256,7 @@ static void add_cmy8(cmyrow *rb, char c, char m, char y)
   return;
 }
 
-static void write_cpass(cmyrow *buf, int rows, int pass, FILE * pstream)
+static void write_cpass(cmyrow *buf, int rows, int pass, gp_file * pstream)
 {
   int row, len;
     for(row=0; row<rows; row++)
@@ -263,7 +267,7 @@ static void write_cpass(cmyrow *buf, int rows, int pass, FILE * pstream)
       else
         {
           CCLINESTART(len,pstream);
-          fwrite( buf[row].cmybuf[pass], len, 1, pstream);
+          gp_fwrite( buf[row].cmybuf[pass], len, 1, pstream);
         }
     }
   return;

@@ -11,12 +11,6 @@
 *									      *
 ******************************************************************************/
 
-/* Configuration management identification */
-#ifndef lint
-static const char
-  cm_id[] = "@(#)$Id: pclscan.c,v 1.8 2000-10-22 11:05:34+02 Martin Rel $";
-#endif
-
 /*****************************************************************************/
 
 #ifndef _XOPEN_SOURCE
@@ -89,7 +83,7 @@ static int cmp_strings(const void *a, const void *b)
   return strncmp((const char *)a, (const char *)b, 3);
 }
 
-static int default_interpreter(FILE *in, const pcl_Command *cmd)
+static int default_interpreter(gp_file *in, const pcl_Command *cmd)
 {
   /* Skip over arguments for those commands which are known to have them */
   if (cmd->kind >= 3) {
@@ -153,7 +147,7 @@ static int default_interpreter(FILE *in, const pcl_Command *cmd)
 
 /*****************************************************************************/
 
-static int default_handler(FILE *in)
+static int default_handler(gp_file *in)
 {
   int c;
 
@@ -186,7 +180,7 @@ static int default_handler(FILE *in)
 
 ******************************************************************************/
 
-int pcl_scan(FILE *in, pcl_CommandInterpreter interpreter, void *idata,
+int pcl_scan(gp_file *in, pcl_CommandInterpreter interpreter, void *idata,
   pcl_UnknownDataHandler handler, void *hdata)
 {
   int

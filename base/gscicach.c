@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -42,7 +42,7 @@ struct gs_color_index_cache_elem_s {
 
 struct gs_color_index_cache_s {
     const gs_color_space *direct_space;
-    gs_imager_state *pis;
+    gs_gstate *pgs;
     gx_device *dev;
     gx_device *trans_dev;
     int client_num_components;
@@ -66,7 +66,7 @@ gs_private_st_ptrs6(st_color_index_cache, gs_color_index_cache_t, "gs_color_inde
 
 gs_color_index_cache_t *
 gs_color_index_cache_create(gs_memory_t *memory, const gs_color_space *direct_space, gx_device *dev,
-                            gs_imager_state *pis, bool need_frac, gx_device *trans_dev)
+                            gs_gstate *pgs, bool need_frac, gx_device *trans_dev)
 {
     int client_num_components = cs_num_components(direct_space);
     int device_num_components = trans_dev->color_info.num_components;
@@ -88,7 +88,7 @@ gs_color_index_cache_create(gs_memory_t *memory, const gs_color_space *direct_sp
     memset(pcic, 0, sizeof(*pcic));
     memset(buf, 0, COLOR_INDEX_CACHE_SIZE * sizeof(gs_color_index_cache_elem_t));
     pcic->direct_space = direct_space;
-    pcic->pis = pis;
+    pcic->pgs = pgs;
     pcic->dev = dev;
     pcic->trans_dev = trans_dev;
     pcic->device_num_components = device_num_components;
@@ -221,7 +221,6 @@ get_color_index_cache_elem(gs_color_index_cache_t *self,
                 return 1;
             }
         }
-        tries+=0;
     }
     if (self->used < COLOR_INDEX_CACHE_SIZE) {
         /* Use a new one */
@@ -261,7 +260,7 @@ compute_frac_values(gs_color_index_cache_t *self, uint i)
         /* Must be devn */
         for (j = 0; j < device_num_components; j++) {
             self->frac_values[i * device_num_components + j] = 
-                cv2frac(self->buf[i].color.devn[j]);
+                cv2frac31(self->buf[i].color.devn[j]);
         }
         self->buf[i].frac_values_done = true;
     }
@@ -309,7 +308,7 @@ gs_cached_color_index(gs_color_index_cache_t *self, const float *paint_values,
                sizeof(*paint_values) * client_num_components);
         memcpy(fcc.paint.values, paint_values, 
                sizeof(*paint_values) * client_num_components);
-        code = pcs->type->remap_color(&fcc, pcs, pdevc, self->pis, 
+        code = pcs->type->remap_color(&fcc, pcs, pdevc, self->pgs, 
                                       self->trans_dev, gs_color_select_texture);
         if (code < 0)
             return code;

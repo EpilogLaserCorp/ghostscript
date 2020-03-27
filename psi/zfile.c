@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -35,6 +35,7 @@
 #include "iname.h"
 #include "isave.h"              /* for restore */
 #include "idict.h"
+#include "iddict.h"
 #include "iutil.h"
 #include "stream.h"
 #include "strimpl.h"
@@ -121,7 +122,7 @@ make_invalid_file(i_ctx_t *i_ctx_p, ref * fp)
 /* strings of the permitgroup array. */
 static int
 check_file_permissions_reduced(i_ctx_t *i_ctx_p, const char *fname, int len,
-                        const char *permitgroup)
+                        gx_io_device *iodev, const char *permitgroup)
 {
     long i;
     ref *permitlist = NULL;
@@ -131,8 +132,14 @@ check_file_permissions_reduced(i_ctx_t *i_ctx_p, const char *fname, int len,
     bool use_windows_pathsep = (gs_file_name_check_separator(win_sep2, 1, win_sep2) == 1);
     uint plen = gp_file_name_parents(fname, len);
 
-    /* Assuming a reduced file name. */
+    /* we're protecting arbitrary file system accesses, not Postscript device accesses.
+     * Although, note that %pipe% is explicitly checked for and disallowed elsewhere
+     */
+    if (iodev && iodev != iodev_default(imemory)) {
+        return 0;
+    }
 
+    /* Assuming a reduced file name. */
     if (dict_find_string(&(i_ctx_p->userparams), permitgroup, &permitlist) <= 0)
         return 0;       /* if Permissions not found, just allow access */
 
@@ -187,14 +194,36 @@ check_file_permissions_reduced(i_ctx_t *i_ctx_p, const char *fname, int len,
 /* strings of the permitgroup array */
 static int
 check_file_permissions(i_ctx_t *i_ctx_p, const char *fname, int len,
-                        const char *permitgroup)
+                        gx_io_device *iodev, const char *permitgroup)
 {
     char fname_reduced[gp_file_name_sizeof];
     uint rlen = sizeof(fname_reduced);
 
     if (gp_file_name_reduce(fname, len, fname_reduced, &rlen) != gp_combine_success)
         return gs_error_invalidaccess;         /* fail if we couldn't reduce */
-    return check_file_permissions_reduced(i_ctx_p, fname_reduced, rlen, permitgroup);
+    return check_file_permissions_reduced(i_ctx_p, fname_reduced, rlen, iodev, permitgroup);
+}
+
+/* z_check_file_permissions: see zfile.h for explanation
+ */
+int
+z_check_file_permissions(gs_memory_t *mem, const char *fname, const int len, const char *permission)
+{
+    i_ctx_t *i_ctx_p = get_minst_from_memory(mem)->i_ctx_p;
+    gs_parsed_file_name_t pname;
+    const char *permitgroup = permission[0] == 'r' ? "PermitFileReading" : "PermitFileWriting";
+    int code = gs_parse_file_name(&pname, fname, len, imemory);
+    if (code < 0)
+        return code;
+
+    if (pname.iodev && i_ctx_p->LockFilePermissions
+         && strcmp(pname.iodev->dname, "%pipe%") == 0) {
+        code = gs_note_error(gs_error_invalidfileaccess);
+    }
+    else {
+        code = check_file_permissions(i_ctx_p, pname.fname, pname.len, pname.iodev, permitgroup);
+    }
+    return code;
 }
 
 /* <name_string> <access_string> file <file> */
@@ -253,6 +282,8 @@ zfile(i_ctx_t *i_ctx_p)
     }
     if (code < 0)
         return code;
+    if (s == NULL)
+        return_error(gs_error_undefinedfilename);
     code = ssetfilename(s, op[-1].value.const_bytes, r_size(op - 1));
     if (code < 0) {
         sclose(s);
@@ -284,6 +315,28 @@ file_is_tempfile(i_ctx_t *i_ctx_p, const uchar *fname, int len)
     return true;
 }
 
+static int
+record_file_is_tempfile(i_ctx_t *i_ctx_p, const uchar *fname, int len, bool add)
+{
+    ref *SAFETY;
+    ref *tempfiles;
+    ref kname, bref;
+    int code = 0;
+
+    if (dict_find_string(systemdict, "SAFETY", &SAFETY) <= 0 ||
+            dict_find_string(SAFETY, "tempfiles", &tempfiles) <= 0) {
+        return 0;
+    }
+    if ((code = name_ref(imemory, fname, len, &kname, 1)) < 0) {
+        return code;
+    }
+    make_bool(&bref, true);
+    if (add)
+        return idict_put(tempfiles, &kname, &bref);
+    else
+        return idict_undef(tempfiles, &kname);
+}
+
 /* ------ Level 2 extensions ------ */
 
 /* <string> deletefile - */
@@ -293,17 +346,22 @@ zdeletefile(i_ctx_t *i_ctx_p)
     os_ptr op = osp;
     gs_parsed_file_name_t pname;
     int code = parse_real_file_name(op, &pname, imemory, "deletefile");
+    bool is_temp = false;
 
     if (code < 0)
         return code;
     if (pname.iodev == iodev_default(imemory)) {
         if ((code = check_file_permissions(i_ctx_p, pname.fname, pname.len,
-                "PermitFileControl")) < 0 &&
-                 !file_is_tempfile(i_ctx_p, op->value.bytes, r_size(op))) {
+                pname.iodev, "PermitFileControl")) < 0 &&
+                 !(is_temp = file_is_tempfile(i_ctx_p, op->value.bytes, r_size(op)))) {
             return code;
         }
     }
     code = (*pname.iodev->procs.delete_file)(pname.iodev, pname.fname);
+
+    if (code >= 0 && is_temp)
+        code = record_file_is_tempfile(i_ctx_p, (unsigned char *)pname.fname, strlen(pname.fname), false);
+
     gs_free_file_name(&pname, "deletefile");
     if (code < 0)
         return code;
@@ -340,8 +398,8 @@ zfilenameforall(i_ctx_t *i_ctx_p)
         pop(3);
         return 0;       /* no pattern, or device not found -- just return */
     }
-    pfen = iodev->procs.enumerate_files(iodev, (const char *)pname.fname,
-                pname.len, imemory);
+    pfen = iodev->procs.enumerate_files(imemory, iodev, (const char *)pname.fname,
+                pname.len);
     if (pfen == 0)
         return_error(gs_error_VMerror);
     push_mark_estack(es_for, file_cleanup);
@@ -369,24 +427,31 @@ file_continue(i_ctx_t *i_ctx_p)
     uint len = r_size(pscratch);
     uint code;
 
-    if (len < devlen)
-        return_error(gs_error_rangecheck);     /* not even room for device len */
-    memcpy((char *)pscratch->value.bytes, iodev->dname, devlen);
-    code = iodev->procs.enumerate_next(pfen, (char *)pscratch->value.bytes + devlen,
-                len - devlen);
-    if (code == ~(uint) 0) {    /* all done */
+    if (len < devlen) {
         esp -= 5;               /* pop proc, pfen, devlen, iodev , mark */
-        return o_pop_estack;
-    } else if (code > len)      /* overran string */
-        return_error(gs_error_rangecheck);
-    else {
-        push(1);
-        ref_assign(op, pscratch);
-        r_set_size(op, code + devlen);
-        push_op_estack(file_continue);  /* come again */
-        *++esp = pscratch[2];   /* proc */
-        return o_push_estack;
+        return_error(gs_error_rangecheck);     /* not even room for device len */
     }
+
+    do {
+        memcpy((char *)pscratch->value.bytes, iodev->dname, devlen);
+        code = iodev->procs.enumerate_next(imemory, pfen, (char *)pscratch->value.bytes + devlen,
+                    len - devlen);
+        if (code == ~(uint) 0) {    /* all done */
+            esp -= 5;               /* pop proc, pfen, devlen, iodev , mark */
+            return o_pop_estack;
+        } else if (code > len) {      /* overran string */
+            return_error(gs_error_rangecheck);
+        }
+        else if (iodev != iodev_default(imemory)
+              || (check_file_permissions(i_ctx_p, (char *)pscratch->value.bytes, code + devlen, iodev, "PermitFileReading")) == 0) {
+            push(1);
+            ref_assign(op, pscratch);
+            r_set_size(op, code + devlen);
+            push_op_estack(file_continue);  /* come again */
+            *++esp = pscratch[2];   /* proc */
+            return o_push_estack;
+        }
+    } while(1);
 }
 /* Cleanup procedure for enumerating files */
 static int
@@ -394,7 +459,7 @@ file_cleanup(i_ctx_t *i_ctx_p)
 {
     gx_io_device *iodev = r_ptr(esp + 2, gx_io_device);
 
-    iodev->procs.enumerate_close(r_ptr(esp + 5, file_enum));
+    iodev->procs.enumerate_close(imemory, r_ptr(esp + 5, file_enum));
     return 0;
 }
 
@@ -428,12 +493,12 @@ zrenamefile(i_ctx_t *i_ctx_p)
                  * and FileWriting permissions to the destination file/path.
                  */
               ((check_file_permissions(i_ctx_p, pname1.fname, pname1.len,
-                                        "PermitFileControl") < 0 &&
+                                        pname1.iodev, "PermitFileControl") < 0 &&
                   !file_is_tempfile(i_ctx_p, op[-1].value.bytes, r_size(op - 1))) ||
               (check_file_permissions(i_ctx_p, pname2.fname, pname2.len,
-                                        "PermitFileControl") < 0 ||
+                                        pname2.iodev, "PermitFileControl") < 0 ||
               check_file_permissions(i_ctx_p, pname2.fname, pname2.len,
-                                        "PermitFileWriting") < 0 )))) {
+                                        pname2.iodev, "PermitFileWriting") < 0 )))) {
             code = gs_note_error(gs_error_invalidfileaccess);
         } else {
             code = (*pname1.iodev->procs.rename_file)(pname1.iodev,
@@ -480,8 +545,11 @@ zstatus(i_ctx_t *i_ctx_p)
                 code = gs_terminate_file_name(&pname, imemory, "status");
                 if (code < 0)
                     return code;
-                code = (*pname.iodev->procs.file_status)(pname.iodev,
+                if ((code = check_file_permissions(i_ctx_p, pname.fname, pname.len,
+                                       pname.iodev, "PermitFileReading")) >= 0) {
+                    code = (*pname.iodev->procs.file_status)(pname.iodev,
                                                        pname.fname, &fstat);
+                }
                 switch (code) {
                     case 0:
                         check_ostack(4);
@@ -601,6 +669,7 @@ zlibfile(i_ctx_t *i_ctx_p)
         pname.iodev = iodev_dflt;
     if (pname.iodev != iodev_dflt) { /* Non-OS devices don't have search paths (yet). */
         code = zopen_file(i_ctx_p, &pname, "r", &s, imemory);
+        if (s == NULL) code = gs_note_error(gs_error_undefinedfilename);
         if (code >= 0) {
             code = ssetfilename(s, op->value.const_bytes, r_size(op));
             if (code < 0) {
@@ -664,11 +733,12 @@ ztempfile(i_ctx_t *i_ctx_p)
     os_ptr op = osp;
     const char *pstr;
     char fmode[4];
-    int code = parse_file_access_string(op, fmode);
+    char fmode_temp[4];
+    int code = parse_file_access_string(op, fmode_temp);
     char *prefix = NULL;
     char *fname= NULL;
     uint fnlen;
-    FILE *sfile;
+    gp_file *sfile;
     stream *s;
     byte *buf, *sbody;
 
@@ -681,7 +751,7 @@ ztempfile(i_ctx_t *i_ctx_p)
         goto done;
     }
 
-    strcat(fmode, gp_fmode_binary_suffix);
+    snprintf(fmode, sizeof(fmode), "%s%s", fmode_temp, gp_fmode_binary_suffix);
     if (r_has_type(op - 1, t_null))
         pstr = gp_scratch_file_name_prefix;
     else {
@@ -699,8 +769,24 @@ ztempfile(i_ctx_t *i_ctx_p)
     }
 
     if (gp_file_name_is_absolute(pstr, strlen(pstr))) {
-        if (check_file_permissions(i_ctx_p, pstr, strlen(pstr),
-                                   "PermitFileWriting") < 0) {
+        int plen = strlen(pstr);
+        const char *sep = gp_file_name_separator();
+#ifdef DEBUG
+        int seplen = strlen(sep);
+        if (seplen != 1)
+            return_error(gs_error_Fatal);
+#endif
+        /* strip off the file name prefix, leave just the directory name
+         * so we can check if we are allowed to write to it
+         */
+        for ( ; plen >=0; plen--) {
+            if (pstr[plen] == sep[0])
+                break;
+        }
+        memcpy(fname, pstr, plen);
+        fname[plen] = '\0';
+        if (check_file_permissions(i_ctx_p, fname, strlen(fname),
+                                   NULL, "PermitFileWriting") < 0) {
             code = gs_note_error(gs_error_invalidfileaccess);
             goto done;
         }
@@ -746,6 +832,7 @@ ztempfile(i_ctx_t *i_ctx_p)
     }
     make_string(op - 1, a_readonly | icurrent_space, fnlen, sbody);
     make_stream_file(op, s, fmode);
+    code = record_file_is_tempfile(i_ctx_p, (unsigned char *)fname, fnlen, true);
 
 done:
     if (prefix)
@@ -753,6 +840,99 @@ done:
     if (fname)
         gs_free_object(imemory, fname, "ztempfile(fname)");
     return code;
+}
+
+/* Return the filename used to open a file object
+ * this is currently only used by the PDF interpreter to
+ * get a filename corresponding to the PDF file being
+ * executed. Since we always execute PDF files from disk
+ * this will always be OK.
+ */
+static int zgetfilename(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+    uint fnlen;
+    gs_const_string pfname;
+    stream *s;
+    byte *sbody;
+    int code;
+
+    check_ostack(1);
+    check_read_type(*op, t_file);
+
+    s = (op)->value.pfile;
+
+    code = sfilename(s, &pfname);
+    if (code < 0) {
+        pfname.size = 0;
+    }
+
+    fnlen = pfname.size;
+    sbody = ialloc_string(fnlen, ".getfilename");
+    if (sbody == 0) {
+        code = gs_note_error(gs_error_VMerror);
+        return code;
+    }
+    memcpy(sbody, pfname.data, fnlen);
+    make_string(op, a_readonly | icurrent_space, fnlen, sbody);
+
+    return 0;
+}
+
+static int zaddcontrolpath(i_ctx_t *i_ctx_p)
+{
+    int code;
+    os_ptr op = osp;
+    ref nsref;
+    unsigned int n = -1;
+
+    check_ostack(2);
+    check_read_type(*op, t_string);
+    check_type(op[-1], t_name);
+
+    name_string_ref(imemory, op-1, &nsref);
+    if (r_size(&nsref) == 17 &&
+        strncmp((const char *)nsref.value.const_bytes,
+                "PermitFileReading", 17) == 0) {
+        n = gs_permit_file_reading;
+    } else if (r_size(&nsref) == 17 &&
+               strncmp((const char *)nsref.value.const_bytes,
+                       "PermitFileWriting", 17) == 0) {
+        n = gs_permit_file_writing;
+    } else if (r_size(&nsref) == 17 &&
+               strncmp((const char *)nsref.value.const_bytes,
+                       "PermitFileControl", 17) == 0) {
+        n = gs_permit_file_control;
+    }
+
+    if (n == -1)
+        code = gs_note_error(gs_error_rangecheck);
+    else if (gs_is_path_control_active(imemory))
+        code = gs_note_error(gs_error_Fatal);
+    else
+        code = gs_add_control_path_len(imemory, n,
+                                       (const char *)op[0].value.const_bytes,
+                                       (size_t)r_size(&op[0]));
+    pop(2);
+    return code;
+}
+
+static int zactivatepathcontrol(i_ctx_t *i_ctx_p)
+{
+    gs_activate_path_control(imemory, 1);
+    return 0;
+}
+static int zcurrentpathcontrolstate(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+    push(1);
+    if (gs_is_path_control_active(imemory)) {
+        make_true(op);
+    }
+    else {
+        make_false(op);
+    }
+    return 0;
 }
 
 /* ------ Initialization procedure ------ */
@@ -772,6 +952,11 @@ const op_def zfile_op_defs[] =
                 /* Internal operators */
     {"0%file_continue", file_continue},
     {"0%execfile_finish", execfile_finish},
+    {"1.getfilename", zgetfilename},
+    /* Control path operators */
+    {"2.addcontrolpath", zaddcontrolpath},
+    {"0.activatepathcontrol", zactivatepathcontrol},
+    {"0.currentpathcontrolstate", zcurrentpathcontrolstate},
     op_def_end(0)
 };
 
@@ -872,7 +1057,7 @@ zopen_file(i_ctx_t *i_ctx_p, const gs_parsed_file_name_t *pfn,
             open_file = iodev_os_open_file;
         /* Check OS files to make sure we allow the type of access */
         if (open_file == iodev_os_open_file) {
-            code = check_file_permissions(i_ctx_p, pfn->fname, pfn->len,
+            code = check_file_permissions(i_ctx_p, pfn->fname, pfn->len, pfn->iodev,
                 file_access[0] == 'r' ? "PermitFileReading" : "PermitFileWriting");
 
             if (code < 0 && !file_is_tempfile(i_ctx_p,
@@ -913,17 +1098,6 @@ make_stream_file(ref * pfile, stream * s, const char *access)
     }
 }
 
-static int
-check_file_permissions_aux(i_ctx_t *i_ctx_p, char *fname, uint flen)
-{   /* i_ctx_p is NULL running init files. */
-    /* fname must be reduced. */
-    if (i_ctx_p == NULL)
-        return 0;
-    if (check_file_permissions_reduced(i_ctx_p, fname, flen, "PermitFileReading") < 0)
-        return_error(gs_error_invalidfileaccess);
-    return 0;
-}
-
 /* return zero for success, -ve for error, +1 for continue */
 static int
 lib_file_open_search_with_no_combine(gs_file_path_ptr  lib_path, const gs_memory_t *mem, i_ctx_t *i_ctx_p,
@@ -933,16 +1107,17 @@ lib_file_open_search_with_no_combine(gs_file_path_ptr  lib_path, const gs_memory
     stream *s;
     uint blen1 = blen;
     struct stat fstat;
+    int code = 1;
 
     if (gp_file_name_reduce(fname, flen, buffer, &blen1) != gp_combine_success)
       goto skip;
 
-    if (starting_arg_file || check_file_permissions_aux(i_ctx_p, buffer, blen1) >= 0) {
+    if (starting_arg_file || check_file_permissions(i_ctx_p, buffer, blen1, iodev, "PermitFileReading") >= 0) {
         if (iodev_os_open_file(iodev, (const char *)buffer, blen1,
                        (const char *)fmode, &s, (gs_memory_t *)mem) == 0) {
             *pclen = blen1;
             make_stream_file(pfile, s, "r");
-            return 0;
+            code = 0;
         }
     }
     else {
@@ -951,12 +1126,12 @@ lib_file_open_search_with_no_combine(gs_file_path_ptr  lib_path, const gs_memory
          * Otherwise, keep searching.
          */
         if ((*iodev->procs.file_status)(iodev,  buffer, &fstat) >= 0) {
-            return_error(gs_error_invalidfileaccess);
+            code = gs_note_error(gs_error_invalidfileaccess);
         }
     }
 
  skip:
-    return 1;
+    return code;
 }
 
 /* return zero for success, -ve for error, +1 for continue */
@@ -968,8 +1143,9 @@ lib_file_open_search_with_combine(gs_file_path_ptr  lib_path, const gs_memory_t 
     stream *s;
     const gs_file_path *pfpath = lib_path;
     uint pi;
+    int code = 1;
 
-    for (pi = 0; pi < r_size(&pfpath->list); ++pi) {
+    for (pi = 0; pi < r_size(&pfpath->list) && code == 1; ++pi) {
         const ref *prdir = pfpath->list.value.refs + pi;
         const char *pstr = (const char *)prdir->value.const_bytes;
         uint plen = r_size(prdir), blen1 = blen;
@@ -979,46 +1155,57 @@ lib_file_open_search_with_combine(gs_file_path_ptr  lib_path, const gs_memory_t 
         /* We need to concatenate and parse the file name here
          * if this path has a %device% prefix.              */
         if (pstr[0] == '%') {
-            int code;
-
             /* We concatenate directly since gp_file_name_combine_*
              * rules are not correct for other devices such as %rom% */
             code = gs_parse_file_name(&pname, pstr, plen, mem);
-            if (code < 0)
+            if (code < 0) {
+                code = 1;
                 continue;
+            }
             if (blen < max(pname.len, plen) + flen)
             	return_error(gs_error_limitcheck);
             memcpy(buffer, pname.fname, pname.len);
             memcpy(buffer+pname.len, fname, flen);
             code = pname.iodev->procs.open_file(pname.iodev, buffer, pname.len + flen, fmode,
                                           &s, (gs_memory_t *)mem);
-            if (code < 0)
+            if (code < 0) {
+                code = 1;
                 continue;
+            }
             make_stream_file(pfile, s, "r");
             /* fill in the buffer with the device concatenated */
             memcpy(buffer, pstr, plen);
             memcpy(buffer+plen, fname, flen);
             *pclen = plen + flen;
-            return 0;
+            code = 0;
         } else {
             r = gp_file_name_combine(pstr, plen,
                     fname, flen, false, buffer, &blen1);
             if (r != gp_combine_success)
                 continue;
-            if (iodev_os_open_file(iodev, (const char *)buffer, blen1, (const char *)fmode,
-                                    &s, (gs_memory_t *)mem) == 0) {
-                if (starting_arg_file ||
-                    check_file_permissions_aux(i_ctx_p, buffer, blen1) >= 0) {
+            if (starting_arg_file || check_file_permissions(i_ctx_p, buffer,
+                                      blen1, iodev, "PermitFileReading") >= 0) {
+
+                if (iodev_os_open_file(iodev, (const char *)buffer, blen1,
+                            (const char *)fmode, &s, (gs_memory_t *)mem) == 0) {
                     *pclen = blen1;
                     make_stream_file(pfile, s, "r");
-                    return 0;
+                    code = 0;
                 }
-                sclose(s);
-                return_error(gs_error_invalidfileaccess);
+            }
+            else {
+                struct stat fstat;
+                /* If we are not allowed to open the file by check_file_permissions_aux()
+                 * and if the file exists, throw an error.......
+                 * Otherwise, keep searching.
+                 */
+                if ((*iodev->procs.file_status)(iodev,  (const char *)buffer, &fstat) >= 0) {
+                    code = gs_note_error(gs_error_invalidfileaccess);
+                }
             }
         }
     }
-    return 1;
+    return code;
 }
 
 /* Return a file object of of the file searched for using the search paths. */
@@ -1034,16 +1221,18 @@ lib_file_open(gs_file_path_ptr  lib_path, const gs_memory_t *mem, i_ctx_t *i_ctx
     bool starting_arg_file = (i_ctx_p == NULL) ? true : i_ctx_p->starting_arg_file;
     bool search_with_no_combine = false;
     bool search_with_combine = false;
-    char fmode[4] = { 'r', 0, 0, 0 };           /* room for binary suffix */
+    char fmode[2] = { 'r', 0};
     gx_io_device *iodev = iodev_default(mem);
     gs_main_instance *minst = get_minst_from_memory(mem);
     int code;
+
+    if (i_ctx_p && starting_arg_file)
+        i_ctx_p->starting_arg_file = false;
 
     /* when starting arg files (@ files) iodev_default is not yet set */
     if (iodev == 0)
         iodev = (gx_io_device *)gx_io_device_table[0];
 
-    strcat(fmode, gp_fmode_binary_suffix);
     if (gp_file_name_is_absolute(fname, flen)) {
        search_with_no_combine = true;
        search_with_combine = false;
@@ -1086,12 +1275,12 @@ lib_file_open(gs_file_path_ptr  lib_path, const gs_memory_t *mem, i_ctx_t *i_ctx
 }
 
 /* The startup code calls this to open @-files. */
-FILE *
+gp_file *
 lib_fopen(const gs_file_path_ptr pfpath, const gs_memory_t *mem, const char *fname)
 {
     /* We need a buffer to hold the expanded file name. */
     char filename_found[DEFAULT_BUFFER_SIZE];
-    FILE *file = NULL;
+    gp_file *file = NULL;
     uint fnamelen;
     ref obj;
     int code;

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -25,7 +25,7 @@
 #include "gxdevice.h"
 #include "gxcmap.h"
 #include "gxdcolor.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gzht.h"
 #include "gsserial.h"
 #include "gxdevsop.h"
@@ -36,7 +36,7 @@
 /* Define the size of the tile buffer allocated on the stack. */
 #define tile_longs_LARGE 256
 #define tile_longs_SMALL 64
-#if arch_small_memory
+#if ARCH_SMALL_MEMORY
 #  define tile_longs_allocated tile_longs_SMALL
 #  define tile_longs tile_longs_SMALL
 #else
@@ -266,7 +266,7 @@ gx_dc_ht_colored_write(
     /* see if enough space is available */
     if (req_size > *psize) {
         *psize = req_size;
-        return gs_error_rangecheck;
+        return_error(gs_error_rangecheck);
     }
 
     /* write out the flag byte */
@@ -328,12 +328,12 @@ gx_dc_ht_colored_write(
  *  pdevc       pointer to the location in which to write the
  *              reconstructed device color
  *
- *  pis         pointer to the current imager state (to access the
+ *  pgs         pointer to the current gs_gstate (to access the
  *              current halftone)
  *
  *  prior_devc  pointer to the current device color (this is provided
  *              separately because the device color is not part of the
- *              imager state)
+ *              gs_gstate)
  *
  *  dev         pointer to the current device, used to retrieve process
  *              color model information
@@ -353,7 +353,7 @@ gx_dc_ht_colored_write(
 static int
 gx_dc_ht_colored_read(
     gx_device_color *       pdevc,
-    const gs_imager_state * pis,
+    const gs_gstate * pgs,
     const gx_device_color * prior_devc,
     const gx_device *       dev,
     int64_t		    offset,
@@ -379,7 +379,7 @@ gx_dc_ht_colored_read(
 
     /* the number of components is determined by the color model */
     devc.colors.colored.num_components = num_comps;
-    devc.colors.colored.c_ht = pis->dev_ht;
+    devc.colors.colored.c_ht = pgs->dev_ht;
 
     /*
      * Verify that we have at least the flag bits. For performance
@@ -460,10 +460,10 @@ gx_dc_ht_colored_read(
 
     /* set the phase as required (select value is arbitrary) */
     color_set_phase_mod( &devc,
-                         pis->screen_phase[0].x,
-                         pis->screen_phase[0].y,
-                         pis->dev_ht->lcm_width,
-                         pis->dev_ht->lcm_height );
+                         pgs->screen_phase[0].x,
+                         pgs->screen_phase[0].y,
+                         pgs->dev_ht->lcm_width,
+                         pgs->dev_ht->lcm_height );
 
     /* everything looks OK */
     *pdevc = devc;
@@ -557,7 +557,7 @@ static SET_COLOR_HT_PROC(set_color_ht_gt_4);
 
 /* Prepare to use a colored halftone, by loading the default cache. */
 static int
-gx_dc_ht_colored_load(gx_device_color * pdevc, const gs_imager_state * pis,
+gx_dc_ht_colored_load(gx_device_color * pdevc, const gs_gstate * pgs,
                       gx_device * ignore_dev, gs_color_select_t select)
 {
     /* TO_DO_DEVICEN */
@@ -617,6 +617,13 @@ gx_dc_ht_colored_fill_rectangle(const gx_device_color * pdevc,
     bool no_rop;
     int i;
     int origx, origy;
+
+    /* This routine cannot build 3bit chunky halftones, as 3 bit
+     * things don't pack nicely into bytes or words. Accordingly
+     * treat 3 bit things as 4 bit things. This is appropriate when
+     * generating halftones for planar. */
+    if (depth == 3)
+        depth = 4;
 
     if (w <= 0 || h <= 0)
         return 0;
@@ -833,41 +840,28 @@ static const gx_const_strip_bitmap ht_no_bitmap = {
 };
 
 /* Set the color value(s) and halftone mask for one plane. */
-
-/* Free variables: pvp, pdc, sbits, max_color */
-#define SET_PLANE_COLOR_CONSTANT(i)\
-  BEGIN\
-    pvp->values[1][i] = pvp->values[0][i] = \
-        fractional_color(pdc->colors.colored.c_base[i], max_color);\
-    sbits[i] = &ht_no_bitmap;\
-  END
-
-/* Free variables: pvp, pdc, sbits, caches, invert, max_color */
-#define SET_PLANE_COLOR(i)\
-  BEGIN\
-    uint q = pdc->colors.colored.c_base[i];\
-    uint r = pdc->colors.colored.c_level[i];\
-\
-    pvp->values[0][i] = fractional_color(q, max_color);\
-    if (r == 0)\
-        pvp->values[1][i] = pvp->values[0][i], sbits[i] = &ht_no_bitmap;\
-    else if (!invert) {\
-        pvp->values[1][i] = fractional_color(q + 1, max_color);\
-        sbits[i] = (const gx_const_strip_bitmap *)\
-            &gx_render_ht(caches[i], r)->tiles;\
-    } else {                                                        \
-        const gx_device_halftone *pdht = pdc->colors.colored.c_ht;  \
-        int nlevels =\
-            (pdht->components ?\
-             pdht->components[i].corder.num_levels :\
-             pdht->order.num_levels);\
-\
-        pvp->values[1][i] = pvp->values[0][i];                   \
-        pvp->values[0][i] = fractional_color(q + 1, max_color);   \
-        sbits[i] = (const gx_const_strip_bitmap *)\
-            &gx_render_ht(caches[i], nlevels - r)->tiles;    \
-    }\
-  END
+static inline void set_plane_color(int i, color_values_pair_t *pvp, const gx_device_color * pdc,
+    const gx_const_strip_bitmap * sbits[MAX_DCC], gx_ht_cache * caches[MAX_DCC], 
+    gx_color_value max_color, bool invert)
+{
+    uint q = pdc->colors.colored.c_base[i];
+    uint r = pdc->colors.colored.c_level[i];
+        
+    pvp->values[0][i] = fractional_color(q, max_color);
+    if (r == 0)
+        pvp->values[1][i] = pvp->values[0][i], sbits[i] = &ht_no_bitmap;
+    else if (!invert) {
+        pvp->values[1][i] = fractional_color(q + 1, max_color);
+        sbits[i] = (const gx_const_strip_bitmap *) &gx_render_ht(caches[i], r)->tiles;
+    } else {
+        const gx_device_halftone *pdht = pdc->colors.colored.c_ht;
+        int nlevels = 
+            (pdht->components ? pdht->components[i].corder.num_levels : pdht->order.num_levels);
+        pvp->values[1][i] = pvp->values[0][i];
+        pvp->values[0][i] = fractional_color(q + 1, max_color);
+        sbits[i] = (const gx_const_strip_bitmap *) &gx_render_ht(caches[i], nlevels - r)->tiles;
+    }
+}
 
 /* Set up the colors and the individual plane halftone bitmaps. */
 static int
@@ -889,12 +883,12 @@ set_ht_colors_le_4(color_values_pair_t *pvp /* only used internally */,
      */
     bool invert = dev->color_info.polarity == GX_CINFO_POLARITY_SUBTRACTIVE;
 
-    SET_PLANE_COLOR(0);
+    set_plane_color(0, pvp, pdc, sbits, caches, max_color, invert);
     if (nplanes >= 2) {
-        SET_PLANE_COLOR(1);
+        set_plane_color(1, pvp, pdc, sbits, caches, max_color, invert);
     }
     if (nplanes >= 3) {
-        SET_PLANE_COLOR(2);
+        set_plane_color(2, pvp, pdc, sbits, caches, max_color, invert);
     }
     if (nplanes == 3) {
         gx_color_value alpha = pdc->colors.colored.alpha;
@@ -917,7 +911,7 @@ set_ht_colors_le_4(color_values_pair_t *pvp /* only used internally */,
 #undef M
         }
     } else if (nplanes > 3){
-        SET_PLANE_COLOR(3);
+        set_plane_color(3, pvp, pdc, sbits, caches, max_color, invert);
         if (nplanes > 4) {
             /*
              * Set colors for any planes beyond the 4th.  Since this code
@@ -927,8 +921,11 @@ set_ht_colors_le_4(color_values_pair_t *pvp /* only used internally */,
             /****** DOESN'T MAP COLORS RIGHT, DOESN'T HANDLE ALPHA ******/
             int pi;
 
-            for (pi = 4; pi < nplanes; ++pi)
-                SET_PLANE_COLOR_CONSTANT(pi);
+            for (pi = 4; pi < nplanes; ++pi) {
+                pvp->values[1][pi] = pvp->values[0][pi] =
+                    fractional_color(pdc->colors.colored.c_base[pi], max_color);
+                sbits[pi] = &ht_no_bitmap;
+            }
         }
         /*
          * For CMYK output, especially if the input was RGB, it's
@@ -1072,12 +1069,15 @@ set_ht_colors_gt_4(color_values_pair_t *pvp,
     gx_color_value cv[MAX_DCC] = {0};
 
     /* Set the color values and halftone caches. */
-    for (i = 0; i < nplanes; ++i)
+    for (i = 0; i < nplanes; ++i) {
         if ((plane_mask >> i) & 1)
-            SET_PLANE_COLOR(i);
-        else
-            SET_PLANE_COLOR_CONSTANT(i);
-
+            set_plane_color(i, pvp, pdc, sbits, caches, max_color, invert);
+        else {
+            pvp->values[1][i] = pvp->values[0][i] =
+                fractional_color(pdc->colors.colored.c_base[i], max_color);
+            sbits[i] = &ht_no_bitmap;
+        }
+    }
     /*
      * Determine a gs_color_index value for each pair of component values.
      * We assume that an overall index value can be formed from the

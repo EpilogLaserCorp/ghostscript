@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Sony NWP-533 driver for GhostScript */
@@ -161,9 +161,9 @@ nwp533_close(gx_device *dev)
 
 /* Send the page to the printer. */
 static int
-nwp533_print_page(gx_device_printer *dev, FILE *prn_stream)
+nwp533_print_page(gx_device_printer *dev, gp_file *prn_stream)
 {
-  int lnum;
+  int lnum, code = 0;
   int line_size = gdev_mem_bytes_per_scan_line(dev);
   byte *in;
   int printer_file;
@@ -174,6 +174,8 @@ nwp533_print_page(gx_device_printer *dev, FILE *prn_stream)
       line_size += 4 - (line_size % 4);
     }
   in = (byte *) gs_malloc(dev->memory, line_size, 1, "nwp533_output_page(in)");
+  if (in == NULL)
+      return_error(gs_error_VMerror);
  restart:
   if(ioctl(printer_file, LBIOCSTOP, 0) < 0)
     {
@@ -186,7 +188,9 @@ nwp533_print_page(gx_device_printer *dev, FILE *prn_stream)
 
   for ( lnum = 0; lnum < dev->height; lnum++)
     {
-      gdev_prn_copy_scan_lines(prn_dev, lnum, in, line_size);
+      code = gdev_prn_copy_scan_lines(prn_dev, lnum, in, line_size);
+      if (code < 0)
+          goto xit;
       if(write(printer_file, in, line_size) != line_size)
         {
           perror("Writting to output");
@@ -201,7 +205,8 @@ nwp533_print_page(gx_device_printer *dev, FILE *prn_stream)
       perror("Starting print");
       return_error(gs_error_ioerror);
     }
+xit:
   gs_free(dev->memory, in, line_size, 1, "nwp533_output_page(in)");
 
-  return 0;
+  return code;
 }

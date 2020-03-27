@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -29,27 +29,34 @@
 #include "pcpage.h"
 #include "pjtop.h"
 #include <stdlib.h>             /* for atof() */
+#include "gzstate.h"
+#include "plparams.h"
 
 /* Commands */
 
 int
 pcl_do_printer_reset(pcl_state_t * pcs)
 {
+	int code = 0;
     if (pcs->macro_level)
         return e_Range;         /* not allowed inside macro */
 
     /* reset the other parser in case we have gotten the
        pcl_printer_reset while in gl/2 mode. */
-    pcl_implicit_gl2_finish(pcs);
+    code = pcl_implicit_gl2_finish(pcs);
+    if (code < 0)
+        return code;
     /* Print any partial page if not pclxl snippet mode. */
     if (pcs->end_page == pcl_end_page_top) {
-        int code = pcl_end_page_if_marked(pcs);
+        code = pcl_end_page_if_marked(pcs);
 
         if (code < 0)
             return code;
         /* if duplex start on the front side of the paper */
         if (pcs->duplex)
-            put_param1_bool(pcs, "FirstSide", true);
+            code = put_param1_bool(pcs, "FirstSide", true);
+        if (code < 0)
+            return code;
     }
     /* unload fonts */
 
@@ -97,7 +104,9 @@ pcl_simplex_duplex_print(pcl_args_t * pargs, pcl_state_t * pcs)
     code = pcl_end_page_if_marked(pcs);
     if (code < 0)
         return code;
-    pcl_home_cursor(pcs);
+    code = pcl_home_cursor(pcs);
+    if (code < 0)
+        return code;
     switch (int_arg(pargs)) {
         case 0:
             pcs->duplex = false;
@@ -159,42 +168,46 @@ static int                      /* ESC & a <side_enum> G */
 pcl_duplex_page_side_select(pcl_args_t * pargs, pcl_state_t * pcs)
 {
     uint i = uint_arg(pargs);
-    int code;
-    /* save : because pcl_end_page() messes with it,
-       or not if it was an unmarked page, so do it yourself */
-    bool back_side = pcs->back_side;
+    int code = 0;
 
     /* oddly the command goes to the next page irrespective of
        arguments */
     code = pcl_end_page_if_marked(pcs);
-    if (code < 0)
-        return code;
-    pcl_home_cursor(pcs);
-
     if (i > 2)
         return 0;
 
-    /* restore */
-    pcs->back_side = back_side;
-    if (pcs->duplex)
-    {
-        switch (i) {
-            case 0:
-                pcs->back_side = !pcs->back_side;
-                break;
-            case 1:
-                pcs->back_side = false;
-                break;
-            case 2:
-                pcs->back_side = true;
-                break;
-            default:
-                pcs->back_side = false; /* default front */
-                break;
-        }
-        put_param1_bool(pcs, "FirstSide", !pcs->back_side);
+    /* home the cursor even if the command has no effect */
+    if (code >= 0) {
+        int errcode = pcl_home_cursor(pcs);
+        if (errcode < 0)
+            return errcode;
     }
-    return 0;
+    
+    /* if there is an error (code < 0) or the page is unmarked (code
+       == 0) then nothing to update */
+    if (code <= 0)
+        return code;
+
+
+    if (pcs->duplex) {
+        switch (i) {
+        case 0:
+            /* do nothing, back_side was updated by
+               pcl_end_page_if_marked() above */
+            break;
+        case 1:
+            pcs->back_side = false;
+            break;
+        case 2:
+            pcs->back_side = true;
+            break;
+        default:
+            /* can't happen */
+            break;
+        }
+        code = put_param1_bool(pcs, "FirstSide", !pcs->back_side);
+    }
+    return code;
 }
 
 static int                      /* ESC & l 1 T */
@@ -287,9 +300,21 @@ pcl_pjl_res(pcl_state_t * pcs)
     return atof(pres);
 }
 
-static void
+static int
+pcjob_do_copy(pcl_state_t *psaved, const pcl_state_t *pcs,
+              pcl_copy_operation_t operation)
+{
+    if (operation & pcl_copy_after_overlay) {
+        psaved->back_side = pcs->back_side;
+    }
+    return 0;
+}
+
+static int
 pcjob_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
+    int code;
+
     if (type & (pcl_reset_initial | pcl_reset_printer)) {
         /* check for a resolution setting from PJL and set it right
            away, there is no pcl command to set the resolution so a
@@ -311,8 +336,12 @@ pcjob_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
              */
 
             if (res[0] != 0 && res[0] != device_res.x) {
-                put_param1_float_array(pcs, "HWResolution", res);
-                gs_erasepage(pcs->pgs);
+                code = put_param1_float_array(pcs, "HWResolution", res);
+                if (code < 0)
+                    return code;
+                code = gs_erasepage(pcs->pgs);
+                if (code < 0)
+                    return code;
             }
         }
 
@@ -329,9 +358,34 @@ pcjob_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
                               "longedge") ? false : true;
         pcs->back_side = false;
         pcs->output_bin = 1;
-        put_param1_bool(pcs, "Duplex", pcs->duplex);
-        put_param1_bool(pcs, "FirstSide", !pcs->back_side);
-        put_param1_bool(pcs, "BindShortEdge", pcs->bind_short_edge);
+        code = put_param1_bool(pcs, "Duplex", pcs->duplex);
+        if (code < 0)
+            return code;
+        code = put_param1_bool(pcs, "FirstSide", !pcs->back_side);
+        if (code < 0)
+            return code;
+        code = put_param1_bool(pcs, "BindShortEdge", pcs->bind_short_edge);
+        if (code < 0)
+            return code;
+    }
+
+    if (type & (pcl_reset_initial ^ pcl_reset_cold))
+    {
+        pjl_envvar_t *pres;
+
+        pres = pjl_proc_get_envvar(pcs->pjls, "pdfmark");
+        if (strlen(pres) > 0) {
+            code = pcl_pjl_pdfmark(pcs->memory, pcs->pgs->device, pres);
+            if (code < 0)
+                return code;
+        }
+
+        pres = pjl_proc_get_envvar(pcs->pjls, "setdistillerparams");
+        if (strlen(pres) > 0) {
+            code = pcl_pjl_setdistillerparams(pcs->memory, pcs->pgs->device, pres);
+            if (code < 0)
+                return code;
+        }
     }
 
     if (type & (pcl_reset_initial | pcl_reset_printer | pcl_reset_overlay)) {
@@ -347,16 +401,19 @@ pcjob_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
             res[0] = res[1] = pcl_pjl_res(pcs);
 
             if (res[0] != 0)
-                arg_set_uint(&args, res[0]);
+                arg_set_uint(&args, (uint)res[0]);
             else
                 arg_set_uint(&args,
                              (uint) gs_currentdevice(pcs->pgs)->
                              HWResolution[0]);
         } else
             arg_set_uint(&args, 300);
-        pcl_set_unit_of_measure(&args, pcs);
+        code = pcl_set_unit_of_measure(&args, pcs);
+        if (code < 0)
+            return code;
     }
+    return 0;
 }
 const pcl_init_t pcjob_init = {
-    pcjob_do_registration, pcjob_do_reset, 0
+    pcjob_do_registration, pcjob_do_reset, pcjob_do_copy
 };

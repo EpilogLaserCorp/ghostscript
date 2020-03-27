@@ -14,19 +14,16 @@
 #ifndef _mediasize_h	/* Inclusion protection */
 #define _mediasize_h
 
-/* Configuration management identification */
-#pragma ident "@(#)$Id: mediasize.h,v 1.11 2001/04/12 18:35:26 Martin Rel $"
-
 /*****************************************************************************/
 
 /* Macros for conversion between units.
    All these macros resolve to floating point numbers. */
 
 /* Millimetres per inch */
-#define MM_PER_IN	25.4
+#define MM_PER_IN	25.4f
 
 /* Big points (units in PostScript's default user space) per inch */
-#define BP_PER_IN	72.0
+#define BP_PER_IN	72.0f
 
 /* Big points per millimetre */
 #define BP_PER_MM	(BP_PER_IN/MM_PER_IN)

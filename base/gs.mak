@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2012 Artifex Software, Inc.
+# Copyright (C) 2001-2019 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 # of the license contained in the file LICENSE in this distribution.
 #
 # Refer to licensing information at http://www.artifex.com or contact
-# Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-# CA  94903, U.S.A., +1(415)492-9861, for further information.
+# Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+# CA 94945, U.S.A., +1(415)492-9861, for further information.
 #
 #
 # Generic makefile, common to all platforms, products, and configurations.
@@ -69,8 +69,8 @@
 #	    typically 'jbig2dec' or 'jbig2dec-/version/'
 #	JPX_LIB - choice of which jpeg2k implementation to use
 #	SHARE_JPX - If set to 1, asks the linker to use an existing
-#	    complied jpeg2k library. If set to 0, asks to compile and 
-#	    link from a local copy of the source using our custom 
+#	    complied jpeg2k library. If set to 0, asks to compile and
+#	    link from a local copy of the source using our custom
 #	    makefile.
 #	JPXSRCDIR - the name of the jpeg2k library source directory
 #	    e.g. 'openjpeg'
@@ -95,7 +95,7 @@
 #		    pdf - a PDF 1.2 interpreter.
 #	    psl3 includes everything in psl2, and psl2 includes everything
 #	      in psl1.  For backward compatibility, level1 is a synonym for
-#	      psl1, and level2 is a synonym for psl2.  
+#	      psl1, and level2 is a synonym for psl2.
 #	    The remaining features are of interest primarily to developers
 #	      who want to "mix and match" features to create custom
 #	      configurations:
@@ -113,8 +113,6 @@
 #                       paramter for each %disk (see Language.htm).
 #		    dps - (partial) support for Display PostScript extensions:
 #			see Language.htm for details.
-#		    dpsnext - (partial) support for Display PostScript
-#			extensions with NeXT's additions.
 #		    epsf - support for recognizing and skipping the binary
 #			header of MS-DOS EPSF files.
 #		    filter - support for Level 2 filters (other than eexec,
@@ -139,7 +137,7 @@
 #	COMPILE_INITS - normally 1; compiles the PostScript language
 #	    initialization files (gs_init.ps et al) and Resource/* tree
 #	    into the executable, eliminating the need for these files
-#	    to be present at run time. Files will be placed in the 
+#	    to be present at run time. Files will be placed in the
 #	    %rom% device.
 #	BAND_LIST_STORAGE - normally file; if set to memory, stores band
 #	    lists in memory (with compression if needed).
@@ -150,11 +148,6 @@
 #	    both, provides both implementations with different procedure
 #	    names for the fd-based implementation (see sfxfd.c for
 #	    more information).
-#	STDIO_IMPLEMENTATION - normally 'c' which uses callouts and 
-#	    ziodevsc.c, but ghostscript library must use '' for file 
-#	    based stdio in ziodevs.c. 
-#           Callouts use procedure based streams and return back to
-#           to gs_main_interpret() in imain.c whenever stdio is needed.
 #
 # It is very unlikely that anyone would want to edit the remaining
 #   symbols, but we describe them here for completeness:
@@ -239,6 +232,7 @@ LCUPSGENDIR=$(GLGENDIR)
 LCUPSOBJDIR=$(GLOBJDIR)
 LCUPSIGENDIR=$(GLGENDIR)
 LCUPSIOBJDIR=$(GLOBJDIR)
+CALOBJDIR=$(GLOBJDIR)
 
 #**************** END PATCHES
 
@@ -248,7 +242,7 @@ GSOBJ=$(GLOBJDIR)$(D)
 #DD=$(GLGEN)
 
 # Define the name of this makefile.
-GS_MAK=$(GLSRCDIR)$(D)gs.mak
+GS_MAK=$(GLSRCDIR)$(D)gs.mak $(TOP_MAKEFILES)
 
 # Define the names of the executables.
 GS_XE=$(BINDIR)$(D)$(GS)$(XE)
@@ -263,6 +257,7 @@ GENCONF_XE=$(AUX)genconf$(XEAUX)
 GENDEV_XE=$(AUX)gendev$(XEAUX)
 GENHT_XE=$(AUX)genht$(XEAUX)
 MKROMFS_XE=$(AUX)mkromfs$(XEAUX)
+PACKPS_XE=$(AUX)packps$(XEAUX)
 
 # Define the names of the generated header files.
 # gconfig*.h and gconfx*.h are generated dynamically.
@@ -274,7 +269,10 @@ gconfigd_h=$(GLGENDIR)$(D)gconfigd.h
 iconfxx_h=$(GLGENDIR)$(D)iconfxx.h
 iconfig_h=$(GLGENDIR)$(D)iconfig.h
 
-all default : $(GS_XE) $(PCL_XPS_TARGETS) $(GS_SHARED_OBJS) $(MAKEDIRSTOP) $(MAKEDIRS)
+all default : $(GS_XE) $(PCL_XPS_PDL_TARGETS) $(GS_SHARED_OBJS) $(MAKEDIRSTOP) $(GS_MAK) $(MAKEDIRS)
+	$(NO_OP)
+
+experimental: all
 	$(NO_OP)
 
 # the distclean and maintainer-clean targets (if any)
@@ -304,6 +302,7 @@ mostlyclean : config-clean
 	$(RMN_) $(MKROMFS_XE)
 	$(RMN_) $(MKROMFS_XE)_0
 	$(RMN_) $(MKROMFS_XE)_1
+	$(RMN_) $(PACKPS_XE)
 	$(RMN_) $(GSGEN)gsromfs1.c $(GSGEN)gsromfs1_.c $(GSGEN)gsromfs1_1.c
 	$(RMN_) $(AUX)*.$(OBJ) $(AUX)gscdefs*.c
 
@@ -393,10 +392,11 @@ DEVICE_DEVS_ALL=$(DEVICE_DEVS) $(DEVICE_DEVS1) \
  $(DEVICE_DEVS10) $(DEVICE_DEVS11) $(DEVICE_DEVS12) $(DEVICE_DEVS13) \
  $(DEVICE_DEVS14) $(DEVICE_DEVS15) $(DEVICE_DEVS16) $(DEVICE_DEVS17) \
  $(DEVICE_DEVS18) $(DEVICE_DEVS19) $(DEVICE_DEVS20) $(DEVICE_DEVS21) \
- $(DEVICE_DEVS_EXTRA) $(GLD)romfs$(COMPILE_INITS).dev 
+ $(DEVICE_DEVS_EXTRA)
 
 PSI_DEVS_ALL=$(GSPLAT_DEVS_ALL) \
  $(PSI_FEATURE_DEVS) \
+ $(PSD)iapi.dev \
  $(FEATURE_DEVS) \
  $(FEATURE_DEVS_EXTRA) \
  $(DEVICE_DEVS_ALL)
@@ -419,16 +419,16 @@ DEVS_ALL=$(GLGENDIR)$(D)$(GSPLATFORM).dev\
  $(DEVICE_DEVS10) $(DEVICE_DEVS11) $(DEVICE_DEVS12) $(DEVICE_DEVS13) \
  $(DEVICE_DEVS14) $(DEVICE_DEVS15) $(DEVICE_DEVS16) $(DEVICE_DEVS17) \
  $(DEVICE_DEVS18) $(DEVICE_DEVS19) $(DEVICE_DEVS20) $(DEVICE_DEVS21) \
- $(DEVICE_DEVS_EXTRA) $(GLD)romfs$(COMPILE_INITS).dev 
+ $(DEVICE_DEVS_EXTRA)
 
 
-$(GLGENDIR)$(D)fdevs.tr: $(GS_MAK) $(TOP_MAKEFILES) $(ECHOGS_XE) $(GSPLAT_DEVS_ALL) $(FEATURE_DEVS)
+$(GLGENDIR)$(D)fdevs.tr: $(GS_MAK) $(ECHOGS_XE) $(GSPLAT_DEVS_ALL) $(FEATURE_DEVS) $(MAKEDIRS)
 	$(EXP)$(ECHOGS_XE) -w $(GLGENDIR)$(D)fdevs.tr - -include $(GLGENDIR)$(D)$(GSPLATFORM)
 	$(EXP)$(ECHOGS_XE) -a $(GLGENDIR)$(D)fdevs.tr -+ $(FEATURE_DEVS)
 	$(EXP)$(ECHOGS_XE) -a $(GLGENDIR)$(D)fdevs.tr -+ $(FEATURE_DEVS_EXTRA)
 
-$(GLGENDIR)$(D)devdevs.tr: $(GS_MAK) $(TOP_MAKEFILES) $(ECHOGS_XE) $(DEVICE_DEVS_ALL)
-	$(EXP)$(ECHOGS_XE) -a $(GLGENDIR)$(D)devdevs.tr -+ $(DEVICE_DEVS)
+$(GLGENDIR)$(D)devdevs.tr: $(GS_MAK) $(ECHOGS_XE) $(DEVICE_DEVS_ALL) $(MAKEDIRS)
+	$(EXP)$(ECHOGS_XE) -w $(GLGENDIR)$(D)devdevs.tr -+ $(DEVICE_DEVS)
 	$(EXP)$(ECHOGS_XE) -a $(GLGENDIR)$(D)devdevs.tr -+ $(DEVICE_DEVS1)
 	$(EXP)$(ECHOGS_XE) -a $(GLGENDIR)$(D)devdevs.tr -+ $(DEVICE_DEVS2)
 	$(EXP)$(ECHOGS_XE) -a $(GLGENDIR)$(D)devdevs.tr -+ $(DEVICE_DEVS3)
@@ -451,13 +451,12 @@ $(GLGENDIR)$(D)devdevs.tr: $(GS_MAK) $(TOP_MAKEFILES) $(ECHOGS_XE) $(DEVICE_DEVS
 	$(EXP)$(ECHOGS_XE) -a $(GLGENDIR)$(D)devdevs.tr -+ $(DEVICE_DEVS20)
 	$(EXP)$(ECHOGS_XE) -a $(GLGENDIR)$(D)devdevs.tr -+ $(DEVICE_DEVS21)
 	$(EXP)$(ECHOGS_XE) -a $(GLGENDIR)$(D)devdevs.tr -+ $(DEVICE_DEVS_EXTRA)
-	$(EXP)$(ECHOGS_XE) -a $(GLGENDIR)$(D)devdevs.tr -+ $(GLD)romfs$(COMPILE_INITS).dev
 	$(EXP)$(ECHOGS_XE) -a $(GLGENDIR)$(D)devdevs.tr - $(GLGENDIR)$(D)libcore
 
 devs_tr=$(GLGENDIR)$(D)devs.tr
 psdevs_tr=$(GLGENDIR)$(D)psdevs.tr
 
-$(devs_tr) : $(GS_MAK) $(TOP_MAKEFILES) $(ECHOGS_XE) $(GLGENDIR)$(D)fdevs.tr $(GLGENDIR)$(D)devdevs.tr
+$(devs_tr) : $(GS_MAK) $(ECHOGS_XE) $(GLGENDIR)$(D)fdevs.tr $(GLGENDIR)$(D)devdevs.tr $(MAKEDIRS)
 	$(EXP)$(ECHOGS_XE) -w $(devs_tr) -n -R $(GLGENDIR)$(D)fdevs.tr
 	$(EXP)$(ECHOGS_XE) -a $(devs_tr) -+ ""
 	$(EXP)$(ECHOGS_XE) -a $(devs_tr) -n -R $(GLGENDIR)$(D)devdevs.tr
@@ -469,37 +468,56 @@ GCONFIG_EXTRAS=
 
 ld_tr=$(GLGENDIR)$(D)ld.tr
 $(ld_tr) : \
-  $(GS_MAK) $(TOP_MAKEFILES) $(GLSRCDIR)$(D)version.mak $(GENCONF_XE) $(ECHOGS_XE) $(devs_tr) $(GLGENDIR)$(D)libcore.dev
+  $(GS_MAK) $(GLSRCDIR)$(D)version.mak $(GENCONF_XE) $(ECHOGS_XE) $(devs_tr)\
+  $(GLGENDIR)$(D)libcore.dev $(MAKEDIRS)
 	$(EXP)$(GENCONF_XE) $(devs_tr) -h $(gconfxx_h) $(CONFILES) $(CONFLDTR) $(ld_tr)
 	$(EXP)$(ECHOGS_XE) -a $(gconfxx_h) $(GCONFIG_EXTRAS)
 
+gsnoapi_tr=$(GLGENDIR)$(D)gsnoapi.tr
 gs_tr=$(GLGENDIR)$(D)gs.tr
 igs_tr=$(GLGENDIR)$(D)igs.tr
 gsld_tr=$(GLGENDIR)$(D)gsld.tr
-$(gs_tr): $(GS_MAK) $(TOP_MAKEFILES) $(GLSRCDIR)$(D)version.mak $(GENCONF_XE) $(ECHOGS_XE) $(ld_tr) $(devs_tr) $(PSI_DEVS_ALL) \
-                                               $(GLGENDIR)$(D)libcore.dev
+gsnoapild_tr=$(GLGENDIR)$(D)gsnoapild.tr
+$(gsnoapi_tr): $(GS_MAK) $(GLSRCDIR)$(D)version.mak $(GENCONF_XE) $(ECHOGS_XE) $(ld_tr) $(devs_tr) $(PSI_DEVS_ALL)\
+ $(GLGENDIR)$(D)libcore.dev $(MAKEDIRS)
 	$(EXP)$(ECHOGS_XE) -w $(igs_tr) - -include $(PSI_FEATURE_DEVS)
 	$(EXP)$(GENCONF_XE) $(igs_tr) -h $(iconfxx_h) $(CONFILES) $(CONFLDTR) $(gsld_tr)
 	$(EXP)$(ECHOGS_XE) -w $(iconfig_h) -R $(iconfxx_h)
-	$(EXP)$(ECHOGS_XE) -w $(gs_tr) -R $(devs_tr)
-	$(EXP)$(ECHOGS_XE) -a $(gs_tr) -R $(igs_tr)
+	$(EXP)$(ECHOGS_XE) -w $(gsnoapi_tr) -R $(devs_tr)
+	$(EXP)$(ECHOGS_XE) -a $(gsnoapi_tr) -R $(igs_tr)
+	$(EXP)$(GENCONF_XE) $(gsnoapi_tr) -h $(GLGENDIR)$(D)unused.h $(CONFILES) $(CONFLDTR) $(gsnoapild_tr)
+
+$(gs_tr): $(gsnoapi_tr)
+	$(EXP)$(ECHOGS_XE) -w $(gs_tr) -R $(gsnoapi_tr)
+	$(EXP)$(ECHOGS_XE) -a $(gs_tr) - -include $(PSD)iapi.dev
 	$(EXP)$(GENCONF_XE) $(gs_tr) -h $(GLGENDIR)$(D)unused.h $(CONFILES) $(CONFLDTR) $(gsld_tr)
 
+
 pcl_tr=$(GLGENDIR)$(D)pcl.tr
-$(pcl_tr): $(GS_MAK) $(TOP_MAKEFILES) $(GLSRCDIR)$(D)version.mak $(GENCONF_XE) $(ECHOGS_XE) $(ld_tr) $(devs_tr) $(PCL_DEVS_ALL) \
-                                             $(devs_tr) $(PCL_FEATURE_DEVS) $(GLGENDIR)$(D)libcore.dev
-	$(EXP)$(GENCONF_XE) -n pcl $(PCL_FEATURE_DEVS) $(CONFILES) -o $(pcl_tr)
+ipcl_tr=$(GLGENDIR)$(D)ipcl.tr
+pclld_tr=$(GLGENDIR)$(D)pclld.tr
+$(pcl_tr): $(GS_MAK) $(GLSRCDIR)$(D)version.mak $(GENCONF_XE) $(ECHOGS_XE) $(ld_tr) $(devs_tr) $(PCL_DEVS_ALL) \
+                                             $(devs_tr) $(PCL_FEATURE_DEVS) $(GLGENDIR)$(D)libcore.dev $(MAKEDIRS)
+	$(EXP)$(ECHOGS_XE) -w $(ipcl_tr) - -include $(PCL_FEATURE_DEVS)
+	$(EXP)$(ECHOGS_XE) -w $(pcl_tr) -R $(devs_tr)
+	$(EXP)$(ECHOGS_XE) -a $(pcl_tr) -R $(ipcl_tr)
+	$(EXP)$(GENCONF_XE) $(pcl_tr) -h $(GLGENDIR)$(D)unused.h $(CONFILES) $(CONFLDTR) $(pclld_tr)
 
 xps_tr=$(GLGENDIR)$(D)xps.tr
-$(xps_tr): $(GS_MAK) $(TOP_MAKEFILES) $(GLSRCDIR)$(D)version.mak $(GENCONF_XE) $(ECHOGS_XE) $(ld_tr) $(devs_tr) $(XPS_DEVS_ALL) \
-                                             $(devs_tr) $(XPS_FEATURE_DEVS) $(GLGENDIR)$(D)libcore.dev
-	$(EXP)$(GENCONF_XE) -n xps $(XPS_FEATURE_DEVS) $(CONFILES) -o $(xps_tr)
+ixps_tr=$(GLGENDIR)$(D)ixps.tr
+xpsld_tr=$(GLGENDIR)$(D)xpsld.tr
+$(xps_tr): $(GS_MAK) $(GLSRCDIR)$(D)version.mak $(GENCONF_XE) $(ECHOGS_XE) $(ld_tr) $(devs_tr) $(XPS_DEVS_ALL) \
+                                             $(devs_tr) $(XPS_FEATURE_DEVS) $(GLGENDIR)$(D)libcore.dev $(MAKEDIRS)
+	$(EXP)$(ECHOGS_XE) -w $(ixps_tr) - -include $(XPS_FEATURE_DEVS)
+	$(EXP)$(ECHOGS_XE) -w $(xps_tr) -R $(devs_tr)
+	$(EXP)$(ECHOGS_XE) -a $(xps_tr) -R $(ixps_tr)
+	$(EXP)$(GENCONF_XE) $(xps_tr) -h $(GLGENDIR)$(D)unused.h $(CONFILES) $(CONFLDTR) $(xpsld_tr)
 
 gpdl_tr=$(GLGENDIR)$(D)gpdl.tr
 igpdl_tr=$(GLGENDIR)$(D)igpdl.tr
 gpdlld_tr=$(GLGENDIR)$(D)gpdlld.tr
-$(gpdl_tr): $(GS_MAK) $(TOP_MAKEFILES) $(GLSRCDIR)$(D)version.mak $(GENCONF_XE) $(ECHOGS_XE) $(ld_tr) $(devs_tr) $(XPS_DEVS_ALL) \
-                                       $(devs_tr) $(PSI_DEVS_ALL) $(PCL_FEATURE_DEVS) $(XPS_FEATURE_DEVS) $(GLGENDIR)$(D)libcore.dev
+$(gpdl_tr): $(GS_MAK) $(GLSRCDIR)$(D)version.mak $(GENCONF_XE) $(ECHOGS_XE) $(ld_tr) $(devs_tr) $(XPS_DEVS_ALL) \
+            $(devs_tr) $(PSI_DEVS_ALL) $(PCL_FEATURE_DEVS) $(XPS_FEATURE_DEVS) $(GLGENDIR)$(D)libcore.dev $(MAKEDIRS)
 	$(EXP)$(ECHOGS_XE) -w $(igpdl_tr) - -include $(PSI_FEATURE_DEVS)
 	$(EXP)$(GENCONF_XE) $(igpdl_tr) -h $(iconfxx_h) $(CONFILES) $(CONFLDTR) $(gpdlld_tr)
 	$(EXP)$(ECHOGS_XE) -w $(iconfig_h) -R $(iconfxx_h)
@@ -514,11 +532,11 @@ $(gconfxx_h) : $(ld_tr)
 $(gconfig_h) : $(gconfxx_h)
 	$(RM_) $(gconfig_h)
 	$(CP_) $(gconfxx_h) $(gconfig_h)
-	
+
 # The line above is an empty command; don't delete.
 
 # save our set of makefile variables that are defined in every build (paths, etc.)
-$(gconfigd_h) : $(ECHOGS_XE) $(GS_MAK) $(TOP_MAKEFILES) $(GLSRCDIR)$(D)version.mak
+$(gconfigd_h) : $(ECHOGS_XE) $(GS_MAK) $(GLSRCDIR)$(D)version.mak $(MAKEDIRS)
 	$(EXP)$(ECHOGS_XE) -w $(gconfigd_h) -x 23 define -s -u GS_LIB_DEFAULT -x 2022 $(GS_LIB_DEFAULT) -x 22
 	$(EXP)$(ECHOGS_XE) -a $(gconfigd_h) -x 23 define -s -u GS_DEV_DEFAULT -x 2022 $(GS_DEV_DEFAULT) -x 22
 	$(EXP)$(ECHOGS_XE) -a $(gconfigd_h) -x 23 define -s -u GS_CACHE_DIR -x 2022 $(GS_CACHE_DIR) -x 22
@@ -529,5 +547,20 @@ $(gconfigd_h) : $(ECHOGS_XE) $(GS_MAK) $(TOP_MAKEFILES) $(GLSRCDIR)$(D)version.m
 	$(EXP)$(ECHOGS_XE) -a $(gconfigd_h) -x 23 define -s -u GS_REVISIONDATE -s $(GS_REVISIONDATE)
 
 obj_tr=$(GLGENDIR)$(D)obj.tr
-$(obj_tr) : $(ld_tr)
-	$(EXP)$(GENCONF_XE) $(devs_tr) $(CONFILES) -o $(obj_tr)
+$(obj_tr) : $(gs_tr)
+	$(EXP)$(GENCONF_XE) $(gs_tr) -h $(GLGENDIR)$(D)unused.h $(CONFILES) -o $(obj_tr)
+
+
+pclobj_tr=$(GLGENDIR)$(D)pclobj.tr
+$(pclobj_tr) : $(pcl_tr)
+	$(EXP)$(GENCONF_XE) $(pcl_tr) -h $(GLGENDIR)$(D)unused.h $(CONFILES) -o $(pclobj_tr)
+
+
+xpsobj_tr=$(GLGENDIR)$(D)xpsobj.tr
+$(xpsobj_tr) : $(xps_tr)
+	$(EXP)$(GENCONF_XE) $(xps_tr) -h $(GLGENDIR)$(D)unused.h $(CONFILES) -o $(xpsobj_tr)
+
+
+pdlobj_tr=$(GLGENDIR)$(D)pdlobj.tr
+$(pdlobj_tr) : $(gpdl_tr)
+	$(EXP)$(GENCONF_XE) $(gpdl_tr) -h $(GLGENDIR)$(D)unused.h $(CONFILES) -o $(pdlobj_tr)

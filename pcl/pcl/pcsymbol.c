@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -100,13 +100,15 @@ pcl_define_symbol_set(pcl_args_t * pargs, pcl_state_t * pcs)
     }
     first_code = pl_get_uint16(psm->first_code);
     last_code = pl_get_uint16(psm->last_code);
-    /* NB fixme should check psm->Format to identify the vocabulary. */
+
+    if (last_code > 255 || first_code > last_code)
+        return e_Range;
+    
     {
-        int num_codes = last_code - first_code + 1;
+        int num_codes = last_code - first_code + 1;  /* must be in [0,256] now. */
         int i;
 
-        if (num_codes <= 0 || last_code > 255
-            || (count != psm_header_size + num_codes * 2))
+        if (num_codes == 0 || (count != psm_header_size + num_codes * 2))
             return e_Range;
 
         header =
@@ -130,7 +132,7 @@ pcl_define_symbol_set(pcl_args_t * pargs, pcl_state_t * pcs)
          * Byte swap the codes now, so that we don't have to byte swap
          * them every time we access them.
          */
-        for (i = num_codes; --i >= 0;)
+        for (i = 0; i < num_codes; i++)
             header->codes[i] =
                 pl_get_uint16((byte *) psm + psm_header_size + i * 2);
     }
@@ -148,19 +150,26 @@ pcl_define_symbol_set(pcl_args_t * pargs, pcl_state_t * pcs)
         if (symsetp->maps[gv] != NULL)
             gs_free_object(mem, symsetp->maps[gv], "symset map");
     } else {
+        int code = 0;
         pl_glyph_vocabulary_t gx;
 
         symsetp = (pcl_symbol_set_t *) gs_alloc_bytes(mem,
                                                       sizeof
                                                       (pcl_symbol_set_t),
                                                       "symset dict value");
-        if (!symsetp)
+        if (!symsetp) {
+            gs_free_object(mem, header, "pcl_font_header(header)");
             return_error(e_Memory);
+        }
         for (gx = plgv_MSL; gx < plgv_next; gx++)
             symsetp->maps[gx] = NULL;
         symsetp->storage = pcds_temporary;
-        pl_dict_put(&pcs->soft_symbol_sets, id_key(pcs->symbol_set_id),
+        code = pl_dict_put(&pcs->soft_symbol_sets, id_key(pcs->symbol_set_id),
                     2, symsetp);
+        if (code < 0) {
+            gs_free_object(mem, header, "pcl_font_header(header)");
+            return code;
+        }
     }
     symsetp->maps[gv] = header;
 
@@ -270,10 +279,14 @@ pcl_load_built_in_symbol_sets(pcl_state_t * pcs)
             for (gx = plgv_MSL; gx < plgv_next; gx++)
                 symsetp->maps[gx] = NULL;
             symsetp->storage = pcds_internal;
+
+            if (pl_dict_put(&pcs->built_in_symbol_sets, mapp->id, 2, symsetp) < 0) {
+                /* on error, pl_dict_put consumes symsetp */
+                return_error(gs_error_VMerror);
+            }
         }
         gv = (mapp->character_requirements[7] & 07) == 1 ?
             plgv_Unicode : plgv_MSL;
-        pl_dict_put(&pcs->built_in_symbol_sets, mapp->id, 2, symsetp);
         symsetp->maps[gv] = (pl_symbol_map_t *) mapp;
     }
     return 0;
@@ -355,9 +368,11 @@ pcsymbol_do_registration(pcl_parser_state_t * pcl_parser_state,
         return 0;
 }
 
-static void
+static int
 pcsymbol_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
+    int code;
+
     if (type & (pcl_reset_initial | pcl_reset_printer | pcl_reset_overlay)) {
         id_set_value(pcs->symbol_set_id, 0);
         if (type & pcl_reset_initial) {
@@ -377,13 +392,16 @@ pcsymbol_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
             pcl_args_t args;
 
             arg_set_uint(&args, 1);     /* delete temporary symbol sets */
-            pcl_symbol_set_control(&args, pcs);
+            code = pcl_symbol_set_control(&args, pcs);
+            if (code < 0)
+                return code;
         }
     }
     if (type & pcl_reset_permanent) {
         pl_dict_release(&pcs->soft_symbol_sets);
         pl_dict_release(&pcs->built_in_symbol_sets);
     }
+    return 0;
 }
 
 static int

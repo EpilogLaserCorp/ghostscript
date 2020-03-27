@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -21,13 +21,12 @@
 #include "store.h"
 #include "gsstate.h"
 
-/****** NOTE: none of the arithmetic operators  ******/
-/****** currently check for floating exceptions ******/
-
 /*
  * Many of the procedures in this file are public only so they can be
  * called from the FunctionType 4 interpreter (zfunc4.c).
  */
+
+static int mul_64_64_overflowcheck(int64_t abc, int64_t def, int64_t *res);
 
 /* <num1> <num2> add <sum> */
 /* We make this into a separate procedure because */
@@ -36,6 +35,7 @@ int
 zop_add(i_ctx_t *i_ctx_p)
 {
     register os_ptr op = osp;
+    float result;
 
     switch (r_type(op)) {
     default:
@@ -45,7 +45,16 @@ zop_add(i_ctx_t *i_ctx_p)
         default:
             return_op_typecheck(op - 1);
         case t_real:
-            op[-1].value.realval += op->value.realval;
+            result = op[-1].value.realval + op->value.realval;
+#ifdef HAVE_ISINF
+            if (isinf(result))
+                return_error(gs_error_undefinedresult);
+#endif
+#ifdef HAVE_ISNAN
+            if (isnan(result))
+                return_error(gs_error_undefinedresult);
+#endif
+            op[-1].value.realval = result;
             break;
         case t_integer:
             make_real(op - 1, (double)op[-1].value.intval + op->value.realval);
@@ -56,7 +65,16 @@ zop_add(i_ctx_t *i_ctx_p)
         default:
             return_op_typecheck(op - 1);
         case t_real:
-            op[-1].value.realval += (double)op->value.intval;
+            result = op[-1].value.realval + (double)op->value.intval;
+#ifdef HAVE_ISINF
+            if (isinf(result))
+                return_error(gs_error_undefinedresult);
+#endif
+#ifdef HAVE_ISNAN
+            if (isnan(result))
+                return_error(gs_error_undefinedresult);
+#endif
+            op[-1].value.realval = result;
             break;
         case t_integer: {
             if (sizeof(ps_int) != 4 && gs_currentcpsimode(imemory)) {
@@ -103,6 +121,7 @@ zdiv(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
     os_ptr op1 = op - 1;
+    float result;
 
     /* We can't use the non_int_cases macro, */
     /* because we have to check explicitly for op == 0. */
@@ -116,10 +135,28 @@ zdiv(i_ctx_t *i_ctx_p)
                 default:
                     return_op_typecheck(op1);
                 case t_real:
-                    op1->value.realval /= op->value.realval;
+                    result = op1->value.realval / op->value.realval;
+#ifdef HAVE_ISINF
+                    if (isinf(result))
+                        return_error(gs_error_undefinedresult);
+#endif
+#ifdef HAVE_ISNAN
+                    if (isnan(result))
+                        return_error(gs_error_undefinedresult);
+#endif
+                    op1->value.realval = result;
                     break;
                 case t_integer:
-                    make_real(op1, (double)op1->value.intval / op->value.realval);
+                    result = (double)op1->value.intval / op->value.realval;
+#ifdef HAVE_ISINF
+                    if (isinf(result))
+                        return_error(gs_error_undefinedresult);
+#endif
+#ifdef HAVE_ISNAN
+                    if (isnan(result))
+                        return_error(gs_error_undefinedresult);
+#endif
+                    make_real(op1, result);
             }
             break;
         case t_integer:
@@ -129,14 +166,90 @@ zdiv(i_ctx_t *i_ctx_p)
                 default:
                     return_op_typecheck(op1);
                 case t_real:
-                    op1->value.realval /= (double)op->value.intval;
+                    result = op1->value.realval / (double)op->value.intval;
+#ifdef HAVE_ISINF
+                    if (isinf(result))
+                        return_error(gs_error_undefinedresult);
+#endif
+#ifdef HAVE_ISNAN
+                    if (isnan(result))
+                        return_error(gs_error_undefinedresult);
+#endif
+                    op1->value.realval = result;
                     break;
                 case t_integer:
-                    make_real(op1, (double)op1->value.intval / (double)op->value.intval);
+                    result = (double)op1->value.intval / (double)op->value.intval;
+#ifdef HAVE_ISINF
+                    if (isinf(result))
+                        return_error(gs_error_undefinedresult);
+#endif
+#ifdef HAVE_ISNAN
+                    if (isnan(result))
+                        return_error(gs_error_undefinedresult);
+#endif
+                    make_real(op1, result);
             }
     }
     pop(1);
     return 0;
+}
+
+/*
+To detect 64bit x 64bit multiplication overflowing, consider
+breaking the numbers down into 32bit chunks.
+
+  abc = (a<<64) + (b<<32) + c
+      (where a is 0 or -1, and b and c are 32bit unsigned.
+
+Similarly:
+
+  def = (d<<64) + (b<<32) + f
+
+Then:
+
+  abc.def = ((a<<64) + (b<<32) + c) * ((d<<64) + (e<<32) + f)
+          = (a<<64).def + (d<<64).abc + (b<<32).(e<<32) +
+            (b<<32).f + (e<<32).c + cf
+          = (a.def + d.abc + b.e)<<64 + (b.f + e.c)<<32 + cf
+
+*/
+
+static int mul_64_64_overflowcheck(int64_t abc, int64_t def, int64_t *res)
+{
+  uint32_t b = (abc>>32);
+  uint32_t c = (uint32_t)abc;
+  uint32_t e = (def>>32);
+  uint32_t f = (uint32_t)def;
+  uint64_t low, mid, high, bf, ec;
+
+  /* Low contribution */
+  low = (uint64_t)c * (uint64_t)f;
+  /* Mid contributions */
+  bf = (uint64_t)b * (uint64_t)f;
+  ec = (uint64_t)e * (uint64_t)c;
+  /* Top contribution */
+  high = (uint64_t)b * (uint64_t)e;
+  if (abc < 0)
+      high -= def;
+  if (def < 0)
+      high -= abc;
+  /* How do we check for carries from 64bit unsigned adds?
+   *  x + y >= (1<<64) == x >= (1<<64) - y
+   *                   == x >  (1<<64) - y - 1
+   * if we consider just 64bits, this is:
+   * x > NOT y
+   */
+  if (bf > ~ec)
+      high += ((uint64_t)1)<<32;
+  mid = bf + ec;
+  if (low > ~(mid<<32))
+      high += 1;
+  high += (mid>>32);
+  low += (mid<<32);
+
+  *res = low;
+
+  return (int64_t)low < 0 ? high != -1 : high != 0;
 }
 
 /* <num1> <num2> mul <product> */
@@ -144,6 +257,7 @@ int
 zmul(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
+    float result;
 
     switch (r_type(op)) {
     default:
@@ -153,10 +267,20 @@ zmul(i_ctx_t *i_ctx_p)
         default:
             return_op_typecheck(op - 1);
         case t_real:
-            op[-1].value.realval *= op->value.realval;
+            result = op[-1].value.realval * op->value.realval;
+#ifdef HAVE_ISINF
+            if (isinf(result))
+                return_error(gs_error_undefinedresult);
+#endif
+#ifdef HAVE_ISNAN
+            if (isnan(result))
+                return_error(gs_error_undefinedresult);
+#endif
+            op[-1].value.realval = result;
             break;
         case t_integer:
-            make_real(op - 1, (double)op[-1].value.intval * op->value.realval);
+            result = (double)op[-1].value.intval * op->value.realval;
+            make_real(op - 1, result);
         }
         break;
     case t_integer:
@@ -164,7 +288,16 @@ zmul(i_ctx_t *i_ctx_p)
         default:
             return_op_typecheck(op - 1);
         case t_real:
-            op[-1].value.realval *= (double)op->value.intval;
+            result = op[-1].value.realval * (double)op->value.intval;
+#ifdef HAVE_ISINF
+            if (isinf(result))
+                return_error(gs_error_undefinedresult);
+#endif
+#ifdef HAVE_ISNAN
+            if (isnan(result))
+                return_error(gs_error_undefinedresult);
+#endif
+            op[-1].value.realval = result;
             break;
         case t_integer: {
             if (sizeof(ps_int) != 4 && gs_currentcpsimode(imemory)) {
@@ -177,13 +310,13 @@ zmul(i_ctx_t *i_ctx_p)
                     op[-1].value.intval = (ps_int)ab;
             }
             else {
-                double ab = (double)op[-1].value.intval * op->value.intval;
-                if (ab > (double)MAX_PS_INT) /* (double)0x7fffffffffffffff */
+                int64_t result;
+                if (mul_64_64_overflowcheck(op[-1].value.intval, op->value.intval, &result)) {
+                    double ab = (double)op[-1].value.intval * op->value.intval;
                     make_real(op - 1, ab);
-                else if (ab < (double)MIN_PS_INT) /* (double)(int64_t)0x8000000000000000 */
-                    make_real(op - 1, ab);
-                else
-                    op[-1].value.intval = (ps_int)ab;
+                } else {
+                    op[-1].value.intval = result;
+                }
             }
         }
         }

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* CoStar LabelWriter II, II Plus driver for Ghostscript */
@@ -47,7 +47,7 @@ prn_device(prn_bg_procs, "coslwxl",	/* The print_page proc is compatible with al
 
 /* Send the page to the printer. */
 static int
-coslw_print_page(gx_device_printer * pdev, FILE * prn_stream)
+coslw_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
     int line_size = gdev_mem_bytes_per_scan_line((gx_device *) pdev);
     int line_size_words = (line_size + W - 1) / W;
@@ -111,7 +111,7 @@ coslw_print_page(gx_device_printer * pdev, FILE * prn_stream)
                 int this_blank = 255;
                 if (num_blank_lines < this_blank)
                     this_blank = num_blank_lines;
-                fprintf(prn_stream, "\033f\001%c", this_blank);
+                gp_fprintf(prn_stream, "\033f\001%c", this_blank);
                 num_blank_lines -= this_blank;
             }
 
@@ -125,18 +125,18 @@ coslw_print_page(gx_device_printer * pdev, FILE * prn_stream)
             /* Possible change the bytes per line */
             if (bytes_per_line != out_count)
             {
-                fprintf(prn_stream, "\033D%c", out_count);
+                gp_fprintf(prn_stream, "\033D%c", out_count);
                 bytes_per_line = out_count;
             }
 
             /* Transfer the data */
-            fputs("\026", prn_stream);
-            fwrite(out_data, sizeof(byte), out_count, prn_stream);
+            gp_fputs("\026", prn_stream);
+            gp_fwrite(out_data, sizeof(byte), out_count, prn_stream);
         }
     }
 
     /* eject page */
-    fputs("\033E", prn_stream);
+    gp_fputs("\033E", prn_stream);
 
     /* free temporary storage */
     gs_free(pdev->memory, (char *)storage, storage_size_words, W, "coslw_print_page");

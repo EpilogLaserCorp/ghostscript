@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,16 +9,15 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
-*/
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
+ */
 
 
 /* XPS interpreter - text drawing support */
 
 #include "ghostxps.h"
-
-#include <ctype.h>
+#include <stdlib.h>
 
 #define XPS_TEXT_BUFFER_SIZE 300
 
@@ -32,11 +31,13 @@ struct xps_text_buffer_s
     gs_glyph g[XPS_TEXT_BUFFER_SIZE];
 };
 
-static inline int unhex(int i)
+static inline int unhex(int c)
 {
-    if (isdigit(i))
-        return i - '0';
-    return tolower(i) - 'a' + 10;
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'A' && c <= 'Z')
+        return c - 'A' + 10;
+    return c - 'a' + 10;
 }
 
 void
@@ -129,7 +130,6 @@ xps_select_best_font_encoding(xps_font_t *font)
         { 3, 3 },       /* Prc */
         { 3, 2 },       /* ShiftJis */
         { 3, 0 },       /* Symbol */
-        // { 0, * }, -- Unicode (deprecated)
         { 1, 0 },
         { -1, -1 },
     };
@@ -144,8 +144,8 @@ xps_select_best_font_encoding(xps_font_t *font)
             xps_identify_font_encoding(font, i, &pid, &eid);
             if (pid == xps_cmap_list[k].pid && eid == xps_cmap_list[k].eid)
             {
-                xps_select_font_encoding(font, i);
-                return;
+                if (xps_select_font_encoding(font, i))
+                    return;
             }
         }
     }
@@ -157,20 +157,77 @@ xps_select_best_font_encoding(xps_font_t *font)
  * Call text drawing primitives.
  */
 
+/* See if the device can handle Text Rendering Mode natively
+ * returns < 0 for error, 0 for can't handle it, 1 for can handle it
+ */
+static int
+PreserveTrMode(xps_context_t *ctx)
+{
+
+    gs_c_param_list list;
+    dev_param_req_t request;
+    gs_param_name ParamName = "PreserveTrMode";
+    gs_param_typed_value Param;
+    char *data;
+    gs_gstate *pgs = ctx->pgs;
+    int code = 0;
+
+    /* Interrogate the device to see if it supports Text Rendering Mode */
+    data = (char *)gs_alloc_bytes(ctx->memory, 15, "temporary special_op string");
+    memset(data, 0x00, 15);
+    memcpy(data, "PreserveTrMode", 15);
+    gs_c_param_list_write(&list, ctx->memory);
+    /* Make a null object so that the param list won't check for requests */
+    Param.type = gs_param_type_null;
+    list.procs->xmit_typed((gs_param_list *)&list, ParamName, &Param);
+    /* Stuff the data into a structure for passing to the spec_op */
+    request.Param = data;
+    request.list = &list;
+
+    code = dev_proc(gs_currentdevice(pgs), dev_spec_op)(gs_currentdevice(pgs), gxdso_get_dev_param,
+                                                        &request, sizeof(dev_param_req_t));
+
+    if (code != gs_error_undefined) {
+        /* The parameter is present in the device, now we need to see its value */
+        gs_c_param_list_read(&list);
+        list.procs->xmit_typed((gs_param_list *)&list, ParamName, &Param);
+
+        if (Param.type != gs_param_type_bool) {
+            /* This really shoudn't happen, but its best to be sure */
+            gs_free_object(ctx->memory, data,"temporary special_op string");
+            gs_c_param_list_release(&list);
+            return gs_error_typecheck;
+        }
+
+        if (Param.value.b) {
+            code = 1;
+        } else {
+            code = 0;
+        }
+    } else {
+        code = 0;
+    }
+    gs_free_object(ctx->memory, data,"temporary special_op string");
+    gs_c_param_list_release(&list);
+    return code;
+}
+
 static int
 xps_flush_text_buffer(xps_context_t *ctx, xps_font_t *font,
         xps_text_buffer_t *buf, int is_charpath)
 {
     gs_text_params_t params;
     gs_text_enum_t *textenum;
-    float x = buf->x[0];
-    float y = buf->y[0];
+    float initial_x, x = buf->x[0];
+    float initial_y, y = buf->y[0];
     int code;
     int i;
+    gs_gstate_color saved;
 
     // dmprintf1(ctx->memory, "flushing text buffer (%d glyphs)\n", buf->count);
 
-    gs_moveto(ctx->pgs, x, y);
+    initial_x = x;
+    initial_y = y;
 
     params.operation = TEXT_FROM_GLYPHS | TEXT_REPLACE_WIDTHS;
     if (is_charpath)
@@ -193,6 +250,47 @@ xps_flush_text_buffer(xps_context_t *ctx, xps_font_t *font,
     buf->x[buf->count] = 0;
     buf->y[buf->count] = 0;
 
+    if (ctx->pgs->text_rendering_mode == 2 ) {
+        gs_text_enum_t *Tr_textenum;
+        gs_text_params_t Tr_params;
+
+        /* Save the 'stroke' colour, which XPS doesn't normally use, or set.
+         * This isn't used by rendering, but it is used by the pdfwrite
+         * device family, and must be correct for stroking text rendering
+         * modes.
+         */
+        saved = ctx->pgs->color[1];
+        /* And now make the stroke color the same as the fill color */
+        ctx->pgs->color[1] = ctx->pgs->color[0];
+
+        if (PreserveTrMode(ctx) != 1) {
+            /* The device doesn't want (or can't handle) Text Rendering Modes
+             * So start by doing a 'charpath stroke' to embolden the text
+             */
+            gs_moveto(ctx->pgs, initial_x, initial_y);
+            Tr_params.operation = TEXT_FROM_GLYPHS | TEXT_REPLACE_WIDTHS | TEXT_DO_TRUE_CHARPATH;
+            Tr_params.data.glyphs = params.data.glyphs;
+            Tr_params.size = params.size;
+            Tr_params.x_widths = params.x_widths;
+            Tr_params.y_widths = params.y_widths;
+            Tr_params.widths_size = params.widths_size;
+
+            code = gs_text_begin(ctx->pgs, &Tr_params, ctx->memory, &Tr_textenum);
+            if (code != 0)
+                return gs_throw1(-1, "cannot gs_text_begin() (%d)", code);
+
+            code = gs_text_process(Tr_textenum);
+
+            if (code != 0)
+                return gs_throw1(-1, "cannot gs_text_process() (%d)", code);
+
+            gs_text_release(Tr_textenum, "gslt font render");
+
+            gs_stroke(ctx->pgs);
+        }
+    }
+
+    gs_moveto(ctx->pgs, initial_x, initial_y);
     code = gs_text_begin(ctx->pgs, &params, ctx->memory, &textenum);
     if (code != 0)
         return gs_throw1(-1, "cannot gs_text_begin() (%d)", code);
@@ -206,6 +304,10 @@ xps_flush_text_buffer(xps_context_t *ctx, xps_font_t *font,
 
     buf->count = 0;
 
+    if (ctx->pgs->text_rendering_mode == 2 ) {
+        /* Restore the stroke colour which we overwrote above */
+        ctx->pgs->color[1] = saved;
+    }
     return 0;
 }
 
@@ -241,22 +343,16 @@ xps_parse_digits(char *s, int *digit)
     return s;
 }
 
-static inline int is_real_num_char(int c)
-{
-    return (c >= '0' && c <= '9') || c == 'e' || c == 'E' || c == '+' || c == '-' || c == '.';
-}
-
 static char *
-xps_parse_real_num(char *s, float *number)
+xps_parse_real_num(char *s, float *number, bool *number_parsed)
 {
-    char buf[64];
-    char *p = buf;
-    while (is_real_num_char(*s))
-        *p++ = *s++;
-    *p = 0;
-    if (buf[0])
-        *number = atof(buf);
-    return s;
+    char *tail;
+    float v;
+    v = (float)strtod(s, &tail);
+    *number_parsed = tail != s;
+    if (*number_parsed)
+        *number = v;
+    return tail;
 }
 
 static char *
@@ -280,14 +376,42 @@ xps_parse_glyph_index(char *s, int *glyph_index)
 }
 
 static char *
-xps_parse_glyph_metrics(char *s, float *advance, float *uofs, float *vofs)
+xps_parse_glyph_advance(char *s, float *advance, int bidi_level)
 {
+    bool advance_overridden = false;
+
+    if (*s == ',') {
+        s = xps_parse_real_num(s + 1, advance, &advance_overridden);
+
+        /*
+         * If the advance has been derived from the font and not
+         * overridden by the Indices Attribute the sign has already
+         * been direction adjusted.
+         */
+
+        if (advance_overridden && (bidi_level & 1))
+            *advance *= -1;
+    }
+    return s;
+}
+
+static char *
+xps_parse_glyph_offsets(char *s, float *uofs, float *vofs)
+{
+    bool offsets_overridden; /* not used */
+
     if (*s == ',')
-        s = xps_parse_real_num(s + 1, advance);
+        s = xps_parse_real_num(s + 1, uofs, &offsets_overridden);
     if (*s == ',')
-        s = xps_parse_real_num(s + 1, uofs);
-    if (*s == ',')
-        s = xps_parse_real_num(s + 1, vofs);
+        s = xps_parse_real_num(s + 1, vofs, &offsets_overridden);
+    return s;
+}
+
+static char *
+xps_parse_glyph_metrics(char *s, float *advance, float *uofs, float *vofs, int bidi_level)
+{
+    s = xps_parse_glyph_advance(s, advance, bidi_level);
+    s = xps_parse_glyph_offsets(s, uofs, vofs);
     return s;
 }
 
@@ -371,7 +495,7 @@ xps_parse_glyphs_imp(xps_context_t *ctx, xps_font_t *font, float size,
 
             if (is && *is)
             {
-                is = xps_parse_glyph_metrics(is, &advance, &u_offset, &v_offset);
+                is = xps_parse_glyph_metrics(is, &advance, &u_offset, &v_offset, bidi_level);
                 if (*is == ';')
                     is ++;
             }
@@ -385,7 +509,7 @@ xps_parse_glyphs_imp(xps_context_t *ctx, xps_font_t *font, float size,
             /* Adjust glyph offset and advance width for emboldening */
             if (sim_bold)
             {
-                advance *= 1.02;
+                advance *= 1.02f;
                 u_offset += 0.01 * size;
                 v_offset += 0.01 * size;
             }
@@ -435,7 +559,7 @@ xps_parse_glyphs(xps_context_t *ctx,
     char *opacity_mask_uri;
 
     char *bidi_level_att;
-    char *caret_stops_att;
+    /*char *caret_stops_att;*/
     char *fill_att;
     char *font_size_att;
     char *font_uri_att;
@@ -472,14 +596,14 @@ xps_parse_glyphs(xps_context_t *ctx,
     int sim_bold = 0;
     int sim_italic = 0;
 
-    gs_matrix shear = { 1, 0, 0.36397, 1, 0, 0 }; /* shear by 20 degrees */
+    gs_matrix shear = { 1, 0, 0.36397f, 1, 0, 0 }; /* shear by 20 degrees */
 
     /*
      * Extract attributes and extended attributes.
      */
 
     bidi_level_att = xps_att(root, "BidiLevel");
-    caret_stops_att = xps_att(root, "CaretStops");
+    /*caret_stops_att = xps_att(root, "CaretStops");*/
     fill_att = xps_att(root, "Fill");
     font_size_att = xps_att(root, "FontRenderingEmSize");
     font_uri_att = xps_att(root, "FontUri");
@@ -641,13 +765,14 @@ xps_parse_glyphs(xps_context_t *ctx,
 
     if (fill_att)
     {
-        float samples[32];
+        float samples[XPS_MAX_COLORS];
         gs_color_space *colorspace;
 
         xps_parse_color(ctx, base_uri, fill_att, &colorspace, samples);
         if (fill_opacity_att)
-            samples[0] = atof(fill_opacity_att);
+            samples[0] *= atof(fill_opacity_att);
         xps_set_color(ctx, colorspace, samples);
+        rc_decrement(colorspace, "xps_parse_glyphs");
 
         if (sim_bold)
         {

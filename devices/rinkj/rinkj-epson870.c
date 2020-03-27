@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -460,9 +460,6 @@ static int
 rinkj_escp_init (RinkjDevice *self, const RinkjDeviceParams *params)
 {
   RinkjEscp *z = (RinkjEscp *)self;
-  int resolution = 720; /* todo: make settable */
-  int uweave;
-  int height, top, bottom;
   int i;
 
   z->width = params->width;
@@ -471,11 +468,6 @@ rinkj_escp_init (RinkjDevice *self, const RinkjDeviceParams *params)
 
   /* weaving stuff */
   z->pass = 0;
-
-  /* 0 inch margins on top, 0.5 on bottom */
-  top = 0 * resolution;
-  bottom = params->height + 0.5 * resolution;
-  height = params->height * resolution + resolution;
 
   /* some defaults */
   for (i = 0; i < sizeof(z->plane_offsets) / sizeof(z->plane_offsets[0]); i++)
@@ -536,9 +528,6 @@ rinkj_escp_init (RinkjDevice *self, const RinkjDeviceParams *params)
 
   z->spacing = z->yres / z->head_yres;
   z->passes_per_scan = z->xres / z->head_xres;
-
-  /* microweave */
-  uweave = (z->n_pins == 1);
 
   z->max_offset = 0;
   for (i = 0; i < sizeof(z->plane_offsets) / sizeof(z->plane_offsets[0]); i++)
@@ -855,7 +844,6 @@ static int
 rinkj_escp_flush (RinkjEscp *z)
 {
   int xsb, xsb_out;
-  int xs_out;
   int status;
   const int plane[7] = {3, 1, 0, 2, 5, 4, 6};
   const int color[7] = {0, 1, 2, 4, 17, 18, 16};
@@ -879,7 +867,6 @@ rinkj_escp_flush (RinkjEscp *z)
 
   xsb = (z->width * z->bps + 7) >> 3;
 
-  xs_out = (z->width + z->passes_per_scan - 1) / (z->passes_per_scan);
   xsb_out = (((z->width * z->head_bps + 7) >> 3) + z->passes_per_scan - 1) /
     (z->passes_per_scan);
 
@@ -980,7 +967,12 @@ rinkj_escp_flush (RinkjEscp *z)
           else
             status = rinkj_byte_stream_write (z->out, thisbuf, xsb_out);
         }
-      if (status < 0) return status;
+      if (status < 0) {
+          if (rle)
+            free (compress_buf);
+          free (thisbuf);
+          return status;
+      }
 #if 0
       status = rinkj_byte_stream_puts (z->out, "\r");
       if (status < 0) return status;

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -122,6 +122,7 @@ xps_decode_image(xps_context_t *ctx, xps_part_t *part, xps_image_t *image)
     int len = part->size;
     cmm_profile_t *profile;
     int error;
+    int code;
 
     if (len < 8)
         return gs_throw(-1, "unknown image file format");
@@ -173,18 +174,19 @@ xps_decode_image(xps_context_t *ctx, xps_part_t *part, xps_image_t *image)
         if (profile == NULL)
             return gs_throw(gs_error_VMerror, "Profile allocation failed");
 
-        /* Set buffer */
+        /* Set buffer - profile takes ownership! */
         profile->buffer = image->profile;
         profile->buffer_size = image->profilesize;
+        image->profile = NULL;
 
         /* Parse */
-        gsicc_init_profile_info(profile);
+        code = gsicc_init_profile_info(profile);
 
-        if (profile->profile_handle == NULL)
+        if (code < 0)
         {
             /* Problem with profile. Just ignore it */
             gs_warn("ignoring problem with icc profile embedded in an image");
-            gsicc_profile_reference(profile, -1);
+            gsicc_adjust_profile_rc(profile, -1, "xps_decode_image");
         }
         else
         {
@@ -193,7 +195,7 @@ xps_decode_image(xps_context_t *ctx, xps_part_t *part, xps_image_t *image)
             if ((image->comps - image->hasalpha) == gsicc_getsrc_channel_count(profile))
             {
                 /* Create a new colorspace and associate with the profile */
-                // TODO: refcount image->colorspace
+                rc_decrement(image->colorspace, "xps_decode_image");
                 gs_cspace_build_ICC(&image->colorspace, NULL, ctx->memory);
                 image->colorspace->cmm_icc_profile_data = profile;
             }
@@ -201,7 +203,8 @@ xps_decode_image(xps_context_t *ctx, xps_part_t *part, xps_image_t *image)
             {
                 /* Problem with profile. Just ignore it */
                 gs_warn("ignoring icc profile embedded in an image with wrong number of components");
-                gsicc_profile_reference(profile, -1);
+                gsicc_adjust_profile_rc(profile, -1, "xps_decode_image");
+                image->profile = NULL;
             }
         }
     }
@@ -231,6 +234,9 @@ xps_paint_image_brush_imp(xps_context_t *ctx, xps_image_t *image, int alpha)
     unsigned int used;
     byte *samples;
 
+    if (image->xres == 0 || image->yres == 0)
+        return 0;
+
     if (alpha)
     {
         colorspace = ctx->gray_lin;
@@ -258,11 +264,12 @@ xps_paint_image_brush_imp(xps_context_t *ctx, xps_image_t *image, int alpha)
 
     gsimage.Interpolate = 1;
 
+    /* FIXME: leak enum in case of error */
     penum = gs_image_enum_alloc(ctx->memory, "xps_parse_image_brush (gs_image_enum_alloc)");
     if (!penum)
         return gs_throw(gs_error_VMerror, "gs_enum_allocate failed");
 
-    if ((code = gs_image_init(penum, &gsimage, false, ctx->pgs)) < 0)
+    if ((code = gs_image_init(penum, &gsimage, false, false, ctx->pgs)) < 0)
         return gs_throw(code, "gs_image_init failed");
 
     if ((code = gs_image_next(penum, samples, count, &used)) < 0)
@@ -310,6 +317,8 @@ xps_paint_image_brush(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, 
 
         /* You do not want the opacity to be used in the image soft mask filling */
         gs_setopacityalpha(ctx->pgs, 1.0);
+        gs_setfillconstantalpha(ctx->pgs, 1.0);
+        gs_setstrokeconstantalpha(ctx->pgs, 1.0);
         gs_trans_mask_params_init(&params, TRANSPARENCY_MASK_Luminosity);
         gs_begin_transparency_mask(ctx->pgs, &params, &bbox, 0);
         code = xps_paint_image_brush_imp(ctx, image, 1);
@@ -324,7 +333,7 @@ xps_paint_image_brush(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, 
         gs_setcolorspace(ctx->pgs, image->colorspace);
         gs_setblendmode(ctx->pgs, BLEND_MODE_Normal);
         gs_trans_group_params_init(&tgp);
-        gs_begin_transparency_group(ctx->pgs, &tgp, &bbox);
+        gs_begin_transparency_group(ctx->pgs, &tgp, &bbox, PDF14_BEGIN_TRANS_GROUP);
         code = xps_paint_image_brush_imp(ctx, image, 0);
         if (code < 0)
         {
@@ -374,7 +383,7 @@ xps_find_image_brush_source_part(xps_context_t *ctx, char *base_uri, xps_item_t 
         image_name = NULL;
         profile_name = NULL;
 
-        xps_strlcpy(buf, image_source_att, sizeof buf);
+        gs_strlcpy(buf, image_source_att, sizeof buf);
         p = strchr(buf, ' ');
         if (p)
         {
@@ -402,10 +411,11 @@ xps_find_image_brush_source_part(xps_context_t *ctx, char *base_uri, xps_item_t 
     xps_absolute_path(partname, base_uri, image_name, sizeof partname);
     part = xps_read_part(ctx, partname);
     if (!part)
-        return gs_throw1(-1, "cannot find image resource part '%s'", partname);
+        return gs_rethrow1(-1, "cannot find image resource part '%s'", partname);
 
     *partp = part;
-    *profilep = xps_strdup(ctx, profile_name);
+    if (profilep)
+        *profilep = xps_strdup(ctx, profile_name);
 
     return 0;
 }
@@ -416,7 +426,7 @@ xps_parse_image_brush(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, 
     xps_part_t *part;
     xps_image_t *image;
     gs_color_space *colorspace;
-    char *profilename;
+    char *profilename = NULL;
     int code;
 
     code = xps_find_image_brush_source_part(ctx, base_uri, root, &part, &profilename);
@@ -437,9 +447,11 @@ xps_parse_image_brush(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, 
         colorspace = xps_read_icc_colorspace(ctx, base_uri, profilename);
         if (colorspace && cs_num_components(colorspace) == cs_num_components(image->colorspace))
         {
-            // TODO: refcount image->colorspace
+            rc_decrement(image->colorspace, "xps_parse_image_brush");
             image->colorspace = colorspace;
         }
+        else
+            rc_decrement(colorspace, "xps_parse_image_brush");
     }
 
     code = xps_parse_tiling_brush(ctx, base_uri, dict, root, xps_paint_image_brush, image);
@@ -460,9 +472,8 @@ xps_image_brush_has_transparency(xps_context_t *ctx, char *base_uri, xps_item_t 
     xps_part_t *imagepart;
     int code;
     int has_alpha;
-    char *profilename;
 
-    code = xps_find_image_brush_source_part(ctx, base_uri, root, &imagepart, &profilename);
+    code = xps_find_image_brush_source_part(ctx, base_uri, root, &imagepart, NULL);
     if (code < 0)
     {
         gs_catch(code, "cannot find image source");
@@ -479,7 +490,7 @@ xps_image_brush_has_transparency(xps_context_t *ctx, char *base_uri, xps_item_t 
 void
 xps_free_image(xps_context_t *ctx, xps_image_t *image)
 {
-    // TODO: refcount image->colorspace
+    rc_decrement(image->colorspace, "xps_free_image");
     if (image->samples)
         xps_free(ctx, image->samples);
     if (image->alpha)

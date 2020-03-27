@@ -1,4 +1,4 @@
-#! /bin/sh
+#! /usr/bin/env bash
 
 #   EXPAT TEST SCRIPT FOR W3C XML TEST SUITE
 
@@ -6,7 +6,7 @@
 # w3c.org xml test suite, available from
 # http://www.w3.org/XML/Test/xmlts20020606.zip.
 
-# To run this script, first set XMLWF so that xmlwf can be
+# To run this script, first set XMLWF below so that xmlwf can be
 # found, then set the output directory with OUTPUT.
 
 # The script lists all test cases where Expat shows a discrepancy
@@ -20,15 +20,18 @@
 # produced by xmlwf conforms to an older definition of canonical XML
 # and does not generate notation declarations.
 
+shopt -s nullglob
+
+# Note: OUTPUT must terminate with the directory separator.
+OUTPUT="$PWD/tests/out/"
+TS="$PWD/tests/"
+
 MYDIR="`dirname \"$0\"`"
 cd "$MYDIR"
 MYDIR="`pwd`"
-XMLWF="`dirname \"$MYDIR\"`/xmlwf/xmlwf"
-# XMLWF=/usr/local/bin/xmlwf
-TS="$MYDIR/XML-Test-Suite"
-# OUTPUT must terminate with the directory separator.
-OUTPUT="$TS/out/"
-# OUTPUT=/home/tmp/xml-testsuite-out/
+XMLWF="${1:-`dirname \"$MYDIR\"`/xmlwf/xmlwf}"
+# Unicode-aware diff utility
+DIFF="${MYDIR}/udiffer.py"
 
 
 # RunXmlwfNotWF file reldir
@@ -36,10 +39,8 @@ OUTPUT="$TS/out/"
 RunXmlwfNotWF() {
   file="$1"
   reldir="$2"
-  $XMLWF -p "$file" > outfile || return $?
-  read outdata < outfile
-  if test "$outdata" = "" ; then
-      echo "Expected well-formed: $reldir$file"
+  if $XMLWF -p "$file" > /dev/null; then
+      echo "Expected not well-formed: $reldir$file"
       return 1
   else
       return 0
@@ -51,11 +52,11 @@ RunXmlwfNotWF() {
 RunXmlwfWF() {
   file="$1"
   reldir="$2"
-  $XMLWF -p -d "$OUTPUT$reldir" "$file" > outfile || return $?
+  $XMLWF -p -N -d "$OUTPUT$reldir" "$file" > outfile || return $?
   read outdata < outfile 
   if test "$outdata" = "" ; then 
       if [ -f "out/$file" ] ; then 
-          diff "$OUTPUT$reldir$file" "out/$file" > outfile 
+          $DIFF "$OUTPUT$reldir$file" "out/$file" > outfile 
           if [ -s outfile ] ; then 
               cp outfile "$OUTPUT$reldir$file.diff"
               echo "Output differs: $reldir$file"
@@ -96,11 +97,12 @@ for xmldir in ibm/valid/P* \
               sun/invalid ; do
   cd "$TS/xmlconf/$xmldir"
   mkdir -p "$OUTPUT$xmldir"
-  for xmlfile in *.xml ; do
+  for xmlfile in $(ls -1 *.xml | sort -d) ; do
+      [[ -f "$xmlfile" ]] || continue
       RunXmlwfWF "$xmlfile" "$xmldir/"
       UpdateStatus $?
   done
-  rm outfile
+  rm -f outfile
 done
 
 cd "$TS/xmlconf/oasis"
@@ -117,6 +119,7 @@ rm outfile
 
 cd "$TS/xmlconf"
 for xmldir in ibm/not-wf/P* \
+              ibm/not-wf/p28a \
               ibm/not-wf/misc \
               xmltest/not-wf/ext-sa \
               xmltest/not-wf/not-sa \
@@ -127,7 +130,6 @@ for xmldir in ibm/not-wf/P* \
       RunXmlwfNotWF "$xmlfile" "$xmldir/"
       UpdateStatus $?
   done
-  rm outfile
 done
 
 cd "$TS/xmlconf/oasis"
@@ -135,7 +137,6 @@ for xmlfile in *fail*.xml ; do
     RunXmlwfNotWF "$xmlfile" "oasis/"
     UpdateStatus $?
 done
-rm outfile
 
 echo "Passed: $SUCCESS"
 echo "Failed: $ERROR"

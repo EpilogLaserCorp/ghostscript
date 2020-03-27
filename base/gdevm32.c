@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* 32-bit-per-pixel "memory" (stored bitmap) device */
@@ -44,7 +44,7 @@ mem_full_device("image32", 24, 8, mem_open,
 #define color_swap_bytes(color)\
   ((((color) >> 24) & 0xff) + (((color) >> 8) & 0xff00) +\
    (((color) & 0xff00) << 8) + ((color) << 24))
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
 #  define arrange_bytes(color) (color)
 #else
 #  define arrange_bytes(color) color_swap_bytes(color)
@@ -241,7 +241,7 @@ mem_true32_copy_color(gx_device * dev,
 /* Note that on a big-endian machine, this is the same as the */
 /* standard byte-oriented-device. */
 
-#if !arch_is_big_endian
+#if !ARCH_IS_BIG_ENDIAN
 
 /* Procedures */
 declare_mem_procs(mem32_word_copy_mono, mem32_word_copy_color, mem32_word_fill_rectangle);
@@ -293,4 +293,4 @@ mem32_word_copy_color(gx_device * dev,
     return 0;
 }
 
-#endif /* !arch_is_big_endian */
+#endif /* !ARCH_IS_BIG_ENDIAN */

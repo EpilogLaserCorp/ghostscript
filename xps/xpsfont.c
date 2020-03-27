@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -103,11 +103,14 @@ xps_new_font(xps_context_t *ctx, byte *buf, int buflen, int index)
 void
 xps_free_font(xps_context_t *ctx, xps_font_t *font)
 {
+    if (font == NULL)
+        return;
     if (font->font)
     {
         gs_font_finalize(ctx->memory, font->font);
         gs_free_object(ctx->memory, font->font, "font object");
     }
+    xps_free(ctx, font->data);
     xps_free(ctx, font);
 }
 
@@ -163,11 +166,12 @@ xps_find_sfnt_table(xps_font_t *font, const char *name, int *lengthp)
  * Get the windows truetype font file name - position 4 in the name table.
  */
 void
-xps_load_sfnt_name(xps_font_t *font, char *namep)
+xps_load_sfnt_name(xps_font_t *font, char *namep, const int buflen)
 {
     byte *namedata;
     int offset, length;
-    int format, count, stringoffset;
+    /*int format;*/
+    int count, stringoffset;
     int found;
     int i, k;
 
@@ -181,11 +185,26 @@ xps_load_sfnt_name(xps_font_t *font, char *namep)
         return;
     }
 
+    /* validate the offset, and the data for the two
+     * values we're about to read
+     */
+    if (offset + 6 > font->length)
+    {
+        gs_warn("name table byte offset invalid");
+        return;
+    }
     namedata = font->data + offset;
 
-    format = u16(namedata + 0);
+    /*format = u16(namedata + 0);*/
     count = u16(namedata + 2);
     stringoffset = u16(namedata + 4);
+
+    if (stringoffset + offset > font->length
+        || offset + 6 + count * 12 > font->length)
+    {
+        gs_warn("name table invalid");
+        return;
+    }
 
     if (length < 6 + (count * 12))
     {
@@ -202,6 +221,13 @@ xps_load_sfnt_name(xps_font_t *font, char *namep)
         int nameid = u16(record + 6);
         length = u16(record + 8);
         offset = u16(record + 10);
+
+        length = length > buflen - 1 ? buflen - 1: length;
+        if (namedata + stringoffset + offset >= font->data + font->length)
+            continue;
+
+        if (namedata + stringoffset + offset + length >= font->data +  font->length)
+            length = (font->data +  font->length) - (namedata + stringoffset + offset);
 
         /* Full font name or postscript name */
         if (nameid == 4 || nameid == 6)
@@ -270,17 +296,19 @@ xps_load_sfnt_cmap(xps_font_t *font)
     }
 
     cmapdata = font->data + offset;
-
-    nsubtables = u16(cmapdata + 2);
-    if (nsubtables < 0 || length < 4 + nsubtables * 8)
+    if (cmapdata + 4 < font->data + font->length)
     {
-        gs_warn("cannot find cmap sub-tables");
-        return;
-    }
+        nsubtables = u16(cmapdata + 2);
+        if (nsubtables < 0 || length < 4 + nsubtables * 8)
+        {
+            gs_warn("cannot find cmap sub-tables");
+            return;
+        }
 
-    font->cmaptable = offset;
-    font->cmapsubcount = nsubtables;
-    font->cmapsubtable = 0;
+        font->cmaptable = offset;
+        font->cmapsubcount = nsubtables;
+        font->cmapsubtable = 0;
+    }
 }
 
 /*
@@ -313,19 +341,24 @@ xps_identify_font_encoding(xps_font_t *font, int idx, int *pid, int *eid)
  * Select a cmap subtable for use with encoding functions.
  */
 
-void
+int
 xps_select_font_encoding(xps_font_t *font, int idx)
 {
     byte *cmapdata, *entry;
     int pid, eid;
     if (idx < 0 || idx >= font->cmapsubcount)
-        return;
+        return 0;
     cmapdata = font->data + font->cmaptable;
     entry = cmapdata + 4 + idx * 8;
     pid = u16(entry + 0);
     eid = u16(entry + 2);
     font->cmapsubtable = font->cmaptable + u32(entry + 4);
+    if (font->cmapsubtable >= font->length) {
+        font->cmapsubtable = 0;
+        return 0;
+    }
     font->usepua = (pid == 3 && eid == 0);
+    return 1;
 }
 
 /*
@@ -356,9 +389,14 @@ xps_encode_font_char_imp(xps_font_t *font, int code)
             byte *startCount = endCount + segCount2 + 2;
             byte *idDelta = startCount + segCount2;
             byte *idRangeOffset = idDelta + segCount2;
+            byte *giddata;
             int i2;
 
-            for (i2 = 0; i2 < segCount2 - 3; i2 += 2)
+            if (segCount2 < 3 || segCount2 > 65535 ||
+               idRangeOffset > font->data + font->length)
+               return gs_error_invalidfont;
+
+           for (i2 = 0; i2 < segCount2 - 3; i2 += 2)
             {
                 int delta, roff;
                 int start = u16(startCount + i2);
@@ -369,13 +407,16 @@ xps_encode_font_char_imp(xps_font_t *font, int code)
                 if ( code > u16(endCount + i2) )
                     continue;
                 delta = s16(idDelta + i2);
-                roff = s16(idRangeOffset + i2);
+                roff = u16(idRangeOffset + i2);
                 if ( roff == 0 )
                 {
                     return ( code + delta ) & 0xffff; /* mod 65536 */
-                    return 0;
                 }
-                glyph = u16(idRangeOffset + i2 + roff + ((code - start) << 1));
+                if ((giddata = (idRangeOffset + i2 + roff + ((code - start) << 1))) >
+                    font->data + font->length) {
+                    return code;
+                }
+                glyph = u16(giddata);
                 return (glyph == 0 ? 0 : glyph + delta);
             }
 
@@ -434,6 +475,148 @@ xps_encode_font_char_imp(xps_font_t *font, int code)
     }
 
     return 0;
+}
+
+/*
+ * Given a GID, reverse the CMAP subtable lookup to turn it back into a character code
+ * We need a Unicode return value, so we might need to do some fixed tables for
+ * certain kinds of CMAP subtables (ie non-Unicode ones). That would be a future enhancement
+ * if we ever encounter such a beast.
+ */
+static int
+xps_decode_font_char_imp(xps_font_t *font, int code)
+{
+    byte *table, *t;
+
+    /* no cmap selected: return identity */
+    if (font->cmapsubtable <= 0)
+        return code;
+
+    table = font->data + font->cmapsubtable;
+    if (table >= font->data + font->length)
+        return code;
+
+    switch (u16(table))
+    {
+        case 0: /* Apple standard 1-to-1 mapping. */
+            {
+                int i, length = u16(&table[2]) - 6;
+
+                if (length < 0 || length > 256)
+                    return gs_error_invalidfont;
+
+                for (i=0;i<length;i++) {
+                    if (table[6 + i] == code)
+                        return i;
+                }
+            }
+            return 0;
+        case 4: /* Microsoft/Adobe segmented mapping. */
+            {
+                int segCount2 = u16(table + 6);
+                byte *endCount = table + 14;
+                byte *startCount = endCount + segCount2 + 2;
+                byte *idDelta = startCount + segCount2;
+                byte *idRangeOffset = idDelta + segCount2;
+                byte *giddata;
+                int i2;
+
+                if (segCount2 < 3 || segCount2 > 65535 ||
+                    idRangeOffset > font->data + font->length)
+                    return gs_error_invalidfont;
+
+                for (i2 = 0; i2 < segCount2 - 3; i2 += 2)
+                {
+                    int delta = s16(idDelta + i2), roff = u16(idRangeOffset + i2);
+                    int start = u16(startCount + i2);
+                    int end = u16(endCount + i2);
+                    int glyph, i;
+
+                    if (end < start)
+                        return gs_error_invalidfont;
+
+                    for (i=start;i<=end;i++) {
+                        if (roff == 0) {
+                            glyph = (i + delta) & 0xffff;
+                        } else {
+                            if ((giddata = (idRangeOffset + i2 + roff + ((i - start) << 1))) >
+                                 font->data + font->length) {
+                                return_error(gs_error_invalidfont);
+                            }
+                            glyph = u16(giddata);
+                        }
+                        if (glyph == code) {
+                            return i;
+                        }
+                    }
+                }
+            }
+            return 0;
+        case 6: /* Single interval lookup. */
+            {
+                int ch, i, length = u16(&table[8]);
+                int firstCode = u16(&table[6]);
+
+                if (length < 0 || length > 65535)
+                    return gs_error_invalidfont;
+
+                for (i=0;i<length;i++) {
+                    t = &table[10 + (i * 2)];
+                    if (t + 2 > font->data + font->length)
+                        return gs_error_invalidfont;
+                    ch = u16(t);
+                    if (ch == code)
+                        return (firstCode + i);
+                }
+            }
+            return 0;
+        case 10: /* Trimmed array (like 6) */
+            {
+                unsigned int ch, i, length = u32(&table[20]);
+                int firstCode = u32(&table[16]);
+                for (i=0;i<length;i++) {
+                    t = &table[10 + (i * 2)];
+                    if (t + 2 > font->data + font->length)
+                        return gs_error_invalidfont;
+                    ch = u16(t);
+                    if (ch == code)
+                        return (firstCode + i);
+                }
+            }
+            return 0;
+        case 12: /* Segmented coverage. (like 4) */
+            {
+                unsigned int nGroups = u32(&table[12]);
+                int Group;
+
+                for (Group=0;Group<nGroups;Group++)
+                {
+                    int startCharCode = u32(&table[16 + (Group * 12)]);
+                    int endCharCode = u32(&table[16 + (Group * 12) + 4]);
+                    int startGlyphCode = u32(&table[16 + (Group * 12) + 8]);
+
+                    if (code >= startGlyphCode && code <= (startGlyphCode + (endCharCode - startCharCode))) {
+                        return startGlyphCode + (code - startCharCode);
+                    }
+                }
+            }
+            return 0;
+        case 2: /* High-byte mapping through table. */
+        case 8: /* Mixed 16-bit and 32-bit coverage (like 2) */
+        default:
+            gs_warn1("unknown cmap format: %d\n", u16(table));
+            return 0;
+    }
+    return 0;
+}
+
+int
+xps_decode_font_char(xps_font_t *font, int code)
+{
+    int gid = xps_decode_font_char_imp(font, code);
+    if (gid == 0)
+        return code;
+    return gid;
 }
 
 int

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -50,7 +50,7 @@ s_A85E_process(stream_state * st, stream_cursor_read * pr,
     byte *wlimit = pw->limit;
     int status = 0;
     int prev = ss->last_char;
-    int count;
+    unsigned int count;
 
     if_debug3m('w', ss->memory, "[w85]initial ss->count = %d, rcount = %d, wcount = %d\n",
                ss->count, (int)(rlimit - p), (int)(wlimit - q));
@@ -65,7 +65,8 @@ s_A85E_process(stream_state * st, stream_cursor_read * pr,
                     status = 1;
                     break;
                 }
-                *++q = prev = '\n';
+                /* No need to update 'prev' in this case as its overwritten with 'z' below */
+                *++q = '\n';
                 qn = q + LINE_LIMIT;
                 if_debug1m('w', ss->memory, "[w85]EOL at %d bytes written\n",
                           (int)(q - pw->ptr));

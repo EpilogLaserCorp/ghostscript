@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -71,6 +71,22 @@ typedef struct tagGSDLL {
         PFN_gsapi_init_with_args init_with_args;
         PFN_gsapi_run_string run_string;
         PFN_gsapi_exit exit;
+        PFN_gsapi_set_arg_encoding set_arg_encoding;
+        PFN_gsapi_set_default_device_list set_default_device_list;
+        PFN_gsapi_get_default_device_list get_default_device_list;
+        PFN_gsapi_run_file run_file;
+        PFN_gsapi_run_string_begin run_string_begin;
+        PFN_gsapi_run_string_continue run_string_continue;
+        PFN_gsapi_run_string_end run_string_end;
+        PFN_gsapi_run_string_with_length run_string_with_length;
+        PFN_gsapi_set_param set_param;
+        PFN_gsapi_add_control_path add_control_path;
+        PFN_gsapi_remove_control_path remove_control_path;
+        PFN_gsapi_purge_control_paths purge_control_paths;
+        PFN_gsapi_activate_path_control activate_path_control;
+        PFN_gsapi_is_path_control_active is_path_control_active;
+        PFN_gsapi_add_fs add_fs;
+        PFN_gsapi_remove_fs remove_fs;
 } GSDLL;
 
 GSDLL gsdll;
@@ -769,7 +785,7 @@ int display_size(void *handle, void *device, int width, int height,
 #ifdef DISPLAY_DEBUG
     if (debug)
         fputc('z', stdout);
-    fprintf(stdout, "display_size(0x%x 0x%x, %d, %d, %d, %d, %d, 0x%x)\n",
+    fprintf(stdout, "display_size(0x%x 0x%x, %d, %d, %d, %ld, 0x%x)\n",
         handle, device, width, height, raster, format, pimage);
 #endif
     img = image_find(handle, device);
@@ -983,7 +999,7 @@ main(int argc, char *argv[])
     char **nargv;
     char dformat[64];
     ULONG version[3];
-    void *instance;
+    void *instance = NULL;
 
     if (DosQuerySysInfo(QSV_VERSION_MAJOR, QSV_VERSION_REVISION,
             &version, sizeof(version)))
@@ -1029,10 +1045,10 @@ main(int argc, char *argv[])
         fprintf(stdout, "%s\n", dformat);
 #endif
     nargc = argc + 1;
-    nargv = (char **)malloc((nargc + 1) * sizeof(char *));
+    nargv = (char **)malloc(nargc * sizeof(char *));
     nargv[0] = argv[0];
     nargv[1] = dformat;
-    memcpy(&nargv[2], &argv[1], argc * sizeof(char *));
+    memcpy(&nargv[2], &argv[1], (argc-1) * sizeof(char *));
 
     if ( (code = gsdll.new_instance(&instance, NULL)) == 0) {
         gsdll.set_stdio(instance, gsdll_stdin, gsdll_stdout, gsdll_stderr);

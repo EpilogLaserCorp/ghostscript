@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -78,7 +78,7 @@ get_raster_print_rect(const gs_memory_t * mem,
     gs_matrix lp2rst;
 
     pcl_invert_mtx(prst2lp, &lp2rst);
-    pcl_transform_rect(mem, plp_print_rect, prst_print_rect, &lp2rst);
+    pcl_transform_rect(plp_print_rect, prst_print_rect, &lp2rst);
     intersect_with_positive_quadrant(prst_print_rect);
 }
 
@@ -227,7 +227,8 @@ pcl_enter_graphics_mode(pcl_state_t * pcs, pcl_gmode_entry_t mode)
     /* translate the origin of the forward transformation */
     if (((int)mode & 0x1) != 0)
         gmargin_cp = cur_pt.x;
-    gs_matrix_translate(&rst2lp, gmargin_cp, cur_pt.y, &rst2lp);
+    code = gs_matrix_translate(&rst2lp, gmargin_cp, cur_pt.y, &rst2lp);
+    if (code < 0) return code;
     prstate->gmargin_cp = (coord) gmargin_cp;
 
     /* isotropic scaling with missing parameter is based on clipped raster dimensions */
@@ -324,11 +325,18 @@ pcl_enter_graphics_mode(pcl_state_t * pcs, pcl_gmode_entry_t mode)
      * state, perform a gsave, then place what may be a patterned color space
      * in the new graphic state.
      */
-    pcl_set_graphics_state(pcs);
-    pcl_set_drawing_color(pcs, pcl_pattern_raster_cspace, 0, true);
-    pcl_gsave(pcs);
-    pcl_set_drawing_color(pcs, pcs->pattern_type, pcs->current_pattern_id,
+    code = pcl_set_graphics_state(pcs);
+    if (code < 0) return code;
+    code = pcl_set_drawing_color(pcs, pcl_pattern_raster_cspace, 0, true);
+    if (code < 0) return code;
+    code = pcl_gsave(pcs);
+    if (code < 0) return code;
+    code = pcl_set_drawing_color(pcs, pcs->pattern_type, pcs->current_pattern_id,
                           true);
+    if (code < 0) {
+        (void)pcl_grestore(pcs);
+        return code;
+    }
     gs_setmatrix(pcs->pgs, &rst2dev);
 
     /* translate the origin of the forward transformation */
@@ -354,7 +362,7 @@ pcl_enter_graphics_mode(pcl_state_t * pcs, pcl_gmode_entry_t mode)
     if ((code = pcl_start_raster(src_wid, src_hgt, pcs)) >= 0)
         prstate->graphics_mode = true;
     else
-        pcl_grestore(pcs);
+        (void)pcl_grestore(pcs);
     return code;
 }
 
@@ -365,6 +373,7 @@ pcl_enter_graphics_mode(pcl_state_t * pcs, pcl_gmode_entry_t mode)
 int
 pcl_end_graphics_mode(pcl_state_t * pcs)
 {
+    int code = 0;
     gs_point cur_pt;
     gs_matrix dev2pd;
     /* close the raster; exit graphics mode */
@@ -373,13 +382,15 @@ pcl_end_graphics_mode(pcl_state_t * pcs)
 
     /* get the new current point; then restore the graphic state */
     gs_transform(pcs->pgs, 0.0, 0.0, &cur_pt);
-    pcl_grestore(pcs);
+    code = pcl_grestore(pcs);
+    if (code < 0) return code;
 
     /* transform the new point back to "pseudo print direction" space */
     pcl_invert_mtx(&(pcs->xfm_state.pd2dev_mtx), &dev2pd);
     gs_point_transform(cur_pt.x, cur_pt.y, &dev2pd, &cur_pt);
-    pcl_set_cap_x(pcs, (coord) (cur_pt.x + 0.5) - adjust_pres_mode(pcs),
+    code = pcl_set_cap_x(pcs, (coord) (cur_pt.x + 0.5) - adjust_pres_mode(pcs),
                   false, false);
+    if (code < 0) return code;
     return pcl_set_cap_y(pcs, (coord) (cur_pt.y + 0.5) - pcs->margins.top,
                          false, false, false, false);
 }
@@ -414,27 +425,40 @@ pcl_end_graphics_mode_implicit(pcl_state_t * pcs, bool ignore_in_rtl)
 /*
  * ESC * t # R
  *
- * Set raster graphics resolution.
- * The value provided will be rounded up to the nearest legal value or down to 600dpi.
- * 75 100 150 200 300 600 are legal;  120 and 85.7143 are multiples of 75 but not legal.
+ * Set raster graphics resolution.  PCL5 allows integer factors of 600
+ * dpi with minimum 75 and maximum of 600, except a few missing values
+ * (see the table below).  Many HPGL2/RTL plotters allow any positive
+ * integer resolution, and we do the same in RTL mode.
  */
+
+/* 
+ * A table to round up to the next higher permitted resolution.  Note
+ * there are duplicates in the table because some factors are not
+ * supported and they default to the next higher resolution.
+ */
+
+const unsigned int pcl_legal_resolutions[] =
+    {600, 300, 200, 150, 150, 100, 100, 75};
+
 static int
 set_graphics_resolution(pcl_args_t * pargs, pcl_state_t * pcs)
 {
     uint res = arg_is_present(pargs) ? uint_arg(pargs) : 75;
-    uint qi;
 
-    if (res == 0)
+    if (res < 75)
         res = 75;
 
-    qi = 600 / res;
+    /* PCL mode - resolution restricted */
+    if (pcs->personality != rtl) {
+        if (res > 600)
+            res = 600;
 
-    /* HP does not allow 120 dpi or 85.7 dpi as a resolution */
-    qi = (qi == 0 ? 1 : (qi > 8 ? 8 : (qi == 7 ? 6 : (qi == 5 ? 4 : qi))));
+        res = pcl_legal_resolutions[600/res - 1];
+    }
 
     /* ignore if already in graphics mode */
     if (!pcs->raster_state.graphics_mode)
-        pcs->raster_state.resolution = 600 / qi;
+        pcs->raster_state.resolution = res;
 
     return 0;
 }
@@ -521,6 +545,7 @@ static int
 set_compression_method(pcl_args_t * pargs, pcl_state_t * pcs)
 {
     uint mode = uint_arg(pargs);
+    int code = 0;
 
     if (mode < count_of(pcl_decomp_proc)) {
         pcs->raster_state.compression_mode = mode;
@@ -532,15 +557,16 @@ set_compression_method(pcl_args_t * pargs, pcl_state_t * pcs)
                 coord x = pcs->cap.x;
                 coord y = pcs->cap.y;
 
-                pcl_end_graphics_mode(pcs);
+                if ((code = pcl_end_graphics_mode(pcs)) < 0)
+                    return code;
                 pcs->cap.x = x;
                 pcs->cap.y = y;
-                pcl_enter_graphics_mode(pcs, pcs->raster_state.entry_mode);
+                code = pcl_enter_graphics_mode(pcs, pcs->raster_state.entry_mode);
             }
         }
     } else
         return gs_throw1(e_Range, "unsupported mode %d\n", mode);
-    return 0;
+    return code;
 }
 
 /*
@@ -609,6 +635,7 @@ start_graphics_mode(pcl_args_t * pargs, pcl_state_t * pcs)
 {
     pcl_gmode_entry_t mode = (pcl_gmode_entry_t) uint_arg(pargs);
     pcl_raster_state_t *prstate = &(pcs->raster_state);
+    int code = 0;
 
     if (mode > SCALE_CUR_PTR)
         mode = NO_SCALE_LEFT_MARG;
@@ -619,10 +646,10 @@ start_graphics_mode(pcl_args_t * pargs, pcl_state_t * pcs)
         prstate->gmargin_cp = 0;
         if (prstate->pres_mode_3 && (r90 != 0))
             prstate->gmargin_cp += inch2coord(1.0 / 6.0);
-        pcl_enter_graphics_mode(pcs, mode);
+        code = pcl_enter_graphics_mode(pcs, mode);
         prstate->entry_mode = mode;
     }
-    return 0;
+    return code;
 }
 
 /*
@@ -634,7 +661,7 @@ static int
 end_graphics_mode_B(pcl_args_t * pargs, pcl_state_t * pcs)
 {
     if (pcs->raster_state.graphics_mode)
-        pcl_end_graphics_mode(pcs);
+        return pcl_end_graphics_mode(pcs);
     return 0;
 }
 
@@ -642,16 +669,20 @@ end_graphics_mode_B(pcl_args_t * pargs, pcl_state_t * pcs)
  * ESC * r # C
  *
  * End raster graphics mode - new style. This resets the compression mode and
- * the left grahics margin, in addition to ending graphics mode.
+ * the left graphics margin, in addition to ending graphics mode.
  */
 static int
 end_graphics_mode_C(pcl_args_t * pargs, pcl_state_t * pcs)
 {
-    if (pcs->raster_state.graphics_mode)
-        pcl_end_graphics_mode(pcs);
+	int code = 0;
+
+    if (pcs->raster_state.graphics_mode) {
+        if ((code = pcl_end_graphics_mode(pcs)) < 0)
+            return code;
+    }
     pcs->raster_state.gmargin_cp = 0L;
     pcs->raster_state.compression_mode = 0;
-    return 0;
+    return code;
 }
 
 /*
@@ -724,7 +755,7 @@ gmode_do_registration(pcl_parser_state_t * pcl_parser_state, gs_memory_t * pmem 
     }, END_CLASS return 0;
 }
 
-static void
+static int
 gmode_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
     static const uint mask = (pcl_reset_initial
@@ -746,7 +777,7 @@ gmode_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
         if (pcs->personality == rtl) {
             float res = atof(pjl_proc_get_envvar(pcs->pjls, "resolution"));
             if (res != 0)
-                prstate->resolution = res;
+                prstate->resolution = (uint)res;
             prstate->pres_mode_3 = false;
         } else {
             prstate->pres_mode_3 = true;
@@ -761,6 +792,7 @@ gmode_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
         prstate->compression_mode = NO_COMPRESS;
         prstate->y_advance = 1;
     }
+    return 0;
 }
 
 const pcl_init_t rtgmode_init = { gmode_do_registration, gmode_do_reset, 0 };

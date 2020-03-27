@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -73,7 +73,7 @@ static int
 z11_CIDMap_proc(gs_font_cid2 *pfont, gs_glyph glyph)
 {
     const ref *pcidmap = &pfont_data(pfont)->u.type42.CIDMap;
-    ulong cid = glyph - gs_min_cid_glyph;
+    ulong cid = glyph - GS_MIN_CID_GLYPH;
     int gdbytes = pfont->cidata.common.GDBytes;
     int gnum = 0;
     const byte *data;
@@ -347,11 +347,17 @@ zbuildfont11(i_ctx_t *i_ctx_p)
     ref rcidmap, ignore_gdir, file, *pfile, cfnstr, *pCIDFontName, CIDFontName, *t;
     ulong loca_glyph_pos[2][2];
     int code = cid_font_data_param(op, &common, &ignore_gdir);
+    if (code < 0)
+        return code;
 
-    if (code < 0 ||
-        (code = dict_find_string(op, "CIDFontName", &pCIDFontName)) <= 0 ||
-        (code = dict_int_param(op, "MetricsCount", 0, 4, 0, &MetricsCount)) < 0
-        )
+    code = dict_find_string(op, "CIDFontName", &pCIDFontName);
+    if (code <= 0) {
+        if (code == 0)
+            return_error(gs_error_undefined);
+        return code;
+    }
+    code = dict_int_param(op, "MetricsCount", 0, 4, 0, &MetricsCount);
+    if (code < 0)
         return code;
     /*
      * Since build_gs_simple_font may resize the dictionary and cause
@@ -527,7 +533,7 @@ ztype11mapcid(i_ctx_t *i_ctx_p)
         if (pfont->FontType != ft_CID_TrueType)
             return_error(gs_error_invalidfont);
         code = z11_CIDMap_proc((gs_font_cid2 *)pfont,
-                        (gs_glyph)(gs_min_cid_glyph + op->value.intval));
+                        (gs_glyph)(GS_MIN_CID_GLYPH + op->value.intval));
     }
     if (code < 0)
         return code;

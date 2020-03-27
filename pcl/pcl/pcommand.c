@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -58,14 +58,12 @@ float_value(const pcl_value_t * pv)
  * "put" parameters to the device.
  */
 static int
-end_param1(gs_c_param_list * alist, pcl_state_t * pcs)
+transfer_param1(gs_c_param_list * alist, pcl_state_t * pcs)
 {
-    int code;
-
     gs_c_param_list_read(alist);
-    code = gs_state_putdeviceparams(pcs->pgs, (gs_param_list *) alist);
-    gs_c_param_list_release(alist);
-    return code;
+
+    return gs_gstate_putdeviceparams(pcs->pgs, gs_currentdevice(pcs->pgs),
+                                      (gs_param_list *) alist);
 }
 
 /*
@@ -75,10 +73,15 @@ int
 put_param1_bool(pcl_state_t * pcs, gs_param_name pkey, bool value)
 {
     gs_c_param_list list;
+    int code;
 
     gs_c_param_list_write(&list, pcs->memory);
-    /*code = */ param_write_bool((gs_param_list *) & list, pkey, &value);
-    return end_param1(&list, pcs);
+    code = param_write_bool((gs_param_list *) & list, pkey, &value);
+    if (code >= 0)
+        code = transfer_param1(&list, pcs);
+
+    gs_c_param_list_release(&list);
+    return code;
 }
 
 /*
@@ -89,10 +92,15 @@ put_param1_float(pcl_state_t * pcs, gs_param_name pkey, double value)
 {
     gs_c_param_list list;
     float fval = value;
+    int code;
 
     gs_c_param_list_write(&list, pcs->memory);
-    /*code = */ param_write_float((gs_param_list *) & list, pkey, &fval);
-    return end_param1(&list, pcs);
+    code = param_write_float((gs_param_list *) & list, pkey, &fval);
+    if (code >= 0)
+        code = transfer_param1(&list, pcs);
+
+    gs_c_param_list_release(&list);
+    return code;
 }
 
 /*
@@ -102,10 +110,15 @@ int
 put_param1_int(pcl_state_t * pcs, gs_param_name pkey, int value)
 {
     gs_c_param_list list;
+    int code;
 
     gs_c_param_list_write(&list, pcs->memory);
-    /*code = */ param_write_int((gs_param_list *) & list, pkey, &value);
-    return end_param1(&list, pcs);
+    code = param_write_int((gs_param_list *) & list, pkey, &value);
+    if (code >= 0)
+        code = transfer_param1(&list, pcs);
+
+    gs_c_param_list_release(&list);
+    return code;
 }
 
 /*
@@ -118,15 +131,19 @@ put_param1_float_array(pcl_state_t * pcs, gs_param_name pkey, float pf[2]
 {
     gs_c_param_list list;
     gs_param_float_array pf_array;
+    int code = 0;
 
     pf_array.data = pf;
     pf_array.size = 2;
     pf_array.persistent = false;
 
     gs_c_param_list_write(&list, pcs->memory);
-    /* code = */ param_write_float_array((gs_param_list *) & list, pkey,
-                                         &pf_array);
-    return end_param1(&list, pcs);
+    code = param_write_float_array((gs_param_list *) & list, pkey, &pf_array);
+    if (code >= 0)
+        code = transfer_param1(&list, pcs);
+
+    gs_c_param_list_release(&list);
+    return code;
 }
 
 int
@@ -134,12 +151,16 @@ put_param1_string(pcl_state_t * pcs, gs_param_name pkey, const char *str)
 {
     gs_c_param_list list;
     gs_param_string paramstr;
+    int code;
 
     gs_c_param_list_write(&list, pcs->memory);
     param_string_from_string(paramstr, str);
-    /* code = */ param_write_string((gs_param_list *) & list, pkey,
-                                    &paramstr);
-    return end_param1(&list, pcs);
+    code = param_write_string((gs_param_list *) & list, pkey, &paramstr);
+    if (code >= 0)
+        code = transfer_param1(&list, pcs);
+
+    gs_c_param_list_release(&list);
+    return code;
 }
 
 /* initilialize the parser states */
@@ -154,8 +175,11 @@ pcl_do_registrations(pcl_state_t * pcs, pcl_parser_state_t * pst)
     pcs->parse_data = pst->hpgl_parser_state;
     /* initialize pcl's command counter */
     code = pcl_init_command_index(pst, pcs);
-    if (code < 0)
+    if (code < 0) {
+        if (pst->hpgl_parser_state != NULL)
+            gs_free_object(pcs->memory, pst->hpgl_parser_state, "hpgl_init_command_index");
         return code;
+    }
     for (init = pcl_init_table; *init; ++init) {
         if ((*init)->do_registration) {
             code = (*(*init)->do_registration) (pst, pcs->memory);
@@ -178,7 +202,7 @@ pcl_do_resets(pcl_state_t * pcs, pcl_reset_type_t type)
 
     for (; *init && code >= 0; ++init) {
         if ((*init)->do_reset)
-            (*(*init)->do_reset) (pcs, type);
+            code = (*(*init)->do_reset) (pcs, type);
     }
     return code;
 }

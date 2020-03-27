@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -33,6 +33,8 @@
 #include "gdevpdtw.h"
 #include "gdevpdti.h"
 #include "whitelst.h"		/* Checks whether protected fonta cna be embedded */
+
+#include "gscencs.h"
 
 /* GC descriptors */
 public_st_pdf_font_resource();
@@ -73,6 +75,7 @@ case 8: switch (pdfont->FontType) {
  case ft_MicroType:
  case ft_GL2_stick_user_defined:
  case ft_user_defined:
+ case ft_PDF_user_defined:
  case ft_GL2_531:
      ENUM_RETURN(pdfont->u.simple.v);
  case ft_CID_encrypted:
@@ -86,6 +89,7 @@ case 9: switch (pdfont->FontType) {
  case ft_MicroType:
  case ft_GL2_stick_user_defined:
  case ft_user_defined:
+ case ft_PDF_user_defined:
  case ft_GL2_531:
      ENUM_RETURN(pdfont->u.simple.s.type3.char_procs);
  case ft_CID_encrypted:
@@ -99,6 +103,7 @@ case 10: switch (pdfont->FontType) {
  case ft_MicroType:
  case ft_GL2_stick_user_defined:
  case ft_user_defined:
+ case ft_PDF_user_defined:
  case ft_GL2_531:
      ENUM_RETURN(pdfont->u.simple.s.type3.cached);
  case ft_CID_encrypted:
@@ -112,6 +117,7 @@ case 11: switch (pdfont->FontType) {
  case ft_MicroType:
  case ft_GL2_stick_user_defined:
  case ft_user_defined:
+ case ft_PDF_user_defined:
  case ft_GL2_531:
      ENUM_RETURN(pdfont->u.simple.s.type3.Resources);
  case ft_CID_encrypted:
@@ -142,6 +148,7 @@ RELOC_PTRS_WITH(pdf_font_resource_reloc_ptrs, pdf_font_resource_t *pdfont)
     case ft_MicroType:
     case ft_GL2_stick_user_defined:
     case ft_user_defined:
+    case ft_PDF_user_defined:
     case ft_GL2_531:
         RELOC_VAR(pdfont->u.simple.Encoding);
         RELOC_VAR(pdfont->u.simple.v);
@@ -409,6 +416,7 @@ font_resource_alloc(gx_device_pdf *pdev, pdf_font_resource_t **ppfres,
     pfres->cmap_ToUnicode = NULL;
     pfres->mark_glyph = 0;
     pfres->mark_glyph_data = 0;
+    pfres->u.simple.standard_glyph_code_for_notdef = gs_c_name_glyph((const byte *)".notdef", 7) - gs_c_min_std_encoding_glyph;
     *ppfres = pfres;
     return 0;
  fail:
@@ -449,6 +457,7 @@ int font_resource_free(gx_device_pdf *pdev, pdf_font_resource_t *pdfont)
         case ft_MicroType:
         case ft_GL2_stick_user_defined:
         case ft_user_defined:
+        case ft_PDF_user_defined:
         case ft_GL2_531:
             if(pdfont->u.simple.Encoding) {
                 gs_free_object(pdev->pdf_memory, pdfont->u.simple.Encoding, "Free simple Encoding");
@@ -563,6 +572,7 @@ font_resource_simple_alloc(gx_device_pdf *pdev, pdf_font_resource_t **ppfres,
     pfres->u.simple.BaseEncoding = -1;
     pfres->u.simple.preferred_encoding_index = -1;
     pfres->u.simple.last_reserved_char = -1;
+    pfres->u.simple.TwoByteToUnicode = 1;
     *ppfres = pfres;
     return 0;
 }
@@ -761,7 +771,7 @@ has_extension_glyphs(gs_font *pfont)
     const int sl = strlen(gx_extendeg_glyph_name_separator);
 
     psf_enumerate_glyphs_begin(&genum, (gs_font *)pfont, NULL, 0, GLYPH_SPACE_NAME);
-    for (glyph = gs_no_glyph; (psf_enumerate_glyphs_next(&genum, &glyph)) != 1; ) {
+    for (glyph = GS_NO_GLYPH; (psf_enumerate_glyphs_next(&genum, &glyph)) != 1; ) {
         code = pfont->procs.glyph_name(pfont, glyph, &str);
         if (code < 0)
             return code;

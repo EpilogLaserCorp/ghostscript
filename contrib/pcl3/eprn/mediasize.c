@@ -11,12 +11,6 @@
 *									      *
 ******************************************************************************/
 
-/* Configuration management identification */
-#ifndef lint
-static const char
-  cm_id[] = "@(#)$Id: mediasize.c,v 1.11 2001/04/12 18:35:26 Martin Rel $";
-#endif
-
 /*****************************************************************************/
 
 #ifndef _XOPEN_SOURCE
@@ -106,11 +100,11 @@ static const ms_SizeDescription list[] = {
     /* Media called by this name may vary up to 0.5" in dimension (PPD 4.3). */
   {sn(A4),		{210*BP_PER_MM,	297*BP_PER_MM}},
   {sn(Folio),		{210*BP_PER_MM, 330*BP_PER_MM}},
-  {sn(Quarto),		{8.5*BP_PER_IN,	10.83*BP_PER_IN}},  /* 215.9 x 275.1 mm
+  {sn(Quarto),		{8.5f*BP_PER_IN,	10.83f*BP_PER_IN}},  /* 215.9 x 275.1 mm
         PPD 4.3 uses bp values for the definition, but this does not agree
         with the mm values it specifies. The inch specifications fit. */
-  {sn(Letter),		{8.5*BP_PER_IN,	11.0*BP_PER_IN}}, /* 215.9 x 279.4 mm */
-  {sn(Legal),		{8.5*BP_PER_IN,	14.0*BP_PER_IN}}, /* 215.9 x 355.6 mm */
+  {sn(Letter),		{8.5f*BP_PER_IN,	11.0f*BP_PER_IN}}, /* 215.9 x 279.4 mm */
+  {sn(Legal),		{8.5f*BP_PER_IN,	14.0f*BP_PER_IN}}, /* 215.9 x 355.6 mm */
   {sn(EnvKaku3),	{216*BP_PER_MM,	277*BP_PER_MM}},
   {sn(SuperA),		{227*BP_PER_MM,	356*BP_PER_MM}},
   {sn(ARCHA),		{9*BP_PER_IN,	12*BP_PER_IN}},	  /* 228.6 x 304.8 mm */
@@ -171,8 +165,8 @@ static void check(void)
     assert(list[j].dimen[0] <= list[j].dimen[1]);
     assert(strlen(list[j].name) < LONGER_THAN_NAMES);
     assert(list[j].dimen[0] == 0.0 || list[j-1].dimen[0] < list[j].dimen[0] ||
-      list[j-1].dimen[0] == list[j].dimen[0] &&
-        list[j-1].dimen[1] <= list[j].dimen[1]);
+           (list[j-1].dimen[0] == list[j].dimen[0] &&
+            list[j-1].dimen[1] <= list[j].dimen[1]));
   }
 
   /* Check that the highest accepted value does not collide with the flags */
@@ -408,9 +402,9 @@ extern int ms_find_name_from_code(char *buffer, size_t length,
   code = ms_flags(code);
 
   /* Substrings */
-  if (user_flag_list != NULL &&
-      add_substrings(buffer, &length, &code, user_flag_list) != 0 ||
-    add_substrings(buffer, &length, &code, substrings) != 0) return -1;
+  if ((user_flag_list != NULL &&
+       add_substrings(buffer, &length, &code, user_flag_list) != 0) ||
+      add_substrings(buffer, &length, &code, substrings) != 0) return -1;
 
   /* Transverse qualifier */
   if (code & MS_TRANSVERSE_FLAG) {

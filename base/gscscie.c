@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -22,6 +22,7 @@
 #include "gsmatrix.h"		/* for gscolor2.h */
 #include "gxcspace.h"
 #include "gscolor2.h"		/* for gs_set/currentcolorrendering */
+#include "gsicc_manage.h"	/* for gsicc_adjust_profile_rc */
 #include "gxcie.h"
 #include "gxarith.h"
 #include "gxdevice.h"		/* for gxcmap.h */
@@ -122,16 +123,16 @@ const gs_color_space_type gs_color_space_type_CIEA = {
 
 /* Determine the concrete space underlying a CIEBased space. */
 const gs_color_space *
-gx_concrete_space_CIE(const gs_color_space * pcs, const gs_imager_state * pis)
+gx_concrete_space_CIE(const gs_color_space * pcs, const gs_gstate * pgs)
 {
-    const gs_cie_render *pcie = pis->cie_render;
+    const gs_cie_render *pcie = pgs->cie_render;
 
     if (pcie == 0 || pcie->RenderTable.lookup.table == 0 ||
         pcie->RenderTable.lookup.m == 3
         ) {
-        return pis->devicergb_cs;
+        return pgs->devicergb_cs;
     } else {			/* pcie->RenderTable.lookup.m == 4 */
-        return pis->devicecmyk_cs;
+        return pgs->devicecmyk_cs;
     }
 }
 
@@ -140,7 +141,7 @@ gx_concrete_space_CIE(const gs_color_space * pcs, const gs_imager_state * pis)
 /* interpreters can substitute their own installer. */
 /* This procedure is exported for the benefit of gsicc.c */
 int
-gx_install_CIE(gs_color_space * pcs, gs_state * pgs)
+gx_install_CIE(gs_color_space * pcs, gs_gstate * pgs)
 {
     return (*pcs->params.a->common.install_cspace) (pcs, pgs);
 }
@@ -155,7 +156,7 @@ gx_final_CIEDEFG(const gs_color_space * pcs)
         rc_decrement(pcs_noconst->icc_equivalent, "gx_final_CIEDEFG");
     }
     if (pcs->cmm_icc_profile_data != NULL) {
-        rc_decrement(pcs_noconst->cmm_icc_profile_data, "gx_final_CIEDEFG");
+        gsicc_adjust_profile_rc(pcs_noconst->cmm_icc_profile_data, -1, "gx_final_CIEDEFG");
     }
     rc_decrement(pcs_noconst->params.defg, "gx_final_CIEDEFG");
 }
@@ -169,7 +170,7 @@ gx_final_CIEDEF(const gs_color_space * pcs)
         rc_decrement(pcs_noconst->icc_equivalent,"gx_final_CIEDEF");
     }
     if (pcs->cmm_icc_profile_data != NULL) {
-        rc_decrement(pcs_noconst->cmm_icc_profile_data, "gx_final_CIEDEF");
+        gsicc_adjust_profile_rc(pcs_noconst->cmm_icc_profile_data, -1, "gx_final_CIEDEF");
     }
     rc_decrement(pcs_noconst->params.def, "gx_final_CIEDEF");
 }
@@ -183,7 +184,7 @@ gx_final_CIEABC(const gs_color_space * pcs)
         rc_decrement(pcs_noconst->icc_equivalent,"gx_final_CIEABC");
     }
     if (pcs->cmm_icc_profile_data != NULL) {
-        rc_decrement(pcs_noconst->cmm_icc_profile_data, "gx_final_CIEABC");
+        gsicc_adjust_profile_rc(pcs_noconst->cmm_icc_profile_data, -1, "gx_final_CIEABC");
     }
     rc_decrement(pcs_noconst->params.abc, "gx_final_CIEABC");
 }
@@ -197,7 +198,7 @@ gx_final_CIEA(const gs_color_space * pcs)
         rc_decrement(pcs_noconst->icc_equivalent,"gx_final_CIEA");
     }
     if (pcs->cmm_icc_profile_data != NULL) {
-        rc_decrement(pcs_noconst->cmm_icc_profile_data, "gx_final_CIEA");
+        gsicc_adjust_profile_rc(pcs_noconst->cmm_icc_profile_data, -1, "gx_final_CIEA");
     }
     rc_decrement(pcs_noconst->params.a, "gx_adjust_cspace_CIEA");
 }
@@ -406,6 +407,8 @@ gx_serialize_cie_cache(const cie_cache_floats *c, stream * s)
     int code;
 
     code = sputs(s, (const byte *)&c->params.is_identity, sizeof(c->params.is_identity), &n);
+    if (code < 0)
+        return_error(gs_error_ioerror);
     if (c->params.is_identity)
         return 0;
     code = sputs(s, (const byte *)&cache_size, sizeof(cache_size), &n);

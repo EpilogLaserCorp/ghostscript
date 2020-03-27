@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -60,7 +60,7 @@
  * do the following:
  *   a.  Create a copy of the color space and change the copy so that it
  *       uses its alternate colorspace.
- *   b.  Create a copy of the current imager state and modify its color
+ *   b.  Create a copy of the current gs_gstate and modify its color
  *       mapping (cmap) procs to use a special set of 'capture' procs.
  *   c.  Based upon the type of color space (Separation or DeviceN) create
  *       a 'color' which consists of the desired spot color set to 100% and
@@ -111,7 +111,7 @@
 
 static void
 update_Separation_spot_equivalent_cmyk_colors(gx_device * pdev,
-                    const gs_state * pgs, const gs_color_space * pcs,
+                    const gs_gstate * pgs, const gs_color_space * pcs,
                     gs_devn_params * pdevn_params,
                     equivalent_cmyk_color_params * pparams)
 {
@@ -128,9 +128,8 @@ update_Separation_spot_equivalent_cmyk_colors(gx_device * pdev,
             unsigned int cs_sep_name_size;
             unsigned char * pcs_sep_name;
 
-            pcs->params.separation.get_colorname_string
-                (pdev->memory, pcs->params.separation.sep_name, &pcs_sep_name,
-                 &cs_sep_name_size);
+            pcs_sep_name = (unsigned char *)pcs->params.separation.sep_name;
+            cs_sep_name_size = strlen(pcs->params.separation.sep_name);
             if (compare_color_names(dev_sep_name->data, dev_sep_name->size,
                             pcs_sep_name, cs_sep_name_size)) {
                 gs_color_space temp_cs = *pcs;
@@ -152,9 +151,9 @@ update_Separation_spot_equivalent_cmyk_colors(gx_device * pdev,
 
 /* This is used for getting the equivalent CMYK values for the spots that
    may exist in a DeviceN output ICC profile */
-static void
+static int
 update_ICC_spot_equivalent_cmyk_colors(gx_device * pdev,
-                    const gs_state * pgs, const gs_color_space * pcs,
+                    const gs_gstate * pgs, const gs_color_space * pcs,
                     gs_devn_params * pdevn_params,
                     equivalent_cmyk_color_params * pparams)
 {
@@ -165,6 +164,8 @@ update_ICC_spot_equivalent_cmyk_colors(gx_device * pdev,
 
 
     code = dev_proc(pdev, get_profile)(pdev, &dev_profile);
+    if (code < 0)
+        return code;
     /*
      * Check if the ICC spot names matche any of the
      * separations for which we need an equivalent CMYK color.
@@ -197,11 +198,12 @@ update_ICC_spot_equivalent_cmyk_colors(gx_device * pdev,
             }
         }
     }
+    return 0;
 }
 
 static void
 update_DeviceN_spot_equivalent_cmyk_colors(gx_device * pdev,
-                    const gs_state * pgs, const gs_color_space * pcs,
+                    const gs_gstate * pgs, const gs_color_space * pcs,
                     gs_devn_params * pdevn_params,
                     equivalent_cmyk_color_params * pparams)
 {
@@ -220,9 +222,9 @@ update_DeviceN_spot_equivalent_cmyk_colors(gx_device * pdev,
      * In this situation we exit rather than produce invalid values.
      */
      for (j = 0; j < pcs->params.device_n.num_components; j++) {
-        pcs->params.device_n.get_colorname_string
-            (pdev->memory, pcs->params.device_n.names[j],
-             &pcs_sep_name, &cs_sep_name_size);
+        pcs_sep_name = (unsigned char *)pcs->params.device_n.names[j];
+        cs_sep_name_size = strlen(pcs->params.device_n.names[j]);
+
         if (compare_color_names("None", 4, pcs_sep_name, cs_sep_name_size)) {
             /* If we are going out to a device that supports devn colors
                then it is possible that any preview that such a device creates
@@ -247,9 +249,8 @@ update_DeviceN_spot_equivalent_cmyk_colors(gx_device * pdev,
                             &(pdevn_params->separations.names[i]);
 
             for (j = 0; j < pcs->params.device_n.num_components; j++) {
-                pcs->params.device_n.get_colorname_string
-                    (pdev->memory, pcs->params.device_n.names[j], &pcs_sep_name,
-                     &cs_sep_name_size);
+                pcs_sep_name = (unsigned char *)pcs->params.device_n.names[j];
+                cs_sep_name_size = strlen(pcs->params.device_n.names[j]);
                 if (compare_color_names(dev_sep_name->data, dev_sep_name->size,
                             pcs_sep_name, cs_sep_name_size)) {
                     gs_color_space temp_cs = *pcs;
@@ -281,8 +282,8 @@ static bool check_all_colors_known(int num_spot,
 }
 
 /* If possible, update the equivalent CMYK color for a spot color */
-void
-update_spot_equivalent_cmyk_colors(gx_device * pdev, const gs_state * pgs,
+int
+update_spot_equivalent_cmyk_colors(gx_device * pdev, const gs_gstate * pgs,
     gs_devn_params * pdevn_params, equivalent_cmyk_color_params * pparams)
 {
     const gs_color_space * pcs;
@@ -291,16 +292,16 @@ update_spot_equivalent_cmyk_colors(gx_device * pdev, const gs_state * pgs,
 
     code = dev_proc(pdev, get_profile)(pdev, &dev_profile);
     if (code < 0)
-        return;
+        return code;
 
     /* If all of the color_info is valid then there is nothing to do. */
     if (pparams->all_color_info_valid)
-        return;
+        return 0;
 
     /* Verify that we really have some separations. */
     if (pdevn_params->separations.num_separations == 0) {
         pparams->all_color_info_valid = true;
-        return;
+        return 0;
     }
     /*
      * Verify that the given color space is a Separation or a DeviceN color
@@ -324,12 +325,16 @@ update_spot_equivalent_cmyk_colors(gx_device * pdev, const gs_state * pgs,
             dev_profile->spotnames != NULL) {
             /* In this case, we are trying to set up the equivalent colors
                for the spots in the output ICC profile */
-            update_ICC_spot_equivalent_cmyk_colors(pdev, pgs, pcs, pdevn_params,
-                                                   pparams);
+            code = update_ICC_spot_equivalent_cmyk_colors(pdev, pgs, pcs,
+                                                          pdevn_params,
+                                                          pparams);
+            if (code < 0)
+                return code;
             pparams->all_color_info_valid = check_all_colors_known
                     (pdevn_params->separations.num_separations, pparams);
         }
     }
+    return 0;
 }
 
 static void
@@ -378,7 +383,7 @@ static const gx_color_map_procs cmap_capture_cmyk_color = {
 
 static void
 cmap_gray_capture_cmyk_color(frac gray, gx_device_color * pdc,
-        const gs_imager_state * pis, gx_device * dev, gs_color_select_t select)
+        const gs_gstate * pgs, gx_device * dev, gs_color_select_t select)
 {
     equivalent_cmyk_color_params * pparams =
             ((color_capture_device *)dev)->pequiv_cmyk_colors;
@@ -392,20 +397,20 @@ cmap_gray_capture_cmyk_color(frac gray, gx_device_color * pdc,
 
 static void
 cmap_rgb_capture_cmyk_color(frac r, frac g, frac b, gx_device_color * pdc,
-     const gs_imager_state * pis, gx_device * dev, gs_color_select_t select)
+     const gs_gstate * pgs, gx_device * dev, gs_color_select_t select)
 {
     equivalent_cmyk_color_params * pparams =
             ((color_capture_device *)dev)->pequiv_cmyk_colors;
     int sep_num = ((color_capture_device *)dev)->sep_num;
     frac cmyk[4];
 
-    color_rgb_to_cmyk(r, g, b, pis, cmyk, dev->memory);
+    color_rgb_to_cmyk(r, g, b, pgs, cmyk, dev->memory);
     save_spot_equivalent_cmyk_color(sep_num, pparams, cmyk);
 }
 
 static void
 cmap_cmyk_capture_cmyk_color(frac c, frac m, frac y, frac k, gx_device_color * pdc,
-     const gs_imager_state * pis, gx_device * dev, gs_color_select_t select,
+     const gs_gstate * pgs, gx_device * dev, gs_color_select_t select,
      const gs_color_space *pcs)
 {
     equivalent_cmyk_color_params * pparams =
@@ -422,17 +427,18 @@ cmap_cmyk_capture_cmyk_color(frac c, frac m, frac y, frac k, gx_device_color * p
 
 static void
 cmap_rgb_alpha_capture_cmyk_color(frac r, frac g, frac b, frac alpha,
-        gx_device_color * pdc, const gs_imager_state * pis, gx_device * dev,
+        gx_device_color * pdc, const gs_gstate * pgs, gx_device * dev,
                          gs_color_select_t select)
 {
-    cmap_rgb_capture_cmyk_color(r, g, b, pdc, pis, dev, select);
+    cmap_rgb_capture_cmyk_color(r, g, b, pdc, pgs, dev, select);
 }
 
 static void
 cmap_separation_capture_cmyk_color(frac all, gx_device_color * pdc,
-     const gs_imager_state * pis, gx_device * dev, gs_color_select_t select)
+     const gs_gstate * pgs, gx_device * dev, gs_color_select_t select,
+     const gs_color_space *pcs)
 {
-    dmprintf(pis->memory, "cmap_separation_capture_cmyk_color - this routine should not be executed\n");
+    dmprintf(pgs->memory, "cmap_separation_capture_cmyk_color - this routine should not be executed\n");
 }
 
 /* The call to this is actually going to occur if we happen to be using a 
@@ -441,7 +447,8 @@ cmap_separation_capture_cmyk_color(frac all, gx_device_color * pdc,
    go ahead and just grab the cmyk portion */
 static void
 cmap_devicen_capture_cmyk_color(const frac * pcc, gx_device_color * pdc,
-     const gs_imager_state * pis, gx_device * dev, gs_color_select_t select)
+     const gs_gstate * pgs, gx_device * dev, gs_color_select_t select,
+     const gs_color_space *pcs)
 {
     equivalent_cmyk_color_params * pparams =
         ((color_capture_device *)dev)->pequiv_cmyk_colors;
@@ -455,11 +462,11 @@ cmap_devicen_capture_cmyk_color(const frac * pcc, gx_device_color * pdc,
  * alternate color space.
  */
 void
-capture_spot_equivalent_cmyk_colors(gx_device * pdev, const gs_state * pgs,
+capture_spot_equivalent_cmyk_colors(gx_device * pdev, const gs_gstate * pgs,
     const gs_client_color * pcc, const gs_color_space * pcs,
     int sep_num, equivalent_cmyk_color_params * pparams)
 {
-    gs_imager_state temp_state = *((const gs_imager_state *)pgs);
+    gs_gstate temp_state = *((const gs_gstate *)pgs);
     color_capture_device temp_device = { 0 };
     gx_device_color dev_color;
     gsicc_rendering_param_t render_cond;
@@ -467,12 +474,13 @@ capture_spot_equivalent_cmyk_colors(gx_device * pdev, const gs_state * pgs,
     cmm_profile_t *curr_output_profile;
     cmm_dev_profile_t temp_profile = {	/* Initialize to 0's/NULL's */
                           { 0 } /* device_profile[] */, 0 /* proof_profile */,
-                          0 /* link_profile */, 0 /* oi_profile */, 
-                          { {0} } /* rendercond[] */, 0 /* devicegraytok */, 
-                          0 /* graydection */, 0 /* pageneutralcolor */, 
+                          0 /* link_profile */, 0 /* oi_profile */,
+                          0 /* blend_profile */, 0 /* postren_profile */,
+                          { {0} } /* rendercond[] */, 0 /* devicegraytok */,
+                          0 /* graydection */, 0 /* pageneutralcolor */,
                           0 /* usefastcolor */, 0 /* supports_devn */,
-                          0 /* sim_overprint */, 0 /* spotnames */, 
-                          0 /* prebandthreshold */, 0 /* memory */, 
+                          0 /* sim_overprint */, 0 /* spotnames */,
+                          0 /* prebandthreshold */, 0 /* memory */,
                           { 0 } /* rc_header */
                           };
 
@@ -517,7 +525,7 @@ capture_spot_equivalent_cmyk_colors(gx_device * pdev, const gs_state * pgs,
     set_dev_proc(&temp_device, get_profile, gx_default_get_profile);
 
     /*
-     * Create a temp copy of the imager state.  We do this so that we
+     * Create a temp copy of the gs_gstate.  We do this so that we
      * can modify the color space mapping (cmap) procs.  We use our
      * replacment procs to capture the color.  The installation of a
      * Separation or DeviceN color space also sets a use_alt_cspace flag
@@ -534,7 +542,7 @@ capture_spot_equivalent_cmyk_colors(gx_device * pdev, const gs_state * pgs,
 /* Used for detecting if we are trying to find the equivalant color during
    named color replacement */
 bool
-named_color_equivalent_cmyk_colors(const gs_imager_state * pis)
+named_color_equivalent_cmyk_colors(const gs_gstate * pgs)
 {
-    return pis->cmap_procs == &cmap_capture_cmyk_color;
+    return pgs->cmap_procs == &cmap_capture_cmyk_color;
 }

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,18 +19,17 @@
 #ifndef gsropt_INCLUDED
 #  define gsropt_INCLUDED
 
+#include "stdpre.h"
+#ifdef HAVE_SSE2
+#include <emmintrin.h>
+#endif
+
 /*
  * This file defines the types for some library extensions that are
  * motivated by PCL5 and also made available for PostScript:
  * RasterOp, source and pattern white-pixel transparency, and
  * per-pixel "render algorithm" information.
  */
-
-/*
- * Define whether we implement transparency correctly, or whether we
- * implement it as documented in the H-P manuals.
- */
-#define TRANSPARENCY_PER_H_P
 
 /* Raster ops are explained in Chapter 5 of "The PCL 5 Color Technical
  * Reference Manual", but essentially, they provide a way of mixing
@@ -94,14 +93,21 @@ typedef enum {
  * RasterOp operand is called texture, not pattern.
  */
 
+/* We have to define rop3_{T,S,D} as enum values to shut compilers
+ * up that do switch checking. We also have to #define them to allow
+ * the preprocessor templating to work. */
+
 /* 3-input RasterOp */
 typedef enum {
     rop3_0 = 0,
-#define rop3_T 0xf0              /* texture */
+    rop3_T = 0xf0,              /* texture */
+#define rop3_T 0xf0
 #define rop3_T_shift 4
-#define rop3_S 0xcc              /* source */
+    rop3_S = 0xcc,              /* source */
+#define rop3_S 0xcc
 #define rop3_S_shift 2
     rop3_D = 0xaa,              /* destination */
+#define rop3_D 0xaa
 #define rop3_D_shift 1
     rop3_1 = 0xff,
     rop3_default = rop3_T | rop3_S
@@ -214,6 +220,25 @@ typedef enum {
 #define lop_T_transparent 0x200
 #define lop_pdf14 0x400
 
+static inline int
+lop_sanitize(int lop)
+{
+    int olop = lop;
+
+    /* Nobble transparency using ROP conversion */
+    /* The T transparency flag only has an effect if
+     * we aren't on the leading diagonal. */
+    if (olop & lop_T_transparent &&
+        ((lop & 0xF0)>>4) != (lop & 0x0F))
+        lop = (lop & 0xCF) | 0x20;
+    if (olop & lop_S_transparent)
+        lop = (lop & 0x33) | 0x88;
+    /* Preserve the PDF14 bit */
+    lop |= (olop & lop_pdf14);
+
+    return lop;
+}
+
 typedef uint gs_logical_operation_t;
 
 #define lop_default\
@@ -222,13 +247,8 @@ typedef uint gs_logical_operation_t;
    (pattern_transparent_default ? lop_T_transparent : 0))
 
      /* Test whether a logical operation uses S or T. */
-#ifdef TRANSPARENCY_PER_H_P     /* bizarre but necessary definition */
 #define lop_uses_S(lop)\
   (rop3_uses_S(lop) || ((lop) & (lop_S_transparent | lop_T_transparent)))
-#else                           /* reasonable definition */
-#define lop_uses_S(lop)\
-  (rop3_uses_S(lop) || ((lop) & lop_S_transparent))
-#endif
 #define lop_uses_T(lop)\
   (rop3_uses_T(lop) || ((lop) & lop_T_transparent))
 /* Test whether a logical operation just sets D = x if y = 0. */
@@ -293,6 +313,14 @@ typedef union rop_source_s {
     rop_operand c;
 } rop_source;
 
+/*
+scolors and tcolors in the following structure should really be
+gx_color_index *, but to do that would require gxcindex.h being
+included everywhere this header is, and it's not. Including it
+at the top of this header runs other things into problems, so
+living with void *'s until we can get the header inclusion
+sorted.
+*/
 struct rop_run_op_s {
     void (*run)(rop_run_op *, byte *dest, int len);
     void (*runswap)(rop_run_op *, byte *dest, int len);
@@ -301,9 +329,10 @@ struct rop_run_op_s {
     int rop;
     byte depth;
     byte flags;
+    byte mul;
     byte dpos;
-    const byte *scolors;
-    const byte *tcolors;
+    const void *scolors;
+    const void *tcolors;
     void (*release)(rop_run_op *);
     void *opaque;
 };
@@ -316,21 +345,29 @@ enum {
     rop_t_1bit     = 8
 };
 
-/* To use a rop_run_op, allocate it on the stack, then call
- * rop_get_run_op with a pointer to it to fill it in with details of an
- * implementer. If you're lucky (doing a popular rop) you'll get an optimised
- * implementation. If you're not, you'll get a general purpose slow rop. You
- * will always get an implementation of some kind though.
+/* To use a rop_run_op, allocate it on the stack, then (if T or S are constant)
+ * call one of:
+ */
+void rop_set_s_constant(rop_run_op *op, int s);
+void rop_set_t_constant(rop_run_op *op, int t);
+
+/* Then call rop_get_run_op with a pointer to it to fill it in with details
+ * of an implementer. If you're lucky (doing a popular rop) you'll get an
+ * optimised implementation. If you're not, you'll get a general purpose
+ * slow rop. You will always get an implementation of some kind though.
  *
  * You should logical or together the flags - this tells the routine whether
  * s and t are constant, or will be varying across the run.
+ *
+ * If this function returns non zero, the ROP has been optimised out.
  */
-void rop_get_run_op(rop_run_op *op, int rop, int depth, int flags);
+int rop_get_run_op(rop_run_op *op, int rop, int depth, int flags);
 
-/* Next, you should set the values of S and T. Each of these can either be
- * a constant value, or a pointer to a run of bytes. It is the callers
- * responsibility to set these in the correct way (corresponding to the flags
- * passed into the call to rop_get_run_op.
+/* Next, (for non-constant S or T) you should set the values of S and T.
+ * (Constant values were handled earlier, remember?) Each of these can
+ * either be a constant value, or a pointer to a run of bytes. It is the
+ * callers responsibility to set these in the correct way (corresponding
+ * to the flags passed into the call to rop_get_run_op.
  *
  * For cases where depth < 8, and a bitmap is used, we have to specify the
  * start bit position within the byte. (All data in rop bitmaps is considered
@@ -339,7 +376,6 @@ void rop_set_s_constant(rop_run_op *op, int s);
 void rop_set_s_bitmap(rop_run_op *op, const byte *s);
 void rop_set_s_bitmap_subbyte(rop_run_op *op, const byte *s, int startbitpos);
 void rop_set_s_colors(rop_run_op *op, const byte *scolors);
-void rop_set_t_constant(rop_run_op *op, int t);
 void rop_set_t_bitmap(rop_run_op *op, const byte *t);
 void rop_set_t_bitmap_subbyte(rop_run_op *op, const byte *s, int startbitpos);
 void rop_set_t_colors(rop_run_op *op, const byte *scolors);

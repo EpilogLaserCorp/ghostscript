@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -26,8 +26,9 @@
 #include "sjpeg.h"
 #include "gsmchunk.h"
 
-typedef void *backing_store_ptr;
+#if !defined(SHARE_JPEG) || SHARE_JPEG==0
 #include "jmemcust.h"
+#endif
 
 /*
   Ghostscript uses a non-public interface to libjpeg in order to
@@ -106,7 +107,7 @@ gs_jpeg_log_error(stream_DCT_state * st)
     /* Format the error message */
     (*cinfo->err->format_message) (cinfo, buffer);
     (*st->report_error) ((stream_state *) st, buffer);
-    return gs_error_ioerror;	/* caller will do return_error() */
+    return_error(gs_error_ioerror);	/* caller will do return_error() */
 }
 
 /*
@@ -149,7 +150,7 @@ gs_jpeg_destroy(stream_DCT_state * st)
     return 0;
 }
 
-#if SHARE_JPEG == 0
+#if !defined(SHARE_JPEG) || SHARE_JPEG==0
 static void *gs_j_mem_alloc(j_common_ptr cinfo, size_t size)
 {
     gs_memory_t *mem = (gs_memory_t *)(GET_CUST_MEM_DATA(cinfo)->priv);
@@ -181,10 +182,11 @@ static long gs_j_mem_init (j_common_ptr cinfo)
 static void gs_j_mem_term (j_common_ptr cinfo)
 {
     gs_memory_t *cmem = (gs_memory_t *)(GET_CUST_MEM_DATA(cinfo)->priv);
-    gs_memory_t *mem = gs_memory_chunk_target(cmem);
+    gs_memory_t *mem = gs_memory_chunk_unwrap(cmem);
 
-    gs_memory_chunk_release(cmem);
-    
+    if (mem == cmem)
+        return;
+
     (void)jpeg_cust_mem_set_private(GET_CUST_MEM_DATA(cinfo), mem);
 }
 #endif /* SHAREJPEG == 0 */
@@ -193,10 +195,13 @@ static void gs_j_mem_term (j_common_ptr cinfo)
 int gs_jpeg_mem_init (gs_memory_t *mem, j_common_ptr cinfo)
 {
     int code = 0;
-#if SHARE_JPEG == 0
+#if !defined(SHARE_JPEG) || SHARE_JPEG==0
     jpeg_cust_mem_data custm, *custmptr;
 
     memset(&custm, 0x00, sizeof(custm));
+
+    /* JPEG allocated chunks don't need to be subject to gc. */
+    mem = mem->non_gc_memory;
 
     if (!jpeg_cust_mem_init(&custm, (void *) mem, gs_j_mem_init, gs_j_mem_term, NULL,
                             gs_j_mem_alloc, gs_j_mem_free,
@@ -204,7 +209,7 @@ int gs_jpeg_mem_init (gs_memory_t *mem, j_common_ptr cinfo)
         code = gs_note_error(gs_error_VMerror);
     }
     if (code == 0) {
-        custmptr = (jpeg_cust_mem_data *)gs_alloc_bytes(mem->non_gc_memory, sizeof(custm) + sizeof(void *), "JPEG custom memory descriptor");
+        custmptr = (jpeg_cust_mem_data *)gs_alloc_bytes(mem, sizeof(custm) + sizeof(void *), "JPEG custom memory descriptor");
         if (!custmptr) {
             code = gs_note_error(gs_error_VMerror);
         }
@@ -220,7 +225,7 @@ int gs_jpeg_mem_init (gs_memory_t *mem, j_common_ptr cinfo)
 void
 gs_jpeg_mem_term(j_common_ptr cinfo)
 {
-#if SHARE_JPEG == 0
+#if !defined(SHARE_JPEG) || SHARE_JPEG==0
     if (cinfo->client_data) {
         jpeg_cust_mem_data *custmptr = (jpeg_cust_mem_data *)cinfo->client_data;
         gs_memory_t *mem = (gs_memory_t *)(GET_CUST_MEM_DATA(cinfo)->priv);

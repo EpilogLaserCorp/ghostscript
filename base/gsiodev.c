@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -48,17 +48,18 @@ static iodev_proc_get_params(os_get_params);
 const gx_io_device gs_iodev_os =
 {
     "%os%", "FileSystem",
-    {iodev_no_init, iodev_no_open_device,
+    {iodev_no_init, iodev_no_finit, iodev_no_open_device,
      NULL /*iodev_os_open_file */ , iodev_os_gp_fopen, iodev_os_fclose,
      os_delete, os_rename, os_status,
      os_enumerate, gp_enumerate_files_next, gp_enumerate_files_close,
      os_get_params, iodev_no_put_params
-    }
+    },
+    NULL,
+    NULL
 };
 
 /* ------ Initialization ------ */
 
-init_proc(gs_iodev_init);	/* check prototype */
 int
 gs_iodev_init(gs_memory_t * mem)
 {				/* Make writable copies of all IODevices. */
@@ -74,6 +75,8 @@ gs_iodev_init(gs_memory_t * mem)
         return_error(gs_error_VMerror);
 
     libctx->io_device_table_size = gx_io_device_table_count + NUM_RUNTIME_IODEVS;
+    libctx->io_device_table_count = 0;
+    libctx->io_device_table = table;
 
     for (i = 0; i < gx_io_device_table_count; ++i) {
         gx_io_device *iodev =
@@ -84,14 +87,14 @@ gs_iodev_init(gs_memory_t * mem)
             goto fail;
         table[i] = iodev;
         memcpy(table[i], gx_io_device_table[i], sizeof(gx_io_device));
+        iodev->memory = mem;
         libctx->io_device_table_count++;
     }
     for (;i < gx_io_device_table_count + NUM_RUNTIME_IODEVS; i++) {
         table[i] = NULL;
     }
 
-    libctx->io_device_table = table;
-    code = gs_register_struct_root(mem, NULL,
+    code = gs_register_struct_root(mem, &mem->gs_lib_ctx->io_device_table_root,
                                    (void **)&libctx->io_device_table,
                                    "io_device_table");
     if (code < 0)
@@ -105,11 +108,18 @@ gs_iodev_init(gs_memory_t * mem)
     /****** CAN'T FIND THE ROOT ******/
     /*gs_unregister_root(mem, root, "io_device_table");*/
  fail:
-    for (; i > 0; --i)
-        gs_free_object(mem, table[i - 1], "gs_iodev_init(iodev)");
-    gs_free_object(mem, table, "gs_iodev_init(table)");
-    libctx->io_device_table = NULL;
     return (code < 0 ? code : gs_note_error(gs_error_VMerror));
+}
+
+void
+gs_iodev_finit(gs_memory_t * mem)
+{
+    gs_lib_ctx_t *libctx = gs_lib_ctx_get_interp_instance(mem);
+    if (libctx && libctx->io_device_table) {
+        gs_free_object(mem, libctx->io_device_table, "gs_iodev_finit");
+        libctx->io_device_table = NULL;
+    }
+    return;
 }
 
 /*
@@ -145,7 +155,7 @@ gs_iodev_register_dev(gs_memory_t * mem, const gx_io_device *newiodev)
 
     return(code);
   fail2:
-    for (; i > 0; --i)
+    for (i = libctx->io_device_table_count; i > 0; --i)
         gs_free_object(mem, table[i - 1], "gs_iodev_init(iodev)");
     gs_free_object(mem, table, "gs_iodev_init(table)");
     libctx->io_device_table = NULL;
@@ -157,11 +167,38 @@ gs_iodev_register_dev(gs_memory_t * mem, const gx_io_device *newiodev)
 static void
 gs_iodev_finalize(const gs_memory_t *cmem, void *vptr)
 {
-    if (cmem->gs_lib_ctx->io_device_table == vptr) {
-        cmem->gs_lib_ctx->io_device_table = NULL;
+    /* discard const for gs_free_object */
+    gs_memory_t *mem = (gs_memory_t *)cmem;
+    if (mem->gs_lib_ctx->io_device_table == vptr) {
+        gx_io_device **table = mem->gs_lib_ctx->io_device_table;
+        while (mem->gs_lib_ctx->io_device_table_count-- > 0) {
+            gs_free_object(mem,
+              table[mem->gs_lib_ctx->io_device_table_count],
+              "gs_iodev_finalize");
+            table[mem->gs_lib_ctx->io_device_table_count] = NULL;
+        }
+        mem->gs_lib_ctx->io_device_table = NULL;
+        mem->gs_lib_ctx->io_device_table_size =
+            mem->gs_lib_ctx->io_device_table_count = 0;
     }
 }
 
+void
+io_device_finalize(const gs_memory_t *cmem, void *vptr)
+{
+    /* discard const for gs_free_object */
+    gs_memory_t *mem = (gs_memory_t *)cmem;
+    if (mem->gs_lib_ctx->io_device_table_count > 0) {
+        int i;
+        for (i = 0; i < mem->gs_lib_ctx->io_device_table_count
+           && mem->gs_lib_ctx->io_device_table[i] != vptr; i++)
+        ;
+
+        (mem->gs_lib_ctx->io_device_table[i]->procs.finit)(mem->gs_lib_ctx->io_device_table[i], mem);
+        mem->gs_lib_ctx->io_device_table[i] = NULL;
+    }
+    return;
+}
 
 /* ------ Default (unimplemented) IODevice procedures ------ */
 
@@ -169,6 +206,12 @@ int
 iodev_no_init(gx_io_device * iodev, gs_memory_t * mem)
 {
     return 0;
+}
+
+void
+iodev_no_finit(gx_io_device * iodev, gs_memory_t * mem)
+{
+    return;
 }
 
 int
@@ -187,13 +230,13 @@ iodev_no_open_file(gx_io_device * iodev, const char *fname, uint namelen,
 
 int
 iodev_no_fopen(gx_io_device * iodev, const char *fname, const char *access,
-               FILE ** pfile, char *rfname, uint rnamelen)
+               gp_file ** pfile, char *rfname, uint rnamelen, gs_memory_t *mem)
 {
     return_error(gs_error_invalidfileaccess);
 }
 
 int
-iodev_no_fclose(gx_io_device * iodev, FILE * file)
+iodev_no_fclose(gx_io_device * iodev, gp_file * file)
 {
     return_error(gs_error_ioerror);
 }
@@ -217,8 +260,8 @@ iodev_no_file_status(gx_io_device * iodev, const char *fname, struct stat *pstat
 }
 
 file_enum *
-iodev_no_enumerate_files(gx_io_device * iodev, const char *pat, uint patlen,
-                         gs_memory_t * memory)
+iodev_no_enumerate_files(gs_memory_t *mem, gx_io_device * iodev, const char *pat,
+                         uint patlen)
 {
     return NULL;
 }
@@ -240,10 +283,10 @@ iodev_no_put_params(gx_io_device * iodev, gs_param_list * plist)
 /* The fopen routine is exported for %null. */
 int
 iodev_os_gp_fopen(gx_io_device * iodev, const char *fname, const char *access,
-               FILE ** pfile, char *rfname, uint rnamelen)
+                  gp_file ** pfile, char *rfname, uint rnamelen, gs_memory_t *mem)
 {
     errno = 0;
-    *pfile = gp_fopen(fname, access);
+    *pfile = gp_fopen(mem, fname, access);
     if (*pfile == NULL)
         return_error(gs_fopen_errno_to_code(errno));
     if (rfname != NULL && rfname != fname)
@@ -253,9 +296,9 @@ iodev_os_gp_fopen(gx_io_device * iodev, const char *fname, const char *access,
 
 /* The fclose routine is exported for %null. */
 int
-iodev_os_fclose(gx_io_device * iodev, FILE * file)
+iodev_os_fclose(gx_io_device * iodev, gp_file * file)
 {
-    fclose(file);
+    gp_fclose(file);
     return 0;
 }
 
@@ -275,14 +318,14 @@ static int
 os_status(gx_io_device * iodev, const char *fname, struct stat *pstat)
 {				/* The RS/6000 prototype for stat doesn't include const, */
     /* so we have to explicitly remove the const modifier. */
-    return (gp_stat((char *)fname, pstat) < 0 ? gs_error_undefinedfilename : 0);
+    return (gp_stat(iodev->memory, (char *)fname, pstat) < 0 ? gs_error_undefinedfilename : 0);
 }
 
 static file_enum *
-os_enumerate(gx_io_device * iodev, const char *pat, uint patlen,
-             gs_memory_t * mem)
+os_enumerate(gs_memory_t * mem, gx_io_device * iodev, const char *pat,
+             uint patlen)
 {
-    return gp_enumerate_files_init(pat, patlen, mem);
+    return gp_enumerate_files_init(mem, pat, patlen);
 }
 
 static int
@@ -433,7 +476,7 @@ gs_private_st_ptrs1(st_gs_file_enum, gs_file_enum, "gs_file_enum",
                     gs_file_enum_enum_ptrs, gs_file_enum_reloc_ptrs, pfile_enum);
 
 file_enum *
-gs_enumerate_files_init(const char *pat, uint patlen, gs_memory_t * mem)
+gs_enumerate_files_init(gs_memory_t * mem, const char *pat, uint patlen)
 {
     file_enum *pfen;
     gs_file_enum *pgs_file_enum;
@@ -451,14 +494,17 @@ gs_enumerate_files_init(const char *pat, uint patlen, gs_memory_t * mem)
     if (pfn.len == 0 || iodev->procs.enumerate_files == iodev_no_enumerate_files) {
         return NULL;	/* no pattern, or device not found -- just return */
     }
-    pfen = iodev->procs.enumerate_files(iodev, (const char *)pfn.fname,
-                pfn.len, mem);
+    pfen = iodev->procs.enumerate_files(mem, iodev, (const char *)pfn.fname,
+                pfn.len);
     if (pfen == 0)
         return NULL;
     pgs_file_enum = gs_alloc_struct(mem, gs_file_enum, &st_gs_file_enum,
                            "gs_enumerate_files_init");
     if (pgs_file_enum == 0)
+    {
+        iodev->procs.enumerate_close(mem, pfen);
         return NULL;
+    }
     pgs_file_enum->memory = mem;
     pgs_file_enum->piodev = iodev;
     pgs_file_enum->pfile_enum = pfen;
@@ -467,34 +513,40 @@ gs_enumerate_files_init(const char *pat, uint patlen, gs_memory_t * mem)
 }
 
 uint
-gs_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
+gs_enumerate_files_next(gs_memory_t * mem, file_enum * pfen, char *ptr,
+                        uint maxlen)
 {
     gs_file_enum *pgs_file_enum = (gs_file_enum *)pfen;
-    int iodev_name_len = pgs_file_enum->prepend_iodev_name ?
-                        strlen(pgs_file_enum->piodev->dname) : 0;
+    int iodev_name_len;
     uint return_len;
+
+    if (pgs_file_enum == NULL)
+        return ~0;
+
+    iodev_name_len = pgs_file_enum->prepend_iodev_name ?
+                        strlen(pgs_file_enum->piodev->dname) : 0;
 
     if (iodev_name_len > maxlen)
         return maxlen + 1;	/* signal overflow error */
     if (iodev_name_len > 0)
         memcpy(ptr, pgs_file_enum->piodev->dname, iodev_name_len);
-    return_len = pgs_file_enum->piodev->procs.enumerate_next(pgs_file_enum->pfile_enum,
+    return_len = pgs_file_enum->piodev->procs.enumerate_next(mem, pgs_file_enum->pfile_enum,
                                 ptr + iodev_name_len, maxlen - iodev_name_len);
     if (return_len == ~0) {
-        gs_memory_t *mem = pgs_file_enum->memory;
+        gs_memory_t *mem2 = pgs_file_enum->memory;
 
-        gs_free_object(mem, pgs_file_enum, "gs_enumerate_files_close");
+        gs_free_object(mem2, pgs_file_enum, "gs_enumerate_files_close");
         return ~0;
     }
     return return_len+iodev_name_len;
 }
 
 void
-gs_enumerate_files_close(file_enum * pfen)
+gs_enumerate_files_close(gs_memory_t * mem, file_enum * pfen)
 {
     gs_file_enum *pgs_file_enum = (gs_file_enum *)pfen;
-    gs_memory_t *mem = pgs_file_enum->memory;
+    gs_memory_t *mem2 = pgs_file_enum->memory;
 
-    pgs_file_enum->piodev->procs.enumerate_close(pgs_file_enum->pfile_enum);
-    gs_free_object(mem, pgs_file_enum, "gs_enumerate_files_close");
+    pgs_file_enum->piodev->procs.enumerate_close(mem, pgs_file_enum->pfile_enum);
+    gs_free_object(mem2, pgs_file_enum, "gs_enumerate_files_close");
 }

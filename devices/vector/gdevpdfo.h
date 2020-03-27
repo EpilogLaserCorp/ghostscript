@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -37,12 +37,7 @@
 
 #include "gsparam.h"
 #include "smd5.h"
-
-/* Define some needed abstract types. */
-#ifndef gx_device_pdf_DEFINED
-#  define gx_device_pdf_DEFINED
-typedef struct gx_device_pdf_s gx_device_pdf;
-#endif
+#include "gdevpdfx.h"
 
 /* ---------------- Structures ---------------- */
 
@@ -139,6 +134,12 @@ extern const cos_object_procs_t cos_generic_procs;
 
 extern const cos_object_procs_t cos_reference_procs;
 #define cos_type_reference (&cos_reference_procs)
+
+extern const cos_object_procs_t cos_dict_procs;
+#define cos_type_dict (&cos_dict_procs)
+
+extern const cos_object_procs_t cos_array_procs;
+#define cos_type_array (&cos_array_procs)
 
 /*
  * Define the macro for casting any cos object to type cos_object_t.

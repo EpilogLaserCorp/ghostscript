@@ -1,6 +1,6 @@
 1 gs
  gs - GPL Ghostscript interpreter/previewer
-! Ghostscript version 9.16, 30 March 2015
+! Ghostscript version 9.52, 19 March 2020
   Usage:
    $ gs [options] [file ...]
 
@@ -228,12 +228,6 @@
 
 2 Special_names
 
-  -dDISKFONTS
- Causes individual character outlines to be loaded from the disk the
- first time they are encountered.  (Normally Ghostscript loads all the
- character outlines when it loads a font.)  This may allow loading more
- fonts into RAM, at the expense of slower rendering.
-
   -dNOCACHE
  Disables character caching.  Only useful for debugging.
 
@@ -261,8 +255,8 @@
 
   -dWRITESYSTEMDICT
  Leaves systemdict writable.  This is necessary when running special
- utility programs such as font2c and pcharstr, which must bypass normal
- PostScript access protection.
+ utility programs, but is strongly discouraged as it bypasses normal Postscript
+ security measures.
 
   -sDEVICE=device
  Selects an alternate initial output device, as described above.

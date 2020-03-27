@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -51,7 +51,7 @@ prn_device(prn_bg_procs, "jbig2",	/* The print_page proc is compatible with allo
 
 /* Send the page to the file. */
 static int
-jbig2_print_page(gx_device_printer * pdev, FILE * prn_stream)
+jbig2_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
     gx_device_jbig2 *jdev = (gx_device_jbig2 *) pdev;
     gs_memory_t *mem = jdev->memory;
@@ -108,7 +108,9 @@ jbig2_print_page(gx_device_printer * pdev, FILE * prn_stream)
             code = gs_note_error(gs_error_ioerror);
             goto done;
         }
-        gdev_prn_get_bits(pdev, lnum, in, &data);        
+        code = gdev_prn_get_bits(pdev, lnum, in, &data);
+        if (code < 0)
+            goto done;
         sputs(&cstrm, data, state.stride, &ignore_used);
     }
 

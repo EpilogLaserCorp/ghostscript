@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -50,6 +50,10 @@
 
 static const char szImgName2[] = "Ghostscript Image";
 static const char szTrcName2[] = "Ghostscript Graphical Trace";
+
+/* These two are defined in dwmain.c/dwmainc.c because they need access to the gsdll and instance */
+int dwmain_add_file_control_path(const TCHAR *pathfile);
+void dwmain_remove_file_control_path(const TCHAR *pathfile);
 
 /* Forward references */
 LRESULT CALLBACK WndImg2Proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -385,14 +389,14 @@ image_close(IMAGE *img)
 void
 register_class(void)
 {
-    WNDCLASS wndclass;
+    WNDCLASS wndclass = { 0 };
     HINSTANCE hInstance = GetModuleHandle(NULL);
 
     /* register the window class for graphics */
     wndclass.style = CS_HREDRAW | CS_VREDRAW;
     wndclass.lpfnWndProc = WndImg2Proc;
     wndclass.cbClsExtra = 0;
-    wndclass.cbWndExtra = sizeof(LONG);
+    wndclass.cbWndExtra = sizeof(void*);
     wndclass.hInstance = hInstance;
     wndclass.hIcon = LoadIcon(hInstance,(LPSTR)MAKEINTRESOURCE(GSIMAGE_ICON));
     wndclass.hCursor = LoadCursor((HINSTANCE)NULL, IDC_ARROW);
@@ -1157,6 +1161,8 @@ WndImg2Proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
     RECT rect;
     int nVscrollInc, nHscrollInc;
     IMAGE *img;
+    static int cFiles = 0;
+    static char** szFiles = NULL;
 
     if (message == WM_CREATE) {
         /* Object is stored in window extra data.
@@ -1164,9 +1170,9 @@ WndImg2Proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
          * initializes it here.
          */
         img = (IMAGE *)(((CREATESTRUCT *)lParam)->lpCreateParams);
-        SetWindowLong(hwnd, 0, (LONG)img);
+        SetWindowLongPtr(hwnd, 0, (LONG_PTR)img);
     }
-    img = (IMAGE *)GetWindowLong(hwnd, 0);
+    img = (IMAGE *)GetWindowLongPtr(hwnd, 0);
 
     switch(message) {
         case WM_SYSCOMMAND:
@@ -1455,32 +1461,50 @@ WndImg2Proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
             if (img->hwndtext)
                 SendMessage(img->hwndtext, message, wParam, lParam);
             else {
-                char *szFile;
-                int i, cFiles;
+                int i, lcFiles, code;
                 unsigned int Len, error;
                 const char *p;
                 const char *szDragPre = "\r(";
                 const char *szDragPost = ") run\r";
                 HDROP hdrop = (HDROP)wParam;
-                cFiles = DragQueryFile(hdrop, (UINT)(-1), (LPSTR)NULL, 0);
-                for (i=0; i<cFiles; i++) {
+                for (i = 0; szFiles != NULL && i < cFiles; i++) {
+                    if (szFiles[i] != NULL) {
+                        dwmain_remove_file_control_path(szFiles[i]);
+                            free(szFiles[i]);
+                            szFiles[i] = NULL;
+                    }
+                }
+                lcFiles = DragQueryFile(hdrop, (UINT)(-1), (LPSTR)NULL, 0);
+                if (cFiles < lcFiles) {
+                    free(szFiles);
+                    szFiles = malloc(lcFiles * sizeof(char*));
+                    if (!szFiles) {
+                        cFiles = 0;
+                        return 0;
+                    }
+                    memset(szFiles, 0x00, lcFiles * sizeof(char*));
+                    cFiles = lcFiles;
+                }
+                for (i=0; i<lcFiles; i++) {
                     Len = DragQueryFile(hdrop, i, NULL, 0);
-                    szFile = malloc(Len+1);
-                    if (szFile != 0) {
-                        error = DragQueryFile(hdrop, i, szFile, Len+1);
+                    szFiles[i] = malloc(Len+1);
+                    if (szFiles[i] != 0) {
+                        error = DragQueryFile(hdrop, i, szFiles[i], Len+1);
                         if (error != 0) {
-                            for (p=szDragPre; *p; p++)
-                                SendMessage(hwnd,WM_CHAR,*p,1L);
-                            for (p=szFile; *p; p++) {
-                                if (*p == '\\')
-                                    SendMessage(hwnd,WM_CHAR,'/',1L);
-                                else
+                            code = dwmain_add_file_control_path(szFiles[i]);
+                            if (code >= 0){
+                                for (p=szDragPre; *p; p++)
+                                    SendMessage(hwnd,WM_CHAR,*p,1L);
+                                for (p=szFiles[i]; *p; p++) {
+                                    if (*p == '\\')
+                                        SendMessage(hwnd,WM_CHAR,'/',1L);
+                                    else
+                                        SendMessage(hwnd,WM_CHAR,*p,1L);
+                                }
+                                for (p=szDragPost; *p; p++)
                                     SendMessage(hwnd,WM_CHAR,*p,1L);
                             }
-                            for (p=szDragPost; *p; p++)
-                                SendMessage(hwnd,WM_CHAR,*p,1L);
                         }
-                        free(szFile);
                     }
                 }
                 DragFinish(hdrop);
@@ -1493,12 +1517,25 @@ WndImg2Proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
                     img->cx, img->cy);
                 win_set_reg_value((img->device != NULL ? "Image" : "Tracer"), winposbuf);
             }
+            { /* Get rid of left over drag'n'drop file names*/
+                int i;
+                for (i = 0; szFiles != NULL && i < cFiles; i++) {
+                    if (szFiles[i] != NULL) {
+                        dwmain_remove_file_control_path(szFiles[i]);
+                        free(szFiles[i]);
+                        szFiles[i] = NULL;
+                    }
+                }
+                free(szFiles);
+                szFiles = NULL;
+                cFiles = 0;
+            }
             DragAcceptFiles(hwnd, FALSE);
             break;
 
     }
 
-        return DefWindowProc(hwnd, message, wParam, lParam);
+    return DefWindowProc(hwnd, message, wParam, lParam);
 }
 
 /* Repaint a section of the window. */

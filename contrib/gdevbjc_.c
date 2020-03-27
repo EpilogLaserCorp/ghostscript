@@ -46,7 +46,6 @@
 #include "gdevbjc_.h"
 
 /* ------ The device descriptors ------ */
-static dev_proc_print_page(bjc_print_page);
 static dev_proc_print_page(bjc_print_page_mono);
 static dev_proc_print_page(bjc_print_page_gray);
 static dev_proc_print_page(bjc_print_page_cmyk);
@@ -83,113 +82,113 @@ BJL_command BJL_command_set[] = {
 /* String parameter definitions */
 
 stringParamDescription strPrinterType[] = {
-    { { "BJC-250",    7, false },   	0 },
-    { { "BJC-250ex",  9, false }, 	1 },
-    { { "BJC-1000",   8, false },  	2 },
+    { { (const byte *)"BJC-250",    7, false },   	0 },
+    { { (const byte *)"BJC-250ex",  9, false }, 	1 },
+    { { (const byte *)"BJC-1000",   8, false },  	2 },
 
-    { { "250",   3, false },       	0 },
-    { { "250ex", 5, false },     	1 },
-    { { "1000",  4, false },      	2 },
+    { { (const byte *)"250",   3, false },       	0 },
+    { { (const byte *)"250ex", 5, false },     	1 },
+    { { (const byte *)"1000",  4, false },      	2 },
     { {0} }
 };
 
 stringParamDescription strFeeder[] = {
-    { { "Manual",	6, false },    	0x11 },
-    { { "Auto",        	4, false },    	0x10 },
+    { { (const byte *)"Manual",	6, false },    	0x11 },
+    { { (const byte *)"Auto",        	4, false },    	0x10 },
 
-    { { "m",		1, false },    	0x11 },
-    { { "a",		1, false },    	0x10 },
+    { { (const byte *)"m",		1, false },    	0x11 },
+    { { (const byte *)"a",		1, false },    	0x10 },
     { {0} }
 };
 
 stringParamDescription strQuality[] = {
-    { { "Normal",	6, false },    	0 },
-    { { "High",        	4, false },    	1 },
-    { { "Draft",        5, false },    	2 },
-    { { "NonBleed",   	8, false },    	8 },
+    { { (const byte *)"Normal",	6, false },    	0 },
+    { { (const byte *)"High",        	4, false },    	1 },
+    { { (const byte *)"Draft",        5, false },    	2 },
+    { { (const byte *)"NonBleed",   	8, false },    	8 },
 
-    { { "n",		1, false },    	0 },
-    { { "h",		1, false },    	1 },
-    { { "d",		1, false },    	2 },
-    { { "b",		1, false },    	8 },
+    { { (const byte *)"n",		1, false },    	0 },
+    { { (const byte *)"h",		1, false },    	1 },
+    { { (const byte *)"d",		1, false },    	2 },
+    { { (const byte *)"b",		1, false },    	8 },
     { {0} }
 };
 
 stringParamDescription strInk[] = {
-    { { "Black",	5, false },    	8 },
-    { { "Cyan",        	4, false },    	1 },
-    { { "Magenta",      7, false },    	2 },
-    { { "Yellow",   	6, false },    	4 },
-    { { "Red",        	3, false },    	6 },
-    { { "Green",        5, false },    	5 },
-    { { "Blue",   	4, false },    	3 },
+    { { (const byte *)"Black",	5, false },    	8 },
+    { { (const byte *)"Cyan",        	4, false },    	1 },
+    { { (const byte *)"Magenta",      7, false },    	2 },
+    { { (const byte *)"Yellow",   	6, false },    	4 },
+    { { (const byte *)"Red",        	3, false },    	6 },
+    { { (const byte *)"Green",        5, false },    	5 },
+    { { (const byte *)"Blue",   	4, false },    	3 },
 
-    { { "K",		1, false },    	8 },
-    { { "C",		1, false },    	1 },
-    { { "M",		1, false },    	2 },
-    { { "Y",		1, false },    	4 },
-    { { "R",		1, false },    	6 },
-    { { "G",		1, false },    	5 },
-    { { "B",		1, false },    	3 },
-    { { "CK",		2, false },    	9 },
-    { { "MK",		2, false },    10 },
-    { { "YK",		2, false },    12 },
-    { { "RK",		2, false },    14 },
-    { { "GK",		2, false },    13 },
-    { { "BK",		2, false },    11 },
-    { { "CMY",		3, false },     7 },
-    { { "CMYK",		4, false },    15 },
+    { { (const byte *)"K",		1, false },    	8 },
+    { { (const byte *)"C",		1, false },    	1 },
+    { { (const byte *)"M",		1, false },    	2 },
+    { { (const byte *)"Y",		1, false },    	4 },
+    { { (const byte *)"R",		1, false },    	6 },
+    { { (const byte *)"G",		1, false },    	5 },
+    { { (const byte *)"B",		1, false },    	3 },
+    { { (const byte *)"CK",		2, false },    	9 },
+    { { (const byte *)"MK",		2, false },    10 },
+    { { (const byte *)"YK",		2, false },    12 },
+    { { (const byte *)"RK",		2, false },    14 },
+    { { (const byte *)"GK",		2, false },    13 },
+    { { (const byte *)"BK",		2, false },    11 },
+    { { (const byte *)"CMY",		3, false },     7 },
+    { { (const byte *)"CMYK",		4, false },    15 },
     { {0} }
 };
 
 static stringParamDescription strMedia[] = {
-  {{"PlainPaper", 10, false}, 0},
-  {{"CoatedPaper", 11, false}, 1},
-  {{"TransparencyFilm", 16, false}, 2},
-  {{"BackprintFilm", 13, false}, 3},
-  {{"T-ShirtTransfer", 15, false}, 3},
-  {{"FabricSheet", 11, false}, 4},
-  {{"GlossyPaper", 11, false}, 5},
-  {{"GlossyPhotoPaper", 16, false}, 5},
-  {{"HighGlossPaper", 14, false}, 5},
-  {{"HighGlossyFilm", 14, false}, 6},
-  {{"Envelope", 8, false}, 7},
-  {{"OtherPaper", 10, false}, 8},
-  {{"HighResolutionPaper", 19, false}, 9},
-/*    { { "HighResPaper",		12, false },    11 }, */
-  {{"GlossyPhotoCard", 15, false}, 10},
-/*    { { "FullBleed",		 9, false },    12 }, */
-  {{"Banner", 6, false}, 11},
+  {{(const byte *)"PlainPaper", 10, false}, 0},
+  {{(const byte *)"CoatedPaper", 11, false}, 1},
+  {{(const byte *)"TransparencyFilm", 16, false}, 2},
+  {{(const byte *)"BackprintFilm", 13, false}, 3},
+  {{(const byte *)"T-ShirtTransfer", 15, false}, 3},
+  {{(const byte *)"FabricSheet", 11, false}, 4},
+  {{(const byte *)"GlossyPaper", 11, false}, 5},
+  {{(const byte *)"GlossyPhotoPaper", 16, false}, 5},
+  {{(const byte *)"HighGlossPaper", 14, false}, 5},
+  {{(const byte *)"HighGlossyFilm", 14, false}, 6},
+  {{(const byte *)"Envelope", 8, false}, 7},
+  {{(const byte *)"OtherPaper", 10, false}, 8},
+  {{(const byte *)"HighResolutionPaper", 19, false}, 9},
+/*    { { (const byte *)"HighResPaper",		12, false },    11 }, */
+  {{(const byte *)"GlossyPhotoCard", 15, false}, 10},
+/*    { { (const byte *)"FullBleed",		 9, false },    12 }, */
+  {{(const byte *)"Banner", 6, false}, 11},
 
-  {{"Plain", 5, false}, 0},
-  {{"Coated", 6, false}, 1},
-  {{"Trans", 5, false}, 2},
-  {{"Back", 4, false}, 3},
-  {{"Shirt", 4, false}, 3},
-/*    { { "Lead",			 4, false },    4 }, */
-  {{"Fabric", 6, false}, 4},
-  {{"Glossy", 6, false}, 5},
-  {{"HGloss", 6, false}, 6},
-  {{"Env", 3, false}, 7},
-  {{"Oth", 3, false}, 8},
-  {{"HiRes", 5, false}, 9},
-/*    { { "Bleed",		 5, false },    12 }, */
-  {{"Card", 4, false}, 10},
-  {{"Ban", 3, false}, 11},
+  {{(const byte *)"Plain", 5, false}, 0},
+  {{(const byte *)"Coated", 6, false}, 1},
+  {{(const byte *)"Trans", 5, false}, 2},
+  {{(const byte *)"Back", 4, false}, 3},
+  {{(const byte *)"Shirt", 4, false}, 3},
+/*    { { (const byte *)"Lead",			 4, false },    4 }, */
+  {{(const byte *)"Fabric", 6, false}, 4},
+  {{(const byte *)"Glossy", 6, false}, 5},
+  {{(const byte *)"HGloss", 6, false}, 6},
+  {{(const byte *)"Env", 3, false}, 7},
+  {{(const byte *)"Oth", 3, false}, 8},
+  {{(const byte *)"HiRes", 5, false}, 9},
+/*    { { (const byte *)"Bleed",		 5, false },    12 }, */
+  {{(const byte *)"Card", 4, false}, 10},
+  {{(const byte *)"Ban", 3, false}, 11},
 
-  {{"p", 1, false}, 0},
-  {{"c", 1, false}, 1},
-  {{"t", 1, false}, 2},
-  {{"b", 1, false}, 3},
-  {{"s", 1, false}, 3},
-  {{"f", 1, false}, 4},
-  {{"g", 1, false}, 5},
-  {{"F", 1, false}, 6},
-  {{"e", 1, false}, 7},
-  {{"o", 1, false}, 8},
-  {{"h", 1, false}, 9},
-  {{"C", 1, false}, 10},
-  {{"B", 1, false}, 11},
+  {{(const byte *)"p", 1, false}, 0},
+  {{(const byte *)"c", 1, false}, 1},
+  {{(const byte *)"t", 1, false}, 2},
+  {{(const byte *)"b", 1, false}, 3},
+  {{(const byte *)"s", 1, false}, 3},
+  {{(const byte *)"f", 1, false}, 4},
+  {{(const byte *)"g", 1, false}, 5},
+  {{(const byte *)"F", 1, false}, 6},
+  {{(const byte *)"e", 1, false}, 7},
+  {{(const byte *)"o", 1, false}, 8},
+  {{(const byte *)"h", 1, false}, 9},
+  {{(const byte *)"C", 1, false}, 10},
+  {{(const byte *)"B", 1, false}, 11},
   {{0}}
 };
 
@@ -221,7 +220,8 @@ const gx_device_bjc_printer gs_bjcmono_device =
 bjc_device(bjcmono_procs, "bjcmono",
            DEFAULT_WIDTH_10THS, DEFAULT_HEIGHT_10THS,
            X_DPI, Y_DPI,
-           (3.4 / 25.4), (7.0 / 25.4), (3.4 / 25.4), (3.0 / 25.4),
+           (float)(3.4 / 25.4), (float)(7.0 / 25.4),
+           (float)(3.4 / 25.4), (float)(3.0 / 25.4),
            1,                   /* num components */
            1,                   /* depth  */
            1,                   /* max gray */
@@ -243,7 +243,8 @@ const gx_device_bjc_printer gs_bjcgray_device =
 bjc_device(bjcgray_procs, "bjcgray",
            DEFAULT_WIDTH_10THS, DEFAULT_HEIGHT_10THS,
            X_DPI, Y_DPI,
-           (3.4 / 25.4), (7.0 / 25.4), (3.4 / 25.4), (3.0 / 25.4),
+           (float)(3.4 / 25.4), (float)(7.0 / 25.4),
+           (float)(3.4 / 25.4), (float)(3.0 / 25.4),
            1,                   /* num components */
            8,                   /* depth  */
            255,                 /* max gray */
@@ -265,7 +266,8 @@ const gx_device_bjc_printer gs_bjccmyk_device =
 bjc_device(bjc_cmykcolor_procs, "bjccmyk",
            DEFAULT_WIDTH_10THS, DEFAULT_HEIGHT_10THS,
            X_DPI, Y_DPI,
-           (3.4 / 25.4), (7.0 / 25.4), (3.4 / 25.4), (3.0 / 25.4),
+           (float)(3.4 / 25.4), (float)(7.0 / 25.4),
+           (float)(3.4 / 25.4), (float)(3.0 / 25.4),
            4,                   /* num components */
            4,                   /* depth  */
            1,                   /* max gray */
@@ -287,7 +289,8 @@ const gx_device_bjc_printer gs_bjccolor_device =
 bjc_device(bjc_truecolor_procs, "bjccolor",
            DEFAULT_WIDTH_10THS, DEFAULT_HEIGHT_10THS,
            X_DPI, Y_DPI,
-           (3.4 / 25.4), (7.0 / 25.4), (3.4 / 25.4), (3.0 / 25.4),
+           (float)(3.4 / 25.4), (float)(7.0 / 25.4),
+           (float)(3.4 / 25.4), (float)(3.0 / 25.4),
            4,                   /* num components */
            32,                  /* depth  */
            255,                 /* max gray */
@@ -302,7 +305,7 @@ bjc_device(bjc_truecolor_procs, "bjccolor",
 
 /*
 static int
-bjc_print_page(gx_device_printer * pdev, FILE * file)
+bjc_print_page(gx_device_printer * pdev, gp_file * file)
 {
 #define ppdev ((gx_device_bjc_printer *) pdev)
 #define prdev ((gx_device_printer *) pdev)
@@ -329,7 +332,7 @@ bjc_print_page(gx_device_printer * pdev, FILE * file)
 done:
     gs_free_object(pdev->memory, row, "bjc file buffer");
 
-    fwrite((const char *) alma, 512, 1, file);
+    gp_fwrite((const char *) alma, 512, 1, file);
     return code;
 
 #undef ppdev
@@ -337,15 +340,15 @@ done:
 */
 
 void
-bjc_put_bjl_command(FILE * file, int bjl_command)
+bjc_put_bjl_command(gp_file * file, int bjl_command)
 {
     BJL_command *command = BJL_command_set;
     for( ; command->string; command++)
         if(command->numeric == bjl_command) break;
     if(command->string) {
-      fwrite((const char *)"\033[K\002\000\000\037BJLSTART\012", 16, 1, file);
-      fwrite(command->string, command->length, 1, file);
-      fwrite((const char *)"\012BJLEND\012", 8, 1, file); }
+      gp_fwrite((const char *)"\033[K\002\000\000\037BJLSTART\012", 16, 1, file);
+      gp_fwrite(command->string, command->length, 1, file);
+      gp_fwrite((const char *)"\012BJLEND\012", 8, 1, file); }
 }
 
 /* ------ Get/put parameters ------ */
@@ -387,8 +390,9 @@ gdev_bjc_get_params(gx_device * pdev, gs_param_list * plist)
 {
     const gx_device_bjc_printer * ppdev = (gx_device_bjc_printer *)pdev;
 
-    int code = gdev_prn_get_params(pdev, plist);
-    if (code < 0 ||
+    int code;
+    (void) (
+        (code = gdev_prn_get_params(pdev, plist)) < 0 ||
         (code = param_write_string(plist, "PrinterType",
                  &paramValueToParam(strPrinterType, ppdev->printerType)->p_string)) < 0 ||
         (code = param_write_string(plist, "Feeder",
@@ -414,8 +418,8 @@ gdev_bjc_get_params(gx_device * pdev, gs_param_list * plist)
         (code = param_write_float(plist, "Gamma", &ppdev->gamma)) < 0 ||
         (code = param_write_float(plist, "RedGamma", &ppdev->redGamma)) < 0 ||
         (code = param_write_float(plist, "GreenGamma", &ppdev->greenGamma)) < 0 ||
-        (code = param_write_float(plist, "BlueGamma", &ppdev->blueGamma)) < 0)
-        return code;
+        (code = param_write_float(plist, "BlueGamma", &ppdev->blueGamma)) < 0
+        );
     return code;
 
 }
@@ -428,7 +432,7 @@ gdev_bjc_put_params(gx_device * pdev, gs_param_list * plist)
     const char *param_name;
     gs_param_string tmppar;
     uint parsize;
-    stringParamDescription *tmpstr=NULL;
+    const stringParamDescription *tmpstr=NULL;
 
 #   define ppdev ((gx_device_bjc_printer *)pdev)
 
@@ -554,7 +558,7 @@ label:							\
 }
 
 static int
-bjc_print_page_mono(gx_device_printer * pdev, FILE * file)
+bjc_print_page_mono(gx_device_printer * pdev, gp_file * file)
 {
 #define ppdev ((gx_device_bjc_printer *) pdev)
 #define prdev ((gx_device_printer *) pdev)
@@ -571,8 +575,8 @@ bjc_print_page_mono(gx_device_printer * pdev, FILE * file)
                   ((ppdev->ink & INK_K) ? 0x11: 0x10)); /* black or color */
     char ink   = 0x01; /* regular ink type */
     char compress = (ppdev->compress == true ? 0x01 : 0x00); /* compression or not */
-    int x_resolution = pdev->HWResolution[0];
-    int y_resolution = pdev->HWResolution[1];
+    int x_resolution = (int)pdev->HWResolution[0];
+    int y_resolution = (int)pdev->HWResolution[1];
     int length = 0/*x71*/, lm = 0/*x01*/, rm = 0/*x01*/, top = 0/*x50*/;
     byte inkc = ppdev->ink;
     byte mask_array[] = { 0xff, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe };
@@ -625,7 +629,7 @@ bjc_print_page_mono(gx_device_printer * pdev, FILE * file)
 }
 
 static int
-bjc_print_page_gray(gx_device_printer * pdev, FILE * file)
+bjc_print_page_gray(gx_device_printer * pdev, gp_file * file)
 {
 #define ppdev ((gx_device_bjc_printer *) pdev)
 #define prdev ((gx_device_printer *) pdev)
@@ -644,8 +648,8 @@ bjc_print_page_gray(gx_device_printer * pdev, FILE * file)
                   ((ppdev->ink & INK_K) ? 0x11: 0x10)); /* black or color */
     char ink   = 0x01; /* regular ink type */
     char compress = (ppdev->compress == true ? 0x01 : 0x00); /* compression or not */
-    int x_resolution = pdev->HWResolution[0];
-    int y_resolution = pdev->HWResolution[1];
+    int x_resolution = (int)pdev->HWResolution[0];
+    int y_resolution = (int)pdev->HWResolution[1];
     int length = 0/*x71*/, lm = 0/*x01*/, rm = 0/*x01*/, top = 0/*x50*/;
     byte inkc = ppdev->ink;
     byte mask_array[] = { 0xff, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe };
@@ -712,7 +716,7 @@ bjc_print_page_gray(gx_device_printer * pdev, FILE * file)
 }
 
 static int
-bjc_print_page_cmyk(gx_device_printer * pdev, FILE * file)
+bjc_print_page_cmyk(gx_device_printer * pdev, gp_file * file)
 {
 #define ppdev ((gx_device_bjc_printer *) pdev)
 #define prdev ((gx_device_printer *) pdev)
@@ -731,9 +735,8 @@ bjc_print_page_cmyk(gx_device_printer * pdev, FILE * file)
     char color = 0x10; /* color */
     char ink   = 0x01; /* regular ink type */
     char compress = (ppdev->compress == true ? 0x01 : 0x00); /* compression or not */
-    char skip_x;
-    int x_resolution = pdev->HWResolution[0];
-    int y_resolution = pdev->HWResolution[1];
+    int x_resolution = (int)pdev->HWResolution[0];
+    int y_resolution = (int)pdev->HWResolution[1];
     int length = 0/*x71*/, lm = 0/*x01*/, rm = 0/*x01*/, top = 0/*x50*/;
     int plane;
     byte mask_array[] = { 0xff, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe };
@@ -761,7 +764,6 @@ bjc_print_page_cmyk(gx_device_printer * pdev, FILE * file)
 
     for (y = 0; y < pdev->height ; y++) {
 
-        skip_x = 0;
         for (plane = 0; plane < 4; plane++) {   /* print each color component */
             gx_render_plane_init(&render_plane, (gx_device *)pdev, plane);
             gdev_prn_get_lines(pdev, y, 1, row + raster*plane, raster,
@@ -830,7 +832,7 @@ bjc_print_page_cmyk(gx_device_printer * pdev, FILE * file)
 }
 
 static int
-bjc_print_page_color(gx_device_printer * pdev, FILE * file)
+bjc_print_page_color(gx_device_printer * pdev, gp_file * file)
 {
 #define ppdev ((gx_device_bjc_printer *) pdev)
 #define prdev ((gx_device_printer *) pdev)
@@ -854,8 +856,8 @@ bjc_print_page_color(gx_device_printer * pdev, FILE * file)
     char color = 0x10; /* color */
     char ink   = 0x01; /* regular ink type */
     char compress = (ppdev->compress == true ? 0x01 : 0x00); /* compression or not */
-    int x_resolution = pdev->HWResolution[0];
-    int y_resolution = pdev->HWResolution[1];
+    int x_resolution = (int)pdev->HWResolution[0];
+    int y_resolution = (int)pdev->HWResolution[1];
     int length = 0/*x71*/, lm = 0/*x01*/, rm = 0/*x01*/, top = 0/*x50*/;
     byte mask_array[] = { 0xff, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe };
     byte lastmask = mask_array[pdev->width % 8];

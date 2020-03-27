@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -21,6 +21,8 @@
 #  define imain_INCLUDED
 
 #include "gsexit.h"		/* exported by imain.c */
+#include "gstypes.h"
+#include "iref.h"
 
 /*
  * This file defines the intended API between client front ends
@@ -37,10 +39,7 @@
  * top-level API calls take an interpreter instance (gs_main_instance *)
  * as their first argument.
  */
-#ifndef gs_main_instance_DEFINED
-#  define gs_main_instance_DEFINED
 typedef struct gs_main_instance_s gs_main_instance;
-#endif
 
 /* ================ Exported procedures from imain.c ================ */
 
@@ -70,7 +69,7 @@ gs_main_instance *gs_main_alloc_instance(gs_memory_t *);
  * init0 records the files to be used for stdio, and initializes the
  * graphics library, the file search paths, and other instance data.
  */
-int gs_main_init0(gs_main_instance *minst, FILE *in, FILE *out, FILE *err,
+int gs_main_init0(gs_main_instance *minst, gp_file *in, gp_file *out, gp_file *err,
                   int max_lib_paths);
 
 /*
@@ -169,6 +168,13 @@ int gs_main_run_string_with_length(gs_main_instance * minst,
                                    int user_errors, int *pexit_code,
                                    ref * perror_object);
 
+/* Version of gs_main_run_file that works for PDF files. */
+int gs_main_run_file2(gs_main_instance *minst,
+                      const char       *fname,
+                      int               user_errors,
+                      int              *pexit_code,
+                      ref              *perror_object);
+
 /*
  * Open the file for gs_main_run_file.  This is an internal routine
  * that is only exported for some special clients.
@@ -197,6 +203,25 @@ int gs_main_run_string_continue(gs_main_instance * minst,
                                 ref * perror_object);
 int gs_main_run_string_end(gs_main_instance * minst, int user_errors,
                            int *pexit_code, ref * perror_object);
+
+/* This procedure returns the offset at which the last UEL was
+ * encountered during parsing. This is only defined after
+ * a gs_error_InterpreterExit has been returned (and in particular
+ * after a .forceinterp_exit has been called). Calling this
+ * in other circumstances will get undefined results. */
+uint gs_main_get_uel_offset(gs_main_instance * minst);
+
+gs_memory_t *
+gs_main_get_device_memory(gs_main_instance * minst);
+
+int
+gs_main_set_device(gs_main_instance * minst, gx_device *pdev);
+
+int
+gs_main_force_resolutions(gs_main_instance * minst, const float *resolutions);
+
+int
+gs_main_force_dimensions(gs_main_instance * minst, const long *resolutions);
 
 /* ---------------- Operand stack access ---------------- */
 

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -221,6 +221,9 @@ fn_PtCr_evaluate(const gs_function_t *pfn_common, const float *in, float *out)
         OP_NONE(PtCr_repeat_end)	/* repeat_end */
     };
 
+    memset(repeat_count, 0x00, MAX_PSC_FUNCTION_NESTING * sizeof(int));
+    memset(repeat_proc_size, 0x00, MAX_PSC_FUNCTION_NESTING * sizeof(int));
+
     vstack[-1].type = CVT_NONE;  /* for type dispatch in empty stack case */
     vstack[0].type = CVT_NONE;	/* catch underflow */
     for (i = 0; i < pfn->params.m; ++i)
@@ -246,6 +249,7 @@ fn_PtCr_evaluate(const gs_function_t *pfn_common, const float *in, float *out)
             --p; goto sw;
         case PtCr_int2_to_float:
             store_float(vsp, (double)vsp->value.i);
+            /* fall through */
         case PtCr_2nd_int_to_float:
             store_float(vsp - 1, (double)vsp[-1].value.i);
             --p; goto sw;
@@ -301,9 +305,16 @@ fn_PtCr_evaluate(const gs_function_t *pfn_common, const float *in, float *out)
             vsp->value.f = gs_cos_degrees(vsp->value.f);
             continue;
         case PtCr_cvi:
-            vsp->value.i = (int)(vsp->value.f);
+        {
+           /* Strictly speaking assigning one element of union
+            * to another, overlapping element of a different size is
+            * undefined behavior, hence assign to an intermediate variable
+            */
+            int int1 = (int)(vsp->value.f);
+            vsp->value.i = int1;
             vsp->type = CVT_INT;
             continue;
+        }
         case PtCr_cvr:
             continue;	/* prepare handled it */
         case PtCr_div:
@@ -535,6 +546,9 @@ fn_PtCr_evaluate(const gs_function_t *pfn_common, const float *in, float *out)
             p += 3 + (p[0] <<8) + p[1];		    /* advance just past the repeat_end */
             /* falls through */
         case PtCr_repeat_end:
+            if (repeat_nesting_level < 0)
+                return_error(gs_error_rangecheck);
+
             if ((repeat_count[repeat_nesting_level])-- <= 0)
                 repeat_nesting_level--;
             else
@@ -786,6 +800,8 @@ void
 gs_function_PtCr_free_params(gs_function_PtCr_params_t * params, gs_memory_t * mem)
 {
     gs_free_const_string(mem, params->ops.data, params->ops.size, "ops");
+    params->ops.data = NULL;
+    params->ops.size = 0;
     fn_common_free_params((gs_function_params_t *) params, mem);
 }
 

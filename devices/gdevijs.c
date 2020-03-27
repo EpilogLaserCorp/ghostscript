@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /*
@@ -411,7 +411,7 @@ static int gsijs_fill_mask(gx_device * dev,
    return code;
 }
 
-static int gsijs_fill_path(gx_device * dev, const gs_imager_state * pis,
+static int gsijs_fill_path(gx_device * dev, const gs_gstate * pgs,
       gx_path * ppath, const gx_fill_params * params,
       const gx_drawing_color * pdcolor,
       const gx_clip_path * pcpath)
@@ -424,14 +424,14 @@ static int gsijs_fill_path(gx_device * dev, const gs_imager_state * pis,
 
    ijsdev->k_path = 1;
 
-   code = (*ijsdev->prn_procs.fill_path)(dev, pis, ppath, params, pdcolor, pcpath);
+   code = (*ijsdev->prn_procs.fill_path)(dev, pgs, ppath, params, pdcolor, pcpath);
 
    ijsdev->k_path = 0;
 
-   return 0;
+   return code;
 }
 
-static int gsijs_stroke_path(gx_device * dev, const gs_imager_state * pis,
+static int gsijs_stroke_path(gx_device * dev, const gs_gstate * pgs,
         gx_path * ppath, const gx_stroke_params * params,
         const gx_drawing_color * pdcolor,
         const gx_clip_path * pcpath)
@@ -444,7 +444,7 @@ static int gsijs_stroke_path(gx_device * dev, const gs_imager_state * pis,
 
    ijsdev->k_path = 1;
 
-   code = (*ijsdev->prn_procs.stroke_path)(dev, pis, ppath, params, pdcolor, pcpath);
+   code = (*ijsdev->prn_procs.stroke_path)(dev, pgs, ppath, params, pdcolor, pcpath);
 
    ijsdev->k_path = 0;
 
@@ -522,17 +522,21 @@ gsijs_set_krgb_mode(gx_device_ijs *ijsdev)
 
     buf[0] = 0;
     code = ijs_client_enum_param(ijsdev->ctx, 0, "ColorSpace", buf, sizeof(buf)-1);
-    if (code >= 0)
+    if (code >= 0) {
+        if (code >= sizeof(buf))
+            return IJS_EBUF;
         buf[code] = 0;
-    if (strstr(buf, "KRGB") != NULL)
-    {
-        ijsdev->krgb_mode = 1;     /* yes KRGB is supported */
-        ijsdev->k_bits = 1;        /* KRGB = 1x8x8x8 */
-    }
-    else if (strstr(buf, "KxRGB") != NULL)
-    {
-        ijsdev->krgb_mode = 1;    /* yes KRGB is supported */
-        ijsdev->k_bits = 8;       /* KRGB = 8x8x8x8 */
+
+        if (strstr(buf, "KRGB") != NULL)
+        {
+            ijsdev->krgb_mode = 1;     /* yes KRGB is supported */
+            ijsdev->k_bits = 1;        /* KRGB = 1x8x8x8 */
+        }
+        else if (strstr(buf, "KxRGB") != NULL)
+        {
+            ijsdev->krgb_mode = 1;    /* yes KRGB is supported */
+            ijsdev->k_bits = 8;       /* KRGB = 8x8x8x8 */
+        }
     }
 
     return 0;
@@ -681,8 +685,8 @@ gsijs_set_margin_params(gx_device_ijs *ijsdev)
     }
 
     if (code == 0) {
-        double printable_width, printable_height;
-        double printable_left, printable_top;
+        double printable_width = 0, printable_height = 0;
+        double printable_left = 0, printable_top = 0;
         float m[4];
 
         code = ijs_client_get_param(ijsdev->ctx, 0, "PrintableArea",
@@ -692,6 +696,8 @@ gsijs_set_margin_params(gx_device_ijs *ijsdev)
                That's ok. */
             return 0;
         else if (code >= 0) {
+            if (code >= sizeof(buf))
+                return IJS_EBUF;
             code = gsijs_parse_wxh (buf, code,
                                     &printable_width, &printable_height);
         }
@@ -702,6 +708,8 @@ gsijs_set_margin_params(gx_device_ijs *ijsdev)
             if (code == IJS_EUNKPARAM)
                 return 0;
             else if (code >= 0) {
+                if (code >= sizeof(buf))
+                    return IJS_EBUF;
                 code = gsijs_parse_wxh(buf, code,
                                         &printable_left, &printable_top);
             }
@@ -757,6 +765,9 @@ gsijs_set_resolution(gx_device_ijs *ijsdev)
     if (code >= 0) {
         int i;
 
+        if (code >= sizeof(buf))
+            return IJS_EBUF;
+
         for (i = 0; i < code; i++)
             if (buf[i] == 'x')
                 break;
@@ -765,10 +776,13 @@ gsijs_set_resolution(gx_device_ijs *ijsdev)
 
             if (i == sizeof(buf))
                 code = IJS_EBUF;
-            buf[i] = 0;
-            x_dpi = y_dpi = strtod (buf, &tail);
-            if (tail == buf)
-                code = IJS_ESYNTAX;
+            else
+            {
+                buf[i] = 0;
+                x_dpi = y_dpi = strtod (buf, &tail);
+                if (tail == buf)
+                    code = IJS_ESYNTAX;
+            }
         } else {
             double x, y;
 
@@ -827,15 +841,24 @@ gsijs_open(gx_device *dev)
     if (code < 0)
         return code;
 
+    while (dev->child)
+        dev = dev->child;
+    ijsdev = (gx_device_ijs *)dev;
+
     if (use_outputfd) {
         /* Note: dup() may not be portable to all interesting IJS
            platforms. In that case, this branch should be #ifdef'ed out.
         */
-        fd = dup(fileno(ijsdev->file));
-	if (fd < 0) {
-	    emprintf(ijsdev->memory, "dup() failed\n");
-	    return gs_note_error(gs_error_ioerror);
-	}
+        FILE *file = gp_get_file(ijsdev->file);
+
+        if (file == NULL)
+            fd = -1;
+        else
+            fd = dup(fileno(file));
+        if (fd < 0) {
+            emprintf(ijsdev->memory, "dup() failed\n");
+            return gs_note_error(gs_error_ioerror);
+        }
     }
 
     /* WARNING: Ghostscript should be run with -dSAFER to stop
@@ -845,6 +868,8 @@ gsijs_open(gx_device *dev)
     if (ijsdev->ctx == (IjsClientCtx *)NULL) {
         emprintf1(ijsdev->memory,
                   "Can't start ijs server \042%s\042\n", ijsdev->IjsServer);
+        if (fd >= 0)
+            close(fd);
         return gs_note_error(gs_error_ioerror);
     }
 
@@ -852,11 +877,15 @@ gsijs_open(gx_device *dev)
 
     if (ijs_client_open(ijsdev->ctx) < 0) {
         emprintf(ijsdev->memory, "Can't open ijs\n");
+        if (fd >= 0)
+            close(fd);
         return gs_note_error(gs_error_ioerror);
     }
     if (ijs_client_begin_job(ijsdev->ctx, 0) < 0) {
         emprintf(ijsdev->memory, "Can't begin ijs job 0\n");
         ijs_client_close(ijsdev->ctx);
+        if (fd >= 0)
+            close(fd);
         return gs_note_error(gs_error_ioerror);
     }
 

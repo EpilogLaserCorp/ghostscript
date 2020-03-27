@@ -1,4 +1,4 @@
-% Copyright (C) 2001-2012 Artifex Software, Inc.
+% Copyright (C) 2001-2019 Artifex Software, Inc.
 % All Rights Reserved.
 %
 % This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 % of the license contained in the file LICENSE in this distribution.
 %
 % Refer to licensing information at http://www.artifex.com or contact
-% Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-% CA  94903, U.S.A., +1(415)492-9861, for further information.
+% Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+% CA 94945, U.S.A., +1(415)492-9861, for further information.
 %
 
 % Initialization file for %disk device modifications
@@ -51,9 +51,9 @@ systemdict begin
     mark 5 1 roll ] mark exch { { } forall } forall ]
     //systemdict /.searchabledevs 2 index .forceput
     exch .setglobal
-  }
+  } executeonly
   if
-} .bind executeonly def % must be bound and hidden for .forceput
+} .bind executeonly odef % must be bound and hidden for .forceput
 
 % Modify .putdevparams to force regeneration of .searchabledevs list
 /.putdevparams {
@@ -61,7 +61,7 @@ systemdict begin
   % doesn't get run enough to justify the complication
   //.putdevparams
   //systemdict /.searchabledevs .forceundef
-} .bind odef % must be bound and hidden for .forceundef
+} .bind executeonly odef % must be bound and hidden for .forceundef
 
 % ------ extend filenameforall to handle wildcards in %dev% part of pattern -------%
 /filenameforall {
@@ -129,7 +129,7 @@ systemdict begin
     2 index 0 get 37 eq { [ () ] } { .getsearchabledevs } ifelse
     { 3 index concatstrings	% prepend the device
       {
-        2 index //file } .internalstopped not {
+        2 index //file } //.internalstopped exec not {
         4 1 roll pop pop pop //true
         exit		% exit with success
       } {
@@ -151,7 +151,7 @@ systemdict begin
   //false			% success code
   1 index 0 get 37 eq { [ () ] } { .getsearchabledevs } ifelse
   { 2 index concatstrings	% prepend the device
-    { //deletefile } .internalstopped exch pop not {
+    { //deletefile } //.internalstopped exec exch pop not {
       pop //true exit		% exit with success
     }
     if
@@ -166,7 +166,7 @@ systemdict begin
     //false			% success code
     1 index 0 get 37 eq { [ () ] } { .getsearchabledevs } ifelse
     { 2 index concatstrings	% prepend the device
-      { //status } .internalstopped not {
+      { //status } //.internalstopped exec not {
         { //true 7 -2 roll pop pop //true exit } % exit with success
         if
       }
@@ -187,7 +187,7 @@ systemdict begin
   //false			% success code
   2 index 0 get 37 eq { [ () ] } { .getsearchabledevs } ifelse
   { dup 4 index concatstrings	% prepend the device
-    { (r) //file } .internalstopped
+    { (r) //file } //.internalstopped exec
     not {
       closefile exch pop //true exit	% exit with success
     } {

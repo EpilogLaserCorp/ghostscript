@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -53,24 +53,6 @@
  * Note that non-embedded fonts in the base set of 14 do not have
  * descriptors, nor do Type 0 or (synthetic bitmap) Type 3 fonts.
  */
-/*
- * Start by defining the elements common to font descriptors and sub-font
- * (character class) descriptors.
- */
-typedef struct pdf_font_descriptor_values_s {
-    /* Required elements */
-    int Ascent, CapHeight, Descent, ItalicAngle, StemV;
-    gs_int_rect FontBBox;
-    gs_string FontName;
-    uint Flags;
-    /* Optional elements (default to 0) */
-    int AvgWidth, Leading, MaxWidth, MissingWidth, StemH, XHeight;
-} pdf_font_descriptor_values_t;
-typedef struct pdf_font_descriptor_common_s pdf_font_descriptor_common_t;
-struct pdf_font_descriptor_common_s {
-    pdf_resource_common(pdf_font_descriptor_common_t);
-    pdf_font_descriptor_values_t values;
-};
 /* Flag bits */
 /*#define FONT_IS_FIXED_WIDTH (1<<0)*/  /* defined in gxfont.h */
 #define FONT_IS_SERIF (1<<1)
@@ -93,25 +75,6 @@ struct pdf_font_descriptor_common_s {
 #define FONT_IS_SMALL_CAPS (1<<17)
 #define FONT_IS_FORCE_BOLD (1<<18)
 
-/*
- * Define a (top-level) FontDescriptor.  CID-keyed vs. non-CID-keyed fonts
- * are distinguished by their FontType.
- */
-#ifndef pdf_base_font_DEFINED
-#  define pdf_base_font_DEFINED
-typedef struct pdf_base_font_s pdf_base_font_t;
-#endif
-struct pdf_font_descriptor_s {
-    pdf_font_descriptor_common_t common;
-    pdf_base_font_t *base_font;
-    font_type FontType;		/* (copied from base_font) */
-    bool embed;
-    struct cid_ {		/* (CIDFonts only) */
-        cos_dict_t *Style;
-        char Lang[3];		/* 2 chars + \0 */
-        cos_dict_t *FD;		/* value = COS_VALUE_RESOURCE */
-    } cid;
-};
 /*
  * Define a sub-descriptor for a character class (FD dictionary element).
  */
@@ -262,7 +225,12 @@ int pdf_font_descriptor_free(gx_device_pdf *pdev, pdf_resource_t *pres)
 {
     pdf_font_descriptor_t *pfd = (pdf_font_descriptor_t *)pres;
     pdf_base_font_t *pbfont = pfd->base_font;
-    gs_font *copied = (gs_font *)pbfont->copied, *complete = (gs_font *)pbfont->complete;
+    gs_font *copied = NULL, *complete = NULL;
+
+    if (pbfont) {
+        copied = (gs_font *)pbfont->copied;
+        complete = (gs_font *)pbfont->complete;
+    }
 
     if (complete && copied != complete)
         gs_free_copied_font(complete);
@@ -453,6 +421,7 @@ pdf_compute_font_descriptor(gx_device_pdf *pdev, pdf_font_descriptor_t *pfd)
     case ft_PCL_user_defined:
     case ft_GL2_stick_user_defined:
     case ft_MicroType:
+    case ft_PDF_user_defined:
     case ft_user_defined:
         break;
         /* Other font types may use a non-standard (not 1000x1000) design grid
@@ -529,7 +498,7 @@ pdf_compute_font_descriptor(gx_device_pdf *pdev, pdf_font_descriptor_t *pfd)
         }
         /* See if the glyph name is in any of the known encodings */
         glyph_known_enc = gs_c_name_glyph(gname.data, gname.size);
-        if (glyph_known_enc == gs_no_glyph) {
+        if (glyph_known_enc == GS_NO_GLYPH) {
             desc.Flags |= FONT_IS_SYMBOLIC;
             continue;
         }
@@ -578,6 +547,7 @@ pdf_compute_font_descriptor(gx_device_pdf *pdev, pdf_font_descriptor_t *pfd)
                 break;
             case 'g': case 'p': case 'q': case 'y': /* descender */
                 small_descent = min(small_descent, y0);
+                /* fall through */
             default:		/* no ascender or descender */
                 x_height = max(x_height, y1);
             }
@@ -586,7 +556,7 @@ pdf_compute_font_descriptor(gx_device_pdf *pdev, pdf_font_descriptor_t *pfd)
     if (!(desc.Flags & FONT_IS_SYMBOLIC)) {
         desc.Flags |= FONT_IS_ADOBE_ROMAN; /* required if not symbolic */
         desc.XHeight = (int)x_height;
-        if (!small_present && (!pdev->PDFA != 0 || bfont->FontType != ft_TrueType))
+        if (!small_present && (pdev->PDFA == 0 || bfont->FontType != ft_TrueType))
             desc.Flags |= FONT_IS_ALL_CAPS;
         desc.CapHeight = cap_height;
         /*
@@ -637,10 +607,10 @@ pdf_compute_font_descriptor(gx_device_pdf *pdev, pdf_font_descriptor_t *pfd)
     desc.Descent = desc.FontBBox.p.y;
     if (!(desc.Flags & (FONT_IS_SYMBOLIC | FONT_IS_ALL_CAPS)) &&
         (small_descent > desc.Descent / 3 || desc.XHeight > small_height * 0.9) &&
-        (!pdev->PDFA != 0 || bfont->FontType != ft_TrueType)
+        (pdev->PDFA == 0 || bfont->FontType != ft_TrueType)
         )
         desc.Flags |= FONT_IS_SMALL_CAPS;
-    if (fixed_width > 0 && (!pdev->PDFA != 0 || bfont->FontType != ft_TrueType)) {
+    if (fixed_width > 0 && (pdev->PDFA == 0 || bfont->FontType != ft_TrueType)) {
         desc.Flags |= FONT_IS_FIXED_WIDTH;
         desc.AvgWidth = desc.MaxWidth = desc.MissingWidth = fixed_width;
     }
@@ -723,7 +693,7 @@ pdf_write_FontDescriptor(gx_device_pdf *pdev, pdf_resource_t *pres)
             fd.values.Flags =
                 (fd.values.Flags & ~(FONT_IS_ADOBE_ROMAN)) | FONT_IS_SYMBOLIC;
 
-            if (pfd->base_font->do_subset == DO_SUBSET_NO && ((const gs_font_base *)pfd->base_font)->nearest_encoding_index != ENCODING_INDEX_UNKNOWN) {
+            if (pfd->base_font->do_subset == DO_SUBSET_NO && ((const gs_font_base *)(pfd->base_font->copied))->nearest_encoding_index != ENCODING_INDEX_UNKNOWN) {
                 fd.values.Flags =
                     (fd.values.Flags & ~(FONT_IS_SYMBOLIC)) | FONT_IS_ADOBE_ROMAN;
             }
@@ -736,7 +706,8 @@ pdf_write_FontDescriptor(gx_device_pdf *pdev, pdf_resource_t *pres)
     if (cidset_id != 0)
         pprintld1(s, "/CIDSet %ld 0 R\n", cidset_id);
     else if (pdf_do_subset_font(pdev, pfd->base_font, pfd->common.rid) &&
-             (ftype == ft_encrypted || ftype == ft_encrypted2)
+             (ftype == ft_encrypted || ftype == ft_encrypted2) &&
+             pdev->CompatibilityLevel <= 1.7
              ) {
         stream_puts(s, "/CharSet");
         code = pdf_write_CharSet(pdev, pfd->base_font);

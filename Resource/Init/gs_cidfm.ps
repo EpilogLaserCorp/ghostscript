@@ -1,4 +1,4 @@
-% Copyright (C) 2001-2012 Artifex Software, Inc.
+% Copyright (C) 2001-2019 Artifex Software, Inc.
 % All Rights Reserved.
 %
 % This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 % of the license contained in the file LICENSE in this distribution.
 %
 % Refer to licensing information at http://www.artifex.com or contact
-% Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-% CA  94903, U.S.A., +1(415)492-9861, for further information.
+% Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+% CA 94945, U.S.A., +1(415)492-9861, for further information.
 %
 
 % Redefine CIDFont category with cidfmap .
@@ -120,7 +120,12 @@ currentdict end def
       (DroidSansFallback.ttf)
     } if
   } if
-  concatstrings
+  % If CIDFSubstFont looks like a path/file (rather than just file)
+  % use it without the CIDFSubstPath string
+  dup .file_name_directory_separator rsearch
+  {pop pop pop exch pop}
+  {pop concatstrings}
+  ifelse
   % The CSI data just has to be valid, the substition machinery will
   % generally overwrite it with appropriate values for the missing font.
   /CSI  [(Identity) 0]
@@ -133,9 +138,39 @@ currentdict end def
   } if
 >> def
 
+% <dir.../base.extn> .basename <dir>
+/.splitdirname {
+  (/) rsearch { //true } { (\\) rsearch } ifelse
+  {exch concatstrings exch pop //true}{//false} ifelse
+} bind def
+
+% <file> .addcidfmappath -
+/.addcidfmpermitpath
+{
+  .filename
+  {
+    //.splitdirname exec
+    {dup def} if
+  } if
+} bind def
+
 /VerifyMap  % <raw_map> VerifyMap -
 {
+  % This is where we insert the default fallback into the map
+  % checking first to see if there is a user specified alternative
+  dup /CIDFallBack known not{
+     //DefaultCIDFallBack dup /Path get status
+     {
+       pop pop pop pop
+       /CIDFallBack exch 2 index 3 1 roll put
+     }
+     {
+       pop
+     }ifelse
+  } if
+
   % Remove any mappings for which we cannot find the font file
+  dup length dict begin
   dup
   {
     % if we have a name1->name2 mapping, follow the "trail",
@@ -163,11 +198,12 @@ currentdict end def
           /Path .knownget
           {
             .libfile
-            {closefile pop}
             {
-              {(r) file} .internalstopped
+              dup //.addcidfmpermitpath exec closefile pop}
+            {
+              {(r) file} //.internalstopped exec
               {pop pop 2 index exch .undef}
-              {closefile pop} ifelse
+              {dup //.addcidfmpermitpath exec closefile pop} ifelse
             } ifelse
           }
           {2 index exch .undef}
@@ -177,19 +213,8 @@ currentdict end def
       } ifelse
     } loop
   } forall
-
-  % This is where we insert the default fallback into the map
-  % checking first to see if there is a user specified alternative
-  dup /CIDFallBack known not{
-     //DefaultCIDFallBack dup /Path get status
-     {
-       pop pop pop pop
-       /CIDFallBack exch 2 index 3 1 roll put
-     }
-     {
-       pop
-     }ifelse
-  } if
+  currentdict end
+  {exch pop /PermitFileReading exch .addcontrolpath} forall
 
   % Checks for vicious substitution cycles.
   dup length dict copy                  % <<map>>
@@ -232,6 +257,9 @@ currentdict end def
   } loop
   pop pop
 } bind def
+
+currentdict /.splitdirname undef
+currentdict /.addcidfmpermitpath undef
 
 /PreprocessRecord  % <map> <Name> <raw_record> PreprocessRecord <map> <Name> <record> <bool>
 {

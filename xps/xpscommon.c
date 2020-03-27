@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,14 +9,34 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
 /* XPS interpreter - common parse functions */
 
 #include "ghostxps.h"
+
+xps_item_t *
+xps_lookup_alternate_content(xps_item_t *node)
+{
+    for (node = xps_down(node); node; node = xps_next(node))
+    {
+        if (xps_tag(node))
+        {
+            if (!strcmp(xps_tag(node), "Choice"))
+            {
+                const char *req = xps_att(node, "Requires");
+                if (req && !strcmp(req, "xps"))
+                    return xps_down(node);
+            }
+            if (!strcmp(xps_tag(node), "Fallback"))
+                return xps_down(node);
+        }
+    }
+    return NULL;
+}
 
 int
 xps_parse_brush(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, xps_item_t *node)
@@ -48,6 +68,12 @@ xps_parse_element(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, xps_
         return xps_parse_glyphs(ctx, base_uri, dict, node);
     if (!strcmp(xps_tag(node), "Canvas"))
         return xps_parse_canvas(ctx, base_uri, dict, node);
+    if (!strcmp(xps_tag(node), "AlternateContent"))
+    {
+        node = xps_lookup_alternate_content(node);
+        if (node)
+            xps_parse_element(ctx, base_uri, dict, node);
+    }
     /* skip unknown tags (like Foo.Resources and similar) */
     return 0;
 }

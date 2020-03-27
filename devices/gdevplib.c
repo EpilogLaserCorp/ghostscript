@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* PLanar Interlaced Banded device */
@@ -254,17 +254,16 @@ static dev_proc_map_color_rgb(plibc_map_color_rgb);
 static dev_proc_open_device(plib_open);
 static dev_proc_close_device(plib_close);
 
-static dev_proc_get_params(plib_get_params);
 static dev_proc_put_params(plib_put_params);
 
 /* And of course we need our own print-page routines. */
 static dev_proc_print_page(plib_print_page);
 
-static int plib_print_page(gx_device_printer * pdev, FILE * pstream);
-static int plibm_print_page(gx_device_printer * pdev, FILE * pstream);
-static int plibg_print_page(gx_device_printer * pdev, FILE * pstream);
-static int plibc_print_page(gx_device_printer * pdev, FILE * pstream);
-static int plibk_print_page(gx_device_printer * pdev, FILE * pstream);
+static int plib_print_page(gx_device_printer * pdev, gp_file * pstream);
+static int plibm_print_page(gx_device_printer * pdev, gp_file * pstream);
+static int plibg_print_page(gx_device_printer * pdev, gp_file * pstream);
+static int plibc_print_page(gx_device_printer * pdev, gp_file * pstream);
+static int plibk_print_page(gx_device_printer * pdev, gp_file * pstream);
 
 /* The device procedures */
 
@@ -372,32 +371,7 @@ static const gx_device_procs plibk_procs =
           (float)(0), (float)(0),\
           (float)(0), (float)(0)\
         ),\
-         { 0 },         /* std_procs */\
-         { 0 },         /* skip */\
-         { print_page,\
-           gx_default_print_page_copies,\
-           { gx_default_create_buf_device,\
-             gx_default_size_buf_device,\
-             gx_default_setup_buf_device,\
-             gx_default_destroy_buf_device\
-           },\
-           gdev_prn_default_get_space_params,\
-           gx_default_start_render_thread,\
-           gx_default_open_render_device,\
-           gx_default_close_render_device,\
-           gx_default_buffer_page\
-         },\
-         { 0 },         /* fname */\
-        0/*false*/,     /* OpenOutputFile */\
-        0/*false*/,     /* ReopenPerPage */\
-        0/*false*/,     /* page_uses_transparency */\
-        0/*false*/,     /* background_render */\
-        0/*false*/, -1, /* Duplex[_set] */\
-        0/*false*/, 0, 0, 0, /* file_is_new ... buf */\
-        0, 0, 0, 0, 0/*false*/, 0, 0, /* buffer_memory ... clist_dis'_mask */\
-        0,              /* num_render_threads_requested */\
-        { 0 },  /* save_procs_while_delaying_erasepage */\
-        { 0 }   /* ... orig_procs */}
+        prn_device_body_rest2_(print_page, gx_default_print_page_copies, -1)}
 
 /* The device descriptors themselves */
 const gx_device_plib gs_plib_device =
@@ -426,7 +400,7 @@ static int dump_nc;
 static int dump_l2bits;
 
 static void dump_start(int w, int h, int num_comps, int log2bits,
-                       FILE *dump_file)
+                       gp_file *dump_file)
 {
     if ((num_comps == 3) && (log2bits == 3)) {
         /* OK */
@@ -445,22 +419,18 @@ static void dump_start(int w, int h, int num_comps, int log2bits,
     if (dump_file == NULL)
         return;
     if (dump_nc == 3)
-        fprintf(dump_file, "P6 %d %d 255\n", w, h);
+        gp_fprintf(dump_file, "P6 %d %d 255\n", w, h);
     else if (dump_nc == 4) {
-        if (log2bits == 0)
-            fprintf(dump_file, "P7\nWIDTH %d\nHEIGHT %d\nDEPTH 4\n"
-                    "MAXVAL 255\nTUPLTYPE CMYK\nENDHDR\n", w, h);
-        else
-            fprintf(dump_file, "P7\nWIDTH %d\nHEIGHT %d\nDEPTH 4\n"
-                    "MAXVAL 255\nTUPLTYPE CMYK\nENDHDR\n", w, h);
+        gp_fprintf(dump_file, "P7\nWIDTH %d\nHEIGHT %d\nDEPTH 4\n"
+                "MAXVAL 255\nTUPLTYPE CMYK\nENDHDR\n", w, h);
     } else if (log2bits == 0)
-        fprintf(dump_file, "P4 %d %d\n", w, h);
+        gp_fprintf(dump_file, "P4 %d %d\n", w, h);
     else
-        fprintf(dump_file, "P5 %d %d 255\n", w, h);
+        gp_fprintf(dump_file, "P5 %d %d 255\n", w, h);
     dump_w = w;
 }
 
-static void dump_band(int y, FILE *dump_file)
+static void dump_band(int y, gp_file *dump_file)
 {
     byte *r = bandBufferBase;
     byte *g = r + bandBufferStride;
@@ -473,9 +443,9 @@ static void dump_band(int y, FILE *dump_file)
          while (y--) {
             int w = dump_w;
             while (w--) {
-                fputc(*r++, dump_file);
-                fputc(*g++, dump_file);
-                fputc(*b++, dump_file);
+                gp_fputc(*r++, dump_file);
+                gp_fputc(*g++, dump_file);
+                gp_fputc(*b++, dump_file);
             }
             r += bandBufferStride*3-dump_w;
             g += bandBufferStride*3-dump_w;
@@ -492,10 +462,10 @@ static void dump_band(int y, FILE *dump_file)
                     byte K = *k++;
                     int s;
                     for (s=7; s>=0; s--) {
-                        fputc(255*((C>>s)&1), dump_file);
-                        fputc(255*((M>>s)&1), dump_file);
-                        fputc(255*((Y>>s)&1), dump_file);
-                        fputc(255*((K>>s)&1), dump_file);
+                        gp_fputc(255*((C>>s)&1), dump_file);
+                        gp_fputc(255*((M>>s)&1), dump_file);
+                        gp_fputc(255*((Y>>s)&1), dump_file);
+                        gp_fputc(255*((K>>s)&1), dump_file);
                         w--;
                         if (w == 0) break;
                     }
@@ -509,10 +479,10 @@ static void dump_band(int y, FILE *dump_file)
             while (y--) {
                 int w = dump_w;
                 while (w--) {
-                    fputc(*r++, dump_file);
-                    fputc(*g++, dump_file);
-                    fputc(*b++, dump_file);
-                    fputc(*k++, dump_file);
+                    gp_fputc(*r++, dump_file);
+                    gp_fputc(*g++, dump_file);
+                    gp_fputc(*b++, dump_file);
+                    gp_fputc(*k++, dump_file);
                 }
                 r += bandBufferStride*4-dump_w;
                 g += bandBufferStride*4-dump_w;
@@ -525,7 +495,7 @@ static void dump_band(int y, FILE *dump_file)
             while (y--) {
                 int w = (dump_w+7)>>3;
                 while (w--) {
-                    fputc(*r++, dump_file);
+                    gp_fputc(*r++, dump_file);
                 }
                 r += bandBufferStride - ((dump_w+7)>>3);
             }
@@ -533,7 +503,7 @@ static void dump_band(int y, FILE *dump_file)
             while (y--) {
                 int w = dump_w;
                 while (w--) {
-                    fputc(*r++, dump_file);
+                    gp_fputc(*r++, dump_file);
                 }
                 r += bandBufferStride - dump_w;
             }
@@ -578,30 +548,26 @@ set_line_ptrs(gx_device_memory * mdev, byte * base, int raster,
               byte **line_ptrs, int setup_height)
 {
     int num_planes = mdev->color_info.num_components;
-    gx_render_plane_t plane1;
-    const gx_render_plane_t *planes;
     int pi;
 
     if (num_planes) {
         if (base && !mdev->plane_depth)
             return_error(gs_error_rangecheck);
-        planes = mdev->planes;
     } else {
-        planes = &plane1;
-        plane1.depth = mdev->color_info.depth;
         num_planes = 1;
     }
-    if (line_ptrs)
+    if (line_ptrs) {
         mdev->line_ptrs = line_ptrs;
-    for (pi = 0; pi < num_planes; ++pi) {
-        byte **pend = line_ptrs + setup_height;
-        byte *scan_line = base;
+        for (pi = 0; pi < num_planes; ++pi) {
+            byte **pend = line_ptrs + setup_height;
+            byte *scan_line = base;
 
-        while (line_ptrs < pend) {
-            *line_ptrs++ = scan_line;
-            scan_line += raster * num_planes;
+            while (line_ptrs < pend) {
+                *line_ptrs++ = scan_line;
+                scan_line += raster * num_planes;
+            }
+            base += raster;
         }
-        base += raster;
     }
 
     return 0;
@@ -658,7 +624,7 @@ plib_get_bits_rectangle_mem(gx_device *pdev, const gs_int_rect *prect,
                             gs_get_bits_params_t *params, gs_int_rect **pprect)
 {
     gx_device_memory *mdev = (gx_device_memory *)pdev;
-    int x = prect->p.x, w = prect->q.x - x, y = prect->p.y, h = prect->q.y - y;
+    int x = prect->p.x, y = prect->p.y, h = prect->q.y - y;
     /* First off, see if we can satisfy get_bits_rectangle with just returning
      * pointers to the existing data. */
     {
@@ -689,8 +655,8 @@ plib_create_buf_device(gx_device **pbdev, gx_device *target, int y,
                                           mem, color_usage);
     if (code < 0)
         return code;
-    if ((*pbdev)->procs.get_bits_rectangle == mem_get_bits_rectangle)
-        (*pbdev)->procs.get_bits_rectangle = plib_get_bits_rectangle_mem;
+    if (dev_proc((*pbdev), get_bits_rectangle) == mem_get_bits_rectangle)
+        set_dev_proc((*pbdev), get_bits_rectangle, plib_get_bits_rectangle_mem);
     return 0;
 }
 
@@ -721,6 +687,8 @@ plib_open(gx_device * pdev)
     bdev->printer_procs.buf_procs.setup_buf_device = plib_setup_buf_device;
     bdev->printer_procs.buf_procs.size_buf_device = plib_size_buf_device;
     pdev->is_planar = 1;
+
+    bdev->space_params.banding_type = BandingAlways;
 
     /* You might expect us to call gdev_prn_open_planar rather than
      * gdev_prn_open, but if we do that, it overwrites the 2 function
@@ -822,7 +790,6 @@ plibc_decode_color(gx_device * dev, gx_color_index color,
 {
     uint bitspercolor = dev->color_info.depth / 4;
     uint colormask = (1 << bitspercolor) - 1;
-    uint max_cmyk = dev->color_info.max_color;
     uint c, m, y, k;
 
 #define cvalue(c) ((gx_color_value)((ulong)(c) * gx_max_color_value / colormask))
@@ -868,7 +835,6 @@ plibc_map_color_rgb(gx_device * dev, gx_color_index color,
 {
     uint bitspercolor = dev->color_info.depth / 4;
     uint colormask = (1 << bitspercolor) - 1;
-    uint max_cmyk = dev->color_info.max_color;
     uint c, m, y, k;
 
 #define cvalue(c) ((gx_color_value)((ulong)(c) * gx_max_color_value / colormask))
@@ -891,7 +857,7 @@ plibc_map_color_rgb(gx_device * dev, gx_color_index color,
 /* Print a page using a given row printing routine. */
 static int
 plib_print_page_loop(gx_device_printer * pdev, int log2bits, int numComps,
-                     FILE *pstream)
+                     gp_file *pstream)
 {
     gx_device_plib *pldev = (gx_device_plib *)pdev;
     int lnum;
@@ -972,7 +938,7 @@ plib_print_page_loop(gx_device_printer * pdev, int log2bits, int numComps,
 
 /* Print a monobit page. */
 static int
-plibm_print_page(gx_device_printer * pdev, FILE * pstream)
+plibm_print_page(gx_device_printer * pdev, gp_file * pstream)
 {
 #ifdef DEBUG_PRINT
     emprintf(pdev->memory, "plibm_print_page\n");
@@ -982,7 +948,7 @@ plibm_print_page(gx_device_printer * pdev, FILE * pstream)
 
 /* Print a gray-mapped page. */
 static int
-plibg_print_page(gx_device_printer * pdev, FILE * pstream)
+plibg_print_page(gx_device_printer * pdev, gp_file * pstream)
 {
 #ifdef DEBUG_PRINT
     emprintf(pdev->memory, "plibg_print_page\n");
@@ -992,7 +958,7 @@ plibg_print_page(gx_device_printer * pdev, FILE * pstream)
 
 /* Print a color-mapped page. */
 static int
-plib_print_page(gx_device_printer * pdev, FILE * pstream)
+plib_print_page(gx_device_printer * pdev, gp_file * pstream)
 {
 #ifdef DEBUG_PRINT
     emprintf(pdev->memory, "plibc_print_page\n");
@@ -1002,7 +968,7 @@ plib_print_page(gx_device_printer * pdev, FILE * pstream)
 
 /* Print a 1 bit CMYK page. */
 static int
-plibk_print_page(gx_device_printer * pdev, FILE * pstream)
+plibk_print_page(gx_device_printer * pdev, gp_file * pstream)
 {
 #ifdef DEBUG_PRINT
     emprintf(pdev->memory, "plibk_print_page\n");
@@ -1012,7 +978,7 @@ plibk_print_page(gx_device_printer * pdev, FILE * pstream)
 
 /* Print an 8bpc CMYK page. */
 static int
-plibc_print_page(gx_device_printer * pdev, FILE * pstream)
+plibc_print_page(gx_device_printer * pdev, gp_file * pstream)
 {
 #ifdef DEBUG_PRINT
     emprintf(pdev->memory, "plibc_print_page\n");

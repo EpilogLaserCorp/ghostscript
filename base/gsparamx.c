@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -52,11 +52,12 @@ param_put_enum(gs_param_list * plist, gs_param_name param_name,
                     }
             }
             code = gs_error_rangecheck;
+            /* fall through */
         default:
             ecode = code;
             param_signal_error(plist, param_name, code);
     }
-    return code;
+    return ecode;
 }
 
 /* Put a Boolean value. */
@@ -176,6 +177,7 @@ param_list_copy(gs_param_list *plto, gs_param_list *plfrom)
             value.value.fa.persistent &= copy_persists; goto ca;
         case gs_param_type_string_array:
             value.value.sa.persistent &= copy_persists;
+            /* fall through */
         ca:
         default:
             code = param_write_typed(plto, string_key, &value);

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -18,6 +18,10 @@
 
 #ifndef icolor_INCLUDED
 #  define icolor_INCLUDED
+
+#include "iref.h"
+#include "gsgstate.h"
+#include "gxtmap.h"
 
 /*
  * Define the number of stack slots needed for zcolor_remap_one.
@@ -34,7 +38,7 @@ extern const int zcolor_remap_one_estack;
  * a change as of release 5.95; formerly, it returned 0 in this case.)
  */
 int zcolor_remap_one(i_ctx_t *, const ref *, gx_transfer_map *,
-                     const gs_state *, op_proc_t);
+                     const gs_gstate *, op_proc_t);
 
 /* Reload a cache with entries in [0..1] after sampling. */
 int zcolor_remap_one_finish(i_ctx_t *);

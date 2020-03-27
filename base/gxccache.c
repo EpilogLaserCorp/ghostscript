@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -120,11 +120,11 @@ gx_lookup_fm_pair(gs_font * pfont, const gs_matrix *char_tm,
 
             if (pair->font == 0) {
                 pair->font = pfont;
-                if_debug2m('k', pfont->memory, "[k]updating pair 0x%lx with font 0x%lx\n",
-                           (ulong) pair, (ulong) pfont);
+                if_debug2m('k', pfont->memory, "[k]updating pair "PRI_INTPTR" with font "PRI_INTPTR"\n",
+                           (intptr_t)pair, (intptr_t)pfont);
             } else {
-                if_debug2m('k', pfont->memory, "[k]found pair 0x%lx: font=0x%lx\n",
-                           (ulong) pair, (ulong) pair->font);
+                if_debug2m('k', pfont->memory, "[k]found pair "PRI_INTPTR": font="PRI_INTPTR"\n",
+                           (intptr_t)pair, (intptr_t)pair->font);
             }
             code = gx_touch_fm_pair(dir, pair);
             if (code < 0)
@@ -158,8 +158,8 @@ gx_lookup_cached_char(const gs_font * pfont, const cached_fm_pair * pair,
             cc->wmode == wmode && cc_depth(cc) == depth
             ) {
             if_debug4m('K', pfont->memory,
-                       "[K]found 0x%lx (depth=%d) for glyph=0x%lx, wmode=%d\n",
-                       (ulong) cc, cc_depth(cc), (ulong) glyph, wmode);
+                       "[K]found "PRI_INTPTR" (depth=%d) for glyph=0x%lx, wmode=%d\n",
+                       (intptr_t)cc, cc_depth(cc), (ulong)glyph, wmode);
             return cc;
         }
         chi++;
@@ -176,7 +176,7 @@ gx_lookup_cached_char(const gs_font * pfont, const cached_fm_pair * pair,
 int
 gx_image_cached_char(register gs_show_enum * penum, register cached_char * cc)
 {
-    register gs_state *pgs = penum->pgs;
+    register gs_gstate *pgs = penum->pgs;
     gx_device_color *pdevc = gs_currentdevicecolor_inline(pgs);
     int x, y, w, h, depth;
     int code;
@@ -211,7 +211,8 @@ gx_image_cached_char(register gs_show_enum * penum, register cached_char * cc)
                               "[K]bits");
         else
             dmputs(penum->memory, "[K]no bits\n");
-        dmlprintf3(penum->memory, "[K]copying 0x%lx, offset=(%g,%g)\n", (ulong) cc,
+        dmlprintf3(penum->memory, "[K]copying "PRI_INTPTR", offset=(%g,%g)\n",
+                   (intptr_t) cc,
                    fixed2float(-cc->offset.x),
                    fixed2float(-cc->offset.y));
         dmlprintf6(penum->memory, "   at (%g,%g)+(%d,%d)->(%d,%d)\n",
@@ -256,8 +257,8 @@ gx_image_cached_char(register gs_show_enum * penum, register cached_char * cc)
                                         imaging_dev, cx, cy,
                                         pdevc->colors.pure, 0);
             if_debug8m('K', penum->memory,
-                       "[K]render_char display: xfont=0x%lx, glyph=0x%lx\n\tdev=0x%lx(%s) x,y=%d,%d, color=0x%lx => %d\n",
-                       (ulong) xf, (ulong) xg, (ulong) imaging_dev,
+                       "[K]render_char display: xfont="PRI_INTPTR", glyph=0x%lx\n\tdev="PRI_INTPTR"(%s) x,y=%d,%d, color=0x%lx => %d\n",
+                       (intptr_t)xf, (ulong)xg, (intptr_t)imaging_dev,
                        imaging_dev->dname, cx, cy,
                        (ulong) pdevc->colors.pure, code);
             if (code == 0)
@@ -274,8 +275,8 @@ gx_image_cached_char(register gs_show_enum * penum, register cached_char * cc)
                                        (gx_device *) & mdev, cx - x, cy - y,
                                                      (gx_color_index) 1, 1);
             if_debug7m('K', penum->memory,
-                       "[K]render_char to bits: xfont=0x%lx, glyph=0x%lx\n\tdev=0x%lx(%s) x,y=%d,%d => %d\n",
-                      (ulong) xf, (ulong) xg, (ulong) & mdev,
+                       "[K]render_char to bits: xfont="PRI_INTPTR", glyph=0x%lx\n\tdev="PRI_INTPTR"(%s) x,y=%d,%d => %d\n",
+                      (intptr_t)xf, (ulong) xg, (intptr_t)&mdev,
                       mdev.dname, cx - x, cy - y, code);
             if (code != 0)
                 return_check_interrupt(penum->memory, 1);
@@ -306,11 +307,9 @@ gx_image_cached_char(register gs_show_enum * penum, register cached_char * cc)
 
         gx_clip_path *pcpath;
 
-        if (penum) {
-            penum->use_wxy_float = false;
-            penum->wxy_float.x = penum->wxy_float.y = 0.0;
-            penum->wxy = cc->wxy;
-        }
+        penum->use_wxy_float = false;
+        penum->wxy_float.x = penum->wxy_float.y = 0.0;
+        penum->wxy = cc->wxy;
 
         code = gx_effective_clip_path(pgs, &pcpath);
         if (code >= 0) {
@@ -369,7 +368,7 @@ gx_image_cached_char(register gs_show_enum * penum, register cached_char * cc)
         image.Width = w;
         image.Height = h;
         image.adjust = false;
-        code = gs_image_init(pie, &image, false, pgs);
+        code = gs_image_init(pie, &image, false, true, pgs);
         switch (code) {
             case 1:		/* empty image */
                 code = 0;

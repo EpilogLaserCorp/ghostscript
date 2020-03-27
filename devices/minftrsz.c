@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* $Id */
@@ -133,7 +133,7 @@ min_feature_size_init(gs_memory_t *mem, int min_feature_size,
                   case 2:
                     /* current feature size is 1, darken bit to the right       */
                     /* unless it is past the end of the byte in 'last'          */
-                    if (fd > 0) {
+                    if (fd > 0 && fw > 0) {
                         f |= bm(fw);
                         l |= bm(fw);
                     } else /* fd == 0 */
@@ -144,7 +144,7 @@ min_feature_size_init(gs_memory_t *mem, int min_feature_size,
                     /* the center if the current size is 1, else darken a bit   */
                     /* to the right, with the constraints of staying within the */
                     /* byte (bits 7::0). (fd-1) is to the right.                */
-                    if ((fd < 7) && (fd > 0)) {
+                    if ((fd < 7) && (fd > 1)) {
                         /* within byte, left and right */
                         /* darkening is referenced from 'fw' since that is the  */
                         /* white bit to the right of the 1 or 2 pixel wide area */
@@ -203,7 +203,7 @@ min_feature_size_init(gs_memory_t *mem, int min_feature_size,
                 switch (min_feature_size) {
                   case 2:
                     /* current feature size is 1, darken bit to the right       */
-                    if (fd > 0) {
+                    if (fd > 0 && fw >= 0) {
                         d |= bm(fw);
                     } else /* fd == 0 */
                         d |= 0x0003;            /* two lsb's darkened   */

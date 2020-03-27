@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -186,7 +186,7 @@ dprintf_file_only(const char *file)
         dpf(dprintf_file_only_format, dprintf_file_tail(file));
 }
 void
-lprintf_file_only(FILE * f, const char *file)
+lprintf_file_only(gp_file * f, const char *file)
 {
     epf("%s(?): ", file);
 }
@@ -256,7 +256,7 @@ mlprintf_file_and_line(const gs_memory_t *mem, const char *file, int line)
 }
 #else
 void
-mlprintf_file_only(const gs_memory_t *mem, FILE * f, const char *file)
+mlprintf_file_only(const gs_memory_t *mem, gp_file * f, const char *file)
 {
     epfm(mem, "%s(?): ", file);
 }
@@ -297,9 +297,10 @@ int gs_throw_imp(const char *func, const char *file, int line, int op, int code,
 {
     char msg[1024];
     va_list ap;
+    int count;
 
     va_start(ap, fmt);
-    vsnprintf(msg, sizeof(msg), fmt, ap);
+    count = vsnprintf(msg, sizeof(msg), fmt, ap);
     msg[sizeof(msg) - 1] = 0;
     va_end(ap);
 
@@ -327,6 +328,9 @@ int gs_throw_imp(const char *func, const char *file, int line, int op, int code,
     if (op == 3)
         errprintf_nomem("  %s:%d: %s(): %s\n", file, line, func, msg);
 
+    if (count >= sizeof(msg) || count < 0)  { /* C99 || MSVC */
+        errwrite_nomem(msg_truncated, sizeof(msg_truncated) - 1);
+    }
     return code;
 }
 #endif
@@ -551,7 +555,7 @@ debug_dump_bytes(const gs_memory_t *mem, const byte * from, const byte * to, con
     while (p != to) {
         const byte *q = min(p + 16, to);
 
-        dmprintf1(mem, "0x%lx:", (ulong) p);
+        dmprintf1(mem, PRI_INTPTR, (intptr_t)p);
         while (p != q)
             dmprintf1(mem, " %02x", *p++);
         dmputc(mem, '\n');
@@ -605,7 +609,7 @@ debug_print_string_hex(const gs_memory_t *mem, const byte * chrs, uint len)
   BEGIN\
     ulong *fp_ = (ulong *)&first_arg - 2;\
     for (; fp_ && (fp_[1] & 0xff000000) == 0x08000000; fp_ = (ulong *)*fp_)\
-        dprintf2("  fp=0x%lx ip=0x%lx\n", (ulong)fp_, fp_[1]);\
+        dprintf2("  fp="PRI_INTPTR" ip=0x%lx\n", (intptr_t)fp_, fp_[1]);\
   END
 #endif
 

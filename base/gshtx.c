@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -320,7 +320,7 @@ static int
 build_component(
                    gs_ht_component * phtc,
                    gx_ht_order * porder,
-                   gs_state * pgs,
+                   gs_gstate * pgs,
                    gs_memory_t * pmem
 )
 {
@@ -396,7 +396,7 @@ free_order_array(
  */
 int
 gs_ht_install(
-                 gs_state * pgs,
+                 gs_gstate * pgs,
                  gs_ht * pht
 )
 {
@@ -501,7 +501,7 @@ create_mask_bits(const byte * mask1, const byte * mask2,
     return count;
 }
 static int
-create_mask_order(gx_ht_order * porder, gs_state * pgs,
+create_mask_order(gx_ht_order * porder, gs_gstate * pgs,
                   const gs_client_order_halftone * phcop,
                   gs_memory_t * mem)
 {

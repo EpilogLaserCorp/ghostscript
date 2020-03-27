@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -39,10 +39,6 @@
 #include "ierrors.h"
 #include "iapi.h"
 
-#if DEBUG
-#include "vdtrace.h"
-#endif
-
 #include "gdevdsp.h"
 
 #define kScrollBarWidth   15
@@ -53,7 +49,7 @@ Boolean   gDone;
 ControlActionUPP gActionFunctionScrollUPP;
 
 const char start_string[] = "systemdict /start get exec\n";
-void *instance;
+void *instance = NULL;
 
 const unsigned int display_format = DISPLAY_COLORS_RGB | DISPLAY_UNUSED_FIRST |
                                     DISPLAY_DEPTH_8 | DISPLAY_BIGENDIAN |
@@ -654,11 +650,6 @@ void main(void)
        return;
     }
 
-#ifdef DEBUG
-    visual_tracer_init();
-    set_visual_tracer(&visual_tracer);
-#endif
-
     gsapi_set_stdio(instance, gsdll_stdin, gsdll_stdout, gsdll_stderr);
     gsapi_set_poll(instance, gsdll_poll);
     gsapi_set_display_callback(instance, &display);
@@ -679,10 +670,6 @@ void main(void)
     }
 
     gsapi_delete_instance(instance);
-
-#ifdef DEBUG
-    visual_tracer_close();
-#endif
 
     /* Ghostscript has finished - let user see output before quitting */
     WriteCharsToConsole("\r[Finished - hit any key to quit]", 33);

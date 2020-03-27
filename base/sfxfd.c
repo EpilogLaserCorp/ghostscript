@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -45,9 +45,9 @@
 #ifdef KEEP_FILENO_API
 /* Provide prototypes to avoid compiler warnings. */
 void
-    sread_fileno(stream *, FILE *, byte *, uint),
-    swrite_fileno(stream *, FILE *, byte *, uint),
-    sappend_fileno(stream *, FILE *, byte *, uint);
+    sread_fileno(stream *, gp_file *, byte *, uint),
+    swrite_fileno(stream *, gp_file *, byte *, uint),
+    sappend_fileno(stream *, gp_file *, byte *, uint);
 #else
 #  define sread_fileno sread_file
 #  define swrite_fileno swrite_file
@@ -106,7 +106,7 @@ errno_is_retry(int errn)
 
 /* Initialize a stream for reading an OS file. */
 void
-sread_fileno(register stream * s, FILE * file, byte * buf, uint len)
+sread_fileno(register stream * s, gp_file * file, byte * buf, uint len)
 {
     static const stream_procs p = {
         s_fileno_available, s_fileno_read_seek, s_std_read_reset,
@@ -123,12 +123,12 @@ sread_fileno(register stream * s, FILE * file, byte * buf, uint len)
 
     s_std_init(s, buf, len, &p,
                (seekable ? s_mode_read + s_mode_seek : s_mode_read));
-    if_debug2m('s', s->memory, "[s]read file=0x%lx, fd=%d\n", (ulong) file,
-               fileno(file));
+    if_debug2m('s', s->memory, "[s]read file="PRI_INTPTR", fd=%d\n",
+               (intptr_t) file, fileno(file));
     s->file = file;
     s->file_modes = s->modes;
     s->file_offset = 0;
-    s->file_limit = max_long;
+    s->file_limit = S_FILE_LIMIT_MAX;
 }
 
 /* Confine reading to a subfile.  This is primarily for reusable streams. */
@@ -141,7 +141,7 @@ int
 sread_subfile(stream *s, gs_offset_t start, gs_offset_t length)
 {
     if (s->file == 0 || s->modes != s_mode_read + s_mode_seek ||
-        s->file_offset != 0 || s->file_limit != max_long ||
+        s->file_offset != 0 || s->file_limit != S_FILE_LIMIT_MAX ||
         ((s->position < start || s->position > start + length) &&
          sseek(s, start) < 0)
         )
@@ -184,18 +184,18 @@ s_fileno_available(register stream * s, gs_offset_t *pl)
 static int
 s_fileno_read_seek(register stream * s, gs_offset_t pos)
 {
-    gs_offset_t end = s->srlimit - s->cbuf + 1;
+    gs_offset_t end = s->cursor.r.limit - s->cbuf + 1;
     gs_offset_t offset = pos - s->position;
 
     if (offset >= 0 && offset <= end) {  /* Staying within the same buffer */
-        s->srptr = s->cbuf + offset - 1;
+        s->cursor.r.ptr = s->cbuf + offset - 1;
         return 0;
     }
     if (pos < 0 || pos > s->file_limit ||
         lseek(sfileno(s), s->file_offset + pos, SEEK_SET) < 0
         )
         return ERRC;
-    s->srptr = s->srlimit = s->cbuf - 1;
+    s->cursor.r.ptr = s->cursor.r.limit = s->cbuf - 1;
     s->end_status = 0;
     s->position = pos;
     return 0;
@@ -203,7 +203,7 @@ s_fileno_read_seek(register stream * s, gs_offset_t pos)
 static int
 s_fileno_read_close(stream * s)
 {
-    FILE *file = s->file;
+    gp_file *file = s->file;
 
     if (file != 0) {
         s->file = 0;
@@ -226,7 +226,7 @@ s_fileno_read_process(stream_state * st, stream_cursor_read * ignore_pr,
 again:
     max_count = pw->limit - pw->ptr;
     status = 1;
-    if (s->file_limit < max_long) {
+    if (s->file_limit < S_FILE_LIMIT_MAX) {
         gs_offset_t limit_count = s->file_offset + s->file_limit - ltell(fd);
 
         if (max_count > limit_count)
@@ -254,7 +254,7 @@ again:
 
 /* Initialize a stream for writing an OS file. */
 void
-swrite_fileno(register stream * s, FILE * file, byte * buf, uint len)
+swrite_fileno(register stream * s, gp_file * file, byte * buf, uint len)
 {
     static const stream_procs p = {
         s_std_noavailable, s_fileno_write_seek, s_std_write_reset,
@@ -264,16 +264,16 @@ swrite_fileno(register stream * s, FILE * file, byte * buf, uint len)
 
     s_std_init(s, buf, len, &p,
                (file == stdout ? s_mode_write : s_mode_write + s_mode_seek));
-    if_debug2m('s', s->memory, "[s]write file=0x%lx, fd=%d\n", (ulong) file,
-               fileno(file));
+    if_debug2m('s', s->memory, "[s]write file="PRI_INTPTR", fd=%d\n",
+               (intptr_t) file, fileno(file));
     s->file = file;
     s->file_modes = s->modes;
     s->file_offset = 0;		/* in case we switch to reading later */
-    s->file_limit = max_long;	/* ibid. */
+    s->file_limit = S_FILE_LIMIT_MAX;
 }
 /* Initialize for appending to an OS file. */
 void
-sappend_fileno(register stream * s, FILE * file, byte * buf, uint len)
+sappend_fileno(register stream * s, gp_file * file, byte * buf, uint len)
 {
     swrite_fileno(s, file, buf, len);
     s->modes = s_mode_write + s_mode_append;	/* no seek */
@@ -353,8 +353,8 @@ s_fileno_switch(stream * s, bool writing)
         if (!(s->file_modes & s_mode_write))
             return ERRC;
         pos = stell(s);
-        if_debug2m('s', s->memory, "[s]switch 0x%lx to write at %ld\n",
-                   (ulong) s, pos);
+        if_debug2m('s', s->memory, "[s]switch "PRI_INTPTR" to write at %ld\n",
+                   (intptr_t)s, pos);
         lseek(fd, pos, SEEK_SET);	/* pacify OS */
         if (modes & s_mode_append) {
             sappend_file(s, s->file, s->cbuf, s->cbsize);  /* sets position */
@@ -367,8 +367,8 @@ s_fileno_switch(stream * s, bool writing)
         if (!(s->file_modes & s_mode_read))
             return ERRC;
         pos = stell(s);
-        if_debug2m('s', s->memory, "[s]switch 0x%lx to read at %ld\n",
-                   (ulong) s, pos);
+        if_debug2m('s', s->memory, "[s]switch "PRI_INTPTR" to read at %ld\n",
+                   (intptr_t) s, pos);
         if (sflush(s) < 0)
             return ERRC;
         lseek(fd, 0L, SEEK_CUR);	/* pacify OS */

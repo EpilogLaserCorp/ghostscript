@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,31 +19,26 @@
 #ifndef gsdevice_INCLUDED
 #  define gsdevice_INCLUDED
 
+#include "std.h"
+#include "gsgstate.h"
+#include "gsmatrix.h"
+#include "gsparam.h"
+
+/* We maintain the #ifdef gx_device_DEFINED dance, even though
+ * this is now the primary place in the source that defines it,
+ * to allow iapi.h to remain standalone. */
 #ifndef gx_device_DEFINED
 #  define gx_device_DEFINED
 typedef struct gx_device_s gx_device;
 #endif
 
-#ifndef gx_device_memory_DEFINED
-#  define gx_device_memory_DEFINED
 typedef struct gx_device_memory_s gx_device_memory;
-#endif
-
-#ifndef gs_matrix_DEFINED
-#  define gs_matrix_DEFINED
-typedef struct gs_matrix_s gs_matrix;
-#endif
-
-#ifndef gs_param_list_DEFINED
-#  define gs_param_list_DEFINED
-typedef struct gs_param_list_s gs_param_list;
-#endif
 
 /* Device procedures not involving a graphics state. */
 
 const gx_device *gs_getdevice(int);
 
-/****** DEPRECATED *********/
+/****** DEPRECATED: use  gs_getdefaultlibdevice() *********/
 const gx_device *gs_getdefaultdevice(void);
 
 const gx_device *
@@ -91,38 +86,24 @@ int gs_get_device_or_hw_params(gx_device *, gs_param_list *, bool);
 int gs_putdeviceparams(gx_device *, gs_param_list *);
 int gs_closedevice(gx_device *);
 
-/* Device procedures involving an imager state. */
+/* Device procedures involving an gs_gstate. */
 
-#ifndef gs_imager_state_DEFINED
-#  define gs_imager_state_DEFINED
-typedef struct gs_imager_state_s gs_imager_state;
-#endif
+int gs_gstate_putdeviceparams(gs_gstate *pgs, gx_device *dev,
+gs_param_list *plist);
 
-int gs_imager_putdeviceparams(gs_imager_state *pis, gx_device *dev,
-                              gs_param_list *plist);
-
-/* Device procedures involving a graphics state. */
-
-#ifndef gs_state_DEFINED
-#  define gs_state_DEFINED
-typedef struct gs_state_s gs_state;
-#endif
-
-int gs_flushpage(gs_state *);
-int gs_copypage(gs_state *);
-int gs_output_page(gs_state *, int, int);
-int gs_nulldevice(gs_state *);
-int gs_setdevice(gs_state *, gx_device *);
-int gs_setdevice_no_erase(gs_state *, gx_device *);		/* returns 1 */
+int gs_flushpage(gs_gstate *);
+int gs_copypage(gs_gstate *);
+int gs_output_page(gs_gstate *, int, int);
+int gs_nulldevice(gs_gstate *);
+int gs_setdevice(gs_gstate *, gx_device *);
+int gs_setdevice_no_erase(gs_gstate *, gx_device *);		/* returns 1 */
                                                 /* if erasepage required */
-int gs_setdevice_no_init(gs_state *, gx_device *);
-gx_device *gs_currentdevice(const gs_state *);
+int gs_setdevice_no_init(gs_gstate *, gx_device *);
+gx_device *gs_currentdevice(const gs_gstate *);
 
 /* gzstate.h redefines the following: */
 #ifndef gs_currentdevice_inline
 #  define gs_currentdevice_inline(pgs) gs_currentdevice(pgs)
 #endif
-
-int gs_state_putdeviceparams(gs_state *pgs, gs_param_list *plist);
 
 #endif /* gsdevice_INCLUDED */

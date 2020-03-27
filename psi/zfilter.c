@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -27,9 +27,14 @@
 #include "strimpl.h"
 #include "sfilter.h"
 #include "srlx.h"
+#include "spwgx.h"
 #include "sstring.h"
 #include "ifilter.h"
 #include "files.h"		/* for filter_open, file_d'_buffer_size */
+
+#ifdef URF_INCLUDED
+#include "urffilter.c"
+#endif
 
 /* <source> ASCIIHexEncode/filter <file> */
 /* <source> <dict> ASCIIHexEncode/filter <file> */
@@ -104,6 +109,7 @@ zRLE(i_ctx_t *i_ctx_p)
     stream_RLE_state state;
     int code;
 
+    s_RLE_template.set_defaults((stream_state *)&state);
     check_op(2);
     code = rl_setup(op - 1, &state.EndOfData);
     if (code < 0)
@@ -125,6 +131,45 @@ zRLD(i_ctx_t *i_ctx_p)
     if (code < 0)
         return code;
     return filter_read(i_ctx_p, 0, &s_RLD_template, (stream_state *) & state, 0);
+}
+
+static int
+pwg_setup(os_ptr dop, int *width, int *bpp)
+{
+    if (r_has_type(dop, t_dictionary)) {
+        int code;
+
+        check_dict_read(*dop);
+        if ((code = dict_int_param(dop, "Width", 1, max_int, PWG_default_width, width)) < 0)
+            return code;
+        if ((code = dict_int_param(dop, "BPP", 1, 120, PWG_default_bpp, bpp)) < 0)
+            return code;
+        if (*bpp != 1 && *bpp != 2 && *bpp != 4 && (*bpp & 7) != 0)
+            return gs_error_rangecheck;
+        return 1;
+    } else {
+        *width = PWG_default_width;
+        *bpp = PWG_default_bpp;
+        return 0;
+    }
+}
+
+/* <source> <dict> PWGDecode/filter <file> */
+static int
+zPWGD(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+    stream_PWGD_state state;
+    int code;
+
+    if (s_PWGD_template.set_defaults)
+        s_PWGD_template.set_defaults((stream_state *)&state);
+
+    code = pwg_setup(op, &state.width, &state.bpp);
+    if (code < 0)
+        return code;
+
+    return filter_read(i_ctx_p, 0, &s_PWGD_template, (stream_state *) & state, 0);
 }
 
 /* <source> <EODcount> <EODstring> SubFileDecode/filter <file> */
@@ -398,8 +443,8 @@ filter_ensure_buf(stream ** ps, uint min_buf_size, gs_ref_memory_t *imem,
         if (buf == 0)
             return_error(gs_error_VMerror);
         s->cbuf = buf;
-        s->srptr = s->srlimit = s->swptr = buf - 1;
-        s->swlimit = buf - 1 + len;
+        s->cursor.r.ptr = s->cursor.r.limit = s->cursor.w.ptr = buf - 1;
+        s->cursor.w.limit = buf - 1 + len;
         s->bsize = s->cbsize = len;
         return 0;
     } else {
@@ -456,6 +501,10 @@ const op_def zfilter_op_defs[] = {
     {"1PSStringEncode", zPSSE},
     {"2RunLengthEncode", zRLE},
     {"1RunLengthDecode", zRLD},
+    {"1PWGDecode", zPWGD},
+#ifdef URF_INCLUDED
+    {"1URFDecode", zURFD},
+#endif
     {"3SubFileDecode", zSFD},
     {"1.EOFDecode", zEOFD},
     op_def_end(0)

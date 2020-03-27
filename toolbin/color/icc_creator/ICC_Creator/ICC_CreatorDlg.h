@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 #pragma once
@@ -36,10 +36,11 @@ public:
 protected:
         HICON m_hIcon;
 
-        int GetCIELAB(LPCTSTR lpszPathName);
-        int GetNames(LPCTSTR lpszPathName);
-        int ParseData(char pszInFile[], bool is_ucr);
+        int GetCIELAB(LPWSTR lpszPathName);
+        int GetNames(LPWSTR lpszPathName);
+        int ParseData(LPWSTR lpszPathName, bool is_ucr);
         int CreateICC(void);
+		void CreateLink(link_t type);
         cielab_t *m_cielab;
         colornames_t *m_colorant_names;
         bool m_cpsi_mode;
@@ -60,7 +61,6 @@ public:
     afx_msg void OnBnClickedCielab();
     afx_msg void OnBnClickedNames();
     afx_msg void OnBnClickedIccProfile();
-    afx_msg void OnBnClickedIccHelp();
 
     afx_msg void OnBnClickedCmyk2gray();
     afx_msg void OnBnClickedGray2cmyk();
@@ -69,14 +69,19 @@ public:
     afx_msg void OnBnClickedCmyk2gray2();
     afx_msg void OnBnClickedPsicc();
     afx_msg void OnBnClickedGraythresh();
+    afx_msg void OnBnClickedGraythreshInput();
+    afx_msg void OnBnClickedRGBthreshInput();
+    afx_msg void OnBnClickedCMYKthreshInput();
+    afx_msg void OnEnChangeEditthreshInput();
     afx_msg void OnEnChangeEditthresh();
     CEdit m_graythreshold;
     float m_floatthreshold_gray;
+    CEdit m_threshold_input;
+    float m_floatthreshold_input;
     afx_msg void OnBnClickedPstables();
     afx_msg void OnBnClickedCheck1();
     afx_msg void OnBnClickedEffecttables2();
     afx_msg void OnBnClickedEffecticc3();
     CString m_effect_desc;
-    afx_msg void OnEnChangeEdit1();
     CEdit m_desc_effect_str;
 };

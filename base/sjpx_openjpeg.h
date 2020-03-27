@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -61,12 +61,13 @@ typedef struct stream_jpxd_state_s
 
     unsigned long totalbytes; /* output total */
     unsigned long out_offset; /* output bytes already returned previously */
-    unsigned long img_offset; /* offset in the image data buffer for each channel, only used when output bpp%8 !=0 */
 
     int **pdata; /* pointers to image data */
     int out_numcomps; /* real number of channels to use */
     int alpha_comp; /* input index of alpha channel */
     int *sign_comps; /* compensate for signed data (signed => unsigned) */
+
+    unsigned char *row_data;
 } stream_jpxd_state;
 
 extern const stream_template s_jpxd_template;

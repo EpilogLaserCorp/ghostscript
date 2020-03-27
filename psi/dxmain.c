@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -219,12 +219,22 @@ window_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data)
         GdkPixbuf *pixbuf = NULL;
         int color = img->format & DISPLAY_COLORS_MASK;
         int depth = img->format & DISPLAY_DEPTH_MASK;
+#if GTK_CHECK_VERSION(3, 0, 0)
+        guint width, height;
+#endif
+
 #if !GTK_CHECK_VERSION(3, 0, 0)
         cairo_t *cr = gdk_cairo_create(gtk_widget_get_window(widget));
         gdk_cairo_region(cr, event->region);
         cairo_clip(cr);
 #endif
+#if GTK_CHECK_VERSION(3, 0, 0)
+        width = gtk_widget_get_allocated_width (widget);
+        height = gtk_widget_get_allocated_height (widget);
+        gtk_render_background(gtk_widget_get_style_context(widget), cr, 0, 0, width, height);
+#else
         gdk_cairo_set_source_color(cr, &gtk_widget_get_style(widget)->bg[GTK_STATE_NORMAL]);
+#endif
         cairo_paint(cr);
             switch (color) {
                 case DISPLAY_COLORS_NATIVE:
@@ -303,7 +313,7 @@ static void window_create(IMAGE *img)
     img->vbox = gtk_vbox_new(FALSE, 0);
 #else
     img->vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_set_homogeneous(img->vbox, FALSE);
+    gtk_box_set_homogeneous(GTK_BOX (img->vbox), FALSE);
 #endif
     gtk_container_add(GTK_CONTAINER(img->window), img->vbox);
     gtk_widget_show(img->vbox);
@@ -314,8 +324,9 @@ static void window_create(IMAGE *img)
     gtk_widget_show(img->scroll);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(img->scroll),
         GTK_POLICY_ALWAYS, GTK_POLICY_ALWAYS);
-    gtk_scrolled_window_add_with_viewport(GTK_SCROLLED_WINDOW(img->scroll),
-        img->darea);
+
+    gtk_container_add(GTK_CONTAINER(img->scroll), img->darea);
+
     gtk_box_pack_start(GTK_BOX(img->vbox), img->scroll, TRUE, TRUE, 0);
 #if !GTK_CHECK_VERSION(3, 0, 0)
     g_signal_connect(G_OBJECT (img->darea), "expose-event",
@@ -348,9 +359,18 @@ static void window_resize(IMAGE *img)
          * desktop toolbars, and if possible a little larger than
          * the image to allow room for the scroll bars.
          * We don't know the width of the scroll bars, so just guess. */
+#if !GTK_CHECK_VERSION(3, 0, 0)
         gtk_window_set_default_size(GTK_WINDOW(img->window),
             min(gdk_screen_width()-96, img->width+24),
             min(gdk_screen_height()-96, img->height+24));
+#else
+        guint width, height;
+        width = gtk_widget_get_allocated_width (img->window) - 96;
+        height = gtk_widget_get_allocated_height (img->window) - 96;
+        gtk_window_set_default_size(GTK_WINDOW(img->window),
+            min(width, img->width+24),
+            min(height, img->height+24));
+#endif
     }
 }
 
@@ -635,7 +655,7 @@ static int display_size(void *handle, void *device, int width, int height,
             img->cmyk_bar = gtk_hbox_new(FALSE, 0);
 #else
             img->cmyk_bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-            gtk_box_set_homogeneous(img->cmyk_bar, FALSE);
+            gtk_box_set_homogeneous(GTK_BOX(img->cmyk_bar), FALSE);
 #endif
             gtk_box_pack_start(GTK_BOX(img->vbox), img->cmyk_bar,
                 FALSE, FALSE, 0);
@@ -1163,13 +1183,13 @@ int main(int argc, char *argv[])
 {
     int exit_status;
     int code = 1, code1;
-    void *instance;
+    void *instance = NULL;
     int nargc;
     char **nargv;
     char dformat[64];
     int exit_code;
     gboolean use_gui;
-    const char *default_devs = NULL;
+    char *default_devs = NULL;
     char *our_default_devs = NULL;
     int len;
 
@@ -1182,10 +1202,10 @@ int main(int argc, char *argv[])
             DISPLAY_COLORS_RGB | DISPLAY_ALPHA_NONE | DISPLAY_DEPTH_8 |
             DISPLAY_BIGENDIAN | DISPLAY_TOPFIRST);
     nargc = argc + 1;
-    nargv = (char **)malloc((nargc + 1) * sizeof(char *));
+    nargv = (char **)malloc(nargc * sizeof(char *));
     nargv[0] = argv[0];
     nargv[1] = dformat;
-    memcpy(&nargv[2], &argv[1], argc * sizeof(char *));
+    memcpy(&nargv[2], &argv[1], (argc-1) * sizeof(char *));
 
     /* run Ghostscript */
     if ((code = gsapi_new_instance(&instance, NULL)) == 0) {

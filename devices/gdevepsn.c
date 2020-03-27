@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -134,12 +134,12 @@ const gx_device_printer far_data gs_ibmpro_device =
 /* ------ Driver procedures ------ */
 
 /* Forward references */
-static void eps_output_run(byte *, int, int, char, FILE *, int);
+static void eps_output_run(byte *, int, int, char, gp_file *, int);
 
 /* Send the page to the printer. */
 #define DD 0x40				/* double density flag */
 static int
-eps_print_page(gx_device_printer *pdev, FILE *prn_stream, int y_9pin_high,
+eps_print_page(gx_device_printer *pdev, gp_file *prn_stream, int y_9pin_high,
   const char *init_string, int init_length, const char *end_string,
   int archaic, int tab_hiccup)
 {
@@ -159,35 +159,59 @@ eps_print_page(gx_device_printer *pdev, FILE *prn_stream, int y_9pin_high,
         int line_size = gdev_mem_bytes_per_scan_line((gx_device *)pdev);
         /* Note that in_size is a multiple of 8. */
         int in_size = line_size * (8 * in_y_mult);
-        byte *buf1 = (byte *)gs_malloc(pdev->memory, in_size, 1, "eps_print_page(buf1)");
-        byte *buf2 = (byte *)gs_malloc(pdev->memory, in_size, 1, "eps_print_page(buf2)");
-        byte *in = buf1;
-        byte *out = buf2;
+        byte *buf1 = NULL;
+        byte *buf2 = NULL;
+        byte *in;
+        byte *out;
         int out_y_mult = (y_24pin ? 3 : 1);
         int x_dpi = (int)pdev->x_pixels_per_inch;
-        char start_graphics =
-                (y_24pin ? graphics_modes_24 : graphics_modes_9)[x_dpi / 60];
-        int first_pass = (start_graphics & DD ? 1 : 0);
-        int last_pass = first_pass * (y_9pin_high == 2 ? 1 : 2);
         int y_passes = (y_9pin_high ? 3 : 1);
         int dots_per_space = x_dpi / 10;	/* pica space = 1/10" */
         int bytes_per_space = dots_per_space * out_y_mult;
         int tab_min_pixels = x_dpi * MIN_TAB_10THS / 10;
         int skip = 0, lnum = 0, pass, ypass;
+        int code = 0;
+        
+        char start_graphics;
+        int first_pass;
+        int last_pass;
+
+        if (y_24pin) {
+            if (x_dpi / 60 >= sizeof(graphics_modes_24) / sizeof(graphics_modes_24[0])) {
+                return_error(gs_error_rangecheck);
+            }
+            start_graphics = graphics_modes_24[x_dpi / 60];
+        }
+        else {
+            if (x_dpi / 60 >= sizeof(graphics_modes_9) / sizeof(graphics_modes_9[0])) {
+                return_error(gs_error_rangecheck);
+            }
+            start_graphics = graphics_modes_9[x_dpi / 60];
+        }
+        first_pass = (start_graphics & DD ? 1 : 0);
+        last_pass = first_pass * (y_9pin_high == 2 ? 1 : 2);
+
+        if (bytes_per_space == 0) {
+            /* This avoids divide by zero later on, bug 701843. */
+            return_error(gs_error_rangecheck);
+        }
+        
+        buf1 = (byte *)gs_malloc(pdev->memory, in_size, 1, "eps_print_page(buf1)");
+        buf2 = (byte *)gs_malloc(pdev->memory, in_size, 1, "eps_print_page(buf2)");
+        in = buf1;
+        out = buf2;
+        
 
         /* Check allocations */
-        if ( buf1 == 0 || buf2 == 0 )
-        {	if ( buf1 )
-                  gs_free(pdev->memory, (char *)buf1, in_size, 1, "eps_print_page(buf1)");
-                if ( buf2 )
-                  gs_free(pdev->memory, (char *)buf2, in_size, 1, "eps_print_page(buf2)");
-                return_error(gs_error_VMerror);
+        if ( buf1 == 0 || buf2 == 0 ) {
+            code = gs_error_VMerror;
+            goto xit;
         }
 
         /* Initialize the printer and reset the margins. */
-        fwrite(init_string, 1, init_length, prn_stream);
+        gp_fwrite(init_string, 1, init_length, prn_stream);
         if ( init_string[init_length - 1] == 'Q' )
-                fputc((int)(pdev->width / pdev->x_pixels_per_inch * 10) + 2,
+                gp_fputc((int)(pdev->width / pdev->x_pixels_per_inch * 10) + 2,
                       prn_stream);
 
         /* Calculate the minimum tab distance. */
@@ -201,13 +225,15 @@ eps_print_page(gx_device_printer *pdev, FILE *prn_stream, int y_9pin_high,
                 byte *in_data;
                 byte *inp;
                 byte *in_end;
-                byte *out_end;
+                byte *out_end = NULL;
                 byte *out_blk;
                 register byte *outp;
                 int lcnt;
 
                 /* Copy 1 scan line and test for all zero. */
-                gdev_prn_get_bits(pdev, lnum, in, &in_data);
+                code = gdev_prn_get_bits(pdev, lnum, in, &in_data);
+                if (code < 0)
+                    goto xit;
                 if ( in_data[0] == 0 &&
                      !memcmp((char *)in_data, (char *)in_data + 1, line_size - 1)
                    )
@@ -220,16 +246,18 @@ eps_print_page(gx_device_printer *pdev, FILE *prn_stream, int y_9pin_high,
                 /* Vertical tab to the appropriate position. */
                 while ( skip > 255 )
                 {
-                        fputs("\033J\377", prn_stream);
+                        gp_fputs("\033J\377", prn_stream);
                         skip -= 255;
                 }
                 if ( skip )
                 {
-                        fprintf(prn_stream, "\033J%c", skip);
+                        gp_fprintf(prn_stream, "\033J%c", skip);
                 }
 
                 /* Copy the the scan lines. */
-                lcnt = gdev_prn_copy_scan_lines(pdev, lnum, in, in_size);
+                code = lcnt = gdev_prn_copy_scan_lines(pdev, lnum, in, in_size);
+                if (code < 0)
+                    goto xit;
                 if ( lcnt < 8 * in_y_mult )
                 {	/* Pad with lines of zeros. */
                         memset(in + lcnt * line_size, 0,
@@ -244,7 +272,7 @@ eps_print_page(gx_device_printer *pdev, FILE *prn_stream, int y_9pin_high,
                         /* can't print neighboring dots. */
                         int i;
                         for ( i = 0; i < line_size * in_y_mult; ++i )
-                                in_data[i] |= in_data[i + line_size];
+                                in[i] |= in[i + line_size];
                 }
 
                 if ( y_9pin_high )
@@ -356,12 +384,12 @@ eps_print_page(gx_device_printer *pdev, FILE *prn_stream, int y_9pin_high,
                             }
                             /* Tab over to the appropriate position. */
                             if ( tab_hiccup )
-                              fputs("\010 ", prn_stream); /* bksp, space */
+                              gp_fputs("\010 ", prn_stream); /* bksp, space */
                             /* The following statement is broken up */
                             /* to work around a bug in emx/gcc. */
-                            fprintf(prn_stream, "\033D%c", tpos);
-                            fputc(0, prn_stream);
-                            fputc('\t', prn_stream);
+                            gp_fprintf(prn_stream, "\033D%c", tpos);
+                            gp_fputc(0, prn_stream);
+                            gp_fputc('\t', prn_stream);
                             out_blk = outp = newp;
                         }
                     }
@@ -378,47 +406,52 @@ eps_print_page(gx_device_printer *pdev, FILE *prn_stream, int y_9pin_high,
                                    (y_9pin_high == 2 ? (1 + ypass) & 1 : pass));
                 }
 
-                fputc('\r', prn_stream);
+                gp_fputc('\r', prn_stream);
             }
             if ( ypass < y_passes - 1 )
-                fputs("\033J\001", prn_stream);
+                gp_fputs("\033J\001", prn_stream);
         }
         skip = 24 - y_passes + 1;		/* no skip on last Y pass */
         lnum += 8 * in_y_mult;
         }
 
         /* Eject the page and reinitialize the printer */
-        fputs(end_string, prn_stream);
-        fflush(prn_stream);
+        gp_fputs(end_string, prn_stream);
+        gp_fflush(prn_stream);
 
-        gs_free(pdev->memory, (char *)buf2, in_size, 1, "eps_print_page(buf2)");
-        gs_free(pdev->memory, (char *)buf1, in_size, 1, "eps_print_page(buf1)");
-        return 0;
+xit:
+        if ( buf1 )
+            gs_free(pdev->memory, (char *)buf1, in_size, 1, "eps_print_page(buf1)");
+        if ( buf2 )
+            gs_free(pdev->memory, (char *)buf2, in_size, 1, "eps_print_page(buf2)");
+        if (code < 0)
+            return_error(code);
+        return code;
 }
 
 /* Output a single graphics command. */
 /* pass=0 for all columns, 1 for even columns, 2 for odd columns. */
 static void
 eps_output_run(byte *data, int count, int y_mult,
-  char start_graphics, FILE *prn_stream, int pass)
+  char start_graphics, gp_file *prn_stream, int pass)
 {
         int xcount = count / y_mult;
 
-        fputc(033, prn_stream);
+        gp_fputc(033, prn_stream);
         if ( !(start_graphics & ~3) )
         {
-                fputc("KLYZ"[(int)start_graphics], prn_stream);
+                gp_fputc("KLYZ"[(int)start_graphics], prn_stream);
         }
         else
         {
-                fputc('*', prn_stream);
-                fputc(start_graphics & ~DD, prn_stream);
+                gp_fputc('*', prn_stream);
+                gp_fputc(start_graphics & ~DD, prn_stream);
         }
-        fputc(xcount & 0xff, prn_stream);
-        fputc(xcount >> 8, prn_stream);
+        gp_fputc(xcount & 0xff, prn_stream);
+        gp_fputc(xcount >> 8, prn_stream);
         if ( !pass )
         {
-                fwrite(data, 1, count, prn_stream);
+                gp_fwrite(data, 1, count, prn_stream);
         }
         else
         {
@@ -431,7 +464,7 @@ eps_output_run(byte *data, int count, int y_mult,
                 {
                         for ( j = 0; j < y_mult; j++, dp++ )
                         {
-                                putc(((which & 1) ? *dp : 0), prn_stream);
+                                gp_fputc(((which & 1) ? *dp : 0), prn_stream);
                         }
                 }
         }
@@ -455,7 +488,7 @@ static const char eps_init_string[] = {
 };
 
 static int
-epson_print_page(gx_device_printer *pdev, FILE *prn_stream)
+epson_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
         return eps_print_page(pdev, prn_stream, 0, eps_init_string,
                               sizeof(eps_init_string), "\f\033@",
@@ -463,7 +496,7 @@ epson_print_page(gx_device_printer *pdev, FILE *prn_stream)
 }
 
 static int
-eps9high_print_page(gx_device_printer *pdev, FILE *prn_stream)
+eps9high_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
         return eps_print_page(pdev, prn_stream, 1, eps_init_string,
                               sizeof(eps_init_string), "\f\033@",
@@ -471,7 +504,7 @@ eps9high_print_page(gx_device_printer *pdev, FILE *prn_stream)
 }
 
 static int
-eps9mid_print_page(gx_device_printer *pdev, FILE *prn_stream)
+eps9mid_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
         return eps_print_page(pdev, prn_stream, 2, eps_init_string,
                               sizeof(eps_init_string), "\f\033@",
@@ -479,7 +512,7 @@ eps9mid_print_page(gx_device_printer *pdev, FILE *prn_stream)
 }
 
 static int
-ibmpro_print_page(gx_device_printer *pdev, FILE *prn_stream)
+ibmpro_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
     /*
      * IBM Proprinter Guide to Operations, p. 4-5: "DC1: Select Printer: Sets

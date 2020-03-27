@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,18 +9,18 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
 /* PNG (Portable Network Graphics) Format.  Pronounced "ping". */
 
+#include "zlib.h"
 #include "gdevprn.h"
 #include "gdevmem.h"
 #include "gscdefs.h"
 #include "gxgetbit.h"
-#include "zlib.h"
 #include "gxdownscale.h"
 #include "gxdevsop.h"
 
@@ -38,7 +38,7 @@ typedef struct gx_device_fpng_s gx_device_fpng;
 struct gx_device_fpng_s {
     gx_device_common;
     gx_prn_device_common;
-    int downscale_factor;
+    gx_downscaler_params downscale;
 };
 
 static int
@@ -48,9 +48,7 @@ fpng_get_param(gx_device *dev, char *Param, void *list)
     gs_param_list * plist = (gs_param_list *)list;
 
     if (strcmp(Param, "DownScaleFactor") == 0) {
-        if (pdev->downscale_factor < 1)
-            pdev->downscale_factor = 1;
-        return param_write_int(plist, "DownScaleFactor", &pdev->downscale_factor);
+        return param_write_int(plist, "DownScaleFactor", &pdev->downscale.downscale_factor);
     }
     return gdev_prn_get_param(dev, Param, list);
 }
@@ -62,9 +60,7 @@ fpng_get_params(gx_device * dev, gs_param_list * plist)
     int code, ecode;
 
     ecode = 0;
-    if (pdev->downscale_factor < 1)
-        pdev->downscale_factor = 1;
-    if ((code = param_write_int(plist, "DownScaleFactor", &pdev->downscale_factor)) < 0)
+    if ((code = gx_downscaler_write_params(plist, &pdev->downscale, 0)) < 0)
         ecode = code;
 
     code = gdev_prn_get_params(dev, plist);
@@ -79,27 +75,12 @@ fpng_put_params(gx_device *dev, gs_param_list *plist)
 {
     gx_device_fpng *pdev = (gx_device_fpng *)dev;
     int code, ecode;
-    int dsf = pdev->downscale_factor;
-    const char *param_name;
 
-    ecode = 0;
-    switch (code = param_read_int(plist, (param_name = "DownScaleFactor"), &dsf)) {
-        case 0:
-            if (dsf >= 1)
-                break;
-            code = gs_error_rangecheck;
-        default:
-            ecode = code;
-            param_signal_error(plist, param_name, ecode);
-        case 1:
-            break;
-    }
+    ecode = gx_downscaler_read_params(plist, &pdev->downscale, 0);
 
     code = gdev_prn_put_params(dev, plist);
     if (code < 0)
         ecode = code;
-
-    pdev->downscale_factor = dsf;
 
     return ecode;
 }
@@ -110,7 +91,7 @@ fpng_dev_spec_op(gx_device *pdev, int dev_spec_op, void *data, int size)
     gx_device_fpng *fdev = (gx_device_fpng *)pdev;
 
     if (dev_spec_op == gxdso_adjust_bandheight)
-        return gx_downscaler_adjust_bandheight(fdev->downscale_factor, size);
+        return gx_downscaler_adjust_bandheight(fdev->downscale.downscale_factor, size);
 
     if (dev_spec_op == gxdso_get_dev_param) {
         int code;
@@ -204,6 +185,7 @@ const gx_device_fpng gs_fpng_device =
                  X_DPI, Y_DPI,
                  0, 0, 0, 0,	/* margins */
                  3, 24, 255, 255, 256, 256, fpng_print_page),
+                 GX_DOWNSCALER_PARAMS_DEFAULTS
 };
 
 /* ------ Private definitions ------ */
@@ -230,7 +212,7 @@ static int fpng_init_buffer(void *arg, gx_device *dev, gs_memory_t *mem, int w, 
     buffer = (fpng_buffer_t *)gs_alloc_bytes(mem, sizeof(fpng_buffer_t) + size, "fpng_init_buffer");
     *pbuffer = (void *)buffer;
     if (buffer == NULL)
-        return gs_error_VMerror;
+      return_error(gs_error_VMerror);
     buffer->size = size;
     buffer->compressed = 0;
     return 0;
@@ -249,20 +231,20 @@ static void big32(unsigned char *buf, unsigned int v)
     buf[3] = (v) & 0xff;
 }
 
-static void write_big32(int v, FILE *file)
+static void write_big32(int v, gp_file *file)
 {
-    fputc(v>>24, file);
-    fputc(v>>16, file);
-    fputc(v>>8, file);
-    fputc(v>>0, file);
+    gp_fputc(v>>24, file);
+    gp_fputc(v>>16, file);
+    gp_fputc(v>>8, file);
+    gp_fputc(v>>0, file);
 }
 
-static void putchunk(const char *tag, const unsigned char *data, int size, FILE *file)
+static void putchunk(const char *tag, const unsigned char *data, int size, gp_file *file)
 {
     unsigned int sum;
     write_big32(size, file);
-    fwrite(tag, 1, 4, file);
-    fwrite(data, 1, size, file);
+    gp_fwrite(tag, 1, 4, file);
+    gp_fwrite(data, 1, size, file);
     sum = crc32(0, NULL, 0);
     sum = crc32(sum, (const unsigned char*)tag, 4);
     sum = crc32(sum, data, size);
@@ -323,7 +305,7 @@ static int fpng_process(void *arg, gx_device *dev, gx_device *bdev, const gs_int
     gs_int_rect my_rect;
     z_stream stream;
     int err;
-    int page_height = gx_downscaler_scale_rounded(dev->height, fdev->downscale_factor);
+    int page_height = gx_downscaler_scale_rounded(dev->height, fdev->downscale.downscale_factor);
     fpng_buffer_t *buffer = (fpng_buffer_t *)buffer_;
 
     if (h <= 0 || w <= 0)
@@ -377,7 +359,7 @@ static int fpng_process(void *arg, gx_device *dev, gx_device *bdev, const gs_int
     stream.opaque = bdev->memory;
     err = deflateInit(&stream, Z_DEFAULT_COMPRESSION);
     if (err != Z_OK)
-        return gs_error_VMerror;
+      return_error(gs_error_VMerror);
     p = params.data[0];
     stream.next_out = &buffer->data[0];
     stream.avail_out = buffer->size;
@@ -418,7 +400,7 @@ static int fpng_process(void *arg, gx_device *dev, gx_device *bdev, const gs_int
 
 static int fpng_output(void *arg, gx_device *dev, void *buffer_)
 {
-    FILE *file = (FILE *)arg;
+    gp_file *file = (gp_file *)arg;
     fpng_buffer_t *buffer = (fpng_buffer_t *)buffer_;
 
     putchunk("IDAT", &buffer->data[0], buffer->compressed, file);
@@ -428,18 +410,18 @@ static int fpng_output(void *arg, gx_device *dev, void *buffer_)
 
 /* Write out a page in PNG format. */
 static int
-fpng_print_page(gx_device_printer *pdev, FILE *file)
+fpng_print_page(gx_device_printer *pdev, gp_file *file)
 {
     gx_device_fpng *fdev = (gx_device_fpng *)pdev;
     static const unsigned char pngsig[8] = { 137, 80, 78, 71, 13, 10, 26, 10 };
     unsigned char head[13];
     gx_process_page_options_t process = { 0 };
 
-    fwrite(pngsig, 1, 8, file); /* Signature */
+    gp_fwrite(pngsig, 1, 8, file); /* Signature */
 
     /* IHDR chunk */
-    big32(&head[0], gx_downscaler_scale_rounded(pdev->width, fdev->downscale_factor));
-    big32(&head[4], gx_downscaler_scale_rounded(pdev->height, fdev->downscale_factor));
+    big32(&head[0], gx_downscaler_scale_rounded(pdev->width, fdev->downscale.downscale_factor));
+    big32(&head[4], gx_downscaler_scale_rounded(pdev->height, fdev->downscale.downscale_factor));
     head[8] = 8; /* 8bpc */
     head[9] = 2; /* rgb */
     head[10] = 0; /* compression */
@@ -453,5 +435,5 @@ fpng_print_page(gx_device_printer *pdev, FILE *file)
     process.output_fn = fpng_output;
     process.arg = file;
 
-    return gx_downscaler_process_page((gx_device *)pdev, &process, fdev->downscale_factor);
+    return gx_downscaler_process_page((gx_device *)pdev, &process, fdev->downscale.downscale_factor);
 }

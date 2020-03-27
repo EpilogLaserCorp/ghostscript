@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -47,7 +47,7 @@ gs_show_enum_release(gs_show_enum * penum, gs_memory_t * emem)
 /* The elements of pw are: wx, wy, llx, lly, urx, ury. */
 /* Note that this returns 1 if we just set up the cache device. */
 int
-gs_setcachedevice_double(gs_show_enum *penum, gs_state *pgs, const double *pw)
+gs_setcachedevice_double(gs_show_enum *penum, gs_gstate *pgs, const double *pw)
 {
     if (penum->pgs != pgs)
         return_error(gs_error_rangecheck);
@@ -55,7 +55,7 @@ gs_setcachedevice_double(gs_show_enum *penum, gs_state *pgs, const double *pw)
 }
 /* The _float procedure is strictly for backward compatibility. */
 int
-gs_setcachedevice_float(gs_show_enum * penum, gs_state * pgs, const float *pw)
+gs_setcachedevice_float(gs_show_enum * penum, gs_gstate * pgs, const float *pw)
 {
     double w[6];
     int i;
@@ -69,7 +69,7 @@ gs_setcachedevice_float(gs_show_enum * penum, gs_state * pgs, const float *pw)
 /* The elements of pw2 are: w0x, w0y, llx, lly, urx, ury, w1x, w1y, vx, vy. */
 /* Note that this returns 1 if we just set up the cache device. */
 int
-gs_setcachedevice2_double(gs_show_enum * penum, gs_state * pgs,
+gs_setcachedevice2_double(gs_show_enum * penum, gs_gstate * pgs,
                           const double *pw2)
 {
     if (penum->pgs != pgs)
@@ -78,7 +78,7 @@ gs_setcachedevice2_double(gs_show_enum * penum, gs_state * pgs,
 }
 /* The _float procedure is strictly for backward compatibility. */
 int
-gs_setcachedevice2_float(gs_show_enum * penum, gs_state * pgs, const float *pw2)
+gs_setcachedevice2_float(gs_show_enum * penum, gs_gstate * pgs, const float *pw2)
 {
     double w2[10];
     int i;
@@ -92,7 +92,7 @@ gs_setcachedevice2_float(gs_show_enum * penum, gs_state * pgs, const float *pw2)
 /* Note that this returns 1 if the current show operation is */
 /* non-displaying (stringwidth or cshow). */
 int
-gs_setcharwidth(gs_show_enum * penum, gs_state * pgs,
+gs_setcharwidth(gs_show_enum * penum, gs_gstate * pgs,
                 double wx, double wy)
 {
     double w[2];
@@ -175,7 +175,7 @@ gs_show_width(const gs_show_enum * penum, gs_point * ppt)
  * implementation code requires.
  */
 static int
-show_n_begin(gs_show_enum *penum, gs_state *pgs, int code, gs_text_enum_t *pte)
+show_n_begin(gs_show_enum *penum, gs_gstate *pgs, int code, gs_text_enum_t *pte)
 {
     if (code < 0)
         return code;

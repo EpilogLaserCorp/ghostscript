@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -45,7 +45,7 @@ rc_free_clip_stack(gs_memory_t * mem, void *vstack, client_name_t cname)
 
 /* clipsave */
 int
-gs_clipsave(gs_state *pgs)
+gs_clipsave(gs_gstate *pgs)
 {
     gs_memory_t *mem = pgs->memory;
     gx_clip_path *copy =
@@ -68,7 +68,7 @@ gs_clipsave(gs_state *pgs)
 
 /* cliprestore */
 int
-gs_cliprestore(gs_state *pgs)
+gs_cliprestore(gs_gstate *pgs)
 {
     gx_clip_stack_t *stack = pgs->clip_stack;
 

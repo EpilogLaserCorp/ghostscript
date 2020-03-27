@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,30 +19,19 @@
 #ifndef gxfont42_INCLUDED
 #  define gxfont42_INCLUDED
 
-#ifndef gs_glyph_cache_DEFINED
-#  define gs_glyph_cache_DEFINED
-typedef struct gs_glyph_cache_s gs_glyph_cache;
-#endif
+#include "gxfont.h"
+#include "gsgcache.h"
+#include "gxmatrix.h"
+#include "gxfcache.h"
 
-#ifndef cached_fm_pair_DEFINED
-#  define cached_fm_pair_DEFINED
-typedef struct cached_fm_pair_s cached_fm_pair;
-#endif
+typedef struct
+{
+  const int ccode;
+  const char * const name;
+} mac_glyph_ordering_t;
 
 /* This is the type-specific information for a Type 42 (TrueType) font. */
-#ifndef gs_type42_data_DEFINED
-#define gs_type42_data_DEFINED
 typedef struct gs_type42_data_s gs_type42_data;
-#endif
-#ifndef gs_font_type42_DEFINED
-#  define gs_font_type42_DEFINED
-typedef struct gs_font_type42_s gs_font_type42;
-#endif
-
-#ifndef gs_matrix_fixed_DEFINED
-#define gs_matrix_fixed_DEFINED
-typedef struct gs_matrix_fixed_s gs_matrix_fixed;
-#endif
 
 typedef enum gs_type42_metrics_options_s {
     gs_type42_metrics_options_WMODE0 = 0,
@@ -94,6 +83,7 @@ struct gs_type42_data_s {
     ulong loca;			/* offset to loca table */
     ulong name_offset;		/* offset to name table */
     ulong os2_offset;		/* offset to OS/2 table */
+    ulong post_offset;          /* Offset to the post table */
     /*
      * TrueType fonts specify the number of glyphs in two different ways:
      * the size of the loca table, and an explicit value in maxp.  Currently
@@ -146,6 +136,9 @@ int gs_type42_font_init(gs_font_type42 *pfont, int subfontid);
 /* Read data from sfnts. */
 int gs_type42_read_data(gs_font_type42 * pfont, ulong pos, uint length, byte *buf);
 
+/* Use the name table to find a glyph name */
+int gs_type42_find_post_name(gs_font_type42 * pfont, gs_glyph glyph, gs_string *gname);
+
 /* Read data from sfnts. */
 /* A temporary macro for simplifying the old code change. */
 #define READ_SFNTS(pfont, pos, length, buf)\
@@ -159,7 +152,7 @@ int gs_type42_read_data(gs_font_type42 * pfont, ulong pos, uint length, byte *bu
 #define MAX_NUM_TT_TABLES 40
 
 /* Append the outline of a TrueType character to a path. */
-int gs_type42_append(uint glyph_index, gs_state * pgs,
+int gs_type42_append(uint glyph_index, gs_gstate * pgs,
                  gx_path * ppath, gs_text_enum_t *penum, gs_font *pfont,
                  bool charpath_flag);
 
@@ -191,5 +184,11 @@ uint gs_type42_substitute_glyph_index_vertical(gs_font_type42 *pfont, uint glyph
 void gs_type42_parse_component(const byte **pdata, uint *pflags, gs_matrix_fixed *psmat,
                                int *pmp /*[2], may be null*/, const gs_font_type42 *pfont,
                                const gs_matrix_fixed *pmat);
+
+int
+gs_woff2sfnt_stream(gs_memory_t *mem, stream *s, byte *outbuf, int *outbuflen);
+
+int
+gs_woff2sfnt_buffer(gs_memory_t *mem, byte *inbuf, int inbuflen, byte *outbuf, int *outbuflen);
 
 #endif /* gxfont42_INCLUDED */

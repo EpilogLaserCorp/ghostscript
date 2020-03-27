@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* SFF format writer for CAPI fax devices */
@@ -39,20 +39,20 @@ const gx_device_fax gs_cfax_device = {
 /* ---------------- SFF output ----------------- */
 
 static void
-cfax_byte(uint c, FILE * file)
+cfax_byte(uint c, gp_file * file)
 {
-    fputc(c & 0xff, file);
+    gp_fputc(c & 0xff, file);
 }
 
 static void
-cfax_word(ushort c, FILE * file)
+cfax_word(ushort c, gp_file * file)
 {
     cfax_byte(c & 0xff, file);
     cfax_byte(c >> 8, file);
 }
 
 static void
-cfax_dword(ulong c, FILE * file)
+cfax_dword(ulong c, gp_file * file)
 {
     cfax_byte(c & 0xff, file);
     cfax_byte(c >> 8, file);
@@ -61,7 +61,7 @@ cfax_dword(ulong c, FILE * file)
 }
 
 static void
-cfax_doc_hdr(FILE * file)
+cfax_doc_hdr(gp_file * file)
 {
     cfax_byte('S', file);
     cfax_byte('f', file);
@@ -77,7 +77,7 @@ cfax_doc_hdr(FILE * file)
 }
 
 static void
-cfax_page_hdr(gx_device_printer * pdev, FILE * file)
+cfax_page_hdr(gx_device_printer * pdev, gp_file * file)
 {
     cfax_byte(254, file);
     cfax_byte(16, file);
@@ -92,7 +92,7 @@ cfax_page_hdr(gx_device_printer * pdev, FILE * file)
 }
 
 static void
-cfax_doc_end(FILE * file)
+cfax_doc_end(gp_file * file)
 {
     cfax_byte(254, file);
     cfax_byte(0, file);
@@ -100,7 +100,7 @@ cfax_doc_end(FILE * file)
 
 /* Send the page to the printer. */
 static int
-cfax_stream_print_page_width(gx_device_printer * pdev, FILE * prn_stream,
+cfax_stream_print_page_width(gx_device_printer * pdev, gp_file * prn_stream,
                              const stream_template * temp, stream_state * ss,
                              int width)
 {
@@ -149,7 +149,9 @@ cfax_stream_print_page_width(gx_device_printer * pdev, FILE * prn_stream,
         if (code < 0)
             return_error(gs_error_limitcheck);
         /* Now, get the bits and encode them */
-        gdev_prn_copy_scan_lines(pdev, lnum, in, in_size);
+        code = gdev_prn_copy_scan_lines(pdev, lnum, in, in_size);
+        if (code < 0)
+            goto done;
         if (col_size > in_size) {
             memset(in + in_size , 0, col_size - in_size);
         }
@@ -184,7 +186,7 @@ cfax_stream_print_page_width(gx_device_printer * pdev, FILE * prn_stream,
 
 /* Begin a capi fax page. */
 static int
-cfax_begin_page(gx_device_printer * pdev, FILE * fp, int width)
+cfax_begin_page(gx_device_printer * pdev, gp_file * fp, int width)
 {
     /* Patch the width to reflect fax page width adjustment. */
     int save_width = pdev->width;
@@ -201,7 +203,7 @@ cfax_begin_page(gx_device_printer * pdev, FILE * fp, int width)
 
 /* Print an capi fax (sff-encoded) page. */
 static int
-cfax_print_page(gx_device_printer * pdev, FILE * prn_stream)
+cfax_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
     stream_CFE_state state;
     int code;

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Default device bitmap copying implementation */
@@ -171,7 +171,6 @@ gx_no_copy_alpha(gx_device * dev, const byte * data, int data_x,
    AND it supports devn colors AND is 8 or 16 bit.  For example tiffsep
    and psdcmyk may make use of this if AA is enabled.  It is basically 
    designed for devices that need more than 64 bits for color support 
-   without compressed color encoding.
 
    So that I can follow things and  make it readable for future generations, 
    I am not using the macro nightmare that default_copy_alpha uses. */
@@ -183,27 +182,24 @@ gx_default_copy_alpha_hl_color(gx_device * dev, const byte * data, int data_x,
     const byte *row_alpha;
     gs_memory_t *mem = dev->memory;
     int bpp = dev->color_info.depth;
-    int ncomps = dev->color_info.num_components;
+    uchar ncomps = dev->color_info.num_components;
     uint out_raster;
     int code = 0;
     gx_color_value src_cv[GS_CLIENT_COLOR_MAX_COMPONENTS];
     gx_color_value curr_cv[GS_CLIENT_COLOR_MAX_COMPONENTS];
     gx_color_value blend_cv[GS_CLIENT_COLOR_MAX_COMPONENTS];
     int ry;
-    int k, j;
+    uchar k, j;
     gs_get_bits_params_t gb_params;
     byte *src_planes[GS_CLIENT_COLOR_MAX_COMPONENTS];
     gs_int_rect gb_rect;
     int byte_depth;
-    gx_color_index mask;
     int shift, word_width;
     gx_color_value *composite;
     byte *gb_buff;
     int x_curr, w_curr, gb_buff_start;
-    byte *end_ptr;
 
     byte_depth = bpp / ncomps;
-    mask = ((gx_color_index)1 << byte_depth) - 1;
     shift = 16 - byte_depth;
     word_width = byte_depth >> 3;
 
@@ -211,7 +207,6 @@ gx_default_copy_alpha_hl_color(gx_device * dev, const byte * data, int data_x,
     row_alpha = data;
     out_raster = bitmap_raster(width * byte_depth);
     gb_buff = gs_alloc_bytes(mem, out_raster * ncomps, "copy_alpha_hl_color(gb_buff)");
-    end_ptr = gb_buff + out_raster * ncomps;
     if (gb_buff == 0) {
         code = gs_note_error(gs_error_VMerror);
         return code;
@@ -263,14 +258,24 @@ gx_default_copy_alpha_hl_color(gx_device * dev, const byte * data, int data_x,
             int alpha2, alpha;
 
             w_curr += 1;
-            if (depth == 2)	/* map 0 - 3 to 0 - 15 */
-                alpha = ((row_alpha[sx >> 2] >> ((3 - (sx & 3)) << 1)) & 3) * 5;
-            else
-                alpha2 = row_alpha[sx >> 1],
-                    alpha = (sx & 1 ? alpha2 & 0xf : alpha2 >> 4);
+            switch (depth)
+            {
+            case 2:
+                alpha = ((row_alpha[sx >> 2] >> ((3 - (sx & 3)) << 1)) & 3) * 85;
+                break;
+            case 4:
+                alpha2 = row_alpha[sx >> 1];
+                alpha = (sx & 1 ? alpha2 & 0xf : alpha2 >> 4) * 17;
+                break;
+            case 8:
+                alpha = row_alpha[sx];
+                break;
+            default:
+                return_error(gs_error_rangecheck);
+            }
 
             if (alpha == 0) {
-                /* With alpha 0 we want to avoid writting out this value.
+                /* With alpha 0 we want to avoid writing out this value.
                  * While it is true that writting it out leaves the color 
                  * unchanged,  any device that's watching what pixels are 
                  * written (such as the pattern tile devices) may have problems. 
@@ -280,16 +285,21 @@ gx_default_copy_alpha_hl_color(gx_device * dev, const byte * data, int data_x,
                 code = dev_proc(dev, copy_planes)(dev, &(gb_buff[gb_buff_start]), 
                                                   0, out_raster, gs_no_bitmap_id, 
                                                   x_curr, ry, w_curr-1, 1, 1);
+                if (code < 0) {
+                    gs_free_object(mem, gb_buff, "copy_alpha_hl_color");
+                    return code;
+                }
                 /* reset ourselves */
-                gb_buff_start = gb_buff_start + w_curr;
+                gb_buff_start = gb_buff_start + w_curr * word_width;
                 w_curr = 0;
                 x_curr = rx + 1;
             } else {
-                if (alpha == 15) {	
+                if (alpha == 255) {
                     /* Just use the new color. */
                     composite = &(src_cv[0]);
                 } else {
                     /* We need to do the weighting by the alpha value */
+                    alpha += (alpha>>7); /* Expand from 0..255->0..256 */
                     /* First get the old color */
                     for (k = 0; k < ncomps; k++) {
                         /* We only have 8 and 16 bit depth to worry about.
@@ -308,8 +318,8 @@ gx_default_copy_alpha_hl_color(gx_device * dev, const byte * data, int data_x,
                         }
                         /* Now compute the new color which is a blend of 
                            the old and the new */
-                        blend_cv[k] =  curr_cv[k] +  
-                            (((long) src_cv[k] - (long) curr_cv[k]) * alpha / 15);
+                        blend_cv[k] =  ((curr_cv[k]<<8) +
+                                        (((long) src_cv[k] - (long) curr_cv[k]) * alpha))>>8;
                         composite = &(blend_cv[0]);
                     }
                 } 
@@ -318,9 +328,9 @@ gx_default_copy_alpha_hl_color(gx_device * dev, const byte * data, int data_x,
                     byte *ptr = ((src_planes[k]) + (sx - data_x) * word_width);
                     switch (word_width) {
                         case 2:
-                            *ptr++ = composite[k] & mask;
+                            *ptr++ = composite[k] >> 8;
                         case 1:
-                            *ptr++ = (composite[k] >> shift) & mask;
+                            *ptr++ = composite[k] >> shift;
                     }
                 }
             } /* else on alpha != 0 */
@@ -352,8 +362,8 @@ gx_default_copy_alpha(gx_device * dev, const byte * data, int data_x,
         const byte *row;
         gs_memory_t *mem = dev->memory;
         int bpp = dev->color_info.depth;
-        int ncomps = dev->color_info.num_components;
-        uint in_size = gx_device_raster(dev, false);
+        uchar ncomps = dev->color_info.num_components;
+        uint in_size = gx_device_raster_chunky(dev, false);
         byte *lin;
         uint out_size;
         byte *lout;
@@ -375,7 +385,10 @@ gx_default_copy_alpha(gx_device * dev, const byte * data, int data_x,
             byte *line;
             int sx, rx;
 
-            DECLARE_LINE_ACCUM_COPY(lout, bpp, x);
+            byte *l_dptr = lout;
+            int l_dbit = 0;
+            byte l_dbyte = ((l_dbit) ? (byte)(*(l_dptr) & (0xff00 >> (l_dbit))) : 0);
+            int l_xprev = x;
 
             code = (*dev_proc(dev, get_bits)) (dev, ry, lin, &line);
             if (code < 0)
@@ -386,11 +399,22 @@ gx_default_copy_alpha(gx_device * dev, const byte * data, int data_x,
                 gx_color_index composite;
                 int alpha2, alpha;
 
-                if (depth == 2)	/* map 0 - 3 to 0 - 15 */
-                    alpha = ((row[sx >> 2] >> ((3 - (sx & 3)) << 1)) & 3) * 5;
-                else
+                switch(depth)
+                {
+                case 2:
+                    /* map 0 - 3 to 0 - 15 */
+                    alpha = ((row[sx >> 2] >> ((3 - (sx & 3)) << 1)) & 3) * 85;
+                    break;
+                case 4:
                     alpha2 = row[sx >> 1],
-                        alpha = (sx & 1 ? alpha2 & 0xf : alpha2 >> 4);
+                        alpha = (sx & 1 ? alpha2 & 0xf : alpha2 >> 4) * 17;
+                    break;
+                case 8:
+                    alpha = row[sx];
+                    break;
+                default:
+                    return_error(gs_error_rangecheck);
+                }
               blend:
                 if (alpha == 0) {
                     /* Previously the code used to just write out the previous
@@ -401,14 +425,26 @@ gx_default_copy_alpha(gx_device * dev, const byte * data, int data_x,
                      * tile devices). The right thing to do is to write out
                      * the buffered accumulator, and skip over any pixels that
                      * are completely clear. */
-                    LINE_ACCUM_FLUSH_AND_RESTART(dev, lout, bpp, lx, rx, out_size, ry);
+                    if (rx > l_xprev ) {
+                        sample_store_flush(l_dptr, l_dbit, l_dbyte);
+                        code = (*dev_proc(dev, copy_color))
+                          (dev, lout, l_xprev - (lx), out_size,
+                           gx_no_bitmap_id, l_xprev, ry, (rx) - l_xprev, 1);
+                        if ( code < 0 )
+                          return code;
+                    }
+                    l_dptr = lout;
+                    l_dbit = 0;
+                    l_dbyte = (l_dbit ? (byte)(*l_dptr & (0xff00 >> l_dbit)) : 0);
+                    l_xprev = rx+1;
                     lx = rx+1;
                 } else {
-                    if (alpha == 15) {	/* Just write the new color. */
+                    if (alpha == 255) {	/* Just write the new color. */
                         composite = color;
                     } else {
                         gx_color_value cv[GX_DEVICE_COLOR_MAX_COMPONENTS];
-                        int i;
+                        uchar i;
+                        int alpha2 = alpha + (alpha>>7);
 
                         if (previous == gx_no_color_index) {	/* Extract the old color. */
                             if (bpp < 8) {
@@ -425,16 +461,16 @@ gx_default_copy_alpha(gx_device * dev, const byte * data, int data_x,
                                 switch (bpp >> 3) {
                                     case 8:
                                         previous += (gx_color_index) * src++
-                                            << sample_bound_shift(previous, 56);
+                                            << SAMPLE_BOUND_SHIFT(previous, 56);
                                     case 7:
                                         previous += (gx_color_index) * src++
-                                            << sample_bound_shift(previous, 48);
+                                            << SAMPLE_BOUND_SHIFT(previous, 48);
                                     case 6:
                                         previous += (gx_color_index) * src++
-                                            << sample_bound_shift(previous, 40);
+                                            << SAMPLE_BOUND_SHIFT(previous, 40);
                                     case 5:
                                         previous += (gx_color_index) * src++
-                                            << sample_bound_shift(previous, 32);
+                                            << SAMPLE_BOUND_SHIFT(previous, 32);
                                     case 4:
                                         previous += (gx_color_index) * src++ << 24;
                                     case 3:
@@ -452,26 +488,40 @@ gx_default_copy_alpha(gx_device * dev, const byte * data, int data_x,
 #else
 #  define b_int int
 #endif
-#define make_shade(old, clr, alpha, amax) \
-  (old) + (((b_int)(clr) - (b_int)(old)) * (alpha) / (amax))
+#define make_shade(old, clr, alpha) \
+  (((((b_int)(old))<<8) + (((b_int)(clr) - (b_int)(old)) * (alpha)))>>8)
                         for (i=0; i<ncomps; i++)
-                            cv[i] = make_shade(cv[i], color_cv[i], alpha, 15);
+                            cv[i] = make_shade(cv[i], color_cv[i], alpha2);
 #undef b_int
 #undef make_shade
                         composite =
                             (*dev_proc(dev, encode_color)) (dev, cv);
                         if (composite == gx_no_color_index) {	/* The device can't represent this color. */
                             /* Move the alpha value towards 0 or 1. */
-                            if (alpha == 7)	/* move 1/2 towards 1 */
+                            if (alpha == 127)	/* move 1/2 towards 1 */
                                 ++alpha;
-                            alpha = (alpha & 8) | (alpha >> 1);
+                            alpha = (alpha & 128) | (alpha >> 1);
                             goto blend;
                         }
                     }
-                    LINE_ACCUM(composite, bpp);
+                    if (sizeof(composite) > 4) {
+                        if (sample_store_next64(composite, &l_dptr, &l_dbit, bpp, &l_dbyte) < 0)
+                            return_error(gs_error_rangecheck);
+                    }
+                    else {
+                        if (sample_store_next32(composite, &l_dptr, &l_dbit, bpp, &l_dbyte) < 0)
+                            return_error(gs_error_rangecheck);
+                    }
                 }
             }
-            LINE_ACCUM_COPY(dev, lout, bpp, lx, rx, out_size, ry);
+            if ( rx > l_xprev ) {
+                sample_store_flush(l_dptr, l_dbit, l_dbyte);
+                code = (*dev_proc(dev, copy_color))
+                  (dev, lout, l_xprev - lx, out_size,
+                   gx_no_bitmap_id, l_xprev, ry, rx - l_xprev, 1);
+                if (code < 0)
+                    return code;
+            }
         }
       out:gs_free_object(mem, lout, "copy_alpha(lout)");
         gs_free_object(mem, lin, "copy_alpha(lin)");
@@ -603,7 +653,7 @@ gx_default_strip_tile_rectangle(gx_device * dev, const gx_strip_bitmap * tiles,
                                  */
             dev_proc_tile_rectangle((*tile_proc)) =
                 dev_proc(dev, tile_rectangle);
-            int code;
+            int code = 0;
 
             set_dev_proc(dev, tile_rectangle, gx_default_tile_rectangle);
             code = (*tile_proc)
@@ -634,7 +684,7 @@ gx_default_strip_tile_rectangle(gx_device * dev, const gx_strip_bitmap * tiles,
         dev_proc_copy_mono((*proc_mono));
         dev_proc_copy_color((*proc_color));
         dev_proc_copy_planes((*proc_planes));
-        int code;
+        int code = 0;
 
         if (color0 == gx_no_color_index && color1 == gx_no_color_index) {
             if (tiles->num_planes > 1) {
@@ -652,37 +702,40 @@ gx_default_strip_tile_rectangle(gx_device * dev, const gx_strip_bitmap * tiles,
             proc_mono = dev_proc(dev, copy_mono);
         }
 
-#define real_copy_tile(dev, srcx, tx, ty, tw, th, id)\
-  code =\
-    (tiles->num_planes > 1 ?\
-     (*proc_planes)(dev, row, srcx, raster, id, tx, ty, tw, th, height) :\
-    (proc_color != 0 ?\
-     (*proc_color)(dev, row, srcx, raster, id, tx, ty, tw, th) :\
-     (*proc_mono)(dev, row, srcx, raster, id, tx, ty, tw, th, color0, color1)));\
-  if (code < 0) return_error(code);\
-  return_if_interrupt(dev->memory)
-#define copy_tile(dev, srcx, tx, ty, tw, th, tid)\
-  if_debug6m('t', (dev)->memory, "   copy id=%lu sx=%d => x=%d y=%d w=%d h=%d\n",\
-             tid, srcx, tx, ty, tw, th);\
-  real_copy_tile(dev, srcx, tx, ty, tw, th, tid)
+#define GX_DEFAULT_COPY_TILE(dev, srcx, tx, ty, tw, th, tid) do {\
+                if_debug6m('t', (dev)->memory, "   copy id=%lu sx=%d => x=%d y=%d w=%d h=%d\n", tid, srcx, tx, ty, tw, th);\
+                if (tiles->num_planes > 1) {\
+                    if (proc_planes)\
+                        code = (*proc_planes)(dev, row, srcx, raster, tid, tx, ty, tw, th, height);\
+                } else {\
+                    if (proc_color != 0) {\
+                        code = (*proc_color)(dev, row, srcx, raster, tid, tx, ty, tw, th);\
+                    } else {\
+                        if (proc_mono)\
+                            code = (*proc_mono)(dev, row, srcx, raster, tid, tx, ty, tw, th, color0, color1);\
+                         else code = 0;\
+                    }\
+                }\
+                if (code < 0) return_error(code);\
+                } while (0);
+
+
         if (ch >= h) {		/* Shallow operation */
             if (icw >= w) {	/* Just one (partial) tile to transfer. */
-                copy_tile(dev, irx, x, y, w, h,
-                          (w == width && h == height ? tile_id :
-                           gs_no_bitmap_id));
+                GX_DEFAULT_COPY_TILE(dev, irx, x, y, w, h, (w == width && h == height ? tile_id : gs_no_bitmap_id));
             } else {
                 int ex = x + w;
                 int fex = ex - width;
                 int cx = x + icw;
                 ulong id = (h == height ? tile_id : gs_no_bitmap_id);
 
-                copy_tile(dev, irx, x, y, icw, h, gs_no_bitmap_id);
+                GX_DEFAULT_COPY_TILE(dev, irx, x, y, icw, h, gs_no_bitmap_id);
                 while (cx <= fex) {
-                    copy_tile(dev, 0, cx, y, width, h, id);
+                    GX_DEFAULT_COPY_TILE(dev, 0, cx, y, width, h, id);
                     cx += width;
                 }
                 if (cx < ex) {
-                    copy_tile(dev, 0, cx, y, ex - cx, h, gs_no_bitmap_id);
+                    GX_DEFAULT_COPY_TILE(dev, 0, cx, y, ex - cx, h, gs_no_bitmap_id);
                 }
             }
         } else if (icw >= w && shift == 0) {
@@ -692,11 +745,11 @@ gx_default_strip_tile_rectangle(gx_device * dev, const gx_strip_bitmap * tiles,
             int cy = y + ch;
             ulong id = (w == width ? tile_id : gs_no_bitmap_id);
 
-            copy_tile(dev, irx, x, y, w, ch, (ch == height ? id : gs_no_bitmap_id));
+            GX_DEFAULT_COPY_TILE(dev, irx, x, y, w, ch, (ch == height ? id : gs_no_bitmap_id));
             row = tiles->data;
             do {
                 ch = (cy > fey ? ey - cy : height);
-                copy_tile(dev, irx, x, cy, w, ch,
+                GX_DEFAULT_COPY_TILE(dev, irx, x, cy, w, ch,
                           (ch == height ? id : gs_no_bitmap_id));
             }
             while ((cy += ch) < ey);
@@ -713,17 +766,17 @@ gx_default_strip_tile_rectangle(gx_device * dev, const gx_strip_bitmap * tiles,
                 ulong id = (ch == height ? tile_id : gs_no_bitmap_id);
 
                 if (icw >= w) {
-                    copy_tile(dev, irx, x, cy, w, ch,
+                    GX_DEFAULT_COPY_TILE(dev, irx, x, cy, w, ch,
                               (w == width ? id : gs_no_bitmap_id));
                 } else {
-                    copy_tile(dev, irx, x, cy, icw, ch, gs_no_bitmap_id);
+                    GX_DEFAULT_COPY_TILE(dev, irx, x, cy, icw, ch, gs_no_bitmap_id);
                     cx = x + icw;
                     while (cx <= fex) {
-                        copy_tile(dev, 0, cx, cy, width, ch, id);
+                        GX_DEFAULT_COPY_TILE(dev, 0, cx, cy, width, ch, id);
                         cx += width;
                     }
                     if (cx < ex) {
-                        copy_tile(dev, 0, cx, cy, ex - cx, ch, gs_no_bitmap_id);
+                        GX_DEFAULT_COPY_TILE(dev, 0, cx, cy, ex - cx, ch, gs_no_bitmap_id);
                     }
                 }
                 if ((cy += ch) >= ey)
@@ -735,8 +788,7 @@ gx_default_strip_tile_rectangle(gx_device * dev, const gx_strip_bitmap * tiles,
                 row = tiles->data;
             }
         }
-#undef copy_tile
-#undef real_copy_tile
+#undef GX_DEFAULT_COPY_TILE
     }
     return 0;
 }

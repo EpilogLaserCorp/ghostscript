@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -18,6 +18,10 @@
 
 #ifndef inames_INCLUDED
 #  define inames_INCLUDED
+
+#include "std.h"
+#include "iref.h"
+#include "imemory.h"
 
 /*
  * This file defines those parts of the name table API that depend neither
@@ -27,10 +31,7 @@
 
 /* ---------------- Interface types ---------------- */
 
-#ifndef name_table_DEFINED
-#  define name_table_DEFINED
 typedef struct name_table_s name_table;
-#endif
 
 typedef uint name_index_t;
 
@@ -40,13 +41,11 @@ extern const uint name_max_string;
 
 /* ---------------- Procedural interface ---------------- */
 
-#ifndef gs_ref_memory_DEFINED
-#  define gs_ref_memory_DEFINED
-typedef struct gs_ref_memory_s gs_ref_memory_t;
-#endif
-
 /* Allocate and initialize a name table. */
 name_table *names_init(ulong size, gs_ref_memory_t *imem);
+
+/* Free a name table */
+void names_free(name_table *nt);
 
 /* Get the allocator for a name table. */
 gs_memory_t *names_memory(const name_table * nt);

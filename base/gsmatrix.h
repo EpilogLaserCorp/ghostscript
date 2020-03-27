@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -18,6 +18,9 @@
 
 #ifndef gsmatrix_INCLUDED
 #  define gsmatrix_INCLUDED
+
+#include "gstypes.h"
+#include "scommon.h"
 
 /* See p. 65 of the PostScript manual for the semantics of */
 /* transformation matrices. */
@@ -35,14 +38,8 @@ struct gs_matrix_double_s {
   double xx, xy, yx, yy, tx, ty;
 };
 
-#ifndef gs_matrix_DEFINED
-#  define gs_matrix_DEFINED
 typedef struct gs_matrix_s gs_matrix;
-#endif
-#ifndef gs_matrix_double_DEFINED
-#  define gs_matrix_double_DEFINED
 typedef struct gs_matrix_double_s gs_matrix_double;
-#endif
 
 /* Macro for initializing constant matrices */
 #define constant_matrix_body(xx, xy, yx, yy, tx, ty)\
@@ -87,10 +84,6 @@ int gs_point_transform(double, double, const gs_matrix *, gs_point *),
     gs_bbox_transform_inverse(const gs_rect *, const gs_matrix *, gs_rect *);
 
 /* Serialization */
-#ifndef stream_DEFINED
-#  define stream_DEFINED
-typedef struct stream_s stream;
-#endif
 int sget_matrix(stream *, gs_matrix *);
 int sput_matrix(stream *, const gs_matrix *);
 

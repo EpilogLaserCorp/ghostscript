@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -24,6 +24,12 @@
 /* Initial version 4/1/98 by John Desrosiers (soho@crl.com). */
 /* 8/9/98 L. Peter Deutsch (ghost@aladdin.com) Changed ...sizeof to
    procedures, added some comments. */
+
+/* Maximum number of threads, although render threads assume a main instance */
+/* so each main instance (rare) could have MAX_THREADS-2 render threads      */
+#ifndef MAX_THREADS
+#  define MAX_THREADS 50	/* Arbitrary, but does affect ICC_CACHE_MAXLINKS */
+#endif
 
 /* -------- Synchronization primitives ------- */
 
@@ -51,6 +57,11 @@ int gp_semaphore_close(gp_semaphore * sema);
 int gp_semaphore_wait(gp_semaphore * sema);
 int gp_semaphore_signal(gp_semaphore * sema);
 
+void gp_semaphore_label(gp_semaphore * sema, const char *name);
+#ifndef BOBBIN
+#define gp_semaphore_label(A,B) do {} while (0)
+#endif
+
 /*
  * Monitors support enter/leave semantics: at most one thread can have
  * entered and not yet left a given monitor.
@@ -72,6 +83,11 @@ int gp_monitor_open(gp_monitor * mon);
 int gp_monitor_close(gp_monitor * mon);
 int gp_monitor_enter(gp_monitor * mon);
 int gp_monitor_leave(gp_monitor * mon);
+
+void gp_monitor_label(gp_monitor * mon, const char *name);
+#ifndef BOBBIN
+#define gp_monitor_label(A,B) do {} while (0)
+#endif
 
 /*
  * A new thread starts by calling a procedure, passing it a void * that
@@ -101,5 +117,10 @@ int gp_thread_start(gp_thread_creation_callback_t fun, void *arg, gp_thread_id *
  * the thread id. No further operations on the thread id are permitted.
  */
 void gp_thread_finish(gp_thread_id thread);
+
+void gp_thread_label(gp_thread_id thread, const char *name);
+#ifndef BOBBIN
+#define gp_thread_label(A,B) do {} while(0)
+#endif
 
 #endif /* !defined(gpsync_INCLUDED) */

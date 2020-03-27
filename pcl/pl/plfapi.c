@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -7,8 +7,8 @@
    This software is distributed under license and may not be copied, modified
    or distributed except as expressly authorized under the terms of that
    license.  Refer to licensing information at http://www.artifex.com/
-   or contact Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134,
-   San Rafael, CA  94903, U.S.A., +1(415)492-9861, for further information.
+   or contact Artifex Software, Inc.,  1305 Grant Avenue - Suite 200,
+   Novato, CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Font API support  */
@@ -65,7 +65,7 @@ static ulong
 pl_fapi_get_long(gs_fapi_font * ff, gs_fapi_font_feature var_id, int index);
 
 static int
-pl_fapi_get_cid(gs_font_base * pbfont, gs_string * charstring,
+pl_fapi_get_cid(gs_text_enum_t *penum, gs_font_base * pbfont, gs_string * charstring,
                 gs_string * name, int ccode, gs_string * enc_char_name,
                 char *font_file_path, gs_fapi_char_ref * cr, bool bCID);
 
@@ -105,6 +105,7 @@ static const gs_fapi_font pl_ff_stub = {
     false,                      /* is_vertical */
     false,                      /* metrics_only */
     {{3, 10}, {3, 1}, {-1, -1}, {-1, -1}, {-1, -1}},    /* ttf_cmap_req */
+    {-1 , -1},                                          /* ttf_cmap_selected */
     0,                          /* client_ctx_p */
     0,                          /* client_font_data */
     0,                          /* client_font_data2 */
@@ -146,7 +147,7 @@ pl_fapi_get_long(gs_fapi_font * ff, gs_fapi_font_feature var_id, int index)
 }
 
 static int
-pl_fapi_get_cid(gs_font_base * pbfont, gs_string * charstring,
+pl_fapi_get_cid(gs_text_enum_t *penum, gs_font_base * pbfont, gs_string * charstring,
                 gs_string * name, int ccode, gs_string * enc_char_name,
                 char *font_file_path, gs_fapi_char_ref * cr, bool bCID)
 {
@@ -157,11 +158,12 @@ pl_fapi_get_cid(gs_font_base * pbfont, gs_string * charstring,
     (void)enc_char_name;
     (void)font_file_path;
     (void)bCID;
+    (void)penum;
 
     if (plfont->allow_vertical_substitutes) {
         vertical = pl_font_vertical_glyph(ccode, plfont);
 
-        if (vertical != gs_no_glyph)
+        if (vertical != GS_NO_GLYPH)
             index = vertical;
     }
     cr->char_codes[0] = index;
@@ -216,7 +218,28 @@ static int
 pl_fapi_get_metrics(gs_fapi_font * ff, gs_string * char_name, int cid,
                     double *m, bool vertical)
 {
-    return (0);
+    gs_font_base *pfont = (gs_font_base *) ff->client_font_data;
+    int code = 0;
+
+    /* We only want to supply metrics for Format 1 Class 2 glyph data (with their
+     * PCL/PXL specific LSB and width metrics), all the others we leave the
+     * scaler/render to use the metrics directly from the font/glyph.
+     */
+    if (pfont->FontType == ft_TrueType) {
+        float sbw[4];
+
+        code = pl_tt_f1c2_get_metrics((gs_font_type42 *)pfont, cid, pfont->WMode & 1, sbw);
+        if (code == 0) {
+            m[0] = sbw[0];
+            m[1] = sbw[1];
+            m[2] = sbw[2];
+            m[3] = sbw[3];
+            code = 2;
+        }
+        else
+            code = 0;
+    }
+    return code;
 }
 
 static int
@@ -225,7 +248,7 @@ pl_fapi_set_cache(gs_text_enum_t * penum, const gs_font_base * pbfont,
                   const double pwidth[2], const gs_rect * pbbox,
                   const double Metrics2_sbw_default[4], bool * imagenow)
 {
-    gs_state *pgs = (gs_state *) penum->pis;
+    gs_gstate *pgs = penum->pgs;
     float w2[6];
     int code = 0;
     gs_fapi_server *I = pbfont->FAPI;
@@ -313,7 +336,7 @@ pl_fapi_set_cache_rotate(gs_text_enum_t * penum, const gs_font_base * pbfont,
 
 
 static int
-pl_fapi_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
+pl_fapi_build_char(gs_show_enum * penum, gs_gstate * pgs, gs_font * pfont,
                    gs_char chr, gs_glyph glyph)
 {
     int code;
@@ -444,18 +467,26 @@ pl_fapi_get_mtype_font_scaleFactor(gs_font * pfont, uint * scaleFactor)
 }
 
 static text_enum_proc_is_width_only(pl_show_text_is_width_only);
+static text_enum_proc_release(pl_text_release);
 
 static const gs_text_enum_procs_t null_text_procs = {
     NULL, NULL,
     pl_show_text_is_width_only, NULL,
     NULL, NULL,
-    NULL
+    pl_text_release
 };
 
 static bool
 pl_show_text_is_width_only(const gs_text_enum_t *pte)
 {
     return(true);
+}
+
+void pl_text_release(gs_text_enum_t *pte, client_name_t cname)
+{
+  (void)pte;
+  (void)cname;
+  return;
 }
 
 static int
@@ -477,15 +508,15 @@ pl_fapi_char_metrics(const pl_font_t * plfont, const void *vpgs,
                      gs_char char_code, float metrics[4])
 {
     int code = 0;
-    gs_text_enum_t penum1;
+    gs_text_enum_t *penum1;
     gs_font *pfont = plfont->pfont;
     gs_font_base *pbfont = (gs_font_base *) pfont;
     gs_text_params_t text;
     gs_char buf[2];
-    gs_state *rpgs = (gs_state *) vpgs;
+    gs_gstate *rpgs = (gs_gstate *) vpgs;
     /* NAFF: undefined glyph would be better handled inside FAPI */
     gs_char chr = char_code;
-    gs_glyph unused_glyph = gs_no_glyph;
+    gs_glyph unused_glyph = GS_NO_GLYPH;
     gs_glyph glyph;
     gs_matrix mat = {72.0, 0.0, 0.0, 72.0, 0.0, 0.0};
     gs_matrix fmat;
@@ -500,24 +531,23 @@ pl_fapi_char_metrics(const pl_font_t * plfont, const void *vpgs,
     if (pfont->WMode & 1) {
         gs_glyph vertical = pl_font_vertical_glyph(glyph, plfont);
 
-        if (vertical != gs_no_glyph)
+        if (vertical != GS_NO_GLYPH)
             glyph = vertical;
     }
 
     /* undefined character */
-    if (glyph == 0xffff || glyph == gs_no_glyph) {
+    if (glyph == 0xffff || glyph == GS_NO_GLYPH) {
         metrics[0] = metrics[1] = metrics[2] = metrics[3] = 0;
         code = 1;
     } else {
         gs_fapi_server *I = pbfont->FAPI;
-        gs_state lpgs;
-        gs_state *pgs = &lpgs;
+        gs_gstate lpgs;
+        gs_gstate *pgs = &lpgs;
 
         /* This is kind of naff, but it's *much* cheaper to copy
          * the parts of the gstate we need, than gsave/grestore
          */
         memset(pgs, 0x00, sizeof(lpgs));
-        pgs->is_gstate = rpgs->is_gstate;
         pgs->memory = rpgs->memory;
         pgs->ctm = rpgs->ctm;
         pgs->in_cachedevice = CACHE_DEVICE_NOT_CACHING;
@@ -542,25 +572,27 @@ pl_fapi_char_metrics(const pl_font_t * plfont, const void *vpgs,
         text.data.chars = buf;
         text.size = 1;
 
-        if ((code = gs_text_enum_init(&penum1, &null_text_procs,
-                             NULL, NULL, &text, pfont,
-                             NULL, NULL, NULL, pfont->memory)) >= 0) {
+        if ((penum1 = gs_text_enum_alloc(pfont->memory, pgs,
+                      "pl_fapi_char_metrics")) != NULL) {
 
-            penum1.pis = (gs_imager_state *)pgs;
+            if ((code = gs_text_enum_init(penum1, &null_text_procs,
+                                 NULL, pgs, &text, pfont,
+                                 NULL, NULL, NULL, pfont->memory)) >= 0) {
 
-            code = gs_fapi_do_char(pfont, pgs, &penum1, plfont->font_file, false,
-                        NULL, NULL, char_code, glyph, 0);
+                code = gs_fapi_do_char(pfont, pgs, penum1, plfont->font_file, false,
+                            NULL, NULL, char_code, glyph, 0);
 
-            if (code >= 0 || code == gs_error_unknownerror) {
-                metrics[0] = metrics[1] = 0;
-                metrics[2] = penum1.returned.total_width.x;
-                metrics[3] = penum1.returned.total_width.y;
-                if (code < 0)
-                    code = 0;
+                if (code >= 0 || code == gs_error_unknownerror) {
+                    metrics[0] = metrics[1] = 0;
+                    metrics[2] = penum1->returned.total_width.x;
+                    metrics[3] = penum1->returned.total_width.y;
+                    if (code < 0)
+                        code = 0;
+                }
             }
+            rc_decrement(penum1, "pl_fapi_char_metrics");
         }
         pfont->FontMatrix = fmat;
-
         I->ff.fapi_set_cache = tmp_ff.fapi_set_cache;
     }
     return (code);
@@ -620,15 +652,8 @@ pl_fapi_passfont(pl_font_t * plfont, int subfont, char *fapi_request,
                          (gs_fapi_get_server_param_callback)
                          pl_get_server_param);
 
-    if (pfont->FontType == ft_MicroType && code < 0) {
-        return (code);
-    }
-
-    /* For now, we'll fall back to AFS
-       We should return an error in the future.
-     */
     if (code < 0 || fapi_id == NULL) {
-        return (0);
+        return code;
     }
 
     pfont->procs.build_char = pl_fapi_build_char;

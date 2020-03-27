@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -29,7 +29,9 @@
 #include "srlx.h"		/* ditto */
 #include "gsdcolor.h"
 
-#define CMM_THREAD_SAFE 0        
+#ifdef HAVE_VALGRIND
+#include "valgrind/memcheck.h"
+#endif
 
 /* ---------------- Commands ---------------- */
 
@@ -40,6 +42,7 @@
 #define cmd_compress_const 3
 #define cmd_mask_compress_any\
   ((1 << cmd_compress_rle) | (1 << cmd_compress_cfe) | (1 << cmd_compress_const))
+
 /* Exported by gxclutil.c */
 void clist_rle_init(stream_RLE_state *ss);
 void clist_rld_init(stream_RLD_state *ss);
@@ -106,12 +109,7 @@ typedef enum {
     cmd_op_tile_rect_tiny = 0x80,	/* +dw+0, rect_tiny | +dw+8 */
     cmd_op_copy_mono_planes = 0x90,	/* +compress, plane_height, x#, y#, (w+data_x)#, */
                                         /* h#, <bits> | */
-#define cmd_copy_ht_color 4
-                                /* +4+compress, x#, y#, (w+data_x)#, */
-                                /* h#, <bits> | */
-#define cmd_copy_use_tile 8
-                                /* +8 (use tile), x#, y# | */
-                                /* +12 (use tile), x#, y# */
+#define cmd_copy_use_tile 8             /* +8 (use tile), x#, y# | */
     cmd_op_copy_color_alpha = 0xa0,	/* (same as copy_mono, except: */
                                 /* if color, ignore ht_color; */
                                 /* if alpha & !use_tile, depth is */
@@ -348,59 +346,6 @@ dev_proc_get_bits_rectangle(clist_get_bits_rectangle);
 
 /* ------ Exported by gxclist.c ------ */
 
-/*
- * Error recovery procedures for writer-side VMerrors, for async rendering
- * support.  This logic assumes that the command list file and/or the
- * renderer allocate memory from the same pool as the writer. Hence, when
- * the writer runs out of memory, it tries to pause and let the renderer run
- * for a while in hope that enough memory will be freed by it to allow the
- * writer to allocate enough memory to proceed. Once a VMerror is detected,
- * error recovery proceeds in two escalating stages:
- *
- *  1) The recovery logic repeatedly calls clist_VMerror_recover(), which
- *     waits until the next page has finished rendering. The recovery logic
- *     keeps calling clist_VMerror_recover() until enough memory is freed,
- *     or until clist_VMerror_recover() signals that no more pages
- *     remain to be rendered (when return code < 0).
- *
- *  2) If enough memory is not free, the recovery logic calls
- *     clist_VMerror_recover_flush() once. This routine terminates and
- *     flushes out the partially-completed page that the writer is currently
- *     writing to the command file, then waits for the partial page to finish
- *     rendering. It then opens up a new command list "file" and resets the
- *     state of the command list machinery to an initial state as if a new
- *     page were beginning.
- *
- * If insufficient memory is available after the 2nd step, the situation
- * is the same as if it ocurred in a non-async setup: the writer program
- * simply used up too much memory and cannot continue.
- *
- * The first stage of error recovery (no flush) is performed without
- * flushing out the current page, so failing commands can simply be
- * restarted after such recovery. This is not true of 2nd stage recovery
- * (flush): as part of its operation, the flush resets the state of both
- * writer and renderer to initial values.  In this event, the recovery logic
- * which called clist_try_recover_VMerror_flush() must force any pertinent
- * state information to be re-emitted before re-issuing the failing command.
- *
- * In case of a VMerror, the internal procedures that support the driver
- * procedures simply return the error code: they do not attempt recovery.
- * Note that all such procedures must take care that (1) they don't update
- * any writer state to reflect information written to the band list unless
- * the write actually succeeds, and (2) they are idempotent, since they may
- * be re-executed after first-stage VMerror recovery.
- *
- * Error recovery is only performed by the driver procedures themselves
- * (fill_rectangle, copy_mono, fill_path, etc.) and a few other procedures
- * at the same level of control.  The implementation of error recovery is
- * packaged up in the FOR_RECTS et al macros defined below, but -- as noted
- * above -- recovery is not fully transparent.  Other routines which perform
- * error recovery are those which open the device, begin a new page, or
- * reopen the device (put_params).
- */
-int clist_VMerror_recover(gx_device_clist_writer *, int);
-int clist_VMerror_recover_flush(gx_device_clist_writer *, int);
-
 /* Write out device parameters. */
 int cmd_put_params(gx_device_clist_writer *, gs_param_list *);
 
@@ -433,9 +378,9 @@ byte *cmd_put_op(gx_device_clist_writer * cldev, gx_clist_state * pcls, uint siz
 #endif
 /* Call cmd_put_op and update stats if no error occurs. */
 #define set_cmd_put_op(dp, cldev, pcls, op, csize)\
-  ( (dp = cmd_put_op(cldev, pcls, csize)) == 0 ?\
+  ( (*dp = cmd_put_op(cldev, pcls, csize)) == NULL ?\
       (cldev)->error_code :\
-    (*dp = cmd_count_op(op, csize, cldev->memory), 0) )
+    (**dp = cmd_count_op(op, csize, cldev->memory), 0) )
 
 /* Add a command for all bands or a range of bands. */
 byte *cmd_put_range_op(gx_device_clist_writer * cldev, int band_min,
@@ -445,9 +390,9 @@ byte *cmd_put_range_op(gx_device_clist_writer * cldev, int band_min,
   cmd_put_range_op(cldev, 0, (cldev)->nbands - 1, size)
 /* Call cmd_put_all/range_op and update stats if no error occurs. */
 #define set_cmd_put_range_op(dp, cldev, op, bmin, bmax, csize)\
-  ( (dp = cmd_put_range_op(cldev, bmin, bmax, csize)) == 0 ?\
+  ( (*dp = cmd_put_range_op(cldev, bmin, bmax, csize)) == NULL ?\
       (cldev)->error_code :\
-    (*dp = cmd_count_op(op, csize, (cldev)->memory), 0) )
+    (**dp = cmd_count_op(op, csize, (cldev)->memory), 0) )
 #define set_cmd_put_all_op(dp, cldev, op, csize)\
   set_cmd_put_range_op(dp, cldev, op, 0, (cldev)->nbands - 1, csize)
 
@@ -485,12 +430,12 @@ int cmd_size_w(uint);
 byte *cmd_put_w(uint, byte *);
 
 #define cmd_putw(w,dp)\
-  (w1byte(w) ? (*dp = w, ++dp) :\
-   w2byte(w) ? (*dp = (w) | 0x80, dp[1] = (w) >> 7, dp += 2) :\
-   (dp = cmd_put_w((uint)(w), dp)))
+  (w1byte(w) ? (**dp = w, ++(*dp)) :\
+   w2byte(w) ? (**dp = (w) | 0x80, (*dp)[1] = (w) >> 7, (*dp) += 2) :\
+   (*dp = cmd_put_w((uint)(w), *dp)))
 #define cmd_put2w(wx,wy,dp)\
-  (w1byte((wx) | (wy)) ? (dp[0] = (wx), dp[1] = (wy), dp += 2) :\
-   (dp = cmd_put_w((uint)(wy), cmd_put_w((uint)(wx), dp))))
+  (w1byte((wx) | (wy)) ? ((*dp)[0] = (wx), (*dp)[1] = (wy), (*dp) += 2) :\
+   (*dp = cmd_put_w((uint)(wy), cmd_put_w((uint)(wx), *dp))))
 #define cmd_putxy(xy,dp) cmd_put2w((xy).x, (xy).y, dp)
 
 int cmd_size_frac31(register frac31 w);
@@ -574,12 +519,6 @@ int cmd_update_lop(gx_device_clist_writer *, gx_clist_state *,
  *	... process rectangle x, y, width, height in band pcls ...
  *
  *	........
- *	continue;
- * error_in_rect:
- *	if (!(cdev->error_is_retryable && cdev->driver_call_nesting == 0 &&
- *		SET_BAND_CODE(clist_VMerror_recover_flush(cdev, re.band_code)) >= 0))
- *	    return re.band_code;
- *	re.y -= re.height;
  *   } while ((re.y += re.height) < re.yend);
  *
  * Note that RECT_STEP_INIT(re) sets re.height.  It is OK for the code that
@@ -587,44 +526,6 @@ int cmd_update_lop(gx_device_clist_writer *, gx_clist_state *,
  * vertical subdivision code in copy_mono, copy_color, and copy_alpha makes
  * use of this.  The band processing code may `continue' (to reduce nesting
  * of conditionals).
- *
- * The error_in_rect code detects an error that may be a recoverable
- * VMerror, with calling clist_VMerror_recover_flush. It will attempt to fix the
- * VMerror by flushing and closing the band and resetting the imager state,
- * and then restart emitting the entire band.
- * Note that re.y must not change when restarting the band.
- *
- * The band processing code may wrap a writing operation with a pattern like this :
- *
- * 	do {
- *	    code = operation(...);
- *	} while (RECT_RECOVER(code));
- *	if (code < 0 && SET_BAND_CODE(code))
- *	    goto error_in_rect;
- *
- *
- * This will
- * perform local first-stage VMerror recovery, by waiting for some memory to
- * become free and then retrying the failed operation starting at the
- * TRY_RECT. If local recovery is unsuccessful, the local recovery code
- * should pass control to error_in_rect.
- *
- * In a few cases, the band processing code calls other driver procedures
- * (e.g., clist_copy_mono calls itself recursively if it must split up the
- * operation into smaller pieces) or other procedures that may attempt
- * VMerror recovery.  In such cases, the recursive call must not attempt
- * second-stage VMerror recovery, since the caller would have no way of
- * knowing that the writer state had been reset.  Such recursive calls
- * should be wrapped in
- *
- *  ++cdev->driver_call_nesting;  { ... } --cdev->driver_call_nesting;
- *
- * , which causes error_in_rect
- * simply to return the error code rather than attempting
- * recovery.  (The local recovery with do { ... } while (RECT_RECOVER(code));
- * is still allowed since it is transparent.) By
- * convention, calls to cmd_put_xxx or cmd_set_xxx never attempt recovery
- * and so never require  a nesting.
  *
  * If a put_params call fails, the device will be left in a closed state,
  * but higher-level code won't notice this fact.  We flag this by setting
@@ -636,7 +537,6 @@ typedef struct cmd_rects_enum_s {
         int height;
         int yend;
         int band_height;
-        int band_code;
         int band;
         gx_clist_state *pcls;
         int band_end;
@@ -655,9 +555,6 @@ typedef struct cmd_rects_enum_s {
             re.pcls = cdev->states + re.band;\
             re.band_end = (re.band + 1) * re.band_height;\
             re.height = min(re.band_end, re.yend) - re.y;
-
-#define RECT_RECOVER(codevar) (codevar < 0 && (codevar = clist_VMerror_recover(cdev, codevar)) >= 0)
-#define SET_BAND_CODE(codevar) (re.band_code = codevar)
 
 /* Read a transformation matrix. */
 const byte *cmd_read_matrix(gs_matrix * pmat, const byte * cbp);
@@ -697,6 +594,10 @@ int cmd_write_page_rect_cmd(gx_device_clist_writer * cldev, int op);
  * greater than cmd_max_short_width_bytes (see above).
  */
 #define decompress_spread 0x200
+
+/* clist_copy_mono and clist_copy_color have a max_size, but tiles to the */
+/* cache do not (clist_change_bits and clist_change_tile).		  */
+#define allow_large_bitmap 0x400
 
 int cmd_put_bits(gx_device_clist_writer * cldev, gx_clist_state * pcls,
                  const byte * data, uint width_bits, uint height,
@@ -746,7 +647,7 @@ int clist_change_bits(gx_device_clist_writer * cldev, gx_clist_state * pcls,
  * Write out any necessary color mapping data.
  */
 int cmd_put_color_mapping(gx_device_clist_writer * cldev,
-                                  const gs_imager_state * pis);
+                                  const gs_gstate * pgs);
 /*
  * Add commands to represent a full (device) halftone.
  * (This routine should probably be in some other module.)
@@ -813,5 +714,17 @@ typedef enum {
     CURRBANDS,
     SAMEAS_PUSHCROP_BUTNOPUSH
 } cl_crop_action;
+
+/* Valgrind helper macro */
+#ifdef HAVE_VALGRIND
+#define CMD_CHECK_LAST_OP_BLOCK_DEFINED(cldev) \
+do {\
+    gx_device_clist_writer *CLDEV = (gx_device_clist_writer *)(cldev);\
+    if (CLDEV->ccl != NULL)\
+        VALGRIND_CHECK_MEM_IS_DEFINED(&CLDEV->ccl->tail[1], CLDEV->ccl->tail->size);\
+} while (0 == 1)
+#else
+#define CMD_CHECK_LAST_OP_BLOCK_DEFINED(cldev) do { } while (0)
+#endif
 
 #endif /* gxcldev_INCLUDED */

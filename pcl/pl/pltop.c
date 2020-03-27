@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,112 +19,88 @@
 
 #include "string_.h"
 #include "gdebug.h"
-#include "gsnogc.h"
 #include "gstypes.h"
 #include "gsmemory.h"
 #include "gsstruct.h"
 #include "gsdevice.h"
 #include "pltop.h"
+#include "gserrors.h"
+#include "stream.h"
+#include "strmio.h"
 
-/* Get implemtation's characteristics */
+/* Get implementation's characteristics */
 const pl_interp_characteristics_t *     /* always returns a descriptor */
-pl_characteristics(const pl_interp_implementation_t * impl      /* implementation of interpereter to alloc */
-    )
+pl_characteristics(const pl_interp_implementation_t * impl)      /* implementation of interpreter to alloc */
 {
     return impl->proc_characteristics(impl);
 }
 
-/* Do init of interp */
+/* Do instance interpreter allocation/init. No device is set yet */
 int                             /* ret 0 ok, else -ve error code */
-pl_allocate_interp(pl_interp_t ** interp,       /* RETURNS abstract interpreter struct */
-                   const pl_interp_implementation_t * impl,     /* implementation of interpereter to alloc */
-                   gs_memory_t * mem    /* allocator to allocate interp from */
-    )
+pl_allocate_interp_instance(pl_interp_implementation_t * impl,
+                            gs_memory_t                * mem)   /* allocator to allocate instance from */
 {
-    int code = impl->proc_allocate_interp(interp, impl, mem);
-
-    if (code < 0)
-        return code;
-    (*interp)->implementation = impl;
-    return code;
+    return impl->proc_allocate_interp_instance(impl, mem);
 }
 
-/* Do per-instance interpreter allocation/init. No device is set yet */
-int                             /* ret 0 ok, else -ve error code */
-pl_allocate_interp_instance(pl_interp_instance_t ** instance,   /* RETURNS instance struct */
-                            pl_interp_t * interp,       /* dummy interpreter */
-                            gs_memory_t * mem   /* allocator to allocate instance from */
-    )
+/*
+ * Get the allocator with which to allocate a device
+ */
+gs_memory_t *
+pl_get_device_memory(pl_interp_implementation_t *impl)
 {
-    pl_interp_instance_t *pli;
-
-    int code =
-        interp->implementation->proc_allocate_interp_instance(instance,
-                                                              interp, mem);
-    if (code < 0)
-        return code;
-    pli = *instance;
-    pli->interp = interp;
-
-    return code;
+    if (impl->proc_get_device_memory == NULL)
+        return NULL;
+    return impl->proc_get_device_memory(impl);
 }
 
-/* Set a client language into an interperter instance */
-int                             /* ret 0 ok, else -ve error code */
-pl_set_client_instance(pl_interp_instance_t * instance, /* interp instance to use */
-                       pl_interp_instance_t * client,   /* client to set */
-                       pl_interp_instance_clients_t which_client)
+int
+pl_set_param(pl_interp_implementation_t *impl,
+             pl_set_param_type           type,
+             const char                 *param,
+             const void                 *value)
 {
-    return instance->interp->implementation->proc_set_client_instance
-        (instance, client, which_client);
+    if (impl->proc_set_param == NULL)
+        return 0;
+
+    return impl->proc_set_param(impl, type, param, value);
 }
 
-/* Set an interpreter instance's pre-page action */
-int                             /* ret 0 ok, else -ve err */
-pl_set_pre_page_action(pl_interp_instance_t * instance, /* interp instance to use */
-                       pl_page_action_t action, /* action to execute (rets 1 to abort w/o err) */
-                       void *closure    /* closure to call action with */
-    )
+int
+pl_add_path(pl_interp_implementation_t *impl,
+            const char                 *path)
 {
-    return instance->interp->implementation->proc_set_pre_page_action
-        (instance, action, closure);
+    if (impl->proc_add_path == NULL)
+        return 0;
+
+    return impl->proc_add_path(impl, path);
 }
 
-/* Set an interpreter instance's post-page action */
-int                             /* ret 0 ok, else -ve err */
-pl_set_post_page_action(pl_interp_instance_t * instance,        /* interp instance to use */
-                        pl_page_action_t action,        /* action to execute */
-                        void *closure   /* closure to call action with */
-    )
+int pl_post_args_init(pl_interp_implementation_t *impl)
 {
-    return instance->interp->implementation->proc_set_post_page_action
-        (instance, action, closure);
-}
+    if (impl->proc_post_args_init == NULL)
+        return 0;
 
-int                             /* ret 0 ok, else -ve err */
-pl_get_device_memory(pl_interp_instance_t * instance,   /* interp instance to use */
-                     gs_memory_t ** memory)
-{
-    return instance->interp->implementation->proc_get_device_memory(instance,
-                                                                    memory);
-}
-
-/* Get and interpreter prefered device memory allocator if any */
-int                             /* ret 0 ok, else -ve error code */
-pl_set_device(pl_interp_instance_t * instance,  /* interp instance to use */
-              gx_device * device        /* device to set (open or closed) */
-    )
-{
-    return instance->interp->implementation->proc_set_device(instance,
-                                                             device);
+    return impl->proc_post_args_init(impl);
 }
 
 /* Prepare interp instance for the next "job" */
 int                             /* ret 0 ok, else -ve error code */
-pl_init_job(pl_interp_instance_t * instance     /* interp instance to start job in */
-    )
+pl_init_job(pl_interp_implementation_t * impl,     /* interp instance to start job in */
+            gx_device                  * device) /* device to set (open or closed) */
 {
-    return instance->interp->implementation->proc_init_job(instance);
+    return impl->proc_init_job(impl, device);
+}
+
+int                             /* ret 0 ok, else -ve error code */
+pl_run_prefix_commands(pl_interp_implementation_t * impl,     /* interp instance to start job in */
+                       const char                 * prefix)
+{
+    if (prefix == NULL)
+        return 0;
+    if (impl->proc_run_prefix_commands == NULL)
+        return -1;
+    return impl->proc_run_prefix_commands(impl, prefix);
 }
 
 /* Parse a random access seekable file.
@@ -133,10 +109,52 @@ pl_init_job(pl_interp_instance_t * instance     /* interp instance to start job 
    not NULL.
  */
 int
-pl_process_file(pl_interp_instance_t * instance, char *filename)
+pl_process_file(pl_interp_implementation_t * impl, const char *filename)
 {
-    return instance->interp->implementation->proc_process_file(instance,
-                                                               filename);
+    gs_memory_t *mem;
+    int code, code1;
+    stream *s;
+
+    if (impl->proc_process_file != NULL)
+        return impl->proc_process_file(impl, filename);
+
+    /* We have to process the file in chunks. */
+    mem = pl_get_device_memory(impl);
+    code = 0;
+
+    s = sfopen(filename, "r", mem);
+    if (s == NULL)
+        return gs_error_undefinedfilename;
+
+    code = pl_process_begin(impl);
+
+    while (code == gs_error_NeedInput || code >= 0) {
+        if (s->cursor.r.ptr == s->cursor.r.limit && sfeof(s))
+            break;
+        code = s_process_read_buf(s);
+        if (code < 0)
+            break;
+
+        code = pl_process(impl, &s->cursor.r);
+        if_debug2m('I', mem, "processed (%s) job to offset %ld\n",
+                   pl_characteristics(impl)->language,
+                   sftell(s));
+    }
+
+    code1 = pl_process_end(impl);
+    if (code >= 0 && code1 < 0)
+        code = code1;
+
+    sfclose(s);
+
+    return code;
+}
+
+/* Do setup to for parsing cursor-fulls of data */
+int
+pl_process_begin(pl_interp_implementation_t * impl) /* interp instance to process data job in */
+{
+    return impl->proc_process_begin(impl);
 }
 
 /* Parse a cursor-full of data */
@@ -148,82 +166,56 @@ pl_process_file(pl_interp_instance_t * instance, char *filename)
  *      other <0 value - an error was detected.
  */
 int
-pl_process(pl_interp_instance_t * instance,     /* interp instance to process data job in */
-           stream_cursor_read * cursor  /* data to process */
-    )
+pl_process(pl_interp_implementation_t * impl,       /* interp instance to process data job in */
+           stream_cursor_read         * cursor)     /* data to process */
 {
-    return instance->interp->implementation->proc_process(instance, cursor);
+    return impl->proc_process(impl, cursor);
+}
+
+int
+pl_process_end(pl_interp_implementation_t * impl)   /* interp instance to process data job in */
+{
+    return impl->proc_process_end(impl);
 }
 
 /* Skip to end of job ret 1 if done, 0 ok but EOJ not found, else -ve error code */
 int
-pl_flush_to_eoj(pl_interp_instance_t * instance,        /* interp instance to flush for */
-                stream_cursor_read * cursor     /* data to process */
-    )
+pl_flush_to_eoj(pl_interp_implementation_t * impl,  /* interp instance to flush for */
+                stream_cursor_read         * cursor)/* data to process */
 {
-    return instance->interp->implementation->proc_flush_to_eoj(instance,
-                                                               cursor);
+    return impl->proc_flush_to_eoj(impl, cursor);
 }
 
 /* Parser action for end-of-file (also resets after unexpected EOF) */
 int                             /* ret 0 or +ve if ok, else -ve error code */
-pl_process_eof(pl_interp_instance_t * instance  /* interp instance to process data job in */
-    )
+pl_process_eof(pl_interp_implementation_t * impl)   /* interp instance to process data job in */
 {
-    return instance->interp->implementation->proc_process_eof(instance);
+    return impl->proc_process_eof(impl);
 }
 
 /* Report any errors after running a job */
 int                             /* ret 0 ok, else -ve error code */
-pl_report_errors(pl_interp_instance_t * instance,       /* interp instance to wrap up job in */
-                 int code,      /* prev termination status */
-                 long file_position,    /* file position of error, -1 if unknown */
-                 bool force_to_cout     /* force errors to cout */
-    )
+pl_report_errors(pl_interp_implementation_t * impl,          /* interp instance to wrap up job in */
+                 int                          code,          /* prev termination status */
+                 long                         file_position, /* file position of error, -1 if unknown */
+                 bool                         force_to_cout) /* force errors to cout */
 {
-    return instance->interp->implementation->proc_report_errors
-        (instance, code, file_position, force_to_cout);
+    return impl->proc_report_errors
+        (impl, code, file_position, force_to_cout);
 }
 
 /* Wrap up interp instance after a "job" */
 int                             /* ret 0 ok, else -ve error code */
-pl_dnit_job(pl_interp_instance_t * instance     /* interp instance to wrap up job in */
-    )
+pl_dnit_job(pl_interp_implementation_t * impl)     /* interp instance to wrap up job in */
 {
-    if (instance)
-        return instance->interp->implementation->proc_dnit_job(instance);
-    else
-        return 0;
-}
-
-/* Remove a device from an interperter instance */
-int                             /* ret 0 ok, else -ve error code */
-pl_remove_device(pl_interp_instance_t * instance        /* interp instance to use */
-    )
-{
-    int code = instance->interp->implementation->proc_remove_device(instance);
-
-    return code;
+    return impl->proc_dnit_job(impl);
 }
 
 /* Deallocate a interpreter instance */
 int                             /* ret 0 ok, else -ve error code */
-pl_deallocate_interp_instance(pl_interp_instance_t * instance   /* instance to dealloc */
-    )
+pl_deallocate_interp_instance(pl_interp_implementation_t * impl)   /* instance to dealloc */
 {
-    int code
-        =
-        instance->interp->implementation->
-        proc_deallocate_interp_instance(instance);
-    return code;
-}
-
-/* Do static deinit of interpreter */
-int                             /* ret 0 ok, else -ve error code */
-pl_deallocate_interp(pl_interp_t * interp       /* interpreter to deallocate */
-    )
-{
-    int code = interp->implementation->proc_deallocate_interp(interp);
-
-    return code;
+    if (impl->interp_client_data == NULL)
+        return 0;
+    return impl->proc_deallocate_interp_instance(impl);
 }

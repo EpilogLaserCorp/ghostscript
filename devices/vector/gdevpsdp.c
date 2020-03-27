@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -232,7 +232,7 @@ static const gs_param_item_t psdf_param_items[] = {
     /* (DefaultRenderingIntent) */
     pi("DetectBlends", gs_param_type_bool, DetectBlends),
     pi("DoThumbnails", gs_param_type_bool, DoThumbnails),
-    pi("ImageMemory", gs_param_type_long, ImageMemory),
+    pi("ImageMemory", gs_param_type_size_t, ImageMemory),
     /* (LockDistillerParams) */
     pi("LZWEncodePages", gs_param_type_bool, LZWEncodePages),
     pi("OPM", gs_param_type_int, OPM),
@@ -254,6 +254,7 @@ static const gs_param_item_t psdf_param_items[] = {
     pi("EmbedAllFonts", gs_param_type_bool, EmbedAllFonts),
     pi("MaxSubsetPct", gs_param_type_int, MaxSubsetPct),
     pi("SubsetFonts", gs_param_type_bool, SubsetFonts),
+    pi("PassThroughJPEGImages", gs_param_type_bool, PassThroughJPEGImages),
 
 #undef pi
     gs_param_item_end
@@ -418,10 +419,9 @@ int gdev_psdf_get_image_param(gx_device_psdf *pdev, const psdf_image_param_names
     if (image_names->AutoFilterStrategy != 0)
         if (strcmp(Param, image_names->AutoFilterStrategy) == 0)
             return psdf_write_name(plist, image_names->AutoFilterStrategy,
-                                   (params->AutoFilterStrategy == 0 ?
-                                   "JPEG2000" : params->AutoFilterStrategy));
+                    AutoFilterStrategy_names[params->AutoFilterStrategy]);
 #endif
-    return gs_error_undefined;
+    return_error(gs_error_undefined);
 }
 int
 gdev_psdf_get_param(gx_device *dev, char *Param, void *list)
@@ -526,7 +526,7 @@ gdev_psdf_get_param(gx_device *dev, char *Param, void *list)
         return(psdf_write_name(plist, "CannotEmbedFontPolicy",
                 CannotEmbedFontPolicy_names[(int)pdev->params.CannotEmbedFontPolicy]));
     }
-    return gs_error_undefined;
+    return_error(gs_error_undefined);
 }
 
 int
@@ -925,6 +925,8 @@ psdf_put_image_params(const gx_device_psdf * pdev, gs_param_list * plist,
     const gs_param_item_t *items =
         (pnames->items[0].key == 0 ? pnames->items + 1 : pnames->items);
     int code = gs_param_read_items(plist, params, items);
+    if (code < 0)
+        ecode = code;
 
     if ((pname = pnames->ACSDict) != 0) {
         code = psdf_put_image_dict_param(plist, pname, &params->ACSDict,
@@ -1085,20 +1087,45 @@ gdev_psdf_put_params(gx_device * dev, gs_param_list * plist)
     params.AutoRotatePages = (enum psdf_auto_rotate_pages)
         psdf_put_enum(plist, "AutoRotatePages", (int)params.AutoRotatePages,
                       AutoRotatePages_names, &ecode);
+    if (ecode < 0) {
+        code = ecode;
+        goto exit;
+    }
+
     params.Binding = (enum psdf_binding)
         psdf_put_enum(plist, "Binding", (int)params.Binding,
                       Binding_names, &ecode);
+    if (ecode < 0) {
+        code = ecode;
+        goto exit;
+    }
+
     params.DefaultRenderingIntent = (enum psdf_default_rendering_intent)
         psdf_put_enum(plist, "DefaultRenderingIntent",
                       (int)params.DefaultRenderingIntent,
                       DefaultRenderingIntent_names, &ecode);
+    if (ecode < 0) {
+        code = ecode;
+        goto exit;
+    }
+
     params.TransferFunctionInfo = (enum psdf_transfer_function_info)
         psdf_put_enum(plist, "TransferFunctionInfo",
                       (int)params.TransferFunctionInfo,
                       TransferFunctionInfo_names, &ecode);
+    if (ecode < 0) {
+        code = ecode;
+        goto exit;
+    }
+
     params.UCRandBGInfo = (enum psdf_ucr_and_bg_info)
         psdf_put_enum(plist, "UCRandBGInfo", (int)params.UCRandBGInfo,
                       UCRandBGInfo_names, &ecode);
+    if (ecode < 0) {
+        code = ecode;
+        goto exit;
+    }
+
     ecode = param_put_bool(plist, "UseFlateCompression",
                            &params.UseFlateCompression, ecode);
 
@@ -1107,10 +1134,20 @@ gdev_psdf_put_params(gx_device * dev, gs_param_list * plist)
     ecode = psdf_put_image_params(pdev, plist,
                     (pdev->ParamCompatibilityLevel >= 1.5 ? &Color_names15 : &Color_names),
                                   &params.ColorImage, ecode);
+    if (ecode < 0) {
+        code = ecode;
+        goto exit;
+    }
+
     params.ColorConversionStrategy = (enum psdf_color_conversion_strategy)
         psdf_put_enum(plist, "ColorConversionStrategy",
                       (int)params.ColorConversionStrategy,
                       ColorConversionStrategy_names, &ecode);
+    if (ecode < 0) {
+        code = ecode;
+        goto exit;
+    }
+
     ecode = psdf_read_string_param(plist, "CalCMYKProfile",
                                    &params.CalCMYKProfile, mem, ecode);
     ecode = psdf_read_string_param(plist, "CalGrayProfile",
@@ -1125,11 +1162,21 @@ gdev_psdf_put_params(gx_device * dev, gs_param_list * plist)
     ecode = psdf_put_image_params(pdev, plist,
                     (pdev->ParamCompatibilityLevel >= 1.5 ? &Gray_names15 : &Gray_names),
                                   &params.GrayImage, ecode);
+    if (ecode < 0) {
+        code = ecode;
+        goto exit;
+    }
+
 
     /* Mono sampled image parameters */
 
     ecode = psdf_put_image_params(pdev, plist, &Mono_names,
                                   &params.MonoImage, ecode);
+
+    if (ecode < 0) {
+        code = ecode;
+        goto exit;
+    }
 
     /* Font embedding parameters */
 

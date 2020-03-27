@@ -188,10 +188,10 @@ static  int oprp_get_params(gx_device *, gs_param_list *);
 static  int _put_params(gs_param_list *);
 static  int opvp_put_params(gx_device *, gs_param_list *);
 static  int oprp_put_params(gx_device *, gs_param_list *);
-static  int opvp_fill_path(gx_device *, const gs_imager_state *, gx_path *,
+static  int opvp_fill_path(gx_device *, const gs_gstate *, gx_path *,
                            const gx_fill_params *, const gx_device_color *,
                            const gx_clip_path *);
-static  int opvp_stroke_path(gx_device *, const gs_imager_state *, gx_path *,
+static  int opvp_stroke_path(gx_device *, const gs_gstate *, gx_path *,
                              const gx_stroke_params *, const gx_drawing_color *,
                              const gx_clip_path *);
 static  int opvp_fill_mask(gx_device *, const byte *, int, int, gx_bitmap_id,
@@ -222,9 +222,9 @@ static  int opvp_setflat(gx_device_vector *, double);
 static  int opvp_setlogop(gx_device_vector *, gs_logical_operation_t,
                           gs_logical_operation_t);
 #if GS_VERSION_MAJOR >= 8
-static  int opvp_can_handle_hl_color(gx_device_vector *, const gs_imager_state *, const gx_drawing_color *);
-static  int opvp_setfillcolor(gx_device_vector *, const gs_imager_state *, const gx_drawing_color *);
-static  int opvp_setstrokecolor(gx_device_vector *, const gs_imager_state *,const gx_drawing_color *);
+static  int opvp_can_handle_hl_color(gx_device_vector *, const gs_gstate *, const gx_drawing_color *);
+static  int opvp_setfillcolor(gx_device_vector *, const gs_gstate *, const gx_drawing_color *);
+static  int opvp_setstrokecolor(gx_device_vector *, const gs_gstate *,const gx_drawing_color *);
 #else
 static  int opvp_setfillcolor(gx_device_vector *, const gx_drawing_color *);
 static  int opvp_setstrokecolor(gx_device_vector *, const gx_drawing_color *);
@@ -489,7 +489,7 @@ static opvp_cspace_t cspace_0_2_to_1_0[] = {
 };
 
 /* color space mapping 1.0 to 0.2 */
-static opvp_cspace_t cspace_1_0_to_0_2[] = {
+static OPVP_ColorSpace cspace_1_0_to_0_2[] = {
     OPVP_cspaceBW,
     OPVP_cspaceDeviceGray,
     OPVP_cspaceDeviceCMY,
@@ -501,7 +501,7 @@ static opvp_cspace_t cspace_1_0_to_0_2[] = {
 };
 
 /* image format mapping 1.0 to 0.2 */
-static opvp_imageformat_t iformat_1_0_to_0_2[] = {
+static OPVP_ImageFormat iformat_1_0_to_0_2[] = {
     OPVP_iformatRaw,
     OPVP_iformatRaw, /* OPVP_IFORMAT_MASK use iformat raw in 0.2 */
     OPVP_iformatRLE,
@@ -620,7 +620,7 @@ SetColorSpaceWrapper(opvp_dc_t printerContext, opvp_cspace_t cspace)
         *ErrorNo = OPVP_NOTSUPPORTED_0_2;
         return -1;
     }
-    if (cspace
+    if ((int)cspace
          >= sizeof(cspace_1_0_to_0_2)/sizeof(OPVP_ColorSpace)) {
         /* unknown color space */
         *ErrorNo = OPVP_PARAMERROR_0_2;
@@ -664,7 +664,7 @@ SetStrokeColorWrapper(opvp_dc_t printerContext, const opvp_brush_t *brush)
         /* 0.2 doesn't have OPVP_CSPACE_DEVICEKRGB */
         return OPVP_NOTSUPPORTED;
     }
-    if (brush->colorSpace
+    if ((int)brush->colorSpace
          >= sizeof(cspace_1_0_to_0_2)/sizeof(OPVP_ColorSpace)) {
         /* unknown color space */
         *ErrorNo = OPVP_PARAMERROR_0_2;
@@ -691,7 +691,7 @@ SetFillColorWrapper(opvp_dc_t printerContext, const opvp_brush_t *brush)
         /* 0.2 doesn't have OPVP_CSPACE_DEVICEKRGB */
         return OPVP_NOTSUPPORTED;
     }
-    if (brush->colorSpace
+    if ((int)brush->colorSpace
          >= sizeof(cspace_1_0_to_0_2)/sizeof(OPVP_ColorSpace)) {
         /* unknown color space */
         *ErrorNo = OPVP_PARAMERROR_0_2;
@@ -719,7 +719,7 @@ SetBgColorWrapper(opvp_dc_t printerContext, const opvp_brush_t *brush)
         *ErrorNo = OPVP_NOTSUPPORTED_0_2;
         return -1;
     }
-    if (brush->colorSpace
+    if ((int)brush->colorSpace
          >= sizeof(cspace_1_0_to_0_2)/sizeof(OPVP_ColorSpace)) {
         /* unknown color space */
         *ErrorNo = OPVP_PARAMERROR_0_2;
@@ -1796,6 +1796,7 @@ opvp_load_vector_driver(void)
                 }
                 OpenPrinter_0_2 = NULL;
                 ErrorNo = NULL;
+                dlclose(h);
             }
             i++;
         }
@@ -1831,7 +1832,6 @@ prepare_open(gx_device *dev)
 {
     int ecode = 0;
     int code;
-    opvp_result_t r = -1;
     opvp_api_procs_t *api_entry;
     int dumFD = -1;
     opvp_dc_t dumContext = -1;
@@ -1901,7 +1901,7 @@ prepare_open(gx_device *dev)
         }
         /* call GetColorSpace */
         if (apiEntry->opvpGetColorSpace) {
-            r = apiEntry->opvpGetColorSpace(dumContext, &cspace);
+            (void)apiEntry->opvpGetColorSpace(dumContext, &cspace);
         }
         if (cspace == OPVP_CSPACE_BW) {
             /* mono-color */
@@ -2057,13 +2057,12 @@ opvp_open(gx_device *dev)
             }
         }
 #endif
-        outputFD = fileno(pdev->file);
+        outputFD = fileno(gp_get_file(pdev->file));
     } else {
         /* open printer device */
         code = gdev_prn_open(dev);
         if (code < 0) {
-            ecode = ecode;
-            return ecode;
+            return code;
         }
         while (dev->child) {
             dev = dev->child;
@@ -2073,16 +2072,16 @@ opvp_open(gx_device *dev)
         /* open output stream */
         code = gdev_prn_open_printer_seekable(dev, true, false);
         if (code < 0) {
-            ecode = code;
-            return ecode;
+            return code;
         }
-        outputFD = fileno(rdev->file);
+        outputFD = fileno(gp_get_file(rdev->file));
     }
+    if (outputFD < 0)
+        return outputFD;
 
     /* RE-load vector driver */
     if ((code = opvp_load_vector_driver())) {
-        ecode = code;
-        return ecode;
+        return code;
     }
 
     /* call opvpOpenPrinter */
@@ -2132,7 +2131,7 @@ opvp_open(gx_device *dev)
             int i;
 
             for (i = 0;i < nn;i++) {
-                if (p[i] < sizeof(cspace_available)) {
+                if ((unsigned int)p[i] < sizeof(cspace_available)) {
                     cspace_available[p[i]] = 1;
                 }
             }
@@ -2306,7 +2305,7 @@ opvp_output_page(gx_device *dev, int num_copies, int flush)
  * print page
  */
 static  int
-oprp_print_page(gx_device_printer *pdev, FILE *prn_stream)
+oprp_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
     int ecode = 0;
     int code = -1;
@@ -2507,15 +2506,12 @@ opvp_map_rgb_color(gx_device *dev,
     b = prgb[2];
 #endif
 
-#if !(ENABLE_SIMPLE_MODE)
-    pdev = (gx_device_opvp *)dev;
-    r = -1;
-#endif
-    cs = OPVP_CSPACE_STANDARDRGB;
-
 #if ENABLE_SIMPLE_MODE
     cs = colorSpace;
 #else
+    pdev = (gx_device_opvp *)dev;
+    r = -1;
+    cs = OPVP_CSPACE_STANDARDRGB;
     if (pdev->is_open) {
         /* call GetColorSpace */
         if (apiEntry->opvpGetColorSpace) {
@@ -2562,7 +2558,11 @@ opvp_map_rgb_color(gx_device *dev,
         } else {
             k = 0;
         }
-        return (k + (y << 8) + (m << 16) + (c << 24));
+        return (gx_color_index) k
+                + ((gx_color_index) y << 8)
+                + ((gx_color_index) m << 16)
+                + ((gx_color_index) c << 24)
+                ;
         break;
     case OPVP_CSPACE_DEVICEGRAY:
 #if GS_VERSION_MAJOR >= 8
@@ -3488,7 +3488,7 @@ static int checkCPath(const gx_clip_path *pcpath)
 static  int
 opvp_fill_path(
     gx_device *dev,
-    const gs_imager_state *pis,
+    const gs_gstate *pgs,
     gx_path *ppath,
     const gx_fill_params *params,
     const gx_device_color *pdevc,
@@ -3499,7 +3499,7 @@ opvp_fill_path(
 
     /* check if paths are too complex */
     if (!checkPath(ppath) || !checkCPath(pxpath)) {
-        return gx_default_fill_path(dev, pis, ppath, params, pdevc, pxpath);
+        return gx_default_fill_path(dev, pgs, ppath, params, pdevc, pxpath);
     }
     /* check clippath support */
     if (!(apiEntry->opvpSetClipPath)) {
@@ -3515,10 +3515,10 @@ opvp_fill_path(
     }
 
     if (!vector || draw_image) {
-        return gx_default_fill_path(dev, pis, ppath, params, pdevc, pxpath);
+        return gx_default_fill_path(dev, pgs, ppath, params, pdevc, pxpath);
     }
 
-    return gdev_vector_fill_path(dev, pis, ppath, params, pdevc, pxpath);
+    return gdev_vector_fill_path(dev, pgs, ppath, params, pdevc, pxpath);
 }
 
 /*
@@ -3527,7 +3527,7 @@ opvp_fill_path(
 static  int
 opvp_stroke_path(
     gx_device *dev,
-    const gs_imager_state *pis,
+    const gs_gstate *pgs,
     gx_path *ppath,
     const gx_stroke_params *params,
     const gx_drawing_color *pdcolor,
@@ -3538,7 +3538,7 @@ opvp_stroke_path(
 
     /* check if paths are too complex */
     if (!checkPath(ppath) || !checkCPath(pxpath)) {
-        return gx_default_stroke_path(dev, pis, ppath,
+        return gx_default_stroke_path(dev, pgs, ppath,
                                       params, pdcolor, pxpath);
     }
     /* check clippath support */
@@ -3555,11 +3555,11 @@ opvp_stroke_path(
     }
 
     if (!vector || draw_image) {
-        return gx_default_stroke_path(dev, pis, ppath,
+        return gx_default_stroke_path(dev, pgs, ppath,
                                       params, pdcolor, pxpath);
     }
 
-    return gdev_vector_stroke_path(dev, pis, ppath,
+    return gdev_vector_stroke_path(dev, pgs, ppath,
                                    params, pdcolor, pxpath);
 }
 
@@ -3583,13 +3583,17 @@ opvp_fill_mask(
     const gx_clip_path *pcpath)
 {
     if (vector) {
+        int code;
 #if GS_VERSION_MAJOR >= 8       /* for gs 8.15 */
-        gdev_vector_update_fill_color((gx_device_vector *)dev, NULL, pdcolor);
+        code = gdev_vector_update_fill_color((gx_device_vector *)dev, NULL, pdcolor);
 #else
-        gdev_vector_update_fill_color((gx_device_vector *)dev, pdcolor);
+        code = gdev_vector_update_fill_color((gx_device_vector *)dev, pdcolor);
 #endif
-        gdev_vector_update_clip_path((gx_device_vector *)dev, pcpath);
-        gdev_vector_update_log_op((gx_device_vector *)dev, lop);
+        if (code < 0)   return code;
+        code = gdev_vector_update_clip_path((gx_device_vector *)dev, pcpath);
+        if (code < 0)   return code;
+        code = gdev_vector_update_log_op((gx_device_vector *)dev, lop);
+        if (code < 0)   return code;
     }
 
     return gx_default_fill_mask(dev, data, data_x, raster, id,
@@ -3602,7 +3606,7 @@ opvp_fill_mask(
 static  int
 opvp_begin_image(
     gx_device *dev,
-    const gs_imager_state *pis,
+    const gs_gstate *pgs,
     const gs_image_t *pim,
     gs_image_format_t format,
     const gs_int_rect *prect,
@@ -3629,7 +3633,7 @@ opvp_begin_image(
     /* check if paths are too complex */
     if (!checkCPath(pcpath)) {
         return gx_default_begin_image(
-                    dev, pis, pim, format,
+                    dev, pgs, pim, format,
                     prect, pdcolor, pcpath,
                     mem, pinfo);
     }
@@ -3643,7 +3647,7 @@ opvp_begin_image(
     if (vinfo) {
         memcpy(imageDecode,pim->Decode,sizeof(pim->Decode));
         vinfo->memory =mem;
-        code = gdev_vector_begin_image(vdev, pis, pim, format, prect,
+        code = gdev_vector_begin_image(vdev, pgs, pim, format, prect,
                                        pdcolor, pcpath, mem,
                                        &opvp_image_enum_procs,
                                        vinfo);
@@ -3664,7 +3668,7 @@ opvp_begin_image(
                     if (((pcs->params.indexed.hival + 1) > 256)
                         || (bits_per_pixel != 8 && bits_per_pixel != 1)) {
                         return gx_default_begin_image(
-                                dev, pis, pim, format,
+                                dev, pgs, pim, format,
                                 prect, pdcolor, pcpath,
                                 mem, pinfo);
                     } else if (base_color_index
@@ -3684,9 +3688,9 @@ opvp_begin_image(
                                byte2frac((*(p + 2 + (count * 4)))),
                                byte2frac((*(p + 3 + (count * 4)))),
 #if GS_VERSION_MAJOR >= 9
-                               pis, rgb, mem);
+                               pgs, rgb, mem);
 #else
-                               pis, rgb);
+                               pgs, rgb);
 #endif
                             *(palette + 0 + (count * 3)) = frac2byte(rgb[0]);
                             *(palette + 1 + (count * 3)) = frac2byte(rgb[1]);
@@ -3711,7 +3715,7 @@ opvp_begin_image(
                     } else {
                         /* except CMYK and RGB */
                         return gx_default_begin_image(
-                                    dev, pis, pim, format,
+                                    dev, pgs, pim, format,
                                     prect, pdcolor, pcpath,
                                     mem, pinfo);
                     }
@@ -3725,8 +3729,8 @@ opvp_begin_image(
 #endif
             /* adjust matrix */
             reverse_image = false;
-            gs_matrix_invert(&pim->ImageMatrix, &mtx);
-            gs_matrix_multiply(&mtx, &ctm_only(pis), &mtx);
+            ecode = gs_matrix_invert(&pim->ImageMatrix, &mtx);
+            gs_matrix_multiply(&mtx, &ctm_only(pgs), &mtx);
             switch (FastImageMode) {
             case FastImageNoCTM:
                 if ((mtx.xy==0)&&(mtx.yx==0)&& (mtx.yy>=0)) {
@@ -3959,7 +3963,7 @@ fallthrough:
                 if(apiEntry->opvpResetCTM) {
                     apiEntry->opvpResetCTM(printerContext); /* reset CTM */
                 }
-                return gx_default_begin_image(dev, pis, pim, format,
+                return gx_default_begin_image(dev, pgs, pim, format,
                                     prect, pdcolor, pcpath, mem, pinfo);
             }
         }
@@ -3971,7 +3975,7 @@ fallthrough:
         return ecode;
     }
 
-    return gx_default_begin_image(dev, pis, pim, format, prect,
+    return gx_default_begin_image(dev, pgs, pim, format, prect,
                                   pdcolor, pcpath, mem, pinfo);
 }
 
@@ -4001,7 +4005,7 @@ opvp_image_plane_data(
     byte *ptr;
     bbox_image_enum *pbe;
     gx_image_enum *tinfo;
-    const gs_imager_state *pis;
+    const gs_gstate *pgs;
 
     vinfo = (gdev_vector_image_enum_t *)info;
 
@@ -4025,8 +4029,12 @@ opvp_image_plane_data(
     if (buf) {
         /* Adjust image data gamma */
         pbe = (bbox_image_enum *)vinfo->bbox_info;
+        if (!pbe) {
+            ecode = gs_note_error(gs_error_invalidaccess);
+            goto end;
+        }
         tinfo = (gx_image_enum *)pbe->target_info;
-        pis = tinfo->pis;
+        pgs = tinfo->pgs;
 
         if (vinfo->num_planes == 1) {
             for (h = 0; h < height; h++) {
@@ -4341,20 +4349,16 @@ opvp_image_plane_data(
             for (i = 0; i < height; i++) {
                 ptr = buf + raster_length * i;
                 for (j = 0; j < vinfo->width; j++) {
-                    ptr[j*3] = min(255, frac2cv(gx_map_color_frac(pis,
-                      cv2frac(ptr[j*3]), effective_transfer[0])));
-                    ptr[j*3+1] = min(255, frac2cv(gx_map_color_frac(pis,
-                      cv2frac(ptr[j*3+1]), effective_transfer[1])));
-                    ptr[j*3+2] = min(255, frac2cv(gx_map_color_frac(pis,
-                      cv2frac(ptr[j*3+2]), effective_transfer[2])));
+                    ptr[j*3+0] = frac2byte(gx_map_color_frac(pgs, byte2frac(ptr[j*3+0]), effective_transfer[0]));
+                    ptr[j*3+1] = frac2byte(gx_map_color_frac(pgs, byte2frac(ptr[j*3+1]), effective_transfer[1]));
+                    ptr[j*3+2] = frac2byte(gx_map_color_frac(pgs, byte2frac(ptr[j*3+2]), effective_transfer[2]));
                 }
             }
         } else if (vinfo->bits_per_pixel == 8) { /* 8bit Gray image */
             for (i = 0; i < height; i++) {
                 ptr = buf + raster_length * i;
                 for (j=0; j < vinfo->width; j++) {
-                    ptr[j] = min(255, frac2cv(gx_map_color_frac(pis,
-                      cv2frac(ptr[j]), effective_transfer[3])));
+                    ptr[j] = frac2byte(gx_map_color_frac(pgs, byte2frac(ptr[j]), effective_transfer[3]));
                 }
             }
         }
@@ -4363,20 +4367,16 @@ opvp_image_plane_data(
             for (i = 0; i < height; i++) {
                 ptr = buf + raster_length * i;
                 for (j = 0; j < vinfo->width; j++) {
-                    ptr[j*3] = min(255, frac2cv(gx_map_color_frac(pis,
-                      cv2frac(ptr[j*3]), effective_transfer.colored.red)));
-                    ptr[j*3+1] = min(255, frac2cv(gx_map_color_frac(pis,
-                      cv2frac(ptr[j*3+1]), effective_transfer.colored.green)));
-                    ptr[j*3+2] = min(255, frac2cv(gx_map_color_frac(pis,
-                      cv2frac(ptr[j*3+2]), effective_transfer.colored.blue)));
+                    ptr[j*3+0] = frac2byte(gx_map_color_frac(pgs, byte2frac(ptr[j*3+0]), effective_transfer.colored.red));
+                    ptr[j*3+1] = frac2byte(gx_map_color_frac(pgs, byte2frac(ptr[j*3+1]), effective_transfer.colored.green));
+                    ptr[j*3+2] = frac2byte(gx_map_color_frac(pgs, byte2frac(ptr[j*3+2]), effective_transfer.colored.blue));
                 }
             }
         } else if (vinfo->bits_per_pixel == 8) { /* 8bit Gray image */
             for (i = 0; i < height; i++) {
                 ptr = buf + raster_length * i;
                 for (j = 0; j < vinfo->width; j++) {
-                    ptr[j] = min(255, frac2cv(gx_map_color_frac(pis,
-                      cv2frac(ptr[j]), effective_transfer.colored.gray)));
+                    ptr[j] = frac2byte(gx_map_color_frac(pgs, byte2frac(ptr[j]), effective_transfer.colored.gray));
                 }
             }
         }
@@ -4387,14 +4387,15 @@ opvp_image_plane_data(
             apiEntry->opvpTransferDrawImage(printerContext,
                         raster_length * height, (void *)buf);
         }
-        if (buf) {
-            free(buf); /* free buffer */
-        }
     }
 
     vinfo->y += height;
     ecode = (vinfo->y >= vinfo->height);
 
+end:
+    if (buf) {
+        free(buf); /* free buffer */
+    }
     return ecode;
 }
 
@@ -4724,7 +4725,7 @@ opvp_setlogop(
 /*--- added for Ghostscritp 8.15 ---*/
 static int
 opvp_can_handle_hl_color(gx_device_vector * vdev,
-              const gs_imager_state * pis1, const gx_drawing_color * pdc)
+              const gs_gstate * pgs1, const gx_drawing_color * pdc)
 {
     return false; /* High level color is not implemented yet. */
 }
@@ -4737,7 +4738,7 @@ opvp_can_handle_hl_color(gx_device_vector * vdev,
 static  int
 opvp_setfillcolor(
     gx_device_vector *vdev,
-    const gs_imager_state *pis, /* added for gs 8.15 */
+    const gs_gstate *pgs, /* added for gs 8.15 */
     const gx_drawing_color *pdc)
 #else
 static  int
@@ -4778,7 +4779,7 @@ opvp_setfillcolor(gx_device_vector *vdev, const gx_drawing_color *pdc)
 static  int
 opvp_setstrokecolor(
     gx_device_vector *vdev,
-    const gs_imager_state *pis, /* added for gs 8.15 */
+    const gs_gstate *pgs, /* added for gs 8.15 */
     const gx_drawing_color *pdc)
 #else
 static  int
@@ -4835,7 +4836,6 @@ opvp_vector_dopath(
     int i;
     int pop = 0;
     int npoints = 0;
-    int *cp_num = NULL;
     _fPoint *points = NULL;
     opvp_point_t *opvp_p = NULL;
     _fPoint current;
@@ -4914,11 +4914,6 @@ opvp_vector_dopath(
                 break;
             case gs_pe_curveto:
                 /* npoints */
-                if (!cp_num)
-                cp_num = calloc(sizeof(int), 2);
-                cp_num[0] = npoints;
-                cp_num[1] = 0;
-
                 /* call BezierPath */
                 if (apiEntry->opvpBezierPath) {
                     r = apiEntry->opvpBezierPath(
@@ -4940,7 +4935,6 @@ opvp_vector_dopath(
 
             /* reset */
             npoints = 1;
-            if (cp_num) free(cp_num), cp_num = NULL;
             points = realloc(points, sizeof(_fPoint));
             points[0] = current;
 #endif
@@ -5068,7 +5062,6 @@ opvp_vector_dopath(
 #ifdef  OPVP_OPT_MULTI_PATH
     if (points) free(points);
     if (opvp_p) free(opvp_p);
-    if (cp_num) free(cp_num);
 #endif
     return ecode;
 }

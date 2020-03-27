@@ -1,4 +1,4 @@
-% Copyright (C) 2001-2012 Artifex Software, Inc.
+% Copyright (C) 2001-2019 Artifex Software, Inc.
 % All Rights Reserved.
 %
 % This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 % of the license contained in the file LICENSE in this distribution.
 %
 % Refer to licensing information at http://www.artifex.com or contact
-% Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-% CA  94903, U.S.A., +1(415)492-9861, for further information.
+% Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+% CA 94945, U.S.A., +1(415)492-9861, for further information.
 %
 
 % PDF writer additions to systemdict.
@@ -22,6 +22,9 @@
 
 % These correspond to the 4 predefined settings in Acrobat Distiller 5,
 % plus a "default" setting that doesn't downsample images.
+
+{ /pdfwrite finddevice pop } .internalstopped
+{pop pop (%END PDFWR) .skipeof} if
 
 languagelevel 2 .setlanguagelevel
 
@@ -83,7 +86,7 @@ languagelevel 2 .setlanguagelevel
   /MonoImageDownsampleThreshold 1.5
   /MonoImageFilter /CCITTFaxEncode
   /OffOptimizations 0
-  /OPM 1
+  /OPM 0
   /Optimize //true
   /ParseDSCComments //true
   /ParseDSCCommentsForDocInfo //true
@@ -98,6 +101,7 @@ languagelevel 2 .setlanguagelevel
   /TransferFunctionInfo /Preserve
   /UseFlateCompression //true
   /UsePrologue //false
+  /PassThroughJPEGImages //true
 .dicttomark readonly def
 
 /.distillersettings mark
@@ -193,7 +197,7 @@ languagelevel 2 .setlanguagelevel
   /ColorConversionStrategy /UseDeviceIndependentColor
   /ColorImageDownsampleType /Average
   /ColorImageResolution 300
-  /CompatibilityLevel 1.5
+  /CompatibilityLevel 1.7
   /CreateJobTicket //true
   /DoThumbnails //false
   /EmbedAllFonts //true
@@ -220,14 +224,14 @@ languagelevel 2 .setlanguagelevel
   /ColorConversionStrategy /LeaveColorUnchanged
   /ColorImageDownsampleType /Bicubic
   /ColorImageResolution 300
-  /CompatibilityLevel 1.5
+  /CompatibilityLevel 1.7
   /CreateJobTicket //true
   /DoThumbnails //true
   /EmbedAllFonts //true
   /GrayACSImageDict .prepressACSImageDict
   /GrayImageDownsampleType /Bicubic
   /GrayImageResolution 300
-  /MonoImageDownsampleType /Bicubic
+  /MonoImageDownsampleType /Subsample
   /MonoImageResolution 1200
   /NeverEmbed []
   /PreserveEPSInfo //true
@@ -242,17 +246,20 @@ languagelevel 2 .setlanguagelevel
   /CannotEmbedFontPolicy /Error
   /ColorACSImageDict .prepressACSImageDict
   /ColorConversionStrategy /LeaveColorUnchanged
-  /ColorImageDownsampleType /Bicubic
+  /ColorImageDownsampleType /Subsample
   /ColorImageResolution 600
+  /DownsampleColorImages //false
   /CompatibilityLevel 1.2 % Always 1.2 with ps2write.
   % /CreateJobTicket //true % Not sure
   /DoThumbnails //false
   /EmbedAllFonts //true
   /GrayACSImageDict .prepressACSImageDict
-  /GrayImageDownsampleType /Bicubic
+  /GrayImageDownsampleType /Subsample
   /GrayImageResolution 600
+  /DownsampleGrayImages //false
   /MonoImageDownsampleType /Subsample
   /MonoImageResolution 1200
+  /DownsampleMonoImages //false
   /NeverEmbed []
   /PreserveEPSInfo //true
   /PreserveOPIComments //true
@@ -275,6 +282,12 @@ languagelevel 2 .setlanguagelevel
 % The ps2pdf* scripts invoke this.
 /.setpdfwrite {		% - .setpdfwrite -
                 % Set a large VM threshold to reduce garbage collection.
+  (\n**** WARNING: The .setpdfwrite operator has been deprecated and will be removed entirely\n) print
+  (              in the next release of Ghostscript. The functionality of this operator has\n) print
+  (              been reduced to increasing the size of the VM threshold. If you believe you\n) print
+  (              have a real need for this then you should replace your call to .setpdfwrite\n) print
+  (              with:\n\n) print
+  (                  3000000 setvmthreshold\n\n) print
   currentuserparams /VMThreshold get 3000000 .max setvmthreshold
 } bind def
 
@@ -499,7 +512,8 @@ userdict /.pdfcvstring () put
 /.ExtractLeafs
 {
   {
-    oforce /Nums knownoget {
+    oforce dup /Nums knownoget {
+      exch pop
       dup length 1 sub 0 2 3 -1 roll {
                           %% dict array index
         dup               %% dict array index index
@@ -571,6 +585,12 @@ userdict /.pdfcvstring () put
 } bind def
 
 /pdfmark {		% -mark- <key> <value> ... <markname> pdfmark -
+  counttomark 0 eq {
+    /pdfmark /stackunderflow signalerror
+  } if
+  dup type /nametype eq not {
+    /pdfmark /typecheck signalerror
+  } if
   dup /SP eq {
     % A hack for synchronizing the clipping path.
     gsave
@@ -636,18 +656,17 @@ currentdict /.pdfmarkparams .undef
             } ifelse
           } bind .makeoperator .forceput
           systemdict /.pdf_hooked_DSC_Creator //true .forceput
-        } if
+        } executeonly if
         pop
-      } if
+      } executeonly if
     } {
       pop
     } ifelse
-  }
+  } executeonly
   {
     pop
   } ifelse
-}
-bind def
+} .bind executeonly odef % must be bound and hidden for .forceput
 
 % Use the DSC processing hook to pass DSC comments to the driver.
 % We use a pseudo-parameter named DSC whose value is an array:
@@ -816,6 +835,7 @@ currentdict /.pdf_hook_DSC_Creator undef
   /MaxSubsetPct { }
   /SubsetFonts { }
   /DSCEncodingToUnicode { }
+  /PassThroughJPEGImages { }
   /PSDocOptions { }
   /PSPageOptions { }
 .dicttomark readonly def
@@ -914,7 +934,7 @@ currentdict /.pdf_hook_DSC_Creator undef
       }{
         //true
       }ifelse
-      { pop false } if
+      { pop //false } if
     } {
       known
     } ifelse
@@ -966,7 +986,7 @@ currentdict /.pdf_hook_DSC_Creator undef
   }ifelse
   systemdict /ProvideUnicode .knownget not { //false } if or
   {
-    currentglobal true setglobal
+    currentglobal //true setglobal
     systemdict /.setupUnicodeDecoder known {
       /Unicode /Decoding resourcestatus {
         pop pop
@@ -1037,3 +1057,5 @@ currentdict /.pdf_hook_DSC_Creator undef
 } bind .schedule_init
 
 .setlanguagelevel
+
+%END PDFWR

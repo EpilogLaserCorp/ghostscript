@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -47,7 +47,7 @@
 static int
 adjust_render_rectangle(pcl_state_t * pcs)
 {
-    gs_state *pgs = pcs->pgs;
+    gs_gstate *pgs = pcs->pgs;
     const pcl_xfm_state_t *pxfmst = &(pcs->xfm_state);
     coord w = pcs->rectangle.x;
     coord h = pcs->rectangle.y;
@@ -238,7 +238,7 @@ pcrect_do_registration(pcl_parser_state_t * pcl_parser_state,
     }, END_CLASS return 0;
 }
 
-static void
+static int
 pcrect_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
     static const uint mask = (pcl_reset_initial
@@ -247,6 +247,8 @@ pcrect_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
         pcs->rectangle.x = 0;
         pcs->rectangle.y = 0;
     }
+
+    return 0;
 }
 
 const pcl_init_t pcrect_init = { pcrect_do_registration, pcrect_do_reset, 0 };

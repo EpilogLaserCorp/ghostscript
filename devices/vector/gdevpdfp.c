@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -74,9 +74,9 @@ static const gs_param_item_t pdf_param_items[] = {
     pi("ReEncodeCharacters", gs_param_type_bool, ReEncodeCharacters),
     pi("FirstObjectNumber", gs_param_type_long, FirstObjectNumber),
     pi("CompressFonts", gs_param_type_bool, CompressFonts),
+    pi("CompressStreams", gs_param_type_bool, CompressStreams),
     pi("PrintStatistics", gs_param_type_bool, PrintStatistics),
     pi("MaxInlineImageSize", gs_param_type_long, MaxInlineImageSize),
-    pi("DSCEncodingToUnicode", gs_param_type_int_array, DSCEncodingToUnicode),
 
         /* PDF Encryption */
     pi("OwnerPassword", gs_param_type_string, OwnerPassword),
@@ -124,9 +124,10 @@ static const gs_param_item_t pdf_param_items[] = {
     pi("PreserveSMask", gs_param_type_bool, PreserveSMask),
     pi("PreserveTrMode", gs_param_type_bool, PreserveTrMode),
     pi("NoT3CCITT", gs_param_type_bool, NoT3CCITT),
-    pi("PDFUseOldCMS", gs_param_type_bool, UseOldColor),
     pi("FastWebView", gs_param_type_bool, Linearise),
     pi("NoOutputFonts", gs_param_type_bool, FlattenFonts),
+    pi("WantsPageLabels", gs_param_type_bool, WantsPageLabels),
+    pi("UserUnit", gs_param_type_float, UserUnit),
 #undef pi
     gs_param_item_end
 };
@@ -237,6 +238,14 @@ gdev_pdf_get_param(gx_device *dev, char *Param, void *list)
     if (strcmp(Param, "ForOPDFRead") == 0) {
         return(param_write_bool(plist, "ForOPDFRead", &pdev->ForOPDFRead));
     }
+    if (strcmp(Param, "PassUserUnit") == 0) {
+        bool dummy;
+        if (pdev->CompatibilityLevel > 1.5)
+            dummy = true;
+        else
+            dummy = false;
+        return(param_write_bool(plist, "PassUserUnit", &dummy));
+    }
     if (!pdev->is_ps2write) {
         if (strcmp(Param, "pdfmark")  == 0){
             return(param_write_null(plist, "pdfmark"));
@@ -287,7 +296,6 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
     float cl = (float)pdev->CompatibilityLevel;
     bool locked = pdev->params.LockDistillerParams, ForOPDFRead;
     gs_param_name param_name;
-    enum psdf_color_conversion_strategy save_ccs = pdev->params.ColorConversionStrategy;
 
     pdev->pdf_memory = gs_memory_stable(pdev->memory);
     /*
@@ -365,7 +373,7 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
      * LockDistillerParams is read again, and reset if necessary, in
      * psdf_put_params.
      */
-    ecode = param_read_bool(plist, "LockDistillerParams", &locked);
+    ecode = param_read_bool(plist, (param_name = "LockDistillerParams"), &locked);
     if (ecode < 0)
         param_signal_error(plist, param_name, ecode);
 
@@ -413,8 +421,13 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
                     cl = (float)1.5;
                 else if (cl < (float)1.65)
                     cl = (float)1.6;
-                else
+                else if (cl < (float)1.75)
                     cl = (float)1.7;
+                else {
+                    cl = (float)2.0;
+                    if (pdev->params.TransferFunctionInfo == tfi_Preserve)
+                        pdev->params.TransferFunctionInfo = tfi_Apply;
+                }
             }
         case 1:
             break;
@@ -475,14 +488,14 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
 
         ecode = param_put_enum(plist, "ProcessColorModel", &pcm,
                                pcm_names, ecode);
+        if (ecode < 0)
+            goto fail;
         if (pcm >= 0) {
             pdf_set_process_color_model(pdev, pcm);
-            pdf_set_initial_color(pdev, &pdev->saved_fill_color, &pdev->saved_stroke_color,
-                            &pdev->fill_used_process_color, &pdev->stroke_used_process_color);
+            rc_decrement(pdev->icc_struct, "gdev_pdf_put_params_impl, ProcessColorModel changed");
+            pdev->icc_struct = 0;
         }
     }
-    if (ecode < 0)
-        goto fail;
 
     if (pdev->is_ps2write && (code = param_read_bool(plist, "ProduceDSC", &pdev->ProduceDSC)) < 0) {
         param_signal_error(plist, param_name, code);
@@ -495,7 +508,7 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
      * or less impossible to alter the setting in the (potentially saved) page
      * device dictionary, so we use this rather clunky method.
      */
-    if (pdev->PDFA < 0 || pdev->PDFA > 2){
+    if (pdev->PDFA < 0 || pdev->PDFA > 3){
         ecode = gs_note_error(gs_error_rangecheck);
         param_signal_error(plist, "PDFA", ecode);
         goto fail;
@@ -531,8 +544,10 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
      */
     if (pdev->PDFX)
         cl = (float)1.3; /* Instead pdev->CompatibilityLevel = 1.2; - see below. */
-    if (pdev->PDFA != 0 && cl < 1.4)
+    if (pdev->PDFA == 1 && cl != 1.4)
         cl = (float)1.4;
+    if (pdev->PDFA == 2 && cl < 1.7)
+        cl = (float)1.7;
     pdev->version = (cl < 1.2 ? psdf_version_level2 : psdf_version_ll3);
     if (pdev->ForOPDFRead) {
         pdev->ResourcesBeforeUsage = true;
@@ -553,117 +568,83 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
     if (cl < 1.2) {
         pdev->HaveCFF = false;
     }
+
+    ecode = param_read_float(plist, "UserUnit", &pdev->UserUnit);
+    if (ecode < 0)
+        goto fail;
+    if (pdev->UserUnit == 0 || (pdev->UserUnit != 1 && pdev->CompatibilityLevel < 1.6)) {
+        ecode = gs_note_error(gs_error_rangecheck);
+        param_signal_error(plist, "UserUnit", ecode);
+        goto fail;
+    }
+
     ecode = gdev_psdf_put_params(dev, plist);
     if (ecode < 0)
         goto fail;
-    if (!pdev->UseOldColor) {
-        if (pdev->params.ConvertCMYKImagesToRGB) {
-            if (pdev->params.ColorConversionStrategy == ccs_CMYK) {
-                emprintf(pdev->memory, "ConvertCMYKImagesToRGB is not compatible with ColorConversionStrategy of CMYK\n");
+
+    if (pdev->CompatibilityLevel > 1.7 && pdev->params.TransferFunctionInfo == tfi_Preserve) {
+        pdev->params.TransferFunctionInfo = tfi_Apply;
+        emprintf(pdev->memory, "\nIt is not possible to preserve transfer functions in PDF 2.0\ntransfer functions will be applied instead\n");
+    }
+
+    if (pdev->params.ConvertCMYKImagesToRGB) {
+        if (pdev->params.ColorConversionStrategy == ccs_CMYK) {
+            emprintf(pdev->memory, "ConvertCMYKImagesToRGB is not compatible with ColorConversionStrategy of CMYK\n");
+        } else {
+            if (pdev->params.ColorConversionStrategy == ccs_Gray) {
+                emprintf(pdev->memory, "ConvertCMYKImagesToRGB is not compatible with ColorConversionStrategy of Gray\n");
             } else {
-                if (pdev->params.ColorConversionStrategy == ccs_Gray) {
-                    emprintf(pdev->memory, "ConvertCMYKImagesToRGB is not compatible with ColorConversionStrategy of Gray\n");
-                } else {
-                    if (pdev->icc_struct)
-                        rc_decrement(pdev->icc_struct,
-                                     "reset default profile\n");
-                    pdf_set_process_color_model(pdev,1);
-                    ecode = gsicc_init_device_profile_struct((gx_device *)pdev, NULL, 0);
-                    if (ecode < 0)
-                        goto fail;
-                }
-            }
-        }
-        switch (pdev->params.ColorConversionStrategy) {
-            case ccs_LeaveColorUnchanged:
-            case ccs_UseDeviceDependentColor:
-            case ccs_UseDeviceIndependentColor:
-            case ccs_UseDeviceIndependentColorForImages:
-            case ccs_ByObjectType:
-                break;
-            case ccs_CMYK:
                 if (pdev->icc_struct)
                     rc_decrement(pdev->icc_struct,
                                  "reset default profile\n");
-                pdf_set_process_color_model(pdev, 2);
+                pdf_set_process_color_model(pdev,1);
                 ecode = gsicc_init_device_profile_struct((gx_device *)pdev, NULL, 0);
                 if (ecode < 0)
                     goto fail;
-                break;
-            case ccs_Gray:
+            }
+        }
+    }
+    switch (pdev->params.ColorConversionStrategy) {
+        case ccs_ByObjectType:
+        case ccs_LeaveColorUnchanged:
+            break;
+        case ccs_UseDeviceIndependentColor:
+        case ccs_UseDeviceIndependentColorForImages:
+            pdev->params.TransferFunctionInfo = tfi_Apply;
+            break;
+        case ccs_CMYK:
+            if (pdev->icc_struct)
+                rc_decrement(pdev->icc_struct,
+                             "reset default profile\n");
+            pdf_set_process_color_model(pdev, 2);
+            ecode = gsicc_init_device_profile_struct((gx_device *)pdev, NULL, 0);
+            if (ecode < 0)
+                goto fail;
+            break;
+        case ccs_Gray:
+            if (pdev->icc_struct)
+                rc_decrement(pdev->icc_struct,
+                             "reset default profile\n");
+            pdf_set_process_color_model(pdev,0);
+            ecode = gsicc_init_device_profile_struct((gx_device *)pdev, NULL, 0);
+            if (ecode < 0)
+                goto fail;
+            break;
+        case ccs_sRGB:
+        case ccs_RGB:
+            /* Only bother to do this if we didn't handle it above */
+            if (!pdev->params.ConvertCMYKImagesToRGB) {
                 if (pdev->icc_struct)
                     rc_decrement(pdev->icc_struct,
                                  "reset default profile\n");
-                pdf_set_process_color_model(pdev,0);
+                pdf_set_process_color_model(pdev,1);
                 ecode = gsicc_init_device_profile_struct((gx_device *)pdev, NULL, 0);
                 if (ecode < 0)
                     goto fail;
-                break;
-            case ccs_sRGB:
-            case ccs_RGB:
-                /* Only bother to do this if we didn't handle it above */
-                if (!pdev->params.ConvertCMYKImagesToRGB) {
-                    if (pdev->icc_struct)
-                        rc_decrement(pdev->icc_struct,
-                                     "reset default profile\n");
-                    pdf_set_process_color_model(pdev,1);
-                    ecode = gsicc_init_device_profile_struct((gx_device *)pdev, NULL, 0);
-                    if (ecode < 0)
-                        goto fail;
-                }
-                break;
-            default:
-                break;
-        }
-    } else {
-        if ((pdev->params.ColorConversionStrategy == ccs_CMYK &&
-             strcmp(pdev->color_info.cm_name, "DeviceCMYK")) ||
-            ((pdev->params.ColorConversionStrategy == ccs_RGB ||
-             pdev->params.ColorConversionStrategy == ccs_sRGB) &&
-              strcmp(pdev->color_info.cm_name, "DeviceRGB")) ||
-            (pdev->params.ColorConversionStrategy == ccs_Gray &&
-              strcmp(pdev->color_info.cm_name, "DeviceGray"))) {
-            emprintf(pdev->memory,
-                     "ColorConversionStrategy is incompatible to ProcessColorModel.\n");
-            ecode = gs_note_error(gs_error_rangecheck);
-            pdev->params.ColorConversionStrategy = save_ccs;
-        }
-        if (pdev->params.ColorConversionStrategy == ccs_UseDeviceIndependentColor) {
-            if (!pdev->UseCIEColor) {
-                emprintf(pdev->memory,
-                         "Set UseCIEColor for UseDeviceIndependentColor to work properly.\n");
-                ecode = gs_note_error(gs_error_rangecheck);
-                pdev->UseCIEColor = true;
             }
-        }
-        if (pdev->params.ColorConversionStrategy == ccs_UseDeviceIndependentColorForImages) {
-            if (!pdev->UseCIEColor) {
-                emprintf(pdev->memory,
-                         "UseDeviceDependentColorForImages is not supported. Use UseDeviceIndependentColor.\n");
-                pdev->params.ColorConversionStrategy = ccs_UseDeviceIndependentColor;
-                if (!pdev->UseCIEColor) {
-                    emprintf(pdev->memory,
-                             "Set UseCIEColor for UseDeviceIndependentColor to work properly.\n");
-                    ecode = gs_note_error(gs_error_rangecheck);
-                    pdev->UseCIEColor = true;
-                }
-            }
-        }
-        if (pdev->params.ColorConversionStrategy == ccs_UseDeviceDependentColor) {
-            if (!strcmp(pdev->color_info.cm_name, "DeviceCMYK")) {
-                emprintf(pdev->memory,
-                         "Replacing the deprecated device parameter value UseDeviceDependentColor with CMYK.\n");
-                pdev->params.ColorConversionStrategy = ccs_CMYK;
-            } else if (!strcmp(pdev->color_info.cm_name, "DeviceRGB")) {
-                emprintf(pdev->memory,
-                         "Replacing the deprecated device parameter value UseDeviceDependentColor with sRGB.\n");
-                pdev->params.ColorConversionStrategy = ccs_sRGB;
-            } else {
-                emprintf(pdev->memory,
-                         "Replacing the deprecated device parameter value UseDeviceDependentColor with Gray.\n");
-                pdev->params.ColorConversionStrategy = ccs_Gray;
-            }
-        }
+            break;
+        default:
+            break;
     }
     if (cl < 1.5f && pdev->params.ColorImage.Filter != NULL &&
             !strcmp(pdev->params.ColorImage.Filter, "JPXEncode")) {
@@ -688,33 +669,24 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
     }
     if (ecode < 0)
         goto fail;
-    /*
-     * Acrobat Reader doesn't handle user-space coordinates larger than
-     * MAX_USER_COORD.  To compensate for this, reduce the resolution so
-     * that the page size in device space (which we equate to user space) is
-     * significantly less than MAX_USER_COORD.  Note that this still does
-     * not protect us against input files that use coordinates far outside
-     * the page boundaries.
-     */
-#define MAX_EXTENT ((int)(MAX_USER_COORD * 0.9))
-    /* Changing resolution or page size requires closing the device, */
-    if (dev->height > MAX_EXTENT || dev->width > MAX_EXTENT) {
-        double factor =
-            max(dev->height / (double)MAX_EXTENT,
-                dev->width / (double)MAX_EXTENT);
 
-        gx_device_set_resolution(dev, dev->HWResolution[0] / factor,
-                                 dev->HWResolution[1] / factor);
-    }
-#undef MAX_EXTENT
     if (pdev->FirstObjectNumber != save_dev->FirstObjectNumber) {
         if (pdev->xref.file != 0) {
-            gp_fseek_64(pdev->xref.file, 0L, SEEK_SET);
+            if (gp_fseek(pdev->xref.file, 0L, SEEK_SET) != 0) {
+                ecode = gs_error_ioerror;
+                goto fail;
+            }
             pdf_initialize_ids(pdev);
         }
     }
     /* Handle the float/double mismatch. */
     pdev->CompatibilityLevel = (int)(cl * 10 + 0.5) / 10.0;
+
+    if (pdev->ForOPDFRead && pdev->OwnerPassword.size != 0) {
+        emprintf(pdev->memory, "\n\tSetting OwnerPassword for PostScript output would result in an encrypted\n\tunusable PostScript file, ignoring.\n");
+        pdev->OwnerPassword.size = 0;
+    }
+
     if(pdev->OwnerPassword.size != save_dev->OwnerPassword.size ||
         (pdev->OwnerPassword.size != 0 &&
          memcmp(pdev->OwnerPassword.data, save_dev->OwnerPassword.data,
@@ -731,6 +703,11 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
 
     if (pdev->Linearise && pdev->is_ps2write) {
         emprintf(pdev->memory, "Can't linearise PostScript output, ignoring\n");
+        pdev->Linearise = false;
+    }
+
+    if (pdev->Linearise && pdev->OwnerPassword.size != 0) {
+        emprintf(pdev->memory, "Can't linearise encrypted PDF, ignoring\n");
         pdev->Linearise = false;
     }
 
@@ -845,19 +822,19 @@ pdf_dsc_process(gx_device_pdf * pdev, const gs_param_string_array * pma)
          * but we do the same -- we ignore %%CreationDate here.
          */
 
-        if (pdf_key_eq(pkey, "Creator")) {
+        if (pdf_key_eq(pkey, "Creator") && pdev->CompatibilityLevel <= 1.7) {
             key = "/Creator";
             newsize = unescape_octals(pdev, (char *)pvalue->data, pvalue->size);
             code = cos_dict_put_c_key_string(pdev->Info, key,
                                              pvalue->data, newsize);
             continue;
-        } else if (pdf_key_eq(pkey, "Title")) {
+        } else if (pdf_key_eq(pkey, "Title") && pdev->CompatibilityLevel <= 1.7) {
             key = "/Title";
             newsize = unescape_octals(pdev, (char *)pvalue->data, pvalue->size);
             code = cos_dict_put_c_key_string(pdev->Info, key,
                                              pvalue->data, newsize);
             continue;
-        } else if (pdf_key_eq(pkey, "For")) {
+        } else if (pdf_key_eq(pkey, "For") && pdev->CompatibilityLevel <= 1.7) {
             key = "/Author";
             newsize = unescape_octals(pdev, (char *)pvalue->data, pvalue->size);
             code = cos_dict_put_c_key_string(pdev->Info, key,
@@ -931,10 +908,6 @@ pdf_dsc_process(gx_device_pdf * pdev, const gs_param_string_array * pma)
             }
             continue;
         }
-
-        if (pdev->ParseDSCCommentsForDocInfo || pdev->PreserveEPSInfo)
-            code = cos_dict_put_c_key_string(pdev->Info, key,
-                                             pvalue->data, pvalue->size);
     }
     return code;
 }

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -64,7 +64,7 @@ const char gp_current_directory_name[] = ".";
 
 /* Define the string to be concatenated with the file mode */
 /* for opening files without end-of-line conversion. */
-const char gp_fmode_binary_suffix[] = "b";
+const char* gp_fmode_binary_suffix = "b";
 
 /* Define the file modes for binary reading or writing. */
 const char gp_fmode_rb[] = "rb";
@@ -88,7 +88,7 @@ gs_private_st_ptrs1(st_file_enum, struct file_enum_s, "file_enum",
 
 /* Initialize an enumeration.  may NEED WORK ON HANDLING * ? \. */
 file_enum *
-gp_enumerate_files_init(const char *pat, uint patlen, gs_memory_t * mem)
+gp_enumerate_files_init_impl(gs_memory_t * mem, const char *pat, uint patlen)
 {
     file_enum *pfen = gs_alloc_struct(mem, file_enum, &st_file_enum, "gp_enumerate_files");
     int pat_size = 2 * patlen + 1;
@@ -132,10 +132,11 @@ gp_enumerate_files_init(const char *pat, uint patlen, gs_memory_t * mem)
 
 /* Enumerate the next file. */
 uint
-gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
+gp_enumerate_files_next_impl(gs_memory_t * mem, file_enum * pfen, char *ptr, uint maxlen)
 {
     APIRET rc;
     ULONG cFilenames = 1;
+    (void)mem;
 
     if (!isos2) {
         /* CAN'T DO IT SO JUST RETURN THE PATTERN. */
@@ -180,15 +181,16 @@ gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
 
 /* Clean up the file enumeration. */
 void
-gp_enumerate_files_close(file_enum * pfen)
+gp_enumerate_files_close_impl(gs_memory_t * mem, file_enum * pfen)
 {
-    gs_memory_t *mem = pfen->memory;
+    gs_memory_t *mem2 = pfen->memory;
+    (void)mem;
 
     if (isos2)
         DosFindClose(pfen->hdir);
-    gs_free_object(mem, pfen->pattern,
+    gs_free_object(mem2, pfen->pattern,
                    "gp_enumerate_files_close(pattern)");
-    gs_free_object(mem, pfen, "gp_enumerate_files_close");
+    gs_free_object(mem2, pfen, "gp_enumerate_files_close");
 }
 
 /* ------ File naming and accessing ------ */
@@ -196,12 +198,16 @@ gp_enumerate_files_close(file_enum * pfen)
 /* Create and open a scratch file with a given name prefix. */
 /* Write the actual file name at fname. */
 FILE *
-gp_open_scratch_file(const gs_memory_t *mem,
-                     const char        *prefix,
-                           char         fname[gp_file_name_sizeof],
-                     const char        *mode)
+gp_open_scratch_file_impl(const gs_memory_t *mem,
+                          const char        *prefix,
+                                char         fname[gp_file_name_sizeof],
+                          const char        *mode,
+                                int          remove)
 {
     FILE *f;
+
+    if (remove)
+        return NULL;
 #ifdef __IBMC__
     char *temp = 0;
     char *tname;
@@ -257,12 +263,12 @@ gp_open_scratch_file(const gs_memory_t *mem,
 
 /* Open a file with the given name, as a stream of uninterpreted bytes. */
 FILE *
-gp_fopen(const char *fname, const char *mode)
+gp_fopen_impl(const gs_memory_t *mem, const char *fname, const char *mode)
 {
     return fopen(fname, mode);
 }
 
-int gp_stat(const char *path, struct stat *buf)
+int gp_stat_impl(gs_memory_t *mem, const char *path, struct stat *buf)
 {
     return stat(path, buf);
 }
@@ -272,25 +278,17 @@ int gp_can_share_fdesc(void)
     return 0;
 }
 
-FILE *gp_open_scratch_file_rm(const gs_memory_t *mem,
-                              const char        *prefix,
-                                    char         fname[gp_file_name_sizeof],
-                              const char        *mode)
+FILE *gp_fdup_impl(FILE *f, const char *mode)
 {
     return NULL;
 }
 
-FILE *gp_fdup(FILE *f, const char *mode)
-{
-    return NULL;
-}
-
-int gp_fpread(char *buf, uint count, int64_t offset, FILE *f)
+int gp_pread_impl(char *buf, size_t count, gs_offset_t offset, FILE *f)
 {
     return -1;
 }
 
-int gp_fpwrite(char *buf, uint count, int64_t offset, FILE *f)
+int gp_pwrite_impl(char *buf, size_t count, gs_offset_t offset, FILE *f)
 {
     return -1;
 }

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -249,20 +249,17 @@ round_byte_color(gx_color_index cv)
 }
 int
 psdf_set_color(gx_device_vector * vdev, const gx_drawing_color * pdc,
-               const psdf_set_color_commands_t *ppscc, bool UseOldColor)
+               const psdf_set_color_commands_t *ppscc)
 {
     const char *setcolor;
     int num_des_comps, code;
     cmm_dev_profile_t *dev_profile;
 
-    if (UseOldColor) {
-        num_des_comps = vdev->color_info.num_components;
-    } else {
-        code = dev_proc((gx_device *)vdev, get_profile)((gx_device *)vdev, &dev_profile);
-        if (code < 0)
-            return code;
-        num_des_comps = gsicc_get_device_profile_comps(dev_profile);
-    }
+    code = dev_proc((gx_device *)vdev, get_profile)((gx_device *)vdev, &dev_profile);
+    if (code < 0)
+        return code;
+    num_des_comps = gsicc_get_device_profile_comps(dev_profile);
+
     if (!gx_dc_is_pure(pdc))
         return_error(gs_error_rangecheck);
     {
@@ -396,6 +393,8 @@ psdf_DCT_filter(gs_param_list *plist /* may be NULL */,
            &st_jpeg_compress_data, "zDCTE");
         if (jcdp == 0)
             return_error(gs_error_VMerror);
+        jcdp->cinfo.mem = NULL;
+        jcdp->cinfo.client_data = NULL;
         ss->data.compress = jcdp;
         jcdp->memory = ss->jpeg_memory = mem;	/* set now for allocation */
         if ((code = gs_jpeg_create_compress(ss)) < 0)
@@ -475,10 +474,8 @@ psdf_end_binary(psdf_binary_writer * pbw)
 int
 psdf_get_bits(gx_device * dev, int y, byte * data, byte ** actual_data)
 {
-    if (dev_proc(dev, get_alpha_bits)(dev, go_graphics) > 1)
-        emprintf1(dev->memory,
-                  "Can't set GraphicsAlphaBits > 1 with a vector device %s.\n",
-                  dev->dname);
+    emprintf(dev->memory,
+                  "Can't set GraphicsAlphaBits or TextAlphaBits with a vector device.\n");
     return_error(gs_error_unregistered);
 }
 
@@ -489,13 +486,15 @@ psdf_get_bits_rectangle(
     gs_get_bits_params_t *  params,
     gs_int_rect **          unread )
 {
+    emprintf(dev->memory,
+                  "Can't set GraphicsAlphaBits or TextAlphaBits with a vector device.\n");
     return_error(gs_error_unregistered);
 }
 
 /*
  * Create compositor procedure for PostScript/PDF writer. Since these
- * devices directly support overprint (and have access to the imager
- * state), no compositor is required for overprint support. Hence, this
+ * devices directly support overprint (and have access to the gs_gstate),
+ * no compositor is required for overprint support. Hence, this
  * routine just recognizes and discards invocations of the overprint
  * compositor.
  */
@@ -504,7 +503,7 @@ psdf_create_compositor(
     gx_device *             dev,
     gx_device **            pcdev,
     const gs_composite_t *  pct,
-    gs_imager_state * pis,
+    gs_gstate             *  pgs,
     gs_memory_t *           mem,
     gx_device *             cdev)
 {
@@ -513,8 +512,8 @@ psdf_create_compositor(
         return 0;
     } else {
         if (dev->parent)
-            return gx_default_create_compositor(dev->parent, pcdev, pct, pis, mem, cdev);
+            return gx_default_create_compositor(dev->parent, pcdev, pct, pgs, mem, cdev);
         else
-            return gx_default_create_compositor(dev, pcdev, pct, pis, mem, cdev);
+            return gx_default_create_compositor(dev, pcdev, pct, pgs, mem, cdev);
     }
 }

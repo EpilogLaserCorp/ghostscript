@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,15 +19,7 @@
 #ifndef iplugin_INCLUDED
 #define iplugin_INCLUDED
 
-#ifndef i_ctx_t_DEFINED
-#define i_ctx_t_DEFINED
-typedef struct gs_context_state_s i_ctx_t;
-#endif
-
-#ifndef gs_memory_DEFINED
-#define gs_memory_DEFINED
-typedef struct gs_memory_s gs_memory_t;
-#endif
+#include "iref.h"
 
 typedef struct i_plugin_holder_s i_plugin_holder;
 typedef struct i_plugin_instance_s i_plugin_instance;

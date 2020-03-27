@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -26,7 +26,7 @@
  *                               this value.
  *   SPECIFIC_CODE (Optional)    If set, this should expand out to code to
  *                               perform the rop. Will be invoked as:
- *                               SPECIFIC_ROP(OUT,D,S,T)
+ *                               SPECIFIC_CODE(OUT,D,S,T)
  *   S_CONST       (Optional)    If set, S will be taken to be constant, else
  *                               S will be read from a pointer.
  *   T_CONST       (Optional)    If set, T will be taken to be constant, else
@@ -39,13 +39,19 @@
  *                               being a pointer to a 1 bit bitmap to choose
  *                               between scolors[0] and [1]. If set to 1, the
  *                               code will assume that this is the case.
- *   S_TRANS       (Optional)    If set, the code will cope with S maybe
- *                               being transparent. If set to 1, the code
- *                               will assume that this is the case.
- *   T_TRANS       (Optional)    If set, the code will cope with T maybe
- *                               being transparent. If set to 1, the code
- *                               will assume that this is the case.
+ *
+ * To make use of SSE here, you must also define:
+ *
+ * MM_SPECIFIC_CODE             If set, SSE can be used. Will be invoked as
+ *                              MM_SPECIFIC_CODE(OUT_PTR,D_PTR,S,T). Note:
+ *                              SPECIFIC_ROP must be set!
  */
+
+#if defined(TEMPLATE_NAME)
+/* Can't do MM_SPECIFIC_CODE if we don't HAVE_SSE2 */
+#ifndef HAVE_SSE2
+#undef MM_SPECIFIC_CODE
+#endif
 
 #ifdef SPECIFIC_ROP
 #if rop3_uses_S(SPECIFIC_ROP)
@@ -68,15 +74,23 @@
 
 #if defined(S_USED) && !defined(S_CONST)
 #define FETCH_S      do { S = *s++; } while (0==1)
+#define MM_FETCH_S   do { S = _mm_loadu_si128((__m128i const *)s); s += 16; } while (0==1)
 #else /* !defined(S_USED) || defined(S_CONST) */
 #define FETCH_S
+#define MM_FETCH_S
 #endif /* !defined(S_USED) || defined(S_CONST) */
 
 #if defined(T_USED) && !defined(T_CONST)
 #define FETCH_T      do { T = *t++; } while (0 == 1)
+#define MM_FETCH_T   do { T = _mm_loadu_su128((_m128i const *)t); t += 16; } while (0 == 1)
 #else /* !defined(T_USED) || defined(T_CONST) */
 #define FETCH_T
+#define MM_FETCH_T
 #endif /* !defined(T_USED) || defined(T_CONST) */
+
+#ifndef MM_SETUP
+#define MM_SETUP() do { } while (0 == 1)
+#endif
 
 static void TEMPLATE_NAME(rop_run_op *op, byte *d, int len)
 {
@@ -87,19 +101,15 @@ static void TEMPLATE_NAME(rop_run_op *op, byte *d, int len)
 #ifdef S_USED
 #ifdef S_CONST
     byte         S = op->s.c;
+#ifdef MM_SPECIFIC_CODE
+    __m128i      MM_S = _mm_set1_epi8(S);
+#endif
 #else /* !defined(S_CONST) */
     const byte  *s = op->s.b.ptr;
 #endif /* !defined(S_CONST) */
-#ifdef S_TRANS
-#if S_TRANS
-    const rop_operand  strans = 0xFF;
-#else /* !S_TRANS */
-    const rop_operand  strans = (op->rop & lop_S_transparent ? 0xFF : -1);
-#endif /* !S_TRANS */
-#endif /* defined(S_TRANS) */
 #ifdef S_1BIT
     int          sroll;
-    const byte  *scolors = op->scolors;
+    const gx_color_index *scolors = op->scolors;
 #endif /* S_1BIT */
 #else /* !defined(S_USED) */
 #define S 0
@@ -108,57 +118,114 @@ static void TEMPLATE_NAME(rop_run_op *op, byte *d, int len)
 #ifdef T_USED
 #ifdef T_CONST
     byte         T = op->t.c;
+#ifdef MM_SPECIFIC_CODE
+    __m128i      MM_T = _mm_set1_epi8(T);
+#endif
 #else /* !defined(T_CONST) */
     const byte  *t = op->t.b.ptr;
 #endif /* !defined(T_CONST) */
-#ifdef T_TRANS
-#if T_TRANS
-    const rop_operand  ttrans = 0xFF;
-#else /* !T_TRANS */
-    const rop_operand  ttrans = (op->rop & lop_T_transparent ? 0xFF : -1);
-#endif /* !T_TRANS */
-#endif /* defined(T_TRANS) */
 #ifdef T_1BIT
     int          troll;
-    const byte  *tcolors = op->tcolors;
-#endif /* T_TRANS */
+    const gx_color_index *tcolors = op->tcolors;
+#endif /* T_1BIT */
 #else /* !defined(T_USED) */
 #define T 0
 #undef T_CONST
 #endif /* !defined(T_USED) */
 
-#if defined(S_TRANS) && defined(S_CONST)
-    if (S == strans)
-        return;
-#endif
-
-#if defined(T_TRANS) && defined(T_CONST)
-    if (T == ttrans)
-        return;
-#endif
+    len *= op->mul;
 
 #ifdef S_1BIT
-#if S_1BIT
+#if S_1BIT == MAYBE
     if (op->flags & rop_s_1bit) {
-#endif /* S_1BIT */
-        s = op->s.b.ptr + (op->s.b.pos>>3);
+#endif /* S_1BIT == MAYBE */
+        s += op->s.b.pos>>3;
         sroll = 8-(op->s.b.pos & 7);
-#if S_1BIT
+#if S_1BIT == MAYBE
     } else
         sroll = 0;
-#endif /* S_1BIT */
+#endif /* S_1BIT == MAYBE */
 #endif /* defined(S_1BIT) */
 #ifdef T_1BIT
-#if T_1BIT
+#if T_1BIT == MAYBE
     if (op->flags & rop_t_1bit) {
-#endif /* T_1BIT */
-        t = op->t.b.ptr + (op->t.b.pos>>3);
+#endif /* T_1BIT == MAYBE */
+        t += op->t.b.pos>>3;
         troll = 8-(op->t.b.pos & 7);
-#if T_1BIT
+#if T_1BIT == MAYBE
     } else
         troll = 0;
-#endif /* T_1BIT */
+#endif /* T_1BIT == MAYBE */
 #endif /* defined(T_1BIT) */
+
+    /* Setup all done, now go for the loops */
+
+    /* SSE version - doesn't do 1 bit (for now at least) */
+#if defined(MM_SPECIFIC_CODE)
+#if defined(S_1_BIT)
+    if (sroll == 0)
+#endif
+#if defined(T_1_BIT)
+    if (troll == 0)
+#endif
+    {
+#ifdef MM_SETUP
+        MM_SETUP();
+#endif
+        while (len > 16)
+        {
+#if defined(S_USED) && !defined(S_CONST)
+            __mm128i MM_S;
+#endif /* defined(S_USED) && !defined(S_CONST) */
+#if defined(T_USED) && !defined(T_CONST)
+            __mm128i MM_T;
+#endif /* defined(T_USED) && !defined(T_CONST) */
+#if defined(S_1BIT) && S_1BIT == MAYBE
+            if (sroll == 0) {
+#endif /* defined(S_1BIT) && S_1BIT == MAYBE */
+#if !defined(S_1BIT) || S_1BIT == MAYBE
+                MM_FETCH_S;
+#endif /* !defined(S_1BIT) || S_1BIT == MAYBE */
+#if defined(S_1BIT) && S_1BIT == MAYBE
+            } else
+#endif /* defined(S_1BIT) && S_1BIT == MAYBE */
+            {
+#ifdef S_1BIT
+                --sroll;
+                S = scolors[(*s >> sroll) & 1];
+                if (sroll == 0) {
+                    sroll = 8;
+                    s++;
+                }
+#endif /* S_1BIT */
+            }
+#if defined(T_1BIT) && T_1BIT == MAYBE
+            if (troll == 0) {
+#endif /* defined(T_1BIT) && T_1BIT == MAYBE */
+#if !defined(T_1BIT) || T_1BIT == MAYBE
+                MM_FETCH_T;
+#endif /* defined(T_1BIT) && T_1BIT == MAYBE */
+#if defined(T_1BIT) && T_1BIT == MAYBE
+            } else
+#endif /* defined(T_1BIT) && T_1BIT == MAYBE */
+            {
+#ifdef T_1BIT
+                --troll;
+                T = tcolors[(*t >> troll) & 1];
+                if (troll == 0) {
+                    troll = 8;
+                    t++;
+                }
+#endif /* T_1BIT */
+            }
+            MM_SPECIFIC_CODE(((__m128i *)d), ((const __m128i *)d), MM_S, MM_T);
+            d += 16;
+            len -= 16;
+        }
+    }
+#endif
+
+    /* Non SSE loop */
     do {
 #if defined(S_USED) && !defined(S_CONST)
         rop_operand S;
@@ -166,15 +233,15 @@ static void TEMPLATE_NAME(rop_run_op *op, byte *d, int len)
 #if defined(T_USED) && !defined(T_CONST)
         rop_operand T;
 #endif /* defined(T_USED) && !defined(T_CONST) */
-#if defined(S_1BIT) && !S_1BIT
+#if defined(S_1BIT) && S_1BIT == MAYBE
         if (sroll == 0) {
-#endif /* defined(S_1BIT) && !S_1BIT */
-#if !defined(S_1BIT) || !S_1BIT
+#endif /* defined(S_1BIT) && S_1BIT == MAYBE */
+#if !defined(S_1BIT) || S_1BIT == MAYBE
             FETCH_S;
-#endif /* !defined(S_1BIT) || !S_1BIT */
-#if defined(S_1BIT) && !S_1BIT
+#endif /* !defined(S_1BIT) || S_1BIT == MAYBE */
+#if defined(S_1BIT) && S_1BIT == MAYBE
         } else
-#endif /* defined(S_1BIT) && !S_1BIT */
+#endif /* defined(S_1BIT) && S_1BIT == MAYBE */
         {
 #ifdef S_1BIT
             --sroll;
@@ -185,15 +252,15 @@ static void TEMPLATE_NAME(rop_run_op *op, byte *d, int len)
             }
 #endif /* S_1BIT */
         }
-#if defined(T_1BIT) && !T_1BIT
+#if defined(T_1BIT) && T_1BIT == MAYBE
         if (troll == 0) {
-#endif /* defined(T_1BIT) && !T_1BIT */
-#if !defined(T_1BIT) || !T_1BIT
+#endif /* defined(T_1BIT) && T_1BIT == MAYBE */
+#if !defined(T_1BIT) || T_1BIT == MAYBE
             FETCH_T;
-#endif /* defined(T_1BIT) && !T_1BIT */
-#if defined(T_1BIT) && !T_1BIT
+#endif /* defined(T_1BIT) && T_1BIT == MAYBE */
+#if defined(T_1BIT) && T_1BIT == MAYBE
         } else
-#endif /* defined(T_1BIT) && !T_1BIT */
+#endif /* defined(T_1BIT) && T_1BIT == MAYBE */
         {
 #ifdef T_1BIT
             --troll;
@@ -204,16 +271,7 @@ static void TEMPLATE_NAME(rop_run_op *op, byte *d, int len)
             }
 #endif /* T_1BIT */
         }
-        if (1
-#if defined(S_TRANS) && !defined(S_CONST)
-            && (S != strans)
-#endif /* defined(S_TRANS) && !defined(S_CONST) */
-#if defined(T_TRANS) && !defined(T_CONST)
-            && (T != ttrans)
-#endif /* defined(T_TRANS) && !defined(T_TRANS) */
-            ) {
-            SPECIFIC_CODE(*d, *d, S, T);
-        }
+        SPECIFIC_CODE(*d, *d, S, T);
         d++;
     }
     while (--len);
@@ -225,12 +283,18 @@ static void TEMPLATE_NAME(rop_run_op *op, byte *d, int len)
 #undef S_1BIT
 #undef S_USED
 #undef S_CONST
-#undef S_TRANS
 #undef SPECIFIC_CODE
 #undef SPECIFIC_ROP
 #undef T
 #undef T_1BIT
 #undef T_USED
 #undef T_CONST
-#undef T_TRANS
 #undef TEMPLATE_NAME
+#undef MM_SETUP
+#undef MM_SPECIFIC_CODE
+#undef MM_FETCH_S
+#undef MM_FETCH_T
+
+#else
+int dummy;
+#endif

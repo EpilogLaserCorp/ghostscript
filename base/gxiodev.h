@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -21,6 +21,10 @@
 #  define gxiodev_INCLUDED
 
 #include "stat_.h"
+#include "gsparam.h"
+#include "scommon.h"
+#include "gp.h"
+#include "gsfname.h"
 
 /*
  * Note that IODevices are not the same as Ghostscript output devices.
@@ -28,10 +32,6 @@
  * Second and Third Edition, for more information.
  */
 
-#ifndef gx_io_device_DEFINED
-#  define gx_io_device_DEFINED
-typedef struct gx_io_device_s gx_io_device;
-#endif
 typedef struct gx_io_device_procs_s gx_io_device_procs;  /* defined here */
 
 /* the number of slots reserved in the io device table for io devices to
@@ -43,24 +43,6 @@ int
 gs_iodev_register_dev(gs_memory_t * mem, const gx_io_device *newiodev);
 
 /* The IODevice table is defined in gconf.c; its extern is in gscdefs.h. */
-
-#ifndef file_enum_DEFINED	/* also defined in gp.h */
-#  define file_enum_DEFINED
-struct file_enum_s;		/* opaque to client, defined by implementors */
-typedef struct file_enum_s file_enum;
-#endif
-
-/* Define an opaque type for parameter lists. */
-#ifndef gs_param_list_DEFINED
-#  define gs_param_list_DEFINED
-typedef struct gs_param_list_s gs_param_list;
-#endif
-
-/* Define an opaque type for streams. */
-#ifndef stream_DEFINED
-#  define stream_DEFINED
-typedef struct stream_s stream;
-#endif
 
 /*
  * Define the IODevice procedures.  Note that file names for fopen, delete,
@@ -75,7 +57,7 @@ typedef struct stream_s stream;
  * implementation of open_device returns an error; the default
  * implementation of open_file in the PostScript interpreter,
  * iodev_os_open_file, uses the IODevice's fopen procedure to open a stream
- * based on an OS FILE *.  However, IODevices are free to implement
+ * based on a gp_file *.  However, IODevices are free to implement
  * open_file (and, if desired, open_device) in any way they want, returning
  * a stream that need not have any relationship to the OS's file system.
  * In this case there is no need to implement fopen or fclose.
@@ -88,6 +70,10 @@ struct gx_io_device_procs_s {
 #define iodev_proc_init(proc)\
   int proc(gx_io_device *iodev, gs_memory_t *mem)
     iodev_proc_init((*init));	/* one-time initialization */
+
+#define iodev_proc_finit(proc)\
+  void proc(gx_io_device *iodev, gs_memory_t *mem)
+    iodev_proc_finit((*finit));	/* finalization */
 
 #define iodev_proc_open_device(proc)\
   int proc(gx_io_device *iodev, const char *access, stream **ps,\
@@ -104,11 +90,11 @@ struct gx_io_device_procs_s {
 
 #define iodev_proc_fopen(proc)\
   int proc(gx_io_device *iodev, const char *fname, const char *access,\
-           FILE **pfile, char *rfname, uint rnamelen)
+           gp_file **pfile, char *rfname, uint rnamelen, gs_memory_t *mem)
     iodev_proc_fopen((*gp_fopen));
 
 #define iodev_proc_fclose(proc)\
-  int proc(gx_io_device *iodev, FILE *file)
+  int proc(gx_io_device *iodev, gp_file *file)
     iodev_proc_fclose((*fclose));
 
 #define iodev_proc_delete_file(proc)\
@@ -124,16 +110,16 @@ struct gx_io_device_procs_s {
     iodev_proc_file_status((*file_status));
 
 #define iodev_proc_enumerate_files(proc)\
-  file_enum *proc(gx_io_device *iodev, const char *pat, uint patlen,\
-                  gs_memory_t *mem)
+  file_enum *proc(gs_memory_t *memory, gx_io_device *iodev, \
+                  const char *pat, uint patlen)
     iodev_proc_enumerate_files((*enumerate_files));
 
 #define iodev_proc_enumerate_next(proc)\
-  uint proc(file_enum *pfen, char *ptr, uint maxlen)
+  uint proc(gs_memory_t *memory, file_enum *pfen, char *ptr, uint maxlen)
     iodev_proc_enumerate_next((*enumerate_next));
 
 #define iodev_proc_enumerate_close(proc)\
-  void proc(file_enum *pfen)
+  void proc(gs_memory_t *memory, file_enum *pfen)
     iodev_proc_enumerate_close((*enumerate_close));
 
     /* Added in release 2.9 */
@@ -154,6 +140,7 @@ typedef iodev_proc_fopen((*iodev_proc_fopen_t));
 
 /* Default implementations of procedures */
 iodev_proc_init(iodev_no_init);
+iodev_proc_finit(iodev_no_finit);
 iodev_proc_open_device(iodev_no_open_device);
 iodev_proc_open_file(iodev_no_open_file);
 iodev_proc_fopen(iodev_no_fopen);
@@ -187,9 +174,9 @@ int gs_fopen_errno_to_code(int);
 
 /* Interface functions for clients that want iodev independent access to */
 /* the gp_enumerate functions */
-file_enum *gs_enumerate_files_init(const char *pat, uint patlen, gs_memory_t * mem);
-uint gs_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen);
-void gs_enumerate_files_close(file_enum * pfen);
+file_enum *gs_enumerate_files_init(gs_memory_t * mem, const char *pat, uint patlen);
+uint gs_enumerate_files_next(gs_memory_t * mem, file_enum * pfen, char *ptr, uint maxlen);
+void gs_enumerate_files_close(gs_memory_t * mem, file_enum * pfen);
 
 /* Test whether a string is equal to a character. */
 /* (This is used for access testing in file_open procedures.) */
@@ -201,11 +188,21 @@ struct gx_io_device_s {
     const char *dname;		/* the IODevice name */
     const char *dtype;		/* the type returned by currentdevparams */
     gx_io_device_procs procs;
+    gs_memory_t *memory;
     void *state;		/* (if the IODevice has state) */
 };
 
+struct_proc_finalize(io_device_finalize);
+
 #define private_st_io_device()	/* in gsiodev.c */\
-  gs_private_st_ptrs1(st_io_device, gx_io_device, "gx_io_device",\
-    io_device_enum_ptrs, io_device_reloc_ptrs, state)
+  gs_public_st_ptrs1_final(st_io_device, gx_io_device, "gx_io_device",\
+    io_device_enum_ptrs, io_device_reloc_ptrs, io_device_finalize, state)
+
+
+int
+gs_iodev_init(gs_memory_t * mem);
+
+void
+gs_iodev_finit(gs_memory_t * mem);
 
 #endif /* gxiodev_INCLUDED */

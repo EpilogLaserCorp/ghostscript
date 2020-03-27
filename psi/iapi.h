@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -68,6 +68,11 @@ extern "C" {
 #    define GSDLLEXPORT
 #  endif
 # endif
+# ifdef __MINGW32__
+/* export stdcall functions as "name" instead of "_name@ordinal" */
+#  undef GSDLLAPI
+#  define GSDLLAPI
+# endif
 # ifndef GSDLLAPI
 #  define GSDLLAPI __stdcall
 # endif
@@ -90,7 +95,11 @@ extern "C" {
 #endif
 
 #ifndef GSDLLEXPORT
-# define GSDLLEXPORT
+# ifdef __GNUC__
+#   define GSDLLEXPORT __attribute__ ((visibility ("default")))
+# else
+#   define GSDLLEXPORT
+# endif
 #endif
 #ifndef GSDLLAPI
 # define GSDLLAPI
@@ -110,6 +119,16 @@ extern "C" {
 #ifndef display_callback_DEFINED
 # define display_callback_DEFINED
 typedef struct display_callback_s display_callback;
+#endif
+
+#ifndef gs_memory_DEFINED
+#  define gs_memory_DEFINED
+typedef struct gs_memory_s gs_memory_t;
+#endif
+
+#ifndef gp_file_DEFINED
+#  define gp_file_DEFINED
+typedef struct gp_file_s gp_file;
 #endif
 
 typedef struct gsapi_revision_s {
@@ -206,13 +225,13 @@ GSDLLEXPORT int GSDLLAPI gsapi_set_display_callback(
  * gsapi_init_with_args().
  */
 GSDLLEXPORT int GSDLLAPI
-gsapi_set_default_device_list(void *lib, char *list, int listlen);
+gsapi_set_default_device_list(void *instance, char *list, int listlen);
 
 /* Returns a pointer to the current default device string
  * *Must* be called after gsapi_new_instance().
  */
 GSDLLEXPORT int GSDLLAPI
-gsapi_get_default_device_list(void *lib, char **list, int *listlen);
+gsapi_get_default_device_list(void *instance, char **list, int *listlen);
 
 /* Set the encoding used for the args. By default we assume
  * 'local' encoding. For windows this equates to whatever the current
@@ -303,11 +322,87 @@ gsapi_run_fileW(void *instance,
 GSDLLEXPORT int GSDLLAPI
 gsapi_exit(void *instance);
 
-/* Visual Tracer */
-/* This function is only for debug purpose clients */
-struct vd_trace_interface_s;
+typedef enum {
+    gs_spt_invalid = -1,
+    gs_spt_null    = 0,   /* void * is NULL */
+    gs_spt_bool    = 1,   /* void * is NULL (false) or non-NULL (true) */
+    gs_spt_int     = 2,   /* void * is a pointer to an int */
+    gs_spt_float   = 3,   /* void * is a float * */
+    gs_spt_name    = 4,   /* void * is a char * */
+    gs_spt_string  = 5    /* void * is a char * */
+} gs_set_param_type;
+GSDLLEXPORT int GSDLLAPI gsapi_set_param(void *instance, gs_set_param_type type, const char *param, const void *value);
+
+enum {
+    GS_PERMIT_FILE_READING = 0,
+    GS_PERMIT_FILE_WRITING = 1,
+    GS_PERMIT_FILE_CONTROL = 2
+};
+
+/* Add a path to one of the sets of permitted paths. */
+GSDLLEXPORT int GSDLLAPI
+gsapi_add_control_path(void *instance, int type, const char *path);
+
+/* Remove a path from one of the sets of permitted paths. */
+GSDLLEXPORT int GSDLLAPI
+gsapi_remove_control_path(void *instance, int type, const char *path);
+
+/* Purge all the paths from the one of the sets of permitted paths. */
 GSDLLEXPORT void GSDLLAPI
-gsapi_set_visual_tracer(struct vd_trace_interface_s *I);
+gsapi_purge_control_paths(void *instance, int type);
+
+GSDLLEXPORT void GSDLLAPI
+gsapi_activate_path_control(void *instance, int enable);
+
+GSDLLEXPORT int GSDLLAPI
+gsapi_is_path_control_active(void *instance);
+
+/* Details of gp_file can be found in gp.h.
+ * Users wanting to use this function should include
+ * that file. Not included here to avoid bloating the
+ * API inclusions for the majority of people who won't
+ * want it. */
+#ifndef gp_file_name_sizeof
+#define gp_file_name_sizeof 4096
+#endif
+
+typedef struct
+{
+    int (*open_file)(const gs_memory_t *mem,
+                           void        *secret,
+                     const char        *fname,
+                     const char        *mode,
+                           gp_file    **file);
+    int (*open_pipe)(const gs_memory_t *mem,
+                           void        *secret,
+                     const char        *fname,
+                           char        *rfname, /* 4096 bytes */
+                     const char        *mode,
+                           gp_file    **file);
+    int (*open_scratch)(const gs_memory_t *mem,
+                              void        *secret,
+                        const char        *prefix,
+                              char        *rfname, /* 4096 bytes */
+                        const char        *mode,
+                              int          rm,
+                              gp_file    **file);
+    int (*open_printer)(const gs_memory_t *mem,
+                              void        *secret,
+                              char        *fname, /* 4096 bytes */
+                              int          binary,
+                              gp_file    **file);
+    int (*open_handle)(const gs_memory_t *mem,
+                             void        *secret,
+                             char        *fname, /* 4096 bytes */
+                       const char        *mode,
+                             gp_file    **file);
+} gsapi_fs_t;
+
+GSDLLEXPORT int GSDLLAPI
+gsapi_add_fs(void *instance, gsapi_fs_t *fs, void *secret);
+
+GSDLLEXPORT void GSDLLAPI
+gsapi_remove_fs(void *instance, gsapi_fs_t *fs, void *secret);
 
 /* function prototypes */
 typedef int (GSDLLAPIPTR PFN_gsapi_revision)(
@@ -325,9 +420,9 @@ typedef int (GSDLLAPIPTR PFN_gsapi_set_poll)(void *instance,
 typedef int (GSDLLAPIPTR PFN_gsapi_set_display_callback)(
     void *instance, display_callback *callback);
 typedef int (GSDLLAPIPTR PFN_gsapi_set_default_device_list)(
-    void *lib, char *list, int listlen);
+    void *instance, char *list, int listlen);
 typedef int (GSDLLAPIPTR PFN_gsapi_get_default_device_list)(
-    void *lib, char **list, int *listlen);
+    void *instance, char **list, int *listlen);
 typedef int (GSDLLAPIPTR PFN_gsapi_init_with_args)(
     void *instance, int argc, char **argv);
 #ifdef __WIN32__
@@ -360,8 +455,15 @@ typedef int (GSDLLAPIPTR PFN_gsapi_run_fileW)(void *instance,
     const wchar_t *file_name, int user_errors, int *pexit_code);
 #endif
 typedef int (GSDLLAPIPTR PFN_gsapi_exit)(void *instance);
-typedef void (GSDLLAPIPTR PFN_gsapi_set_visual_tracer)
-    (struct vd_trace_interface_s *I);
+typedef int (GSDLLAPIPTR PFN_gsapi_set_param)(void *instance, gs_set_param_type type, const char *param, const void *value);
+
+typedef int (GSDLLAPIPTR PFN_gsapi_add_control_path)(void *instance, int type, const char *path);
+typedef int (GSDLLAPIPTR PFN_gsapi_remove_control_path)(void *instance, int type, const char *path);
+typedef void (GSDLLAPIPTR PFN_gsapi_purge_control_paths)(void *instance, int type);
+typedef void (GSDLLAPIPTR PFN_gsapi_activate_path_control)(void *instance, int enable);
+typedef int (GSDLLAPIPTR PFN_gsapi_is_path_control_active)(void *instance);
+typedef int (GSDLLAPIPTR PFN_gsapi_add_fs)(void *instance, gsapi_fs_t *fs, void *secret);
+typedef void (GSDLLAPIPTR PFN_gsapi_remove_fs)(void *instance, gsapi_fs_t *fs, void *secret);
 
 #ifdef __MACOS__
 #pragma export off

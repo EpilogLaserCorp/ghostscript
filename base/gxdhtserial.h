@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,25 +19,8 @@
 #ifndef gxdhtserial_INCLUDED
 #  define gxdhtserial_INCLUDED
 
-#ifndef gs_memory_DEFINED
-#  define gs_memory_DEFINED
-typedef struct gs_memory_s  gs_memory_t;
-#endif
-
-#ifndef gx_device_DEFINED
-#  define gx_device_DEFINED
-typedef struct gx_device_s  gx_device;
-#endif
-
-#ifndef gx_device_halftone_DEFINED
-#  define gx_device_halftone_DEFINED
-typedef struct gx_device_halftone_s gx_device_halftone;
-#endif
-
-#ifndef gs_imager_state_DEFINED
-#  define gs_imager_state_DEFINED
-typedef struct gs_imager_state_s    gs_imager_state;
-#endif
+#include "gsdevice.h"
+#include "gsdcolor.h"
 
 /*
  * Serialize a halftone.
@@ -70,7 +53,7 @@ extern  int     gx_ht_write( const gx_device_halftone * pdht,
  *
  * Returns the number of bytes read, or < 0 in the event of an error.
  */
-extern  int     gx_ht_read_and_install( gs_imager_state *   pis,
+extern  int     gx_ht_read_and_install( gs_gstate   *        pgs,
                                         const gx_device *   dev,
                                         const byte *        data,
                                         uint                size,

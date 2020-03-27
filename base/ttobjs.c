@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -666,6 +666,28 @@ static int free_aux(ttfMemory *mem, void *ptr)
       if ( error )
         goto Fin;
 
+      exec->zp0 = exec->pts;
+      exec->zp1 = exec->pts;
+      exec->zp2 = exec->pts;
+
+      exec->GS.gep0 = 1;
+      exec->GS.gep1 = 1;
+      exec->GS.gep2 = 1;
+
+      exec->GS.projVector.x = 0x4000;
+      exec->GS.projVector.y = 0x0000;
+
+      exec->GS.freeVector = exec->GS.projVector;
+      exec->GS.dualVector = exec->GS.projVector;
+
+      exec->GS.round_state = 1;
+      exec->GS.loop        = 1;
+
+      /* some glyphs leave something on the stack. so we clean it */
+      /* before a new execution.                                  */
+      exec->top     = 0;
+      exec->callTop = 0;
+
       error = RunIns( exec );
       Unset_CodeRange(exec);
     }
@@ -780,6 +802,28 @@ static int free_aux(ttfMemory *mem, void *ptr)
       error = Goto_CodeRange( exec, TT_CodeRange_Cvt, 0 );
       if (error)
         goto Fin;
+
+      exec->zp0 = exec->pts;
+      exec->zp1 = exec->pts;
+      exec->zp2 = exec->pts;
+
+      exec->GS.gep0 = 1;
+      exec->GS.gep1 = 1;
+      exec->GS.gep2 = 1;
+
+      exec->GS.projVector.x = 0x4000;
+      exec->GS.projVector.y = 0x0000;
+
+      exec->GS.freeVector = exec->GS.projVector;
+      exec->GS.dualVector = exec->GS.projVector;
+
+      exec->GS.round_state = 1;
+      exec->GS.loop        = 1;
+
+      /* some glyphs leave something on the stack. so we clean it */
+      /* before a new execution.                                  */
+      exec->top     = 0;
+      exec->callTop = 0;
 
       error = RunIns( exec );
       Unset_CodeRange(exec);

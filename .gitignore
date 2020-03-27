@@ -1,5 +1,6 @@
 # Ignore editor backup files
 *~
+*.swp
 
 # Ignore bad merge files
 *.rej
@@ -115,12 +116,19 @@ gs/jbig2dec/config.h
 gs/jbig2dec/configure.lineno
 gs/jbig2dec/libtool
 
+config.guess
 config.log
 config.mak
 config.status
+config.sub
 configure
+install-sh
 tiff
 tiff-config
+
+
+/Makefile
+/auxflags.mak
 
 
 # Adding the following lines would help limit the 'noise' seen in git status

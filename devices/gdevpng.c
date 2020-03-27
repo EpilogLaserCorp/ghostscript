@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -33,12 +33,7 @@
 /* lpd (L. Peter Deutsch) 1996-4-7: Modified for libpng 0.88. */
 /* Original version by Russell Lang 1995-07-04 */
 
-#include "gdevprn.h"
-#include "gdevmem.h"
-#include "gdevpccm.h"
-#include "gscdefs.h"
-#include "gxdownscale.h"
-
+/* RJW: Include png header BEFORE the gs ones to avoid warnings. */
 /*
  * libpng versions 1.0.3 and later allow disabling access to the stdxxx
  * files while retaining support for FILE * I/O.
@@ -54,6 +49,12 @@
  */
 /*#define PNG_NO_STDIO*/
 #include "png_.h"
+
+#include "gdevprn.h"
+#include "gdevmem.h"
+#include "gdevpccm.h"
+#include "gscdefs.h"
+#include "gxdownscale.h"
 
 /* ------ The device descriptors ------ */
 
@@ -83,8 +84,7 @@ typedef struct gx_device_png_s gx_device_png;
 struct gx_device_png_s {
     gx_device_common;
     gx_prn_device_common;
-    int downscale_factor;
-    int min_feature_size;
+    gx_downscaler_params downscale;
 };
 
 /* Monochrome. */
@@ -96,8 +96,7 @@ const gx_device_png gs_pngmono_device =
            X_DPI, Y_DPI,
            0, 0, 0, 0,		/* margins */
            1, 1, 1, 1, 2, 2, png_print_page),
-    1, /* downscale_factor */
-    0  /* min_feature_size */
+    GX_DOWNSCALER_PARAMS_DEFAULTS
 };
 
 
@@ -113,8 +112,7 @@ const gx_device_png gs_png16_device = {
            X_DPI, Y_DPI,
            0, 0, 0, 0,		/* margins */
            3, 4, 1, 1, 2, 2, png_print_page),
-    1, /* downscale_factor */
-    0  /* min_feature_size */
+    GX_DOWNSCALER_PARAMS_DEFAULTS
 };
 
 /* 8-bit (SuperVGA-style) color. */
@@ -130,8 +128,7 @@ const gx_device_png gs_png256_device = {
            X_DPI, Y_DPI,
            0, 0, 0, 0,		/* margins */
            3, 8, 5, 5, 6, 6, png_print_page),
-    1, /* downscale_factor */
-    0  /* min_feature_size */
+    GX_DOWNSCALER_PARAMS_DEFAULTS
 };
 
 /* 8-bit gray */
@@ -148,8 +145,7 @@ const gx_device_png gs_pnggray_device =
                  X_DPI, Y_DPI,
                  0, 0, 0, 0,	/* margins */
                  1, 8, 255, 0, 256, 0, png_print_page),
-    1, /* downscale_factor */
-    0  /* min_feature_size */
+    GX_DOWNSCALER_PARAMS_DEFAULTS
 };
 
 /* Monochrome (with error diffusion) */
@@ -167,8 +163,7 @@ const gx_device_png gs_pngmonod_device =
                  X_DPI, Y_DPI,
                  0, 0, 0, 0,	/* margins */
                  1, 8, 255, 0, 256, 0, png_print_page_monod),
-    1, /* downscale_factor */
-    0  /* min_feature_size */
+    GX_DOWNSCALER_PARAMS_DEFAULTS
 };
 
 /* 24-bit color. */
@@ -185,8 +180,7 @@ const gx_device_png gs_png16m_device =
                  X_DPI, Y_DPI,
                  0, 0, 0, 0,	/* margins */
                  3, 24, 255, 255, 256, 256, png_print_page),
-    1, /* downscale_factor */
-    0  /* min_feature_size */
+    GX_DOWNSCALER_PARAMS_DEFAULTS
 };
 
 /* 48 bit color. */
@@ -201,8 +195,7 @@ const gx_device_png gs_png48_device =
                  X_DPI, Y_DPI,
                  0, 0, 0, 0,	/* margins */
                  3, 48, 0, 65535, 1, 65536, png_print_page),
-    1, /* downscale_factor */
-    0  /* min_feature_size */
+    GX_DOWNSCALER_PARAMS_DEFAULTS
 };
 
 /* 32-bit RGBA */
@@ -217,8 +210,7 @@ typedef struct gx_device_pngalpha_s gx_device_pngalpha;
 struct gx_device_pngalpha_s {
     gx_device_common;
     gx_prn_device_common;
-    int downscale_factor;
-    int min_feature_size;
+    gx_downscaler_params downscale;
     int background;
 };
 static const gx_device_procs pngalpha_procs =
@@ -305,14 +297,14 @@ const gx_device_pngalpha gs_pngalpha_device = {
          256 /* dither grays */,
          256 /* dither colors */,
          { 4, 4 } /* antialias info text, graphics */,
-         GX_CINFO_SEP_LIN_NONE /* separable_and_linear */,
+         GX_CINFO_UNKNOWN_SEP_LIN /* separable_and_linear */,
          { 0 } /* component shift */,
          { 0 } /* component bits */,
          { 0 } /* component mask */,
          "DeviceRGB" /* process color name */,
          GX_CINFO_OPMODE_UNKNOWN /* opmode */,
          0 /* process_cmps */,
-         0 /* icc_locations */    
+         0 /* icc_locations */
         },
         std_device_part2_(
           (int)((float)(DEFAULT_WIDTH_10THS) * (X_DPI) / 10 + 0.5),
@@ -321,8 +313,7 @@ const gx_device_pngalpha gs_pngalpha_device = {
         offset_margin_values(0, 0, 0, 0, 0, 0),
         std_device_part3_(),
         prn_device_body_rest_(png_print_page),
-        1, /* downscale_factor */
-        0, /* min_feature_size */
+        GX_DOWNSCALER_PARAMS_DEFAULTS,
         0xffffff	/* white background */
 };
 
@@ -335,9 +326,7 @@ png_get_params_downscale(gx_device * dev, gs_param_list * plist)
     int code, ecode;
 
     ecode = 0;
-    if (pdev->downscale_factor < 1)
-        pdev->downscale_factor = 1;
-    if ((code = param_write_int(plist, "DownScaleFactor", &pdev->downscale_factor)) < 0)
+    if ((code = gx_downscaler_write_params(plist, &pdev->downscale, 0)) < 0)
         ecode = code;
 
     code = gdev_prn_get_params(dev, plist);
@@ -352,27 +341,12 @@ png_put_params_downscale(gx_device *dev, gs_param_list *plist)
 {
     gx_device_png *pdev = (gx_device_png *)dev;
     int code, ecode;
-    int dsf = pdev->downscale_factor;
-    const char *param_name;
-    
-    ecode = 0;
-    switch (code = param_read_int(plist, (param_name = "DownScaleFactor"), &dsf)) {
-        case 0:
-            if (dsf >= 1)
-                break;
-            code = gs_error_rangecheck;
-        default:
-            ecode = code;
-            param_signal_error(plist, param_name, ecode);
-        case 1:
-            break;
-    }
+
+    ecode = gx_downscaler_read_params(plist, &pdev->downscale, 0);
 
     code = gdev_prn_put_params(dev, plist);
     if (code < 0)
         ecode = code;
-
-    pdev->downscale_factor = dsf;
 
     return ecode;
 }
@@ -382,11 +356,11 @@ png_get_params_downscale_mfs(gx_device *dev, gs_param_list *plist)
 {
     gx_device_png *pdev = (gx_device_png *)dev;
     int code, ecode;
-    
-    ecode = 0;
-    if ((code = param_write_int(plist, "MinFeatureSize", &pdev->min_feature_size)) < 0)
-        ecode = code;
-    code = png_get_params_downscale(dev, plist);
+
+    ecode = gx_downscaler_write_params(plist, &pdev->downscale,
+                                      GX_DOWNSCALER_PARAMS_MFS);
+
+    code = gdev_prn_get_params(dev, plist);
     if (code < 0)
         ecode = code;
 
@@ -398,36 +372,67 @@ png_put_params_downscale_mfs(gx_device *dev, gs_param_list *plist)
 {
     gx_device_png *pdev = (gx_device_png *)dev;
     int code, ecode;
-    int mfs = pdev->min_feature_size;
-    const char *param_name;
-    
-    ecode = 0;
-    switch (code = param_read_int(plist, (param_name = "MinFeatureSize"), &mfs)) {
-        case 0:
-            if (mfs >= 0 && mfs <= 2)
-                break;
-            code = gs_error_rangecheck;
-        default:
-            ecode = code;
-            param_signal_error(plist, param_name, ecode);
-        case 1:
-            break;
-    }
 
-    code = png_put_params_downscale(dev, plist);
+    ecode = gx_downscaler_read_params(plist, &pdev->downscale,
+                                      GX_DOWNSCALER_PARAMS_MFS);
+
+    code = gdev_prn_put_params(dev, plist);
     if (code < 0)
         ecode = code;
-
-    pdev->min_feature_size = mfs;
 
     return ecode;
 }
 
+#define PNG_MEM_ALIGN 16
+static png_voidp
+gdevpng_malloc(png_structp png, png_size_t size)
+{
+    gs_memory_t *mem = png_get_mem_ptr(png);
+    uchar *unaligned;
+    uchar *aligned;
+
+    if (size == 0)
+        return NULL;
+    unaligned = gs_alloc_bytes(mem, size + PNG_MEM_ALIGN, "libpng");
+    if (unaligned == NULL)
+        return NULL;
+
+    aligned = (uchar *)((intptr_t)(unaligned + PNG_MEM_ALIGN) & ~(PNG_MEM_ALIGN - 1));
+    aligned[-1] = (uchar)(aligned - unaligned);
+
+    return aligned;
+}
+
+static void
+gdevpng_free(png_structp png, png_voidp ptr)
+{
+    gs_memory_t *mem = png_get_mem_ptr(png);
+    uchar *aligned = ptr;
+    if (aligned == NULL)
+        return;
+    gs_free_object(mem, aligned - aligned[-1], "libpng");
+}
+
+static void
+my_png_write(png_struct *png, png_bytep buf, png_size_t size)
+{
+    gp_file *file = png_get_io_ptr(png);
+
+    (void)gp_fwrite(buf, 1, size, file);
+}
+
+static void
+my_png_flush(png_struct *png)
+{
+    gp_file *file = png_get_io_ptr(png);
+
+    (void)gp_fflush(file);
+}
 
 /* Write out a page in PNG format. */
 /* This routine is used for all formats. */
 static int
-do_png_print_page(gx_device_png * pdev, FILE * file, bool monod)
+do_png_print_page(gx_device_png * pdev, gp_file * file, bool monod)
 {
     gs_memory_t *mem = pdev->memory;
     int raster = gdev_prn_raster(pdev);
@@ -436,9 +441,8 @@ do_png_print_page(gx_device_png * pdev, FILE * file, bool monod)
     /* PNG structures */
     byte *row = gs_alloc_bytes(mem, raster, "png raster buffer");
     png_struct *png_ptr =
-    png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-    png_info *info_ptr =
-    png_create_info_struct(png_ptr);
+        png_create_write_struct_2(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL, pdev->memory, gdevpng_malloc, gdevpng_free);
+    png_info *info_ptr = png_create_info_struct(png_ptr);
     int depth = pdev->color_info.depth;
     int y;
     int code;			/* return code */
@@ -447,8 +451,8 @@ do_png_print_page(gx_device_png * pdev, FILE * file, bool monod)
     png_text text_png;
     int dst_bpc, src_bpc;
     bool errdiff = 0;
-    int factor = pdev->downscale_factor;
-    int mfs = pdev->min_feature_size;
+    int factor = pdev->downscale.downscale_factor;
+    int mfs = pdev->downscale.min_feature_size;
 
     bool invert = false, endian_swap = false, bg_needed = false;
     png_byte bit_depth = 0;
@@ -496,7 +500,7 @@ do_png_print_page(gx_device_png * pdev, FILE * file, bool monod)
     }
     code = 0;			/* for normal path */
     /* set up the output control */
-    png_init_io(png_ptr, file);
+    png_set_write_fn(png_ptr, file, my_png_write, my_png_flush);
 
     /* set the file information here */
     /* resolution is in pixels per meter vs. dpi */
@@ -553,7 +557,7 @@ do_png_print_page(gx_device_png * pdev, FILE * file, bool monod)
         case 1:
             bit_depth = 1;
             color_type = PNG_COLOR_TYPE_GRAY;
-            /* invert monocrome pixels */
+            /* invert monochrome pixels */
             if (!monod) {
                 invert = true;
             }
@@ -622,6 +626,19 @@ do_png_print_page(gx_device_png * pdev, FILE * file, bool monod)
         png_set_PLTE(png_ptr, info_ptr, palettep, num_palette);
 
     png_set_text(png_ptr, info_ptr, &text_png, 1);
+
+    if (pdev->icc_struct != NULL && pdev->icc_struct->device_profile[0] != NULL) {
+        cmm_profile_t *icc_profile = pdev->icc_struct->device_profile[0];
+        /* PNG can only be RGB or gray.  No CIELAB :(  */
+        if (icc_profile->data_cs == gsRGB || icc_profile->data_cs == gsGRAY) {
+            if (icc_profile->num_comps == pdev->color_info.num_components &&
+                !(pdev->icc_struct->usefastcolor)) {
+                png_set_iCCP(png_ptr, info_ptr, icc_profile->name,
+                    PNG_COMPRESSION_TYPE_DEFAULT, icc_profile->buffer,
+                    icc_profile->buffer_size);
+            }
+        }
+    }
 #else
     info_ptr->bit_depth = bit_depth;
     info_ptr->color_type = color_type;
@@ -639,7 +656,7 @@ do_png_print_page(gx_device_png * pdev, FILE * file, bool monod)
     if (pdev->icc_struct != NULL && pdev->icc_struct->device_profile[0] != NULL) {
         cmm_profile_t *icc_profile = pdev->icc_struct->device_profile[0];
         /* PNG can only be RGB or gray.  No CIELAB :(  */
-        if (icc_profile->data_cs == gsRGB || icc_profile->data_cs == gsGRAY) { 
+        if (icc_profile->data_cs == gsRGB || icc_profile->data_cs == gsGRAY) {
             if (icc_profile->num_comps == pdev->color_info.num_components &&
                 !(pdev->icc_struct->usefastcolor)) {
                 info_ptr->iccp_name = icc_profile->name;
@@ -648,7 +665,7 @@ do_png_print_page(gx_device_png * pdev, FILE * file, bool monod)
                 info_ptr->valid |= PNG_INFO_iCCP;
             }
         }
-    } 
+    }
 #endif
     if (invert) {
         if (depth == 32)
@@ -683,9 +700,21 @@ do_png_print_page(gx_device_png * pdev, FILE * file, bool monod)
                               depth/dst_bpc, factor, mfs, NULL, 0);
     if (code >= 0)
     {
+#ifdef CLUSTER
+        int bitlen = width*dst_bpc;
+        int end = bitlen>>3;
+        int mask = 255>>(bitlen&7);
+        if (bitlen & 7)
+            mask = ~mask;
+        else
+            end--;
+#endif
         /* Write the contents of the image. */
         for (y = 0; y < height; y++) {
-            gx_downscaler_copy_scan_lines(&ds, y, row, raster);
+            gx_downscaler_getbits(&ds, row, y);
+#ifdef CLUSTER
+            row[end] &= mask;
+#endif
             png_write_rows(png_ptr, &row, 1);
         }
         gx_downscaler_fin(&ds);
@@ -709,13 +738,13 @@ do_png_print_page(gx_device_png * pdev, FILE * file, bool monod)
 }
 
 static int
-png_print_page(gx_device_printer * pdev, FILE * file)
+png_print_page(gx_device_printer * pdev, gp_file * file)
 {
     return do_png_print_page((gx_device_png *)pdev, file, 0);
 }
 
 static int
-png_print_page_monod(gx_device_printer * pdev, FILE * file)
+png_print_page_monod(gx_device_printer * pdev, gp_file * file)
 {
     return do_png_print_page((gx_device_png *)pdev, file, 1);
 }
@@ -763,10 +792,28 @@ pngalpha_create_buf_device(gx_device **pbdev, gx_device *target, int y,
    const gx_render_plane_t *render_plane, gs_memory_t *mem,
    gx_color_usage_t *color_usage)
 {
-    gx_device_printer *ptarget = (gx_device_printer *)target;
+    gx_device_printer *ptarget;
     int code = gx_default_create_buf_device(pbdev, target, y,
         render_plane, mem, color_usage);
     /* Now set copy_alpha to one that handles RGBA */
+
+    /* this is really pretty nasty. The pngalpha device is going to replace
+     * the device methods in the memory rendering device with some of its own.
+     * To me this seems fraught with peril, its making a lot of assumptions
+     * about the compatibility of the devices!
+     * This, of course, totally breaks device chaining, but since the memory
+     * device wasn't going to pass on the intermediate method calls to the
+     * 'terminating' device, we can work around it here. We simply descend
+     * the chain of devices to the terminating device, and pull the methods
+     * we need directly from that device. I don't know why we are using
+     * 'orig_procs' either, but its safe to do so because this is only
+     * done here for the PNG device, and we know that this is a gx_device_prn
+     * based device.
+     */
+    while (target->child != NULL)
+        target = target->child;
+
+    ptarget= (gx_device_printer *)target;
     set_dev_proc(*pbdev, copy_alpha, ptarget->orig_procs.copy_alpha);
     set_dev_proc(*pbdev, fillpage, pngalpha_fillpage);
     return code;
@@ -778,8 +825,6 @@ pngalpha_put_params(gx_device * pdev, gs_param_list * plist)
     gx_device_pngalpha *ppdev = (gx_device_pngalpha *)pdev;
     int background;
     int code, ecode;
-    int dsf = ppdev->downscale_factor;
-    const char *param_name;
 
     /* BackgroundColor in format 16#RRGGBB is used for bKGD chunk */
     switch(code = param_read_int(plist, "BackgroundColor", &background)) {
@@ -794,22 +839,13 @@ pngalpha_put_params(gx_device * pdev, gs_param_list * plist)
             break;
     }
 
-    switch (ecode = param_read_int(plist, (param_name = "DownScaleFactor"), &dsf)) {
-        case 0:
-            if (dsf >= 1)
-                break;
-            ecode = gs_error_rangecheck;
-        default:
-            code = ecode;
-            param_signal_error(plist, param_name, ecode);
-        case 1:
-            break;
-    }
+    if ((ecode = gx_downscaler_read_params(plist, &ppdev->downscale, 0)) < 0)
+        code = ecode;
 
     if (code == 0) {
         code = gdev_prn_put_params(pdev, plist);
     }
-    ppdev->downscale_factor = dsf;
+
     return code;
 }
 
@@ -824,9 +860,7 @@ pngalpha_get_params(gx_device * pdev, gs_param_list * plist)
         code = param_write_int(plist, "BackgroundColor",
                                 &(ppdev->background));
     ecode = 0;
-    if (ppdev->downscale_factor < 1)
-        ppdev->downscale_factor = 1;
-    if ((ecode = param_write_int(plist, "DownScaleFactor", &ppdev->downscale_factor)) < 0)
+    if ((ecode = gx_downscaler_write_params(plist, &ppdev->downscale, 0)) < 0)
         code = ecode;
 
     return code;
@@ -862,27 +896,24 @@ pngalpha_decode_color(gx_device * dev, gx_color_index color,
 
 /* fill the page fills with transparent */
 static int
-pngalpha_fillpage(gx_device *dev, gs_imager_state * pis, gx_device_color *pdevc)
+pngalpha_fillpage(gx_device *dev, gs_gstate * pgs, gx_device_color *pdevc)
 {
     return (*dev_proc(dev, fill_rectangle))(dev, 0, 0, dev->width, dev->height,  0xffffffff);
 }
 
 /* Handle the RGBA planes from the PDF 1.4 compositor */
 static int
-pngalpha_put_image (gx_device *pdev, const byte *buffer, int num_chan, int xstart,
+pngalpha_put_image (gx_device *pdev, gx_device *mdev, const byte **buffers, int num_chan, int xstart,
               int ystart, int width, int height, int row_stride,
-              int plane_stride, int alpha_plane_index, int tag_plane_index)
+              int alpha_plane_index, int tag_plane_index)
 {
-    gx_device_memory *pmemdev = (gx_device_memory *)pdev;
+    gx_device_memory *pmemdev = (gx_device_memory *)mdev;
     byte *buffer_prn;
     int yend = ystart + height;
     int xend = xstart + width;
     int x, y;
     int src_position, des_position;
 
-    /* Eventually, the pdf14 device might be chunky pixels, punt for now */
-    if (plane_stride == 0)
-        return 0;
     if (num_chan != 3 || alpha_plane_index <= 0)
             return_error(gs_error_unknownerror);        /* can't handle these cases */
 
@@ -897,11 +928,11 @@ pngalpha_put_image (gx_device *pdev, const byte *buffer, int num_chan, int xstar
         src_position = (y - ystart) * row_stride;
         des_position = y * pmemdev->raster + xstart * 4;
         for ( x = xstart; x < xend; x++ ) {
-            buffer_prn[des_position++] =  buffer[src_position];
-            buffer_prn[des_position++] =  buffer[src_position + plane_stride];
-            buffer_prn[des_position++] =  buffer[src_position + 2 * plane_stride];
+            buffer_prn[des_position++] =  buffers[0][src_position];
+            buffer_prn[des_position++] =  buffers[1][src_position];
+            buffer_prn[des_position++] =  buffers[2][src_position];
             /* Alpha data in low bits. Note that Alpha is inverted. */
-            buffer_prn[des_position++] = (255 - buffer[src_position + alpha_plane_index * plane_stride]);
+            buffer_prn[des_position++] = (255 - buffers[alpha_plane_index][src_position]);
             src_position += 1;
         }
     }
@@ -950,7 +981,10 @@ pngalpha_copy_alpha(gx_device * dev, const byte * data, int data_x,
             byte *line;
             int sx, rx;
 
-            DECLARE_LINE_ACCUM_COPY(lout, bpp, x);
+            byte *l_dptr = lout;
+            int l_dbit = 0;
+            byte l_dbyte = ((l_dbit) ? (byte)(*(l_dptr) & (0xff00 >> (l_dbit))) : 0);
+            int l_xprev = x;
 
             code = (*dev_proc(dev, get_bits)) (dev, ry, lin, &line);
             if (code < 0)
@@ -958,14 +992,24 @@ pngalpha_copy_alpha(gx_device * dev, const byte * data, int data_x,
             for (sx = data_x, rx = x; sx < data_x + width; ++sx, ++rx) {
                 gx_color_index previous = gx_no_color_index;
                 gx_color_index composite;
-                int alpha2, alpha;
+                uint32_t alpha2, alpha;
 
-                if (depth == 2)	/* map 0 - 3 to 0 - 15 */
-                    alpha = ((row[sx >> 2] >> ((3 - (sx & 3)) << 1)) & 3) * 5;
-                else
-                    alpha2 = row[sx >> 1],
-                        alpha = (sx & 1 ? alpha2 & 0xf : alpha2 >> 4);
-                if (alpha == 15) {	/* Just write the new color. */
+                switch(depth)
+                {
+                case 2:	/* map 0 - 3 to 0 - 255 */
+                    alpha = ((row[sx >> 2] >> ((3 - (sx & 3)) << 1)) & 3) * 85;
+                    break;
+                case 4:
+                    alpha2 = row[sx >> 1];
+                    alpha = (sx & 1 ? alpha2 & 0xf : alpha2 >> 4) * 17;
+                    break;
+                case 8:
+                    alpha = row[sx];
+                    break;
+                default:
+		  return_error(gs_error_rangecheck);
+                }
+                if (alpha == 255) {	/* Just write the new color. */
                     composite = color;
                 } else {
                     if (previous == gx_no_color_index) {	/* Extract the old color. */
@@ -981,19 +1025,19 @@ pngalpha_copy_alpha(gx_device * dev, const byte * data, int data_x,
                     } else {	/* Blend values. */
                         gx_color_value cv[GX_DEVICE_COLOR_MAX_COMPONENTS];
                         int i;
-                        int old_coverage;
-                        int new_coverage;
+                        uint32_t old_coverage;
+                        uint32_t new_coverage;
 
                         (*dev_proc(dev, decode_color)) (dev, previous, cv);
                         /* decode color doesn't give us coverage */
                         cv[3] = previous & 0xff;
                         old_coverage = 255 - cv[3];
                         new_coverage =
-                            (255 * alpha + old_coverage * (15 - alpha)) / 15;
+                            (255 * alpha + old_coverage * (255 - alpha)) / 255;
                         for (i=0; i<ncomps; i++)
                             cv[i] = min(((255 * alpha * color_cv[i]) +
-                                (old_coverage * (15 - alpha ) * cv[i]))
-                                / (new_coverage * 15), gx_max_color_value);
+                                         (old_coverage * (255 - alpha ) * cv[i]))
+                                        / (new_coverage * 255), gx_max_color_value);
                         composite =
                             (*dev_proc(dev, encode_color)) (dev, cv);
                         /* encode color doesn't include coverage */
@@ -1005,9 +1049,23 @@ pngalpha_copy_alpha(gx_device * dev, const byte * data, int data_x,
                          */
                     }
                 }
-                LINE_ACCUM(composite, bpp);
+                if (sizeof(composite) > 4) {
+                    if (sample_store_next64(composite, &l_dptr, &l_dbit, bpp, &l_dbyte) < 0)
+                        return_error(gs_error_rangecheck);
+                }
+                else {
+                    if (sample_store_next32(composite, &l_dptr, &l_dbit, bpp, &l_dbyte) < 0)
+                        return_error(gs_error_rangecheck);
+                }
             }
-            LINE_ACCUM_COPY(dev, lout, bpp, x, rx, raster, ry);
+            if ( rx > l_xprev ) {
+                sample_store_flush(l_dptr, l_dbit, l_dbyte);
+                code = (*dev_proc(dev, copy_color))
+                  (dev, lout, l_xprev - x, raster,
+                   gx_no_bitmap_id, l_xprev, ry, rx - l_xprev, 1);
+                if (code < 0)
+                    return code;
+            }
         }
       out:gs_free_object(mem, lout, "copy_alpha(lout)");
         gs_free_object(mem, lin, "copy_alpha(lin)");

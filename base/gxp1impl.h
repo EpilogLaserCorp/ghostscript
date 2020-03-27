@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,6 +19,10 @@
 
 #ifndef gxp1impl_INCLUDED
 #  define gxp1impl_INCLUDED
+
+#include "gxdevcli.h"
+#include "gxdcolor.h"
+#include "gxpcolor.h"
 
 /*
  * Declare the filling algorithms implemented in gxp1fill.c.
@@ -35,7 +39,7 @@ dev_color_proc_fill_rectangle(gx_dc_pat_trans_fill_rectangle);
 /*
  * Declare the Pattern color mapping procedures exported by gxpcmap.c.
  */
-int gx_pattern_load(gx_device_color *, const gs_imager_state *,
+int gx_pattern_load(gx_device_color *, const gs_gstate *,
                     gx_device *, gs_color_select_t);
 pattern_proc_remap_color(gs_pattern1_remap_color);
 

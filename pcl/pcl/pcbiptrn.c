@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -357,10 +357,13 @@ static const gs_depth_bitmap bi_pixmap_array[PCL_NUM_CROSSHATCH_PATTERNS +
  * pattern above, two copies of this structure are required: a prototype
  * (qualified as const) and the pattern actually used.
  */
-static const byte solid_pattern_data = 0xff;
+/* Although only a byte is used, the 1bpp rendering code expects at least
+ * a short.
+ */
+static const byte solid_pattern_data[2] = { 0xff, 0xff };
 
 static const gs_depth_bitmap solid_pattern_pixmap = {
-    (byte *) & solid_pattern_data, 1, {1, 1}, 0, 1, 1
+    (byte *) & solid_pattern_data[0], 1, {1, 1}, 0, 1, 1
 };
 
 /*
@@ -371,10 +374,14 @@ static const gs_depth_bitmap solid_pattern_pixmap = {
  * the GL/2 documentation describes as source transparency is actually pattern
  * transparency).
  */
-static const byte unsolid_pattern_data = 0x0;
+/* This only actually needs to be a single byte, but we
+ * allocate it to be 2 as this stops address sanitizer
+ * reporting (intentional, safe) overreads by
+ * mem_copy_color_mono. See bug 696603. */
+static const byte unsolid_pattern_data[2] = { 0, 0 };
 
 static const gs_depth_bitmap unsolid_pattern_pixmap = {
-    (byte *) & unsolid_pattern_data, 1, {1, 1}, 0, 1, 1
+    (byte *) & unsolid_pattern_data[0], 1, {1, 1}, 0, 1, 1
 };
 
 /*
@@ -460,20 +467,22 @@ pcl_get_pattern_resolution(pcl_state_t * pcs, gs_point * pattern_res)
 }
 #undef DEVICE_RES_PATTERNS
 /*
- * Return the pointer to a built-in pattern, building it if inecessary.
+ * Return the pointer to a built-in pattern, building it if necessary.
  */
 static pcl_pattern_t *
 get_bi_pattern(pcl_state_t * pcs, int indx)
 {
     if (pcs->bi_pattern_array[indx] == 0) {
         gs_point pattern_res;
+        int code;
 
         pcl_get_pattern_resolution(pcs, &pattern_res);
-        (void)pcl_pattern_build_pattern(&(pcs->bi_pattern_array[indx]),
+        code = pcl_pattern_build_pattern(&(pcs->bi_pattern_array[indx]),
                                         &(bi_pixmap_array[indx]),
                                         pcl_pattern_uncolored,
                                         (int)pattern_res.x,
                                         (int)pattern_res.y, pcs->memory);
+        if (code < 0) return NULL;
         pcs->bi_pattern_array[indx]->ppat_data->storage = pcds_internal;
     }
     return pcs->bi_pattern_array[indx];
@@ -530,13 +539,15 @@ pcl_pattern_get_solid_pattern(pcl_state_t * pcs)
 {
     if (pcs->psolid_pattern == 0) {
         gs_point pattern_res;
+        int code;
 
         pcl_get_pattern_resolution(pcs, &pattern_res);
-        (void)pcl_pattern_build_pattern(&(pcs->psolid_pattern),
+        code = pcl_pattern_build_pattern(&(pcs->psolid_pattern),
                                         &solid_pattern_pixmap,
                                         pcl_pattern_uncolored,
                                         (int)pattern_res.x,
                                         (int)pattern_res.y, pcs->memory);
+        if (code < 0) return NULL;
         pcs->psolid_pattern->ppat_data->storage = pcds_internal;
     }
     return pcs->psolid_pattern;
@@ -550,13 +561,15 @@ pcl_pattern_get_unsolid_pattern(pcl_state_t * pcs)
 {
     if (pcs->punsolid_pattern == 0) {
         gs_point pattern_res;
+        int code;
 
         pcl_get_pattern_resolution(pcs, &pattern_res);
-        (void)pcl_pattern_build_pattern(&(pcs->punsolid_pattern),
+        code = pcl_pattern_build_pattern(&(pcs->punsolid_pattern),
                                         &unsolid_pattern_pixmap,
                                         pcl_pattern_uncolored,
                                         (int)pattern_res.x,
                                         (int)pattern_res.y, pcs->memory);
+        if (code < 0) return NULL;
         pcs->punsolid_pattern->ppat_data->storage = pcds_internal;
     }
     return pcs->punsolid_pattern;

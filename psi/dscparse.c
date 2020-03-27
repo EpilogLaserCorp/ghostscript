@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -1605,10 +1605,10 @@ dsc_parse_bounding_box(CDSC *dsc, CDSCBBOX** pbbox, int offset)
                     *pbbox = (CDSCBBOX *)dsc_memalloc(dsc, sizeof(CDSCBBOX));
                     if (*pbbox == NULL)
                         return CDSC_ERROR;	/* no memory */
-                        (*pbbox)->llx = (int)fllx;
-                        (*pbbox)->lly = (int)flly;
-                        (*pbbox)->urx = (int)(furx+0.999);
-                        (*pbbox)->ury = (int)(fury+0.999);
+                    (*pbbox)->llx = (int)fllx;
+                    (*pbbox)->lly = (int)flly;
+                    (*pbbox)->urx = (int)(furx+0.999);
+                    (*pbbox)->ury = (int)(fury+0.999);
                 }
                 return CDSC_OK;
             case CDSC_RESPONSE_CANCEL:
@@ -2669,10 +2669,11 @@ dsc_check_match_prompt(CDSC *dsc, const char *str, int count)
 {
     if (count != 0) {
         char buf[MAXSTR+MAXSTR];
-        if (dsc->line_length < (unsigned int)(sizeof(buf)/2-1))  {
+
+        memset(buf, 0x00, MAXSTR+MAXSTR);
+        if (dsc->line_length < (unsigned int)(sizeof(buf)/2-1))
             strncpy(buf, dsc->line, dsc->line_length);
-            buf[dsc->line_length] = '\0';
-        }
+
         gs_sprintf(buf+strlen(buf), "\n%%%%Begin%.40s: / %%%%End%.40s\n", str, str);
         return dsc_error(dsc, CDSC_MESSAGE_BEGIN_END, buf, (int)strlen(buf));
     }
@@ -3821,7 +3822,7 @@ dsc_dcs2_fixup(CDSC *dsc)
         DSC_OFFSET *pbegin;
         DSC_OFFSET *pend;
         DSC_OFFSET end;
-        CDCS2 *pdcs = dsc->dcs2;
+        CDCS2 *pdcs = NULL;
         /* Now treat the initial EPS file as a single page without
          * headers or trailer, so page extraction will fetch the
          * the correct separation. */
@@ -3886,6 +3887,14 @@ dsc_dcs2_fixup(CDSC *dsc)
         if (*pbegin == 999999999)
             *pbegin = *pend;
         end = 0;	/* end of composite is start of first separation */
+
+        /* we used to do this where the pointer is declared, but Coverity points out
+         * that dsc_alloc_string can call dsc_reset which can free dsc and dsc->dcs2.
+         * By deferring the initialisation to here we can ensure we don't have a
+         * dangling pointer. This makes me suspiciouos that DCS (not DSC!) comments
+         * have never worked properly.
+         */
+        pdcs = dsc->dcs2;
 
         while (pdcs) {
             page_number = dsc->page_count;
@@ -4364,7 +4373,7 @@ dsc_parse_cmyk_custom_colour(CDSC *dsc)
         if (blank_line)
             break;
         else {
-            cyan = magenta = yellow = black = 0.0;
+            magenta = yellow = black = 0.0;
             cyan = dsc_get_real(dsc->line+n, dsc->line_length-n, &i);
             n += i;
             if (i)
@@ -4440,7 +4449,7 @@ dsc_parse_rgb_custom_colour(CDSC *dsc)
         if (blank_line)
             break;
         else {
-            red = green = blue = 0.0;
+            green = blue = 0.0;
             red = dsc_get_real(dsc->line+n, dsc->line_length-n, &i);
             n += i;
             if (i)

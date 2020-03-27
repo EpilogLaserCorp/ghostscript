@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -76,6 +76,14 @@ gx_semaphore_free(
     }
 }
 
+gx_semaphore_t *(gx_semaphore_label)(gx_semaphore_t *sema, const char *name)
+{
+    (void)name;
+    if (sema)
+        gp_semaphore_label(&sema->native, name);
+    return sema;
+}
+
 /* Macros defined in gxsync.h, but redefined here so compiler chex consistency */
 #define gx_semaphore_wait(sema)  gp_semaphore_wait(&(sema)->native)
 #define gx_semaphore_signal(sema)  gp_semaphore_signal(&(sema)->native)
@@ -127,6 +135,15 @@ gx_monitor_free(
         gp_monitor_close(&mon->native);
         gs_free_object(mon->memory, mon, "gx_monitor (free)");
     }
+}
+
+gx_monitor_t *
+(gx_monitor_label)(gx_monitor_t *mon, const char *name)
+{
+    (void)name;
+    if (mon)
+        gp_monitor_label(&mon->native, name);
+    return mon;
 }
 
 /* Macros defined in gxsync.h, but redefined here so compiler chex consistency */

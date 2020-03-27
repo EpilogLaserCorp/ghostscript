@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -37,7 +37,7 @@ typedef enum
 
 int pcl_end_page(pcl_state_t * pcs, pcl_print_condition_t condition);
 
-void new_logical_page(pcl_state_t * pcs,
+int new_logical_page(pcl_state_t * pcs,
                       int lp_orient,
                       const pcl_paper_size_t * psize,
                       bool reset_initial, bool for_passthrough);
@@ -48,9 +48,11 @@ bool pcl_page_marked(pcl_state_t * pcs);
 
 bool pcl_cursor_moved(pcl_state_t * pcs);
 
-void pcl_mark_page_for_path(pcl_state_t * pcs);
+int pcl_mark_page_for_path(pcl_state_t * pcs);
 
-void pcl_mark_page_for_current_pos(pcl_state_t * pcs);
+int pcl_mark_page_for_current_pos(pcl_state_t * pcs);
+
+int pcl_mark_page_for_character(pcl_state_t * pcs, gs_fixed_point *org);
 
 int new_logical_page_for_passthrough_snippet(pcl_state_t * pcs, int orient,
                                              int tag);

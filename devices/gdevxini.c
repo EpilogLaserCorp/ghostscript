@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -59,7 +59,8 @@ static struct xv_ {
     Boolean alloc_error;
     XErrorHandler orighandler;
     XErrorHandler oldhandler;
-} x_error_handler;
+    Boolean set;
+} x_error_handler = {0};
 
 static int
 x_catch_alloc(Display * dpy, XErrorEvent * err)
@@ -74,7 +75,8 @@ x_catch_alloc(Display * dpy, XErrorEvent * err)
 int
 x_catch_free_colors(Display * dpy, XErrorEvent * err)
 {
-    if (err->request_code == X_FreeColors)
+    if (err->request_code == X_FreeColors ||
+        x_error_handler.orighandler == x_catch_free_colors)
         return 0;
     return x_error_handler.orighandler(dpy, err);
 }
@@ -274,8 +276,10 @@ gdev_x_open(gx_device_X * xdev)
         return_error(gs_error_ioerror);
     }
     /* Buggy X servers may cause a Bad Access on XFreeColors. */
-    x_error_handler.orighandler = XSetErrorHandler(x_catch_free_colors);
-
+    if (!x_error_handler.set) {
+        x_error_handler.orighandler = XSetErrorHandler(x_catch_free_colors);
+        x_error_handler.set = True;
+    }
     /* Get X Resources.  Use the toolkit for this. */
     XtToolkitInitialize();
     app_con = XtCreateApplicationContext();
@@ -364,18 +368,6 @@ gdev_x_open(gx_device_X * xdev)
                 (float)xdev->height / xdev->y_pixels_per_inch * 72;
         }
 
-        /*
-         * If the margins' resolution values are not initialized
-         * default to the device resolution, most devices initialize
-         * this at compile time because they don't "detect" the
-         * resolution as we do here.
-         */
-        if (xdev->MarginsHWResolution[0] == FAKE_RES ||
-            xdev->MarginsHWResolution[1] == FAKE_RES) {
-            xdev->MarginsHWResolution[0] = xdev->x_pixels_per_inch;
-            xdev->MarginsHWResolution[1] = xdev->y_pixels_per_inch;
-        }
-
         sizehints.x = 0;
         sizehints.y = 0;
         sizehints.width = xdev->width;
@@ -451,8 +443,8 @@ gdev_x_open(gx_device_X * xdev)
             wm_hints.flags = InputHint;
             wm_hints.input = False;
             XSetWMHints(xdev->dpy, xdev->win, &wm_hints);	/* avoid input focus */
-            class_hint.res_name = "ghostscript";
-            class_hint.res_class = "Ghostscript";
+            class_hint.res_name = (char *)"ghostscript";
+            class_hint.res_class = (char *)"Ghostscript";
             XSetClassHint(xdev->dpy, xdev->win, &class_hint);
         }
     }
@@ -581,9 +573,19 @@ x_set_buffer(gx_device_X * xdev)
         /* Check that we can set up a memory device. */
         gx_device_memory *mdev = (gx_device_memory *)xdev->target;
 
-        if (mdev == 0 || mdev->color_info.depth != xdev->color_info.depth) {
+        /* This is icky, but is pickled into the architecture of the x11 devices.
+         * This function is called (amongst other places) after a put_params that
+         * changes the page buffer parameters.
+         * If we're running one of the "wrapped" x11 devices (x11mono etc), we have to "patch"
+         * the color_info so it matches the actual x11 device (because of the ways get_params
+         * interacts with put_params in the Postscript world), rather than the "wrapping" device
+         * (for example, x11mono "wraps" x11).
+         * *But* if we run buffered, we have to use the real specs of the real x11 device.
+         * Hence, the real color_info is saved into orig_color_info, and we use that here.
+         */
+        if (mdev == 0 || mdev->color_info.depth != xdev->orig_color_info.depth) {
             const gx_device_memory *mdproto =
-                gdev_mem_device_for_bits(xdev->color_info.depth);
+                gdev_mem_device_for_bits(xdev->orig_color_info.depth);
 
             if (!mdproto) {
                 buffered = false;
@@ -632,9 +634,10 @@ x_set_buffer(gx_device_X * xdev)
             xdev->buffer = buffer;
             mdev->width = xdev->width;
             mdev->height = xdev->height;
+            rc_decrement(mdev->icc_struct, "x_set_buffer");
             mdev->icc_struct = xdev->icc_struct;
             rc_increment(xdev->icc_struct);
-            mdev->color_info = xdev->color_info;
+            mdev->color_info = xdev->orig_color_info;
             mdev->base = xdev->buffer;
             gdev_mem_open_scan_lines(mdev, xdev->height);
         }
@@ -937,6 +940,8 @@ gdev_x_put_params(gx_device * dev, gs_param_list * plist)
 int
 gdev_x_close(gx_device_X *xdev)
 {
+    long MaxBitmap = xdev->space_params.MaxBitmap;
+
     if (xdev->ghostview)
         gdev_x_send_event(xdev, xdev->DONE);
     if (xdev->vinfo) {
@@ -946,6 +951,14 @@ gdev_x_close(gx_device_X *xdev)
     gdev_x_free_colors(xdev);
     if (xdev->cmap != DefaultColormapOfScreen(xdev->scr))
         XFreeColormap(xdev->dpy, xdev->cmap);
+    if (xdev->gc)
+        XFreeGC(xdev->dpy, xdev->gc);
+
     XCloseDisplay(xdev->dpy);
+    /* MaxBitmap == 0 ensures x_set_buffer() configures as non-buffering */
+    xdev->space_params.MaxBitmap = 0;
+    x_set_buffer(xdev);
+    xdev->space_params.MaxBitmap = MaxBitmap;
+
     return 0;
 }

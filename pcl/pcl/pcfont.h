@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -35,15 +35,9 @@ void pcl_decache_font(pcl_state_t * pcs, int set, bool id_select_disable);
  */
 int pcl_recompute_font(pcl_state_t * pcs, bool internal_only);
 
-/*
- * Do any underlining just before a break in motion (vertical motion or
- * negative horizontal motion)...
- */
-#define	pcl_break_underline(pcs)   \
-    BEGIN                           \
-    if (pcs->underline_enabled)    \
-        pcl_do_underline(pcs);     \
-    END
+
+int pcl_break_underline(pcl_state_t * pcs);
+
 
 /* ...and then, after repositioning, restart underlining if necessary... */
 #define	pcl_continue_underline(pcs)        \
@@ -52,7 +46,7 @@ int pcl_recompute_font(pcl_state_t * pcs, bool internal_only);
         pcs->underline_start = pcs->cap;    \
     END
 
-void pcl_do_underline(pcl_state_t * pcs);
+int pcl_do_underline(pcl_state_t * pcs);
 
 /* Define the common structure of downloaded font headers. */
 typedef struct pcl_font_header_s

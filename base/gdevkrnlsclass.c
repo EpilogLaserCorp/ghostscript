@@ -1,3 +1,18 @@
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
+   All Rights Reserved.
+
+   This software is provided AS-IS with no warranty, either express or
+   implied.
+
+   This software is distributed under license and may not be copied,
+   modified or distributed except as expressly authorized under the terms
+   of the license contained in the file LICENSE in this distribution.
+
+   Refer to licensing information at http://www.artifex.com or contact
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
+*/
+
 #include "gx.h"
 #include "gxdcolor.h"
 #include "gdevkrnlsclass.h" /* 'standard' built in subclasses, currently First/Last Page and object filter */
@@ -16,7 +31,7 @@ int install_internal_subclass_devices(gx_device **ppdev, int *devices_loaded)
 #if FORCE_TESTING_SUBCLASSING
     if (!dev->PageHandlerPushed) {
 #else
-    if (!dev->PageHandlerPushed && (dev->FirstPage != 0 || dev->LastPage != 0)) {
+    if (!dev->PageHandlerPushed && (dev->FirstPage != 0 || dev->LastPage != 0 || dev->PageList != 0)) {
 #endif
         code = gx_device_subclass(dev, (gx_device *)&gs_flp_device, sizeof(first_last_subclass_data));
         if (code < 0)
@@ -25,10 +40,10 @@ int install_internal_subclass_devices(gx_device **ppdev, int *devices_loaded)
         saved = dev = dev->child;
 
         /* Open all devices *after* the new current device */
-        while(dev) {
+        do {
             dev->is_open = true;
             dev = dev->child;
-        }
+        }while(dev);
 
         dev = saved;
 
@@ -37,10 +52,10 @@ int install_internal_subclass_devices(gx_device **ppdev, int *devices_loaded)
             dev = dev->parent;
 
         /* Note in all devices in chain that we have loaded the PageHandler */
-        while(dev) {
+        do {
             dev->PageHandlerPushed = true;
             dev = dev->child;
-        }
+        }while(dev);
 
         dev = saved;
         if (devices_loaded)
@@ -58,10 +73,10 @@ int install_internal_subclass_devices(gx_device **ppdev, int *devices_loaded)
         saved = dev = dev->child;
 
         /* Open all devices *after* the new current device */
-        while(dev) {
+        do {
             dev->is_open = true;
             dev = dev->child;
-        }
+        }while(dev);
 
         dev = saved;
 
@@ -70,10 +85,10 @@ int install_internal_subclass_devices(gx_device **ppdev, int *devices_loaded)
             dev = dev->parent;
 
         /* Note in all devices in chain that we have loaded the ObjectHandler */
-        while(dev) {
+        do {
             dev->ObjectHandlerPushed = true;
             dev = dev->child;
-        }
+        }while(dev);
 
         dev = saved;
         if (devices_loaded)

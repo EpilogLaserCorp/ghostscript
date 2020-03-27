@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,16 +20,8 @@
 #  define gxfcopy_INCLUDED
 
 #include "gsccode.h"
-
-#ifndef gs_font_DEFINED
-#  define gs_font_DEFINED
-typedef struct gs_font_s gs_font;
-#endif
-
-#ifndef gs_matrix_DEFINED
-#  define gs_matrix_DEFINED
-typedef struct gs_matrix_s gs_matrix;
-#endif
+#include "gsmatrix.h"
+#include "gsfont.h"
 
 /*
  * Copy a font, aside from its glyphs.  Note that PostScript-specific data
@@ -121,11 +113,15 @@ int gs_copy_glyph(gs_font *font, gs_glyph glyph, gs_font *copied);
  * COPY_GLYPH_NO_NEW, then if the top-level glyph has *not* already been
  * copied, return an undefined error rather than 0.
  *
+ * COPY_GLYPH_USE_GSUB directs the code to try using a TrueType GSUB table
+ * to find a replacement for a glyph. Bug #691574
+ *
  * Returns an error if a glyph is added after calling copied_order_font.
  */
 #define COPY_GLYPH_NO_OLD 1
 #define COPY_GLYPH_NO_NEW 2
 #define COPY_GLYPH_BY_INDEX 4
+#define COPY_GLYPH_USE_GSUB 8
 int gs_copy_glyph_options(gs_font *font, gs_glyph glyph, gs_font *copied,
                           int options);
 

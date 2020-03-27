@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -33,13 +33,15 @@ xps_bounds_in_user_space(xps_context_t *ctx, gs_rect *ubox)
     dbox.p.y = fixed2float(clip_path->outer_box.p.y);
     dbox.q.x = fixed2float(clip_path->outer_box.q.x);
     dbox.q.y = fixed2float(clip_path->outer_box.q.y);
-    gs_bbox_transform_inverse(&dbox, &ctm_only(ctx->pgs), ubox);
+    code = gs_bbox_transform_inverse(&dbox, &ctm_only(ctx->pgs), ubox);
+    if (code < 0)
+        gs_warn("gs_bbox_transform_inverse failed");
 }
 
 /* This will get the proper bounds based upon the current path, clip path
    and stroke width */
-void xps_bounds_in_user_space_path_clip(xps_context_t *ctx, gs_rect *ubox,
-                                        bool use_path, bool is_stroke)
+int xps_bounds_in_user_space_path_clip(xps_context_t *ctx, gs_rect *ubox,
+                                       bool use_path, bool is_stroke)
 {
     int code;
     gs_rect bbox;
@@ -52,7 +54,9 @@ void xps_bounds_in_user_space_path_clip(xps_context_t *ctx, gs_rect *ubox,
         else
             code = gx_curr_bbox(ctx->pgs, &bbox, PATH_FILL);
     }
-    gs_bbox_transform_inverse(&bbox, &ctm_only(ctx->pgs), ubox);
+    if (code < 0)
+        return code;
+    return gs_bbox_transform_inverse(&bbox, &ctm_only(ctx->pgs), ubox);
 }
 
 int
@@ -75,8 +79,12 @@ xps_begin_opacity(xps_context_t *ctx, char *base_uri, xps_resource_t *dict,
         opacity = atof(opacity_att);
     gs_setblendmode(ctx->pgs, BLEND_MODE_Normal);
     gs_setopacityalpha(ctx->pgs, opacity);
+    gs_setfillconstantalpha(ctx->pgs, opacity);
+    gs_setstrokeconstantalpha(ctx->pgs, opacity);
 
-    xps_bounds_in_user_space_path_clip(ctx, &bbox, use_path, is_stroke);
+    code = xps_bounds_in_user_space_path_clip(ctx, &bbox, use_path, is_stroke);
+    if (code < 0)
+        return code;
 
     if (opacity_mask_tag)
     {
@@ -118,7 +126,7 @@ xps_begin_opacity(xps_context_t *ctx, char *base_uri, xps_resource_t *dict,
     }
 
     gs_trans_group_params_init(&tgp);
-    gs_begin_transparency_group(ctx->pgs, &tgp, &bbox);
+    gs_begin_transparency_group(ctx->pgs, &tgp, &bbox, PDF14_BEGIN_TRANS_GROUP);
 
     return 0;
 }

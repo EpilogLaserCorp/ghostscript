@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,23 +19,18 @@
 #ifndef gstype1_INCLUDED
 #  define gstype1_INCLUDED
 
+#include "gstypes.h"
+#include "gsgstate.h"
+#include "gsgdata.h"
+#include "gspath.h"
+
 /* ------ Normal client interface ------ */
 
 #define crypt_charstring_seed 4330
 typedef struct gs_type1_state_s gs_type1_state;
 
-#ifndef gx_path_DEFINED
-#  define gx_path_DEFINED
-typedef struct gx_path_s gx_path;
-#endif
-#ifndef gs_font_type1_DEFINED
-#  define gs_font_type1_DEFINED
 typedef struct gs_font_type1_s gs_font_type1;
-#endif
-#ifndef gs_type1_data_s_DEFINED
-struct gs_type1_data_s;
-#endif
-int gs_type1_interp_init(gs_type1_state * pcis, gs_imager_state * pis,
+int gs_type1_interp_init(gs_type1_state * pcis, gs_gstate * pgs,
                          gx_path * ppath, const gs_log2_scale_point * pscale,
                          const gs_log2_scale_point * psubpixels, bool no_grid_fitting,
                          int paint_type, gs_font_type1 * pfont);
@@ -45,7 +40,7 @@ void gs_type1_set_width(gs_type1_state * pcis, const gs_point * pwpt);
 
 /* Backward compatibility */
 #define gs_type1_init(pcis, penum, psbpt, charpath_flag, paint_type, pfont)\
-  (gs_type1_interp_init(pcis, (gs_imager_state *)((penum)->pgs),\
+  (gs_type1_interp_init(pcis, (gs_gstate *)((penum)->pgs),\
                         (penum)->pgs->path, &(penum)->log2_current_scale,\
                         charpath_flag, paint_type, pfont) |\
    ((psbpt) == 0 ? 0 : (gs_type1_set_lsb(pcis, psbpt), 0)))

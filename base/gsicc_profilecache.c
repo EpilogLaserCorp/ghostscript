@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /*  A cache for icc colorspaces that  were created from PS CIE color
@@ -89,7 +89,7 @@ rc_gsicc_profile_cache_free(gs_memory_t * mem, void *ptr_in, client_name_t cname
 }
 
 void
-gsicc_add_cs(gs_state * pgs, gs_color_space * colorspace, ulong dictkey)
+gsicc_add_cs(gs_gstate * pgs, gs_color_space * colorspace, uint64_t dictkey)
 {
     gsicc_profile_entry_t *result;
     gsicc_profile_cache_t *profile_cache = pgs->icc_profile_cache;
@@ -113,11 +113,14 @@ gsicc_add_cs(gs_state * pgs, gs_color_space * colorspace, ulong dictkey)
     result->color_space = colorspace;
     rc_increment(colorspace);
     result->key = dictkey;
+    if_debug2m(gs_debug_flag_icc, memory,
+               "[icc] Add cs to cache = "PRI_INTPTR", hash = %"PRIu64"\n",
+               (intptr_t)result->color_space, (uint64_t)result->key);
     profile_cache->num_entries++;
 }
 
 gs_color_space*
-gsicc_find_cs(ulong key_test, gs_state * pgs)
+gsicc_find_cs(uint64_t key_test, gs_gstate * pgs)
 {
     gsicc_profile_cache_t *profile_cache = pgs->icc_profile_cache;
     gsicc_profile_entry_t *prev = NULL, *curr = profile_cache->head;
@@ -125,6 +128,9 @@ gsicc_find_cs(ulong key_test, gs_state * pgs)
     /* Look through the cache for the key. If found, move to MRU */
     while (curr != NULL ){
         if (curr->key == key_test){
+            if_debug2m(gs_debug_flag_icc, pgs->memory,
+                       "[icc] Found cs = "PRI_INTPTR", hash = %"PRIu64"\n",
+                       (intptr_t)curr->color_space, (uint64_t)curr->key);
             /* If not already at head of list, move this one there */
             if (curr != profile_cache->head) {
                 /* We need to move found one to the top of the list. */
@@ -175,6 +181,9 @@ gsicc_remove_cs_entry(gsicc_profile_cache_t *profile_cache)
     /* Decremented, but someone could still be referencing this */
     /* If found again in the source document, it will be regenerated
        and added back into the cache. */
+    if_debug2m(gs_debug_flag_icc, memory,
+               "[icc] Remove cs from cache = "PRI_INTPTR", hash = %"PRIu64"\n",
+               (intptr_t)curr->color_space, (uint64_t)curr->key);
     rc_decrement(curr->color_space, "gsicc_remove_cs_entry");
     gs_free_object(memory->stable_memory, curr, "gsicc_remove_cs_entry");
 }

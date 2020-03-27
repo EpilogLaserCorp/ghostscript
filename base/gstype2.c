@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -24,7 +24,7 @@
 #include "gxfixed.h"
 #include "gxmatrix.h"
 #include "gxcoord.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gxpath.h"
 #include "gxfont.h"
 #include "gxfont1.h"
@@ -112,7 +112,6 @@ type2_vstem(gs_type1_state * pcis, cs_ptr csp, cs_ptr cstack)
 }
 
 /* ------ Main interpreter ------ */
-
 /*
  * Continue interpreting a Type 2 charstring.  If str != 0, it is taken as
  * the byte string to interpret.  Return 0 on successful completion, <0 on
@@ -152,7 +151,7 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
             break;
         case 0:
             gs_type1_finish_init(pcis);	/* sets origin */
-            code = t1_hinter__set_mapping(h, &pcis->pis->ctm,
+            code = t1_hinter__set_mapping(h, &pcis->pgs->ctm,
                             &pfont->FontMatrix, &pfont->base->FontMatrix,
                             pcis->scale.x.log2_unit, pcis->scale.x.log2_unit,
                             pcis->scale.x.log2_unit - pcis->log2_subpixels.x,
@@ -161,7 +160,7 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                             gs_currentaligntopixels(pfont->dir));
             if (code < 0)
                 return code;
-            code = t1_hinter__set_font_data(h, 2, pdata, pcis->no_grid_fitting,
+            code = t1_hinter__set_font_data(pfont->memory, h, 2, pdata, pcis->no_grid_fitting,
                             pcis->pfont->is_resource);
             if (code < 0)
                 return code;
@@ -220,11 +219,11 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
             {char2_command_names};
 
             if (c2names[c] == 0)
-                dmlprintf2(pfont->memory, "[1]0x%lx: %02x??\n",
-                           (ulong) (cip - 1), c);
+                dmlprintf2(pfont->memory, "[1]"PRI_INTPTR": %02x??\n",
+                           (intptr_t)(cip - 1), c);
             else
-                dmlprintf3(pfont->memory, "[1]0x%lx: %02x %s\n",
-                           (ulong) (cip - 1), c, c2names[c]);
+                dmlprintf3(pfont->memory, "[1]"PRI_INTPTR": %02x %s\n",
+                           (intptr_t)(cip - 1), c, c2names[c]);
         }
 #endif
         switch ((char_command) c) {
@@ -238,25 +237,35 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
             case c_undef17:
                 return_error(gs_error_invalidfont);
             case c_callsubr:
-                c = fixed2int_var(*csp) + pdata->subroutineNumberBias;
-                code = pdata->procs.subr_data
-                    (pfont, c, false, &ipsp[1].cs_data);
-              subr:if (code < 0) {
-                    /* Calling a Subr with an out-of-range index is clearly a error:
-                     * the Adobe documentation says the results of doing this are
-                     * undefined. However, we have seen a PDF file produced by Adobe
-                     * PDF Library 4.16 that included a Type 2 font that called an
-                     * out-of-range Subr, and Acrobat Reader did not signal an error.
-                     * Therefore, we ignore such calls.
+                if (CS_CHECK_CSTACK_BOUNDS(csp, cstack)) {
+                    c = fixed2int_var(*csp) + pdata->subroutineNumberBias;
+                    code = pdata->procs.subr_data
+                        (pfont, c, false, &ipsp[1].cs_data);
+                  subr:
+                    if (code < 0) {
+                        /* Calling a Subr with an out-of-range index is clearly a error:
+                         * the Adobe documentation says the results of doing this are
+                         * undefined. However, we have seen a PDF file produced by Adobe
+                         * PDF Library 4.16 that included a Type 2 font that called an
+                         * out-of-range Subr, and Acrobat Reader did not signal an error.
+                         * Therefore, we ignore such calls.
+                         */
+                        cip++;
+                        goto top;
+                    }
+                    --csp;
+                    ipsp->ip = cip, ipsp->dstate = state;
+                    ++ipsp;
+                    cip = ipsp->cs_data.bits.data;
+                    goto call;
+                }
+                else {
+                    /* Consider a missing index to be "out-of-range", and see above
+                     * comment.
                      */
                     cip++;
                     goto top;
                 }
-                --csp;
-                ipsp->ip = cip, ipsp->dstate = state;
-                ++ipsp;
-                cip = ipsp->cs_data.bits.data;
-                goto call;
             case c_return:
                 gs_glyph_data_free(&ipsp->cs_data, "gs_type2_interpret");
                 --ipsp;
@@ -273,13 +282,18 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
             case cx_vstem:
                 goto vstem;
             case cx_vmoveto:
-                check_first_operator(csp > cstack);
-                code = t1_hinter__rmoveto(h, 0, *csp);
+                if (CS_CHECK_CSTACK_BOUNDS(csp, cstack)) {
+                    check_first_operator(csp > cstack);
+                    code = t1_hinter__rmoveto(h, 0, *csp);
               move:
               cc:
-                if (code < 0)
-                    return code;
-                goto pp;
+                    if (code < 0)
+                        return code;
+                    goto pp;
+                }
+                else {
+                    return_error(gs_error_invalidfont);
+                }
             case cx_rlineto:
                 for (ap = cstack; ap + 1 <= csp; ap += 2) {
                     code = t1_hinter__rlineto(h, ap[0], ap[1]);
@@ -340,7 +354,7 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                     code = t1_hinter__endglyph(h);
                     if (code < 0)
                         return code;
-                    code = gx_setcurrentpoint_from_path(pcis->pis, pcis->path);
+                    code = gx_setcurrentpoint_from_path(pcis->pgs, pcis->path);
                     if (code < 0)
                         return code;
                 } else {
@@ -368,23 +382,30 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
             case cx_rmoveto:
                 /* See vmoveto above re closing the subpath. */
                 check_first_operator(!((csp - cstack) & 1));
-                if (csp > cstack + 1) {
-                  /* Some Type 2 charstrings omit the vstemhm operator before rmoveto,
-                     even though this is only allowed before hintmask and cntrmask.
-                     Thanks to Felix Pahl.
-                   */
-                  type2_vstem(pcis, csp - 2, cstack);
-                  cstack [0] = csp [-1];
-                  cstack [1] = csp [ 0];
-                  csp = cstack + 1;
+                if (CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack)) {
+                    if (csp > cstack + 1) {
+                      /* Some Type 2 charstrings omit the vstemhm operator before rmoveto,
+                         even though this is only allowed before hintmask and cntrmask.
+                         Thanks to Felix Pahl.
+                       */
+                      type2_vstem(pcis, csp - 2, cstack);
+                      cstack [0] = csp [-1];
+                      cstack [1] = csp [ 0];
+                      csp = cstack + 1;
+                    }
+                    code = t1_hinter__rmoveto(h, csp[-1], *csp);
+                    goto move;
                 }
-                code = t1_hinter__rmoveto(h, csp[-1], *csp);
-                goto move;
+                else
+                    return_error(gs_error_invalidfont);
             case cx_hmoveto:
-                /* See vmoveto above re closing the subpath. */
-                check_first_operator(csp > cstack);
-                code = t1_hinter__rmoveto(h, *csp, 0);
-                goto move;
+                if (CS_CHECK_CSTACK_BOUNDS(csp, cstack)) {
+                    /* See vmoveto above re closing the subpath. */
+                    check_first_operator(csp > cstack);
+                    code = t1_hinter__rmoveto(h, *csp, 0);
+                    goto move;
+                } else
+                    return_error(gs_error_invalidfont);
             case cx_vhcurveto:
                 vertical = true;
                 goto hvc;
@@ -414,6 +435,7 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                          ***********************/
 
             case c2_blend:
+                if (CS_CHECK_CSTACK_BOUNDS(csp, cstack))
                 {
                     int n = fixed2int_var(*csp);
                     int num_values = csp - cstack;
@@ -428,10 +450,11 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                         for (i = 1; i < k; i++)
                             *base += (fixed)(deltas[i] *
                                 pfont->data.WeightVector.values[i]);
-                }
+                } else
+                    return gs_note_error(gs_error_invalidfont);
                 cnext;
             case c2_hstemhm:
-              hstem:check_first_operator(!((csp - cstack) & 1));
+              hstem: check_first_operator(!((csp - cstack) & 1));
                 {
                     fixed x = 0;
 
@@ -450,8 +473,10 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                  * this interpretation everywhere.
                  */
             case c2_cntrmask:
-                check_first_operator(!((csp - cstack) & 1));
-                type2_vstem(pcis, csp, cstack);
+                if (CS_CHECK_CSTACK_BOUNDS(csp, cstack)) {
+                    check_first_operator(!((csp - cstack) & 1));
+                    type2_vstem(pcis, csp, cstack);
+                }
                 /*
                  * We should clear the stack here only if this is the
                  * initial mask operator that includes the implicit
@@ -482,8 +507,12 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                 }
                 break;
             case c2_vstemhm:
-              vstem:check_first_operator(!((csp - cstack) & 1));
-                type2_vstem(pcis, csp, cstack);
+              vstem:
+                if (CS_CHECK_CSTACK_BOUNDS(csp, cstack)) {
+                    check_first_operator(!((csp - cstack) & 1));
+                    type2_vstem(pcis, csp, cstack);
+                }else
+                    return gs_note_error(gs_error_invalidfont);
                 cnext;
             case c2_rcurveline:
                 for (ap = cstack; ap + 5 <= csp; ap += 6) {
@@ -546,10 +575,15 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                 }
                 goto pushed;
             case c2_callgsubr:
-                c = fixed2int_var(*csp) + pdata->gsubrNumberBias;
-                code = pdata->procs.subr_data
-                    (pfont, c, true, &ipsp[1].cs_data);
-                goto subr;
+                if (CS_CHECK_CSTACK_BOUNDS(csp, cstack)) {
+                    c = fixed2int_var(*csp) + pdata->gsubrNumberBias;
+                    code = pdata->procs.subr_data
+                        (pfont, c, true, &ipsp[1].cs_data);
+                    goto subr;
+                } else {
+                    cip++;
+                    goto top;
+                }
             case cx_escape:
                 charstring_next(*cip, state, c, encrypted);
                 ++cip;
@@ -559,19 +593,23 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                     {char2_extended_command_names};
 
                     if (ce2names[c] == 0)
-                        dmlprintf2(pfont->memory, "[1]0x%lx: %02x??\n",
-                                   (ulong) (cip - 1), c);
+                        dmlprintf2(pfont->memory, "[1]"PRI_INTPTR": %02x??\n",
+                                   (intptr_t)(cip - 1), c);
                     else
-                        dmlprintf3(pfont->memory, "[1]0x%lx: %02x %s\n",
-                                   (ulong) (cip - 1), c, ce2names[c]);
+                        dmlprintf3(pfont->memory, "[1]"PRI_INTPTR": %02x %s\n",
+                                   (intptr_t)(cip - 1), c, ce2names[c]);
                 }
 #endif
                 switch ((char2_extended_command) c) {
                     case ce2_and:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack))
+                            return_error(gs_error_invalidfont);
                         csp[-1] = ((csp[-1] != 0) & (*csp != 0) ? fixed_1 : 0);
                         --csp;
                         break;
                     case ce2_or:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack))
+                            return_error(gs_error_invalidfont);
                         csp[-1] = (csp[-1] | *csp ? fixed_1 : 0);
                         --csp;
                         break;
@@ -579,15 +617,23 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                         *csp = (*csp ? 0 : fixed_1);
                         break;
                     case ce2_store:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-3], cstack))
+                            return_error(gs_error_invalidfont);
                         {
                             int i, n = fixed2int_var(*csp);
-                            float *to = Registry[fixed2int_var(csp[-3])].values +
-                            fixed2int_var(csp[-2]);
-                            const fixed *from =
-                            pcis->transient_array + fixed2int_var(csp[-1]);
+                            int ind = fixed2int_var(csp[-3]);
+                            int offs = fixed2int_var(csp[-2]);
+                            float *to;
+                            const fixed *from = pcis->transient_array + fixed2int_var(csp[-1]);
 
-                            for (i = 0; i < n; ++i)
-                                to[i] = fixed2float(from[i]);
+                            if (!CS_CHECK_TRANSIENT_BOUNDS(from, pcis->transient_array))
+                                return_error(gs_error_invalidfont);
+
+                            if (ind < countof(Registry)) {
+                                to = Registry[ind].values + offs;
+                                for (i = 0; i < n; ++i)
+                                    to[i] = fixed2float(from[i]);
+                            }
                         }
                         csp -= 4;
                         break;
@@ -596,28 +642,43 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                             *csp = -*csp;
                         break;
                     case ce2_add:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack))
+                            return_error(gs_error_invalidfont);
                         csp[-1] += *csp;
                         --csp;
                         break;
                     case ce2_sub:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack))
+                            return_error(gs_error_invalidfont);
                         csp[-1] -= *csp;
                         --csp;
                         break;
                     case ce2_div:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack))
+                            return_error(gs_error_invalidfont);
+                        if (*csp == 0)
+                            return_error(gs_error_invalidfont);
                         csp[-1] = float2fixed((double)csp[-1] / *csp);
                         --csp;
                         break;
                     case ce2_load:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-2], cstack))
+                            return_error(gs_error_invalidfont);
                         /* The specification says there is no j (starting index */
                         /* in registry array) argument.... */
                         {
                             int i, n = fixed2int_var(*csp);
-                            const float *from = Registry[fixed2int_var(csp[-2])].values;
-                            fixed *to =
-                            pcis->transient_array + fixed2int_var(csp[-1]);
+                            int ind = fixed2int_var(csp[-2]);
+                            const float *from;
+                            fixed *to = pcis->transient_array + fixed2int_var(csp[-1]);
 
-                            for (i = 0; i < n; ++i)
-                                to[i] = float2fixed(from[i]);
+                            if (!CS_CHECK_TRANSIENT_BOUNDS(to, pcis->transient_array))
+                                return_error(gs_error_invalidfont);
+                            if (ind < countof(Registry)) {
+                                from = Registry[ind].values;
+                                for (i = 0; i < n; ++i)
+                                    to[i] = float2fixed(from[i]);
+                            }
                         }
                         csp -= 3;
                         break;
@@ -625,20 +686,43 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                         *csp = -*csp;
                         break;
                     case ce2_eq:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack))
+                            return_error(gs_error_invalidfont);
                         csp[-1] = (csp[-1] == *csp ? fixed_1 : 0);
                         --csp;
                         break;
                     case ce2_drop:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack))
+                            return_error(gs_error_invalidfont);
                         --csp;
                         break;
                     case ce2_put:
-                        pcis->transient_array[fixed2int_var(*csp)] = csp[-1];
-                        csp -= 2;
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack))
+                            return_error(gs_error_invalidfont);
+                        {
+                            fixed *to = pcis->transient_array + fixed2int_var(*csp);
+
+                            if (!CS_CHECK_TRANSIENT_BOUNDS(to, pcis->transient_array))
+                                return_error(gs_error_invalidfont);
+
+                            *to = csp[-1];
+                            csp -= 2;
+                        }
                         break;
                     case ce2_get:
-                        *csp = pcis->transient_array[fixed2int_var(*csp)];
+                        if (!CS_CHECK_CSTACK_BOUNDS(csp, cstack))
+                            return_error(gs_error_invalidfont);
+                        {
+                            fixed *from = pcis->transient_array + fixed2int_var(*csp);
+                            if (!CS_CHECK_TRANSIENT_BOUNDS(from, pcis->transient_array))
+                                return_error(gs_error_invalidfont);
+
+                            *csp = *from;
+                        }
                         break;
                     case ce2_ifelse:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-3], cstack))
+                            return_error(gs_error_invalidfont);
                         if (csp[-1] > *csp)
                             csp[-3] = csp[-2];
                         csp -= 3;
@@ -649,6 +733,8 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                         /****** NYI ******/
                         break;
                     case ce2_mul:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack))
+                            return_error(gs_error_invalidfont);
                         {
                             double prod = fixed2float(csp[-1]) * *csp;
 
@@ -668,6 +754,8 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                         ++csp;
                         break;
                     case ce2_exch:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack))
+                            return_error(gs_error_invalidfont);
                         {
                             fixed top = *csp;
 
@@ -675,10 +763,14 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                         }
                         break;
                     case ce2_index:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack))
+                            return_error(gs_error_invalidfont);
                         *csp =
                             (*csp < 0 ? csp[-1] : csp[-1 - fixed2int_var(csp[-1])]);
                         break;
                     case ce2_roll:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack))
+                            return_error(gs_error_invalidfont);
                         {
                             int distance = fixed2int_var(*csp);
                             int count = fixed2int_var(csp[-1]);
@@ -702,6 +794,9 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                         }
                         break;
                     case ce2_hflex:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-5], cstack))
+                            return_error(gs_error_invalidfont);
+                        CS_CHECK_PUSHN(csp, cstack, 6);
                         csp[6] = fixed_half;	/* fd/100 */
                         csp[4] = *csp, csp[5] = 0;	/* dx6, dy6 */
                         csp[2] = csp[-1], csp[3] = -csp[-4];	/* dx5, dy5 */
@@ -712,6 +807,8 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                         csp += 6;
                         goto flex;
                     case ce2_flex:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-12], cstack))
+                            return_error(gs_error_invalidfont);
                         *csp /= 100;	/* fd/100 */
 flex:			{
                             fixed x_join = csp[-12] + csp[-10] + csp[-8];
@@ -724,12 +821,12 @@ flex:			{
                             if ((code =
                                  gs_distance_transform(fixed2float(x_join),
                                                        fixed2float(y_join),
-                                                       &ctm_only(pcis->pis),
+                                                       &ctm_only(pcis->pgs),
                                                        &join)) < 0 ||
                                 (code =
                                  gs_distance_transform(fixed2float(x_end),
                                                        fixed2float(y_end),
-                                                       &ctm_only(pcis->pis),
+                                                       &ctm_only(pcis->pgs),
                                                        &end)) < 0
                                 )
                                 return code;
@@ -762,10 +859,12 @@ flex:			{
                             }
                             if (code < 0)
                                 return code;
-                            csp -= 13;
                         }
                         cnext;
                     case ce2_hflex1:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-3], cstack))
+                            return_error(gs_error_invalidfont);
+                        CS_CHECK_PUSHN(csp, cstack, 4);
                         csp[4] = fixed_half;	/* fd/100 */
                         csp[2] = *csp;          /* dx6 */
                         csp[3] = -(csp[-7] + csp[-5] + csp[-1]);	/* dy6 */
@@ -775,6 +874,9 @@ flex:			{
                         csp += 4;
                         goto flex;
                     case ce2_flex1:
+                        if (!CS_CHECK_CSTACK_BOUNDS(&csp[-10], cstack))
+                            return_error(gs_error_invalidfont);
+                        CS_CHECK_PUSHN(csp, cstack, 2);
                         {
                             fixed dx = csp[-10] + csp[-8] + csp[-6] + csp[-4] + csp[-2];
                             fixed dy = csp[-9] + csp[-7] + csp[-5] + csp[-3] + csp[-1];
@@ -792,7 +894,7 @@ flex:			{
 
                 /* Fill up the dispatch up to 32. */
 
-              case_c2_undefs:
+            case_c2_undefs:
             default:		/* pacify compiler */
                 return_error(gs_error_invalidfont);
         }

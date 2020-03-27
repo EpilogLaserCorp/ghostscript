@@ -68,13 +68,26 @@ static dev_proc_print_page(bj10v_print_page);
 static dev_proc_get_initial_matrix(bj10v_get_initial_matrix);
 #endif
 
+static int
+bj10v_open(gx_device * pdev)
+{
+    if (pdev->HWResolution[0] < 180 ||
+        pdev->HWResolution[1] < 180)
+    {
+        emprintf(pdev->memory, "device requires a resolution of at least 180dpi\n");
+        return_error(gs_error_rangecheck);
+    }
+    return gdev_prn_open(pdev);
+}
+
+
 #if 0
 gx_device_procs prn_bj10v_procs =
   prn_matrix_procs(gdev_prn_open, bj10v_get_initial_matrix,
     gdev_prn_output_page, gdev_prn_close);
 #endif
 gx_device_procs prn_bj10v_procs =
-  prn_procs(gdev_prn_open, gdev_prn_output_page, gdev_prn_close);
+  prn_procs(bj10v_open, gdev_prn_output_page, gdev_prn_close);
 
 gx_device_printer gs_bj10v_device =
   prn_device(prn_bj10v_procs, "bj10v",
@@ -137,7 +150,7 @@ prn_putc(gx_device_printer *pdev, int c)
                 pc98_prn_out(c);
                 return 0;
         }
-        return fputc(c, pdev->file);
+        return gp_fputc(c, pdev->file);
 }
 
 static int
@@ -148,7 +161,7 @@ prn_puts(gx_device_printer *pdev, char *ptr)
                         pc98_prn_out(*ptr ++);
                 return 0;
         }
-        return fputs(ptr, pdev->file);
+        return gp_fputs(ptr, pdev->file);
 }
 
 static int
@@ -172,10 +185,10 @@ prn_flush(gx_device_printer *pdev)
 
 #else /* PC9801 */
 
-#define prn_putc(pdev, c) putc(c, pdev->file)
-#define prn_puts(pdev, ptr) fputs(ptr, pdev->file)
-#define prn_write(pdev, ptr, size) fwrite(ptr, 1, size, pdev->file)
-#define prn_flush(pdev) fflush(pdev->file)
+#define prn_putc(pdev, c) gp_fputc(c, pdev->file)
+#define prn_puts(pdev, ptr) gp_fputs(ptr, pdev->file)
+#define prn_write(pdev, ptr, size) gp_fwrite(ptr, 1, size, pdev->file)
+#define prn_flush(pdev) gp_fflush(pdev->file)
 
 #endif
 
@@ -183,7 +196,7 @@ prn_flush(gx_device_printer *pdev)
 
 static void
 bj10v_output_run(byte *data, int dnum, int bytes,
-                                 char *mode, gx_device_printer *pdev)
+                 const char *mode, gx_device_printer *pdev)
 {
         prn_putc(pdev, '\033');
         prn_puts(pdev, mode);
@@ -194,11 +207,11 @@ bj10v_output_run(byte *data, int dnum, int bytes,
 
 /* Send the page to the printer. */
 static int
-bj10v_print_page(gx_device_printer *pdev, FILE *prn_stream)
+bj10v_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {	int line_size = gdev_prn_raster((gx_device *)pdev);
-        int xres = pdev->x_pixels_per_inch;
-        int yres = pdev->y_pixels_per_inch;
-        char *mode = (yres == 180 ?
+        int xres = (int)pdev->x_pixels_per_inch;
+        int yres = (int)pdev->y_pixels_per_inch;
+        const char *mode = (yres == 180 ?
                       (xres == 180 ? "\052\047" : "\052\050") :
                       "|*");
         int bits_per_column = 24 * (yres / 180);
@@ -206,7 +219,8 @@ bj10v_print_page(gx_device_printer *pdev, FILE *prn_stream)
         int x_skip_unit = bytes_per_column * (xres / 180);
         int y_skip_unit = (yres / 180);
         byte *in = (byte *)gs_malloc(pdev->memory->non_gc_memory, 8, line_size, "bj10v_print_page(in)");
-        byte *out = (byte *)gs_malloc(pdev->memory->non_gc_memory, bits_per_column, line_size, "bj10v_print_page(out)");
+        /* We need one extra byte in <out> for our sentinel. */
+        byte *out = (byte *)gs_malloc(pdev->memory->non_gc_memory, bits_per_column * line_size + 1, 1, "bj10v_print_page(out)");
         int lnum = 0;
         int y_skip = 0;
         int code = 0;
@@ -223,7 +237,6 @@ bj10v_print_page(gx_device_printer *pdev, FILE *prn_stream)
            {	byte *out_beg;
                 byte *out_end;
                 byte *outl, *outp;
-                byte *zp;
                 int count, bnum;
 
                 /* Copy 1 scan line and test for all zero. */

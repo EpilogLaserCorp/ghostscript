@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2012 Artifex Software, Inc.
+# Copyright (C) 2001-2019 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 # of the license contained in the file LICENSE in this distribution.
 #
 # Refer to licensing information at http://www.artifex.com or contact
-# Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-# CA  94903, U.S.A., +1(415)492-9861, for further information.
+# Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+# CA 94945, U.S.A., +1(415)492-9861, for further information.
 #
 
 # makefile for Luratech lwf_jp2 library code.
@@ -29,7 +29,7 @@
 # This partial makefile compiles the openjpeg library for use in
 # Ghostscript.
 
-OPEN_JPEG_MAK=$(GLSRC)openjpeg.mak
+OPEN_JPEG_MAK=$(GLSRC)openjpeg.mak $(TOP_MAKEFILES)
 
 OPEN_JPEG_SRC=$(JPXSRCDIR)$(D)src$(D)lib$(D)openjp2$(D)
 OPEN_JPEG_GEN=$(JPXOBJDIR)$(D)
@@ -54,17 +54,17 @@ open_jpeg_OBJS = \
 	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)mct.$(OBJ)			\
 	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)mqc.$(OBJ)			\
 	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)openjpeg.$(OBJ)			\
-	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)opj_clock.$(OBJ)			\
 	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)phix_manager.$(OBJ)			\
 	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)pi.$(OBJ)			\
 	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)ppix_manager.$(OBJ)			\
-	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)raw.$(OBJ)		\
 	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)t1.$(OBJ)		\
 	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)t2.$(OBJ)			\
 	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)tcd.$(OBJ)			\
 	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)tgt.$(OBJ)			\
 	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)thix_manager.$(OBJ)			\
 	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)tpix_manager.$(OBJ)			\
+	$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)thread.$(OBJ)                \
+        $(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)sparse_array.$(OBJ) 
 
 open_jpeg_HDRS = \
 	$(OPEN_JPEG_SRC)bio.h		\
@@ -90,26 +90,28 @@ open_jpeg_HDRS = \
 	$(OPEN_JPEG_SRC)opj_malloc.h			\
 	$(OPEN_JPEG_SRC)opj_stdint.h			\
 	$(OPEN_JPEG_SRC)pi.h		\
-	$(OPEN_JPEG_SRC)raw.h		\
 	$(OPEN_JPEG_SRC)t1.h		\
 	$(OPEN_JPEG_SRC)t1_luts.h	\
 	$(OPEN_JPEG_SRC)t2.h	\
 	$(OPEN_JPEG_SRC)tcd.h		\
 	$(OPEN_JPEG_SRC)tgt.h	\
+	$(OPEN_JPEG_SRC)thread.h	\
+	$(OPEN_JPEG_SRC)tls_keys.h	\
+        $(OPEN_JPEG_SRC)sparse_array.h
 
 # switch in the selected library .dev
-$(OPEN_JPEG_GEN)openjpeg.dev : $(TOP_MAKEFILES) $(OPEN_JPEG_GEN)openjpeg_$(SHARE_JPX).dev \
- $(MAKEDIRS)
+$(OPEN_JPEG_GEN)openjpeg.dev : $(OPEN_JPEG_GEN)openjpeg_$(SHARE_JPX).dev \
+ $(OPEN_JPEG_MAK) $(MAKEDIRS)
 	$(CP_) $(OPEN_JPEG_GEN)openjpeg_$(SHARE_JPX).dev $(OPEN_JPEG_GEN)openjpeg.dev
 
-# external link .dev
-$(OPEN_JPEG_GEN)openjpeg_1.dev : $(TOP_MAKEFILES) $(OPEN_JPEG_MAK) $(ECHOGS_XE) \
- $(MAKEDIRS)
-	$(SETMOD) $(OPEN_JPEG_GEN)openjpeg_1 -lib lib_openjpeg
+# external link .dev - empty, as we add the lib to LDFLAGS
+$(OPEN_JPEG_GEN)openjpeg_1.dev : $(OPEN_JPEG_MAK) $(ECHOGS_XE) \
+ $(OPEN_JPEG_MAK) $(MAKEDIRS)
+	$(SETMOD) $(OPEN_JPEG_GEN)openjpeg_1
 
 # compile our own .dev
-$(OPEN_JPEG_GEN)openjpeg_0.dev : $(TOP_MAKEFILES) $(OPEN_JPEG_MAK) $(ECHOGS_XE) $(open_jpeg_OBJS) \
- $(MAKEDIRS)
+$(OPEN_JPEG_GEN)openjpeg_0.dev : $(ECHOGS_XE) $(open_jpeg_OBJS) \
+ $(OPEN_JPEG_MAK) $(MAKEDIRS)
 	$(SETMOD) $(OPEN_JPEG_GEN)openjpeg_0 $(open_jpeg_OBJS)
 
 # define our specific compiler
@@ -163,9 +165,6 @@ $(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)opj_clock.$(OBJ) : $(OPEN_JPEG_SRC)opj_clock.
 $(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)pi.$(OBJ) : $(OPEN_JPEG_SRC)pi.c $(open_jpeg_HDRS) $(OPEN_JPEG_DEP)
 	$(OPEN_JPEG_CC) $(OPEN_JPEG_O)pi.$(OBJ) $(C_) $(OPEN_JPEG_SRC)pi.c
 
-$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)raw.$(OBJ) : $(OPEN_JPEG_SRC)raw.c $(open_jpeg_HDRS) $(OPEN_JPEG_DEP)
-	$(OPEN_JPEG_CC) $(OPEN_JPEG_O)raw.$(OBJ) $(C_) $(OPEN_JPEG_SRC)raw.c
-
 $(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)t1.$(OBJ) : $(OPEN_JPEG_SRC)t1.c $(open_jpeg_HDRS) $(OPEN_JPEG_DEP)
 	$(OPEN_JPEG_CC) $(OPEN_JPEG_O)t1.$(OBJ) $(C_) $(OPEN_JPEG_SRC)t1.c
 
@@ -192,5 +191,11 @@ $(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)ppix_manager.$(OBJ) : $(OPEN_JPEG_SRC)ppix_ma
 
 $(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)phix_manager.$(OBJ) : $(OPEN_JPEG_SRC)phix_manager.c $(open_jpeg_HDRS) $(OPEN_JPEG_DEP)
 	$(OPEN_JPEG_CC) $(OPEN_JPEG_O)phix_manager.$(OBJ) $(C_) $(OPEN_JPEG_SRC)phix_manager.c
+
+$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)thread.$(OBJ) : $(OPEN_JPEG_SRC)thread.c $(open_jpeg_HDRS) $(OPEN_JPEG_DEP)
+	$(OPEN_JPEG_CC) $(OPEN_JPEG_O)thread.$(OBJ) $(C_) $(OPEN_JPEG_SRC)thread.c
+
+$(OPEN_JPEG_OBJ)$(OPEN_JPEG_PREFIX)sparse_array.$(OBJ) : $(OPEN_JPEG_SRC)sparse_array.c $(open_jpeg_HDRS) $(OPEN_JPEG_DEP)
+	$(OPEN_JPEG_CC) $(OPEN_JPEG_O)sparse_array.$(OBJ) $(C_) $(OPEN_JPEG_SRC)sparse_array.c
 
 # end of file

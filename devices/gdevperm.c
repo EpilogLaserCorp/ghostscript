@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -129,14 +129,14 @@ const gx_device_perm_t gs_perm_device = {
 };
 
 static int
-perm_print_page(gx_device_printer *pdev, FILE *pstream)
+perm_print_page(gx_device_printer *pdev, gp_file *pstream)
 {
     int y;
     gx_device_perm_t * const dev = (gx_device_perm_t *)pdev;
     int ncomp = dev->num_std_colorant_names;
     int raw_raster = pdev->width * ncomp;
-    byte *raw_line;
-    byte *cooked_line;
+    byte *raw_line = NULL;
+    byte *cooked_line = NULL;
     byte *row;
     int code = 0;
     int mode = dev->mode;
@@ -145,9 +145,15 @@ perm_print_page(gx_device_printer *pdev, FILE *pstream)
     fprintf(pstream, "P6\n%d %d\n255\n", dev->width, dev->height);
     raw_line = gs_alloc_bytes(pdev->memory, raw_raster, "perm_print_page");
     cooked_line = gs_alloc_bytes(pdev->memory, dev->width * 3, "perm_print_page");
+    if (raw_line == NULL || cooked_line == NULL) {
+        gs_free_object(pdev->memory, raw_line, "perm_print_page");
+        return_error(gs_error_VMerror);
+    }
     for (y = 0; y < dev->height; y++) {
         int x;
         code = gdev_prn_get_bits(pdev, y, raw_line, &row);
+        if (code < 0)
+            break;
         for (x = 0; x < dev->width; x++) {
             int c, m, y, k;
             int r, g, b;
@@ -216,10 +222,10 @@ gray_cs_to_perm_cm_0(gx_device *dev, frac gray, frac out[])
 }
 
 static void
-rgb_cs_to_perm_cm_0(gx_device *dev, const gs_imager_state *pis,
+rgb_cs_to_perm_cm_0(gx_device *dev, const gs_gstate *pgs,
                                   frac r, frac g, frac b, frac out[])
 {
-    color_rgb_to_cmyk(r, g, b, pis, out, dev->memory);
+    color_rgb_to_cmyk(r, g, b, pgs, out, dev->memory);
     perm_permute_cm(dev, out);
 }
 
@@ -241,7 +247,7 @@ gray_cs_to_perm_cm_1(gx_device *dev, frac gray, frac out[])
 }
 
 static void
-rgb_cs_to_perm_cm_1(gx_device *dev, const gs_imager_state *pis,
+rgb_cs_to_perm_cm_1(gx_device *dev, const gs_gstate *pgs,
                                   frac r, frac g, frac b, frac out[])
 {
     out[0] = frac_1 - r;

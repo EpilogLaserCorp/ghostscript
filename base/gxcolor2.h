@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -24,6 +24,7 @@
 #include "gsmatrix.h"		/* for step_matrix */
 #include "gsrefct.h"
 #include "gxbitmap.h"
+#include "gxdevcli.h"
 
 /* Cache for Indexed color with procedure, or Separation color. */
 struct gs_indexed_map_s {
@@ -65,11 +66,6 @@ rc_free_proc(free_indexed_map);
  * arrange it so that all 4 transformation factors are non-negative.
  */
 
-#ifndef gs_pattern1_instance_t_DEFINED
-#  define gs_pattern1_instance_t_DEFINED
-typedef struct gs_pattern1_instance_s gs_pattern1_instance_t;
-#endif
-
 struct gs_pattern1_instance_s {
     gs_pattern_instance_common;	/* must be first */
     gs_pattern1_template_t templat;
@@ -92,8 +88,8 @@ struct gs_pattern1_instance_s {
     gx_bitmap_id id;		/* key for cached bitmap (= id of mask) */
 };
 
-#define private_st_pattern1_instance() /* in gsptype1.c */\
-  gs_private_st_composite(st_pattern1_instance, gs_pattern1_instance_t,\
+#define public_st_pattern1_instance() /* in gsptype1.c */\
+  gs_public_st_composite(st_pattern1_instance, gs_pattern1_instance_t,\
     "gs_pattern1_instance_t", pattern1_instance_enum_ptrs,\
     pattern1_instance_reloc_ptrs)
 
@@ -102,5 +98,8 @@ struct gs_pattern1_instance_s {
 
 #define float_color_to_byte_color(float_color) ( (0.0 < float_color && float_color < 1.0) ? \
     ((unsigned char) (float_color*255.0)) :  ( (float_color <= 0.0) ? 0x00 : 0xFF  ))
+
+#define float_color_to_color16(float_color) ( (0.0 < float_color && float_color < 1.0) ? \
+    ((uint16_t) (float_color*65535.0)) :  ( (float_color <= 0.0) ? 0x00 : 0xFFFF  ))
 
 #endif /* gxcolor2_INCLUDED */

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* .BMP file format output drivers */
@@ -139,7 +139,7 @@ prn_device(bmp32b_procs, "bmp32b",
 /* Write out a page in BMP format. */
 /* This routine is used for all non-separated formats. */
 static int
-bmp_print_page(gx_device_printer * pdev, FILE * file)
+bmp_print_page(gx_device_printer * pdev, gp_file * file)
 {
     uint raster = gdev_prn_raster(pdev);
     /* BMP scan lines are padded to 32 bits. */
@@ -162,8 +162,10 @@ bmp_print_page(gx_device_printer * pdev, FILE * file)
     /* BMP files want the image in bottom-to-top order! */
 
     for (y = pdev->height - 1; y >= 0; y--) {
-        gdev_prn_copy_scan_lines(pdev, y, row, raster);
-        fwrite((const char *)row, bmp_raster, 1, file);
+        code = gdev_prn_copy_scan_lines(pdev, y, row, raster);
+        if (code < 0)
+            goto done;
+        gp_fwrite((const char *)row, bmp_raster, 1, file);
     }
 
 done:
@@ -175,7 +177,7 @@ done:
 /* Write out a page in separated CMYK format. */
 /* This routine is used for all formats. */
 static int
-bmp_cmyk_print_page(gx_device_printer * pdev, FILE * file)
+bmp_cmyk_print_page(gx_device_printer * pdev, gp_file * file)
 {
     int plane_depth = pdev->color_info.depth / 4;
     uint raster = (pdev->width * plane_depth + 7) >> 3;
@@ -212,7 +214,7 @@ bmp_cmyk_print_page(gx_device_printer * pdev, FILE * file)
                                       &render_plane);
             if (code < 0)
                 goto done;
-            fwrite((const char *)actual_data, bmp_raster, 1, file);
+            gp_fwrite((const char *)actual_data, bmp_raster, 1, file);
         }
     }
 

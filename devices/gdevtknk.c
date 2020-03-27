@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -115,7 +115,7 @@ tekink_map_color_rgb(gx_device *dev, gx_color_index color, ushort prgb[3])
 
 /* Send the page to the printer. */
 static int
-tekink_print_page(gx_device_printer *pdev,FILE *prn_stream)
+tekink_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
     int line_size,color_line_size,scan_line,num_bytes,scan_lines,color_plane;
     int roll_paper,out_line,micro_line,pending_micro_lines,line_blank,
@@ -125,6 +125,7 @@ tekink_print_page(gx_device_printer *pdev,FILE *prn_stream)
     register byte bdata,mdata,ydata,cdata;
     register byte mask,inbyte;
     register byte *indataend,*outdataend;
+    int code = 0;
 
     /* Allocate a temporary buffer for color separation.
        The buffer is partitioned into an input buffer and four
@@ -134,7 +135,8 @@ tekink_print_page(gx_device_printer *pdev,FILE *prn_stream)
     line_size = gdev_mem_bytes_per_scan_line((gx_device *)pdev);
     color_line_size=(pdev->width+7)/8;
     indata1=(byte *)malloc(line_size+4*(color_line_size+1));
-    if (indata1==NULL) return -1;
+    if (indata1==NULL)
+        return_error(gs_error_VMerror);
     /* pointers to the partions */
     indataend=indata1+line_size;
     bdata1=indataend;
@@ -150,7 +152,9 @@ tekink_print_page(gx_device_printer *pdev,FILE *prn_stream)
     scan_lines=pdev->height;
     for (scan_line=0;scan_line<scan_lines;scan_line++){
         /* get data */
-        gdev_prn_copy_scan_lines(pdev,scan_line,indata1,line_size);
+        code = gdev_prn_copy_scan_lines(pdev,scan_line,indata1,line_size);
+        if (code < 0)
+            goto xit;
         /* Separate data into color planes */
         bdatap = bdata1+1;
         mdatap = mdata1+1;
@@ -207,14 +211,14 @@ tekink_print_page(gx_device_printer *pdev,FILE *prn_stream)
                         (out_line/4);
                     for (micro_line=0;micro_line<pending_micro_lines;
                         micro_line++){
-                        fputs("\033A",prn_stream);
+                        gp_fputs("\033A",prn_stream);
                     }
                     out_line+=blank_lines;
                     blank_lines=0;
                 }
-                fprintf(prn_stream,"\033I%c%03d",'0'+(out_line%4)+
-                    4*color_plane,num_bytes);
-                fwrite(outdata+1,1,num_bytes,prn_stream);
+                gp_fprintf(prn_stream,"\033I%c%03d",'0'+(out_line%4)+
+                           4*color_plane,num_bytes);
+                gp_fwrite(outdata+1,1,num_bytes,prn_stream);
             }
         } /* loop over color planes */
 
@@ -229,7 +233,7 @@ tekink_print_page(gx_device_printer *pdev,FILE *prn_stream)
         else{
             if (out_line%4==3){
                 /* Write micro line feed code */
-                fputs("\033A",prn_stream);
+                gp_fputs("\033A",prn_stream);
             }
             out_line++;
         }
@@ -238,17 +242,18 @@ tekink_print_page(gx_device_printer *pdev,FILE *prn_stream)
     /* if the number of scan lines written is not a multiple of four,
        write the final micro line feed code */
     if (out_line%4){
-        fputs("\033A",prn_stream);
+        gp_fputs("\033A",prn_stream);
     }
     /* Separate this plot from the next */
     if (roll_paper){
-        fputs("\n\n\n\n\n",prn_stream);
+        gp_fputs("\n\n\n\n\n",prn_stream);
     }
     else{
-        fputs("\f",prn_stream);
+        gp_fputs("\f",prn_stream);
     }
 
+xit:
     /* Deallocate temp buffer */
     free(indata1);
-    return 0;
+    return code;
 }

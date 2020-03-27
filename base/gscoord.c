@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -54,7 +54,7 @@ static void trace_matrix(const gs_memory_t *mem, const gs_matrix *);
            }
 
 static int
-ctm_set_inverse(gs_state * pgs)
+ctm_set_inverse(gs_gstate * pgs)
 {
     int code = gs_matrix_invert(&ctm_only(pgs), &pgs->ctm_inverse);
 
@@ -96,7 +96,7 @@ ctm_set_inverse(gs_state * pgs)
 /* ------ Coordinate system definition ------ */
 
 int
-gs_initmatrix(gs_state * pgs)
+gs_initmatrix(gs_gstate * pgs)
 {
     gs_matrix imat;
 
@@ -111,7 +111,7 @@ gs_initmatrix(gs_state * pgs)
 }
 
 int
-gs_defaultmatrix(const gs_state * pgs, gs_matrix * pmat)
+gs_defaultmatrix(const gs_gstate * pgs, gs_matrix * pmat)
 {
     gx_device *dev;
 
@@ -122,15 +122,13 @@ gs_defaultmatrix(const gs_state * pgs, gs_matrix * pmat)
     dev = gs_currentdevice_inline(pgs);
     gs_deviceinitialmatrix(dev, pmat);
     /* Add in the translation for the Margins. */
-    pmat->tx += dev->Margins[0] *
-        dev->HWResolution[0] / dev->MarginsHWResolution[0];
-    pmat->ty += dev->Margins[1] *
-        dev->HWResolution[1] / dev->MarginsHWResolution[1];
+    pmat->tx += dev->Margins[0];
+    pmat->ty += dev->Margins[1];
     return 0;
 }
 
 int
-gs_setdefaultmatrix(gs_state * pgs, const gs_matrix * pmat)
+gs_setdefaultmatrix(gs_gstate * pgs, const gs_matrix * pmat)
 {
     if (pmat == NULL)
         pgs->ctm_default_set = false;
@@ -142,7 +140,7 @@ gs_setdefaultmatrix(gs_state * pgs, const gs_matrix * pmat)
 }
 
 int
-gs_currentmatrix(const gs_state * pgs, gs_matrix * pmat)
+gs_currentmatrix(const gs_gstate * pgs, gs_matrix * pmat)
 {
     *pmat = ctm_only(pgs);
     return 0;
@@ -151,7 +149,7 @@ gs_currentmatrix(const gs_state * pgs, gs_matrix * pmat)
 /* Set the current transformation matrix for rendering text. */
 /* Note that this may be based on a font other than the current font. */
 int
-gs_setcharmatrix(gs_state * pgs, const gs_matrix * pmat)
+gs_setcharmatrix(gs_gstate * pgs, const gs_matrix * pmat)
 {
     gs_matrix cmat;
     int code = gs_matrix_multiply(pmat, &ctm_only(pgs), &cmat);
@@ -172,7 +170,7 @@ gs_setcharmatrix(gs_state * pgs, const gs_matrix * pmat)
 /* for rendering text.  If force=true, update char_tm if it is invalid; */
 /* if force=false, don't update char_tm, and return an error code. */
 int
-gs_currentcharmatrix(gs_state * pgs, gs_matrix * ptm, bool force)
+gs_currentcharmatrix(gs_gstate * pgs, gs_matrix * ptm, bool force)
 {
     if (!pgs->char_tm_valid) {
         int code;
@@ -189,7 +187,7 @@ gs_currentcharmatrix(gs_state * pgs, gs_matrix * ptm, bool force)
 }
 
 int
-gs_setmatrix(gs_state * pgs, const gs_matrix * pmat)
+gs_setmatrix(gs_gstate * pgs, const gs_matrix * pmat)
 {
     update_ctm(pgs, pmat->tx, pmat->ty);
     set_ctm_only(pgs, *pmat);
@@ -201,19 +199,19 @@ gs_setmatrix(gs_state * pgs, const gs_matrix * pmat)
 }
 
 int
-gs_imager_setmatrix(gs_imager_state * pis, const gs_matrix * pmat)
+gs_gstate_setmatrix(gs_gstate * pgs, const gs_matrix * pmat)
 {
-    update_matrix_fixed(pis->ctm, pmat->tx, pmat->ty);
-    set_ctm_only(pis, *pmat);
+    update_matrix_fixed(pgs->ctm, pmat->tx, pmat->ty);
+    set_ctm_only(pgs, *pmat);
 #ifdef DEBUG
     if (gs_debug_c('x'))
-        dmlprintf(pis->memory, "[x]imager_setmatrix:\n"), trace_ctm(pis);
+        dmlprintf(pgs->memory, "[x]imager_setmatrix:\n"), trace_ctm(pgs);
 #endif
     return 0;
 }
 
 int
-gs_settocharmatrix(gs_state * pgs)
+gs_settocharmatrix(gs_gstate * pgs)
 {
     if (pgs->char_tm_valid) {
         pgs->ctm = pgs->char_tm;
@@ -224,7 +222,7 @@ gs_settocharmatrix(gs_state * pgs)
 }
 
 int
-gs_translate(gs_state * pgs, double dx, double dy)
+gs_translate(gs_gstate * pgs, double dx, double dy)
 {
     gs_point pt;
     int code;
@@ -244,10 +242,9 @@ gs_translate(gs_state * pgs, double dx, double dy)
 }
 
 int
-gs_translate_untransformed(gs_state * pgs, double dx, double dy)
+gs_translate_untransformed(gs_gstate * pgs, double dx, double dy)
 {
     gs_point pt;
-    int code;
 
     pt.x = (float)dx + pgs->ctm.tx;
     pt.y = (float)dy + pgs->ctm.ty;
@@ -262,7 +259,7 @@ gs_translate_untransformed(gs_state * pgs, double dx, double dy)
 }
 
 int
-gs_scale(gs_state * pgs, double sx, double sy)
+gs_scale(gs_gstate * pgs, double sx, double sy)
 {
     pgs->ctm.xx *= sx;
     pgs->ctm.xy *= sx;
@@ -277,7 +274,7 @@ gs_scale(gs_state * pgs, double sx, double sy)
 }
 
 int
-gs_rotate(gs_state * pgs, double ang)
+gs_rotate(gs_gstate * pgs, double ang)
 {
     int code = gs_matrix_rotate(&ctm_only(pgs), ang,
                                 &ctm_only_writable(pgs));
@@ -291,7 +288,7 @@ gs_rotate(gs_state * pgs, double ang)
 }
 
 int
-gs_concat(gs_state * pgs, const gs_matrix * pmat)
+gs_concat(gs_gstate * pgs, const gs_matrix * pmat)
 {
     gs_matrix cmat;
     int code = gs_matrix_multiply(pmat, &ctm_only(pgs), &cmat);
@@ -312,19 +309,19 @@ gs_concat(gs_state * pgs, const gs_matrix * pmat)
 #define is_skewed(pmat) (!(is_xxyy(pmat) || is_xyyx(pmat)))
 
 int
-gs_transform(gs_state * pgs, double x, double y, gs_point * pt)
+gs_transform(gs_gstate * pgs, double x, double y, gs_point * pt)
 {
     return gs_point_transform(x, y, &ctm_only(pgs), pt);
 }
 
 int
-gs_dtransform(gs_state * pgs, double dx, double dy, gs_point * pt)
+gs_dtransform(gs_gstate * pgs, double dx, double dy, gs_point * pt)
 {
     return gs_distance_transform(dx, dy, &ctm_only(pgs), pt);
 }
 
 int
-gs_itransform(gs_state * pgs, double x, double y, gs_point * pt)
+gs_itransform(gs_gstate * pgs, double x, double y, gs_point * pt)
 {				/* If the matrix isn't skewed, we get more accurate results */
     /* by using transform_inverse than by using the inverse matrix. */
     if (!is_skewed(&pgs->ctm)) {
@@ -336,7 +333,7 @@ gs_itransform(gs_state * pgs, double x, double y, gs_point * pt)
 }
 
 int
-gs_idtransform(gs_state * pgs, double dx, double dy, gs_point * pt)
+gs_idtransform(gs_gstate * pgs, double dx, double dy, gs_point * pt)
 {				/* If the matrix isn't skewed, we get more accurate results */
     /* by using transform_inverse than by using the inverse matrix. */
     if (!is_skewed(&pgs->ctm)) {
@@ -349,10 +346,10 @@ gs_idtransform(gs_state * pgs, double dx, double dy, gs_point * pt)
 }
 
 int
-gs_imager_idtransform(const gs_imager_state * pis, double dx, double dy,
+gs_gstate_idtransform(const gs_gstate * pgs, double dx, double dy,
                       gs_point * pt)
 {
-    return gs_distance_transform_inverse(dx, dy, &ctm_only(pis), pt);
+    return gs_distance_transform_inverse(dx, dy, &ctm_only(pgs), pt);
 }
 
 /* ------ For internal use only ------ */
@@ -360,7 +357,7 @@ gs_imager_idtransform(const gs_imager_state * pis, double dx, double dy,
 /* Set the translation to a fixed value, and translate any existing path. */
 /* Used by gschar.c to prepare for a BuildChar or BuildGlyph procedure. */
 int
-gx_translate_to_fixed(register gs_state * pgs, fixed px, fixed py)
+gx_translate_to_fixed(register gs_gstate * pgs, fixed px, fixed py)
 {
     double fpx = fixed2float(px);
     double fdx = fpx - pgs->ctm.tx;
@@ -408,7 +405,7 @@ gx_translate_to_fixed(register gs_state * pgs, fixed px, fixed py)
 
 /* Scale the CTM and character matrix for oversampling. */
 int
-gx_scale_char_matrix(register gs_state * pgs, int sx, int sy)
+gx_scale_char_matrix(register gs_gstate * pgs, int sx, int sy)
 {
 #define scale_cxy(s, vx, vy)\
   if ( s != 1 )\

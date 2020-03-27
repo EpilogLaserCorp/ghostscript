@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -28,7 +28,7 @@
 #include "gzstate.h"
 
 /* Imported from gsht.c */
-void gx_set_effective_transfer(gs_state *);
+void gx_set_effective_transfer(gs_gstate *);
 
 /* Structure descriptors */
 public_st_client_color();
@@ -99,11 +99,11 @@ gx_no_adjust_color_count(const gs_client_color * pcc,
 }
 
 /* Forward declarations */
-void load_transfer_map(gs_state *, gx_transfer_map *, double);
+void load_transfer_map(gs_gstate *, gx_transfer_map *, double);
 
 /* setgray */
 int
-gs_setgray(gs_state * pgs, double gray)
+gs_setgray(gs_gstate * pgs, double gray)
 {
     gs_color_space      *pcs;
     int                 code;
@@ -125,7 +125,7 @@ gs_setgray(gs_state * pgs, double gray)
 
 /* setrgbcolor */
 int
-gs_setrgbcolor(gs_state * pgs, double r, double g, double b)
+gs_setrgbcolor(gs_gstate * pgs, double r, double g, double b)
 {
     gs_color_space      *pcs;
     int                 code;
@@ -149,24 +149,26 @@ gs_setrgbcolor(gs_state * pgs, double r, double g, double b)
 
 /* setnullcolor */
 int
-gs_setnullcolor(gs_state * pgs)
+gs_setnullcolor(gs_gstate * pgs)
 {
+    int code = 0;
+
     if (pgs->in_cachedevice)
         return_error(gs_error_undefined);
-    gs_setgray(pgs, 0.0);	/* set color space to something harmless */
+    code = gs_setgray(pgs, 0.0);	/* set color space to something harmless */
     color_set_null(gs_currentdevicecolor_inline(pgs));
-    return 0;
+    return code;
 }
 
 /* settransfer */
 /* Remap=0 is used by the interpreter. */
 int
-gs_settransfer(gs_state * pgs, gs_mapping_proc tproc)
+gs_settransfer(gs_gstate * pgs, gs_mapping_proc tproc)
 {
     return gs_settransfer_remap(pgs, tproc, true);
 }
 int
-gs_settransfer_remap(gs_state * pgs, gs_mapping_proc tproc, bool remap)
+gs_settransfer_remap(gs_gstate * pgs, gs_mapping_proc tproc, bool remap)
 {
     gx_transfer *ptran = &pgs->set_transfer;
 
@@ -202,7 +204,7 @@ gs_settransfer_remap(gs_state * pgs, gs_mapping_proc tproc, bool remap)
 
 /* currenttransfer */
 gs_mapping_proc
-gs_currenttransfer(const gs_state * pgs)
+gs_currenttransfer(const gs_gstate * pgs)
 {
     return pgs->set_transfer.gray->proc;
 }
@@ -211,12 +213,18 @@ gs_currenttransfer(const gs_state * pgs)
 
 /* Set device color = 1 for writing into the character cache. */
 int
-gx_set_device_color_1(gs_state * pgs)
+gx_set_device_color_1(gs_gstate * pgs)
 {
     gs_color_space  *pcs;
 
-    gs_setoverprint(pgs, false);
-    gs_setoverprintmode(pgs, 0);
+    /*  We need to set the stroke *and* the fill overprint off
+       to ensure the op compositor is disabled.  They will be
+       restored when the graphic state is restored */
+    if (pgs->stroke_overprint)
+        gs_setstrokeoverprint(pgs, false);
+    if (pgs->overprint)
+        gs_setfilloverprint(pgs, false);
+
     pcs = gs_cspace_new_DeviceGray(pgs->memory);
     if (pcs) {
         gs_setcolorspace(pgs, pcs);
@@ -227,12 +235,6 @@ gx_set_device_color_1(gs_state * pgs)
     }
     set_nonclient_dev_color(gs_currentdevicecolor_inline(pgs), 1);
     pgs->log_op = lop_default;
-    /*
-     * In the unlikely event that  overprint mode is in effect,
-     * update the overprint information.
-     */
-    if (pgs->effective_overprint_mode == 1)
-        (void)gs_do_set_overprint(pgs);
 
     return 0;
 }
@@ -250,7 +252,7 @@ transfer_use_proc(double value, const gx_transfer_map * pmap,
     return (*pmap->proc) (value, pmap);
 }
 void
-load_transfer_map(gs_state * pgs, gx_transfer_map * pmap, double min_value)
+load_transfer_map(gs_gstate * pgs, gx_transfer_map * pmap, double min_value)
 {
     gs_mapping_closure_proc_t proc;
     const void *proc_data;

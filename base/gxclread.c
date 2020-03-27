@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -30,8 +30,6 @@
 #include "gdevplnx.h"
 #include "gdevp14.h"
 #include "gsmemory.h"
-#include "gsmemlok.h"
-#include "vdtrace.h"
 #include "gsicc_cache.h"
 /*
  * We really don't like the fact that gdevprn.h is included here, since
@@ -89,8 +87,7 @@ s_band_read_init(stream_state * st)
     ss->b_this.band_min = 0;
     ss->b_this.band_max = 0;
     ss->b_this.pos = 0;
-    io_procs->rewind(ss->page_bfile, false, ss->page_bfname);
-    return 0;
+    return io_procs->rewind(ss->page_bfile, false, ss->page_bfname);
 }
 
 #ifdef DEBUG
@@ -200,9 +197,9 @@ rb:
             }
 #	    endif
             if_debug5m('l', ss->local_memory,
-                      "[l]reading for bands (%d,%d) at bfile %ld, cfile %ld, length %u\n",
+                      "[l]reading for bands (%d,%d) at bfile %"PRId64", cfile %"PRId64", length %u\n",
                       bmin, bmax,
-                      (long)(io_procs->ftell(bfile) - sizeof(ss->b_this)), (long)pos, left);
+                      (io_procs->ftell(bfile) - sizeof(ss->b_this)), (int64_t)pos, left);
         }
     }
     pw->ptr = q;
@@ -229,7 +226,7 @@ buffer_segment_index(const stream_band_read_state *ss, uint buffer_offset, uint 
             return i;
         }
     }
-    gs_note_error(gs_error_unregistered); /* Must not happen. */
+    (void)gs_note_error(gs_error_unregistered); /* Must not happen. */
     return -1;
 }
 
@@ -367,8 +364,13 @@ clist_close_writer_and_init_reader(gx_device_clist *cldev)
             return_error(gs_error_VMerror);
         }
 
-        code = (crdev->icc_cache_cl = gsicc_cache_new(base_mem)) == NULL ? gs_error_VMerror : code;
+        if (crdev->icc_cache_cl == NULL) {
+            code = (crdev->icc_cache_cl = gsicc_cache_new(base_mem)) == NULL ? gs_error_VMerror : code;
+        }
     }
+
+    check_device_compatible_encoding((gx_device *)cldev);
+
     return code;
 }
 
@@ -395,19 +397,23 @@ clist_find_pseudoband(gx_device_clist_reader *crdev, int band, cmd_block *cb)
         strcpy(fmode, "r");
         strncat(fmode, gp_fmode_binary_suffix, 1);
         if ((code=page_info->io_procs->fopen(page_info->cfname, fmode,
-                            &page_info->cfile,
-                            crdev->memory, crdev->memory, true)) < 0 ||
-             (code=page_info->io_procs->fopen(page_info->bfname, fmode,
-                            &page_info->bfile,
-                            crdev->memory, crdev->memory, false)) < 0)
+                      &page_info->cfile,
+                      crdev->memory, crdev->memory, true)) < 0 ||
+                      (code=page_info->io_procs->fopen(page_info->bfname, fmode,
+                      &page_info->bfile,
+                      crdev->memory, crdev->memory, false)) < 0) {
             return code;
-            bfile = page_info->bfile;
+        }
+        bfile = page_info->bfile;
     }
     /* Go to the start of the last command block */
     start_pos = page_info->bfile_end_pos - sizeof(cmd_block);
     page_info->io_procs->fseek(bfile, start_pos, SEEK_SET, page_info->bfname);
     while( 1 ) {
-        page_info->io_procs->fread_chars(cb, sizeof(cmd_block), bfile);
+        int read = page_info->io_procs->fread_chars(cb, sizeof(cmd_block), bfile);
+
+        if (read < sizeof(cmd_block))
+	    return -1;
         if (cb->band_max == band && cb->band_min == band) {
             page_info->io_procs->fseek(bfile, save_pos, SEEK_SET, page_info->bfname);
             return(0);  /* Found it */
@@ -558,7 +564,6 @@ clist_render_init(gx_device_clist *dev)
     crdev->offset_map = NULL;
     crdev->icc_table = NULL;
     crdev->color_usage_array = NULL;
-    crdev->icc_cache_cl = NULL;
     crdev->render_threads = NULL;
 
     return 0;
@@ -579,7 +584,7 @@ clist_get_bits_rectangle(gx_device *dev, const gs_int_rect * prect,
     gs_int_rect band_rect;
     int lines_rasterized;
     gx_device *bdev;
-    int num_planes =
+    uint num_planes =
         (options & GB_PACKING_CHUNKY ? 1 :
          options & GB_PACKING_PLANAR ? dev->color_info.num_components :
          options & GB_PACKING_BIT_PLANAR ? dev->color_info.depth :
@@ -625,15 +630,15 @@ clist_get_bits_rectangle(gx_device *dev, const gs_int_rect * prect,
     if (code < 0)
         return code;
     code = clist_rasterize_lines(dev, y, line_count, bdev, &render_plane, &my);
-    if (code < 0)
-        return code;
-    lines_rasterized = min(code, line_count);
-    /* Return as much of the rectangle as falls within the rasterized lines. */
-    band_rect = *prect;
-    band_rect.p.y = my;
-    band_rect.q.y = my + lines_rasterized;
-    code = dev_proc(bdev, get_bits_rectangle)
-        (bdev, &band_rect, params, unread);
+    if (code >= 0) {
+        lines_rasterized = min(code, line_count);
+        /* Return as much of the rectangle as falls within the rasterized lines. */
+        band_rect = *prect;
+        band_rect.p.y = my;
+        band_rect.q.y = my + lines_rasterized;
+        code = dev_proc(bdev, get_bits_rectangle)
+            (bdev, &band_rect, params, unread);
+    }
     cdev->buf_procs.destroy_buf_device(bdev);
     if (code < 0 || lines_rasterized == line_count)
         return code;
@@ -810,8 +815,8 @@ clist_render_rectangle(gx_device_clist *cldev, const gs_int_rect *prect,
 
             /* Store the page information. */
             page_info.cfile = page_info.bfile = NULL;
-            strncpy(page_info.cfname, ppage->page->cfname, sizeof(page_info.cfname));
-            strncpy(page_info.bfname, ppage->page->bfname, sizeof(page_info.bfname));
+            strncpy(page_info.cfname, ppage->page->cfname, sizeof(page_info.cfname)-1);
+            strncpy(page_info.bfname, ppage->page->bfname, sizeof(page_info.bfname)-1);
             page_info.io_procs = ppage->page->io_procs;
             page_info.tile_cache_size = ppage->page->tile_cache_size;
             page_info.bfile_end_pos = ppage->page->bfile_end_pos;
@@ -912,16 +917,7 @@ clist_playback_file_bands(clist_playback_action action,
         s.foreign = 1;
         s.state = (stream_state *)&rs;
 
-        if (vd_allowed('s')) {
-            vd_get_dc('s');
-        } else if (vd_allowed('i')) {
-            vd_get_dc('i');
-        }
-        vd_set_shift(0, 0);
-        vd_set_scale(0.01);
-        vd_set_origin(0, 0);
         code = clist_playback_band(action, crdev, &s, target, x0, y0, mem);
-        vd_release_dc;
 #	ifdef DEBUG
         s_band_read_dnit_offset_map(crdev, (stream_state *)&rs);
 #	endif

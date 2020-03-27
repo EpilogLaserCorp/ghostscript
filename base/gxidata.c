@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -22,6 +22,9 @@
 #include "gxcpath.h"
 #include "gximage.h"
 #include "gsicc_cache.h"
+#ifdef WITH_CAL
+#include "cal.h"
+#endif
 
 /* Forward declarations */
 static void update_strip(gx_image_enum *penum);
@@ -84,16 +87,93 @@ gx_image1_plane_data(gx_image_enum_common_t * info,
         const byte *buffer;
         int sourcex;
         int x_used = penum->used.x;
+        int skip = 0;
 
+        /* Bump DDA's if it doesn't cause overflow */
+        penum->cur.x = dda_current(penum->dda.row.x);
+        if (max_int - any_abs(penum->dda.row.x.step.dQ) > any_abs(penum->cur.x))
+            dda_next(penum->dda.row.x);
+        penum->cur.y = dda_current(penum->dda.row.y);
+        if (max_int - any_abs(penum->dda.row.y.step.dQ) > any_abs(penum->cur.y))
+            dda_next(penum->dda.row.y);
+
+        if (penum->interpolate == interp_off) {
+            if (penum->skip_next_line) {
+                if (penum->skip_next_line(penum, dev))
+                    goto mt;
+            } else {
+                switch (penum->posture) {
+                    case image_portrait:
+                        {		/* Precompute integer y and height, */
+                            /* and check for clipping. */
+                            fixed yc = penum->cur.y,
+                                yn = dda_current(penum->dda.row.y);
+
+                            if (yn < yc) {
+                                fixed temp = yn;
+
+                                yn = yc;
+                                yc = temp;
+                            }
+                            yc -= adjust;
+                            if (yc >= penum->clip_outer.q.y)
+                                goto mt;
+                            yn += adjust;
+                            if (yn <= penum->clip_outer.p.y)
+                                goto mt;
+                            penum->yci = fixed2int_pixround_perfect(yc);
+                            penum->hci = fixed2int_pixround_perfect(yn) - penum->yci;
+                            if (penum->hci == 0)
+                                goto mt;
+                            if_debug2m('b', penum->memory, "[b]yci=%d, hci=%d\n",
+                                       penum->yci, penum->hci);
+                        }
+                        break;
+                    case image_landscape:
+                        {		/* Check for no pixel centers in x. */
+                            fixed xc = penum->cur.x,
+                                xn = dda_current(penum->dda.row.x);
+
+                            if (xn < xc) {
+                                fixed temp = xn;
+
+                                xn = xc;
+                                xc = temp;
+                            }
+                            xc -= adjust;
+                            if (xc >= penum->clip_outer.q.x)
+                                goto mt;
+                            xn += adjust;
+                            if (xn <= penum->clip_outer.p.x)
+                                goto mt;
+                            penum->xci = fixed2int_pixround_perfect(xc);
+                            penum->wci = fixed2int_pixround_perfect(xn) - penum->xci;
+                            if (penum->wci == 0)
+                                goto mt;
+                            if_debug2m('b', penum->memory, "[b]xci=%d, wci=%d\n",
+                                       penum->xci, penum->wci);
+                        }
+                        break;
+                    case image_skewed:
+                        ;
+                }
+            }
+        }
+        if (0)
+        {
+        mt:
+            skip = 1;
+        }
         if (bit_planar) {
             /* Repack the bit planes into byte-wide samples. */
 
             buffer = penum->buffer;
             sourcex = 0;
-            for (px = 0; px < num_planes; px += penum->bps)
-                repack_bit_planes(planes, offsets, penum->bps, penum->buffer,
-                                  penum->rect.w, &penum->map[px].table,
-                                  penum->spread);
+            if (!skip)
+                for (px = 0; px < num_planes; px += penum->bps)
+                    repack_bit_planes(planes, offsets, penum->bps, penum->buffer,
+                                      penum->rect.w, &penum->map[px].table,
+                                      penum->spread);
             for (px = 0; px < num_planes; ++px)
                 offsets[px] += planes[px].raster;
         } else {
@@ -103,19 +183,23 @@ gx_image1_plane_data(gx_image_enum_common_t * info,
              * input samples, we may use the data directly.
              */
             sourcex = planes[0].data_x;
-            buffer =
-                (*penum->unpack)(penum->buffer, &sourcex,
-                                 planes[0].data + offsets[0],
-                                 planes[0].data_x, BCOUNT(planes[0]),
-                                 &penum->map[0], penum->spread, num_components_per_plane);
+            if (!skip)
+                buffer =
+                    (*penum->unpack)(penum->buffer, &sourcex,
+                                     planes[0].data + offsets[0],
+                                     planes[0].data_x, BCOUNT(planes[0]),
+                                     &penum->map[0], penum->spread, num_components_per_plane);
+            else
+                buffer = NULL;
 
             offsets[0] += planes[0].raster;
             for (px = 1; px < num_planes; ++px) {
-                (*penum->unpack)(penum->buffer + (px << penum->log2_xbytes),
-                                 &ignore_data_x,
-                                 planes[px].data + offsets[px],
-                                 planes[px].data_x, BCOUNT(planes[px]),
-                                 &penum->map[px], penum->spread, 1);
+                if (!skip)
+                    (*penum->unpack)(penum->buffer + (px << penum->log2_xbytes),
+                                     &ignore_data_x,
+                                     planes[px].data + offsets[px],
+                                     planes[px].data_x, BCOUNT(planes[px]),
+                                     &penum->map[px], penum->spread, 1);
                 offsets[px] += planes[px].raster;
             }
         }
@@ -124,6 +208,7 @@ gx_image1_plane_data(gx_image_enum_common_t * info,
             dmprintf1(dev->memory, "[b]image1 y=%d\n", y);
         if (gs_debug_c('B')) {
             int i, n = width_spp;
+            byte *buftemp = (buffer == NULL) ? penum->buffer : buffer;
 
             if (penum->bps > 8)
                 n *= 2;
@@ -131,100 +216,42 @@ gx_image1_plane_data(gx_image_enum_common_t * info,
                 n = (n + 7) / 8;
             dmlputs(dev->memory, "[B]row:");
             for (i = 0; i < n; i++)
-                dmprintf1(dev->memory, " %02x", buffer[i]);
+                dmprintf1(dev->memory, " %02x", buftemp[i]);
             dmputs(dev->memory, "\n");
         }
 #endif
-        penum->cur.x = dda_current(penum->dda.row.x);
-        dda_next(penum->dda.row.x);
-        penum->cur.y = dda_current(penum->dda.row.y);
-        dda_next(penum->dda.row.y);
-        if (!penum->interpolate)
-            switch (penum->posture) {
-                case image_portrait:
-                    {		/* Precompute integer y and height, */
-                        /* and check for clipping. */
-                        fixed yc = penum->cur.y,
-                            yn = dda_current(penum->dda.row.y);
-
-                        if (yn < yc) {
-                            fixed temp = yn;
-
-                            yn = yc;
-                            yc = temp;
-                        }
-                        yc -= adjust;
-                        if (yc >= penum->clip_outer.q.y)
-                            goto mt;
-                        yn += adjust;
-                        if (yn <= penum->clip_outer.p.y)
-                            goto mt;
-                        penum->yci = fixed2int_pixround_perfect(yc);
-                        penum->hci = fixed2int_pixround_perfect(yn) - penum->yci;
-                        if (penum->hci == 0)
-                            goto mt;
-                        if_debug2m('b', penum->memory, "[b]yci=%d, hci=%d\n",
-                                   penum->yci, penum->hci);
-                    }
-                    break;
-                case image_landscape:
-                    {		/* Check for no pixel centers in x. */
-                        fixed xc = penum->cur.x,
-                            xn = dda_current(penum->dda.row.x);
-
-                        if (xn < xc) {
-                            fixed temp = xn;
-
-                            xn = xc;
-                            xc = temp;
-                        }
-                        xc -= adjust;
-                        if (xc >= penum->clip_outer.q.x)
-                            goto mt;
-                        xn += adjust;
-                        if (xn <= penum->clip_outer.p.x)
-                            goto mt;
-                        penum->xci = fixed2int_pixround_perfect(xc);
-                        penum->wci = fixed2int_pixround_perfect(xn) - penum->xci;
-                        if (penum->wci == 0)
-                            goto mt;
-                        if_debug2m('b', penum->memory, "[b]xci=%d, wci=%d\n",
-                                   penum->xci, penum->wci);
-                    }
-                    break;
-                case image_skewed:
-                    ;
+        if (!skip)
+        {
+            update_strip(penum);
+            if (x_used) {
+                /*
+                 * Processing was interrupted by an error.  Skip over pixels
+                 * already processed.
+                 */
+                dda_advance(penum->dda.pixel0.x, x_used);
+                dda_advance(penum->dda.pixel0.y, x_used);
+                penum->used.x = 0;
             }
-        update_strip(penum);
-        if (x_used) {
-            /*
-             * Processing was interrupted by an error.  Skip over pixels
-             * already processed.
-             */
-            dda_advance(penum->dda.pixel0.x, x_used);
-            dda_advance(penum->dda.pixel0.y, x_used);
-            penum->used.x = 0;
-        }
-        if_debug2m('b', penum->memory, "[b]pixel0 x=%g, y=%g\n",
-                   fixed2float(dda_current(penum->dda.pixel0.x)),
-                   fixed2float(dda_current(penum->dda.pixel0.y)));
-        code = (*penum->render)(penum, buffer, sourcex + x_used,
-                                width_spp - x_used * penum->spp, 1, dev);
-        if (code < 0) {
-            /* Error or interrupt, restore original state. */
-            penum->used.x += x_used;
-            if (!penum->used.y) {
-                dda_previous(penum->dda.row.x);
-                dda_previous(penum->dda.row.y);
-                dda_translate(penum->dda.strip.x,
-                              penum->prev.x - penum->cur.x);
-                dda_translate(penum->dda.strip.y,
-                              penum->prev.y - penum->cur.y);
+            if_debug2m('b', penum->memory, "[b]pixel0 x=%g, y=%g\n",
+                       fixed2float(dda_current(penum->dda.pixel0.x)),
+                       fixed2float(dda_current(penum->dda.pixel0.y)));
+            code = (*penum->render)(penum, buffer, sourcex + x_used,
+                                    width_spp - x_used * penum->spp, 1, dev);
+            if (code < 0) {
+                /* Error or interrupt, restore original state. */
+                penum->used.x += x_used;
+                if (!penum->used.y) {
+                    dda_previous(penum->dda.row.x);
+                    dda_previous(penum->dda.row.y);
+                    dda_translate(penum->dda.strip.x,
+                                  penum->prev.x - penum->cur.x);
+                    dda_translate(penum->dda.strip.y,
+                                  penum->prev.y - penum->cur.y);
+                }
+                goto out;
             }
-            goto out;
+            penum->prev = penum->cur;
         }
-        penum->prev = penum->cur;
-      mt:;
     }
     if (penum->y < penum->rect.h) {
         code = 0;
@@ -352,7 +379,7 @@ repack_bit_planes(const gx_image_plane_t *src_planes, const ulong *offsets,
      */
     for (x = 0; x < width; x += 8) {
         bits32 w0 = 0, w1 = 0;
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
         static const bits32 expand[16] = {
             0x00000000, 0x00000001, 0x00000100, 0x00000101,
             0x00010000, 0x00010001, 0x00010100, 0x00010101,
@@ -451,7 +478,17 @@ gx_image1_end_image(gx_image_enum_common_t * info, bool draw_last)
             return code;
     }
 
-   /* release the reference to the target */
+    if (penum->tpr_state != NULL) {
+        transform_pixel_region_data data;
+        gx_device *dev = penum->dev;
+        if (penum->clip_dev)
+            dev = (gx_device *)penum->clip_dev;
+        if (penum->rop_dev)
+            dev = (gx_device *)penum->rop_dev;
+        data.state = penum->tpr_state;
+        dev_proc(dev, transform_pixel_region)(dev, transform_pixel_region_end, &data);
+    }
+    /* release the reference to the target */
     if ( penum->rop_dev )
         gx_device_set_target((gx_device_forward *)penum->rop_dev, NULL);
     if ( penum->clip_dev )
@@ -486,6 +523,12 @@ gx_image1_end_image(gx_image_enum_common_t * info, bool draw_last)
     }
     gs_free_object(mem, penum->line, "image line");
     gs_free_object(mem, penum->buffer, "image buffer");
+
+#ifdef WITH_CAL
+    if (penum->cal_ht != NULL) {
+        cal_halftone_fin(penum->cal_ht, mem->non_gc_memory);
+    }
+#endif
     gx_image_free_enum(&info);
     return 0;
 }

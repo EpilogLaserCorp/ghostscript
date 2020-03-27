@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,9 +19,6 @@
 
 #ifndef gdevx_INCLUDED
 #  define gdevx_INCLUDED
-
-/* Define the type of an X pixel. */
-typedef unsigned long x_pixel;
 
 #include "gdevbbox.h"
 #include "gdevxcmp.h"
@@ -43,6 +40,7 @@ typedef struct gx_device_X_s {
     bool IsPageDevice;
     byte *buffer;		/* full-window image */
     long buffer_size;
+    gx_device_color_info        orig_color_info;
 
     /* An XImage object for writing bitmap images to the screen */
     XImage image;

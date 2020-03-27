@@ -1,4 +1,4 @@
-% Copyright (C) 2001-2012 Artifex Software, Inc.
+% Copyright (C) 2001-2019 Artifex Software, Inc.
 % All Rights Reserved.
 %
 % This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 % of the license contained in the file LICENSE in this distribution.
 %
 % Refer to licensing information at http://www.artifex.com or contact
-% Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-% CA  94903, U.S.A., +1(415)492-9861, for further information.
+% Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+% CA 94945, U.S.A., +1(415)492-9861, for further information.
 %
 %
 % Unicode Decoding
@@ -4125,11 +4125,11 @@
 16#F8FD    bracerightmid    enter
 16#F8FE    bracerightbt    appleopen
 16#F8FF    apple
-16#FB00    ff
-16#FB01    fi
-16#FB02    fl
-16#FB03    ffi
-16#FB04    ffl
+16#FB00    ff	f_f
+16#FB01    fi	f_i
+16#FB02    fl	f_l
+16#FB03    ffi	f_f_i
+16#FB04    ffl	f_f_l
 16#FB05        slongt longst
 16#FB06        st
 16#FB1E        varika

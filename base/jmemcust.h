@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2014 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,9 +9,16 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
+
+#ifndef jmemcust_h_INCLUDED
+#  define jmemcust_h_INCLUDED
+
+#include "std.h" /* FILE needed by jpeglib.h */
+#include "jpeglib.h"
+#include "jmemsys.h"
 
 typedef JMETHOD(long, j_custmem_init_ptr, (j_common_ptr cinfo));
 typedef JMETHOD(void, j_custmem_term_ptr, (j_common_ptr cinfo));
@@ -54,3 +61,5 @@ jpeg_cust_mem_init(jpeg_cust_mem_data *custm, void *priv,
 
 GLOBAL(jpeg_cust_mem_data *)
 jpeg_cust_mem_set_private(jpeg_cust_mem_data *custm, void *priv);
+
+#endif

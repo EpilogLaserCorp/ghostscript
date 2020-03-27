@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -22,7 +22,6 @@
 #include "gxfixed.h"
 #include "gzpath.h"
 #include "memory_.h"
-#include "vdtrace.h"
 
 /* ---------------- Curve flattening ---------------- */
 
@@ -144,7 +143,8 @@ print_points(const gs_fixed_point *points, int count)
     if (!gs_debug_c('3'))
         return;
     for (i = 0; i < count; i++)
-        if_debug2('3', "[3]out x=%ld y=%ld\n", points[i].x, points[i].y);
+      if_debug2('3', "[3]out x=%ld y=%ld\n",
+                (long)points[i].x, (long)points[i].y);
 #endif
 }
 
@@ -202,7 +202,6 @@ gx_flattened_iterator__init(gx_flattened_iterator *self,
                              &self->ay, &self->by, &self->cy, k))
         return false;
     self->curve = true;
-    vd_curve(self->x0, self->y0, x1, y1, x2, y2, self->x3, self->y3, 0, RGB(255, 255, 255));
     self->k = k;
 #ifndef GS_THREADSAFE
 #   ifdef DEBUG
@@ -271,13 +270,10 @@ gx_flattened_iterator__init(gx_flattened_iterator *self,
 static inline bool
 check_diff_overflow(fixed v0, fixed v1)
 {
-    if (v0 < v1) {
-        if (v1 - v0 < 0)
-            return true;
-    } else {
-        if (v0 - v1 < 0)
-            return true;
-    }
+    if (v1 > 0)
+        return (v0 < min_fixed + v1);
+    else if (v1 < 0)
+        return (v0 > max_fixed + v1);
     return false;
 }
 
@@ -415,9 +411,8 @@ gx_flattened_iterator__next(gx_flattened_iterator *self)
         if_debug5('3', "[3]%s x=%g, y=%g x=%ld y=%ld\n",
                   (((x ^ self->x0) | (y ^ self->y0)) & float2fixed(-0.5) ?
                    "add" : "skip"),
-                  fixed2float(x), fixed2float(y), x, y);
+                  fixed2float(x), fixed2float(y), (long)x, (long)y);
         self->lx1 = x, self->ly1 = y;
-        vd_bar(self->lx0, self->ly0, self->lx1, self->ly1, 1, RGB(0, 255, 0));
         return true;
     } else {
         --self->i;
@@ -438,19 +433,18 @@ gx_flattened_iterator__next(gx_flattened_iterator *self)
         if_debug5('3', "[3]%s x=%g, y=%g x=%ld y=%ld\n",
                   (((x ^ self->lx0) | (y ^ self->ly0)) & float2fixed(-0.5) ?
                    "add" : "skip"),
-                  fixed2float(x), fixed2float(y), x, y);
+                  fixed2float(x), fixed2float(y), (long)x, (long)y);
 #	undef accum
         self->lx1 = self->x = x;
         self->ly1 = self->y = y;
-        vd_bar(self->lx0, self->ly0, self->lx1, self->ly1, 1, RGB(0, 255, 0));
         return true;
     }
 last:
     self->lx1 = self->x3;
     self->ly1 = self->y3;
     if_debug4('3', "[3]last x=%g, y=%g x=%ld y=%ld\n",
-              fixed2float(self->lx1), fixed2float(self->ly1), self->lx1, self->ly1);
-    vd_bar(self->lx0, self->ly0, self->lx1, self->ly1, 1, RGB(0, 255, 0));
+              fixed2float(self->lx1), fixed2float(self->ly1),
+              (long)self->lx1, (long)self->ly1);
     return false;
 }
 
@@ -492,7 +486,6 @@ gx_flattened_iterator__prev(gx_flattened_iterator *self)
         self->i++;
         self->lx0 = self->x0;
         self->ly0 = self->y0;
-        vd_bar(self->lx0, self->ly0, self->lx1, self->ly1, 1, RGB(0, 0, 255));
         return false;
     }
     gx_flattened_iterator__unaccum(self);
@@ -501,13 +494,13 @@ gx_flattened_iterator__prev(gx_flattened_iterator *self)
     if_debug5('3', "[3]%s x=%g, y=%g x=%ld y=%ld\n",
               (((self->x ^ self->lx1) | (self->y ^ self->ly1)) & float2fixed(-0.5) ?
                "add" : "skip"),
-              fixed2float(self->x), fixed2float(self->y), self->x, self->y);
+              fixed2float(self->x), fixed2float(self->y),
+              (long)self->x, (long)self->y);
     gx_flattened_iterator__print_state(self);
 #   endif
     last = (self->i == (1 << self->k) - 1);
     self->lx0 = self->x;
     self->ly0 = self->y;
-    vd_bar(self->lx0, self->ly0, self->lx1, self->ly1, 1, RGB(0, 0, 255));
     if (last)
         if (self->lx0 != self->x0 || self->ly0 != self->y0)
             return_error(gs_error_unregistered); /* Must not happen. */
@@ -534,20 +527,16 @@ static int
 generate_segments(gx_path * ppath, const gs_fixed_point *points,
                     int count, segment_notes notes)
 {
-    /* vd_moveto(ppath->position.x, ppath->position.y); */
     if (notes & sn_not_first) {
-        /* vd_lineto_multi(points, count); */
         print_points(points, count);
         return gx_path_add_lines_notes(ppath, points, count, notes);
     } else {
         int code;
 
-        /* vd_lineto(points[0].x, points[0].y); */
         print_points(points, 1);
         code = gx_path_add_line_notes(ppath, points[0].x, points[0].y, notes);
         if (code < 0)
             return code;
-        /* vd_lineto_multi(points + 1, count - 1); */
         print_points(points + 1, count - 1);
         return gx_path_add_lines_notes(ppath, points + 1, count - 1, notes | sn_not_first);
     }

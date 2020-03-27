@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -26,24 +26,12 @@
 #include "iosdata.h"
 #include "stream.h"
 #include "opdef.h"
-
-/*
- * Define the externally visible state of an interpreter context.
- * If we aren't supporting Display PostScript features, there is only
- * a single context.
- */
-#ifndef gs_context_state_t_DEFINED
-#  define gs_context_state_t_DEFINED
-typedef struct gs_context_state_s gs_context_state_t;
-#endif
-
-#ifndef gs_file_path_ptr_DEFINED
-#  define gs_file_path_ptr_DEFINED
-typedef struct gs_file_path_s *gs_file_path_ptr;
-#endif
+#include "gsgstate.h"
+#include "files.h"
+#include "interp.h"
 
 struct gs_context_state_s {
-    gs_state *pgs;
+    gs_gstate *pgs;
     gs_dual_memory_t memory;
     int language_level;
     ref array_packing;		/* t_boolean */
@@ -51,10 +39,8 @@ struct gs_context_state_s {
     long nv_page_count;    /* non-decreasing page counter for /PageCount */
                            /* It's updated only by currentsystemparams .*/
     long rand_state;		/* (not in Red Book) */
-    long usertime_total;	/* total accumulated usertime, */
-                                /* not counting current time if running */
-    bool keep_usertime;		/* true if context ever executed usertime */
-    int in_superexec;		/* # of levels of superexec */
+    long usertime_0[2];         /* initial value first time usertime was called */
+    bool usertime_inited;       /* has usertime been called yet? */
     /* View clipping is handled in the graphics state. */
     ref error_object;		/* t__invalid or error object from operator */
     ref userparams;		/* t_dictionary */
@@ -67,9 +53,8 @@ struct gs_context_state_s {
     stream *invalid_file_stream;/* An invalid file object (stable memory) */
     op_array_table op_array_table_global; /* Global operator table */
     op_array_table op_array_table_local;  /* Local operator table */
-    int (*time_slice_proc)(i_ctx_t **);   /* Time slice procedure */
     int time_slice_ticks;                 /* Ticks before next slice */
-    int (*reschedule_proc)(i_ctx_t **);   /* Reschedule procedure */
+    gs_offset_t uel_position;   /* The file position at which we last hit UEL */
 
     /* Put the stacks at the end to minimize other offsets. */
     dict_stack_t dict_stack;

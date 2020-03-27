@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* DigiBoard fax device. */
@@ -72,7 +72,7 @@ dfax_prn_open(gx_device *dev)
 
 /* Print a DigiFAX page. */
 static int
-dfax_print_page(gx_device_printer *dev, FILE *prn_stream)
+dfax_print_page(gx_device_printer *dev, gp_file *prn_stream)
 {	stream_CFE_state state;
         static char hdr[64] = "\000PC Research, Inc\000\000\000\000\000\000";
         int code;
@@ -88,18 +88,25 @@ dfax_print_page(gx_device_printer *dev, FILE *prn_stream)
                 { hdr[45] = 0x40; hdr[29] = 1; }	/* high res */
         else
                 { hdr[45] = hdr[29] = 0; }		/* low res */
-        fseek(prn_stream, 0, SEEK_END);
-        fwrite(hdr, sizeof(hdr), 1, prn_stream);
+        code = gp_fseek(prn_stream, 0, SEEK_END);
+        if (code < 0)
+            return_error(gs_error_ioerror);
+
+        gp_fwrite(hdr, sizeof(hdr), 1, prn_stream);
 
         /* Write the page */
         code = gdev_fax_print_page(dev, prn_stream, &state);
+        if (code < 0)
+            return code;
 
         /* Fixup page count */
-        fseek(prn_stream, 24L, SEEK_SET);
-        hdr[24] = dfdev->pageno; hdr[25] = dfdev->pageno >> 8;
-        fwrite(hdr+24, 2, 1, prn_stream);
+        if (gp_fseek(prn_stream, 24L, SEEK_SET) != 0)
+            return_error(gs_error_ioerror);
 
-        return code;
+        hdr[24] = dfdev->pageno; hdr[25] = dfdev->pageno >> 8;
+        gp_fwrite(hdr+24, 2, 1, prn_stream);
+
+        return 0;
 }
 
 #undef dfdev

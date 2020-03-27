@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -39,6 +39,7 @@ static int
 zsetuseciecolor(i_ctx_t * i_ctx_p)
 {
     os_ptr  op = osp;
+    check_type(*op, t_boolean);
 
     istate->use_cie_color = *op;
     pop(1);
@@ -103,10 +104,10 @@ zsetblackptcomp(i_ctx_t * i_ctx_p)
 
 const op_def    zcolor3_l3_op_defs[] = {
     op_def_begin_ll3(),
-    { "0.setuseciecolor", zsetuseciecolor },
+    { "1.setuseciecolor", zsetuseciecolor },
     { "0.currentrenderintent", zcurrentrenderingintent },
     { "1.setrenderingintent", zsetrenderingintent },
-    { "2.currentblackptcomp", zcurrentblackptcomp },
-    { "3.setblackptcomp", zsetblackptcomp },
+    { "0.currentblackptcomp", zcurrentblackptcomp },
+    { "1.setblackptcomp", zsetblackptcomp },
     op_def_end(0)
 };

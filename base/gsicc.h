@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -32,5 +32,11 @@ extern  int     gs_cspace_build_ICC( gs_color_space **   ppcspace,
 
 extern const gs_color_space_type gs_color_space_type_ICC;
 extern cs_proc_remap_color(gx_remap_ICC_imagelab);
+
+int gx_change_color_model(gx_device *dev, int num_comps, int bit_depth);
+
+int gx_remap_ICC_with_link(const gs_client_color * pcc, const gs_color_space * pcs,
+        gx_device_color * pdc, const gs_gstate * pgs, gx_device * dev,
+                gs_color_select_t select, gsicc_link_t *icc_link);
 
 #endif /* gsicc_INCLUDED */

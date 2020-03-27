@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -21,6 +21,7 @@
 #include "gserrors.h"
 #include "gxdevice.h"
 #include "gdevx.h"
+#include "stdint_.h"
 
 /* ---------------- Utilities ---------------- */
 
@@ -45,6 +46,9 @@ set_cmap_values(x11_cmap_values_t *values, int maxv, int mult)
         (mult & (mult - 1))
         )
         return false;
+    if ((maxv + 1) % 11 < 1)
+        maxv++;
+
     values->cv_shift = 16 - small_exact_log2(maxv + 1);
     for (i = 0; i <= maxv; ++i)
         values->nearest[i] = X_max_color_value * i / maxv;
@@ -130,13 +134,16 @@ alloc_std_cmap(gx_device_X *xdev, bool colored)
 
 /* Allocate the dynamic color table, if needed and possible. */
 /* Uses: vinfo, cman.num_rgb.  Sets: cman.dynamic.*. */
-static void
+/* Return true if the allocation was successful. */
+static bool
 alloc_dynamic_colors(gx_device_X * xdev, int num_colors)
 {
     if (num_colors > 0) {
         xdev->cman.dynamic.colors = (x11_color_t **)
             gs_malloc(xdev->memory, sizeof(x11_color_t *), xdev->cman.num_rgb,
                       "x11 cman.dynamic.colors");
+        if (xdev->cman.dynamic.colors == NULL)
+            return false;
         if (xdev->cman.dynamic.colors) {
             int i;
 
@@ -148,6 +155,7 @@ alloc_dynamic_colors(gx_device_X * xdev, int num_colors)
             xdev->cman.dynamic.used = 0;
         }
     }
+    return true;
 }
 
 /* Allocate an X color, updating the reverse map. */
@@ -342,12 +350,13 @@ gdev_x_setup_colors(gx_device_X * xdev)
         if (xdev->cman.std_cmap.map ||
             (xdev->vinfo->class == TrueColor && alloc_std_cmap(xdev, true))
             ) {
-            xdev->color_info.dither_grays = xdev->color_info.dither_colors =
-                min(xdev->cman.std_cmap.map->red_max,
-                    min(xdev->cman.std_cmap.map->green_max,
-                        xdev->cman.std_cmap.map->blue_max)) + 1;
-            if (xdev->cman.std_cmap.map)
+            if (xdev->cman.std_cmap.map) {
+                xdev->color_info.dither_grays = xdev->color_info.dither_colors =
+                    min(xdev->cman.std_cmap.map->red_max,
+                        min(xdev->cman.std_cmap.map->green_max,
+                            xdev->cman.std_cmap.map->blue_max)) + 1;
                 set_std_cmap(xdev, xdev->cman.std_cmap.map);
+            }
         } else
 #endif
             /* Otherwise set up a rgb cube of our own */
@@ -383,8 +392,9 @@ gdev_x_setup_colors(gx_device_X * xdev)
         }
 
         /* Allocate the dynamic color table. */
-        alloc_dynamic_colors(xdev, CUBE(xdev->cman.num_rgb) -
-                             CUBE(xdev->color_info.dither_colors));
+        if (!alloc_dynamic_colors(xdev, CUBE(xdev->cman.num_rgb) -
+                             CUBE(xdev->color_info.dither_colors)))
+            return_error(gs_error_VMerror);
 #undef CUBE
 #undef CBRT
         break;
@@ -399,10 +409,10 @@ grayscale:
         if (xdev->cman.std_cmap.map ||
             (xdev->vinfo->class == StaticGray && alloc_std_cmap(xdev, false))
             ) {
-            xdev->color_info.dither_grays =
-                xdev->cman.std_cmap.map->red_max + 1;
-            if (xdev->cman.std_cmap.map)
+            if (xdev->cman.std_cmap.map) {
+                xdev->color_info.dither_grays = xdev->cman.std_cmap.map->red_max + 1;
                 set_std_cmap(xdev, xdev->cman.std_cmap.map);
+            }
         } else
 #endif
             /* Otherwise set up a gray ramp of our own */
@@ -431,8 +441,9 @@ grayscale:
         }
 
         /* Allocate the dynamic color table. */
-        alloc_dynamic_colors(xdev, xdev->cman.num_rgb -
-                             xdev->color_info.dither_grays);
+        if (!alloc_dynamic_colors(xdev, xdev->cman.num_rgb -
+                             xdev->color_info.dither_grays))
+            return_error(gs_error_VMerror);
         break;
     case 'M':
 monochrome:
@@ -564,9 +575,10 @@ iabs(int x)
     return (x < 0 ? -x : x);
 }
 
-/* Map RGB values to a pixel value. */
-gx_color_index
-gdev_x_map_rgb_color(gx_device * dev, const gx_color_value cv[])
+/* Map RGB values to a pixel value. If force is true, then we will force
+ * a match to one of the table values, avoiding an encode error */
+static gx_color_index
+encode_color(gx_device * dev, const gx_color_value cv[], bool force)
 {
     gx_device_X *const xdev = (gx_device_X *) dev;
     gx_color_value r = cv[0];
@@ -628,9 +640,9 @@ gdev_x_map_rgb_color(gx_device * dev, const gx_color_value cv[])
                 cvg = X_max_color_value * cg / cmap->green_max;
                 cvb = X_max_color_value * cb / cmap->blue_max;
             }
-            if ((iabs((int)r - (int)cvr) & xdev->cman.match_mask.red) == 0 &&
+            if (force || ((iabs((int)r - (int)cvr) & xdev->cman.match_mask.red) == 0 &&
                 (iabs((int)g - (int)cvg) & xdev->cman.match_mask.green) == 0 &&
-                (iabs((int)b - (int)cvb) & xdev->cman.match_mask.blue) == 0) {
+                (iabs((int)b - (int)cvb) & xdev->cman.match_mask.blue) == 0)) {
                 gx_color_index pixel =
                     (xdev->cman.std_cmap.fast ?
                      (cr << xdev->cman.std_cmap.red.pixel_shift) +
@@ -639,8 +651,8 @@ gdev_x_map_rgb_color(gx_device * dev, const gx_color_value cv[])
                      cr * cmap->red_mult + cg * cmap->green_mult +
                      cb * cmap->blue_mult) + cmap->base_pixel;
 
-                if_debug4m('C', dev->memory, "[cX]%u,%u,%u (std cmap) => %lu\n",
-                           r, g, b, pixel);  /* NB: gx_color_index size is 4 or 8 */
+                if_debug4m('C', dev->memory, "[cX]%u,%u,%u (std cmap) => %"PRIu64"\n",
+                           r, g, b, (uint64_t)pixel);  /* NB: gx_color_index size is 4 or 8 */
                 return pixel;
             }
             if_debug3m('C', dev->memory, "[cX]%u,%u,%u (std cmap fails)\n", r, g, b);
@@ -650,10 +662,10 @@ gdev_x_map_rgb_color(gx_device * dev, const gx_color_value cv[])
 
             cr = r * (cmap->red_max + 1) / CV_DENOM;
             cvr = X_max_color_value * cr / cmap->red_max;
-            if ((iabs((int)r - (int)cvr) & xdev->cman.match_mask.red) == 0) {
+            if (force || ((iabs((int)r - (int)cvr) & xdev->cman.match_mask.red) == 0)) {
                 gx_color_index pixel = cr * cmap->red_mult + cmap->base_pixel;
 
-                if_debug2m('C', dev->memory, "[cX]%u (std cmap) => %lu\n", r, pixel);
+                if_debug2m('C', dev->memory, "[cX]%u (std cmap) => %"PRIu64"\n", r, (uint64_t)pixel);
                 return pixel;
             }
             if_debug1m('C', dev->memory, "[cX]%u (std cmap fails)\n", r);
@@ -683,14 +695,14 @@ gdev_x_map_rgb_color(gx_device * dev, const gx_color_value cv[])
                 cvg = CV_FRACTION(cg, max_rgb);
                 cvb = CV_FRACTION(cb, max_rgb);
             }
-            if ((iabs((int)r - (int)cvr) & xdev->cman.match_mask.red) == 0 &&
+            if (force || ((iabs((int)r - (int)cvr) & xdev->cman.match_mask.red) == 0 &&
                 (iabs((int)g - (int)cvg) & xdev->cman.match_mask.green) == 0 &&
-                (iabs((int)b - (int)cvb) & xdev->cman.match_mask.blue) == 0) {
+                (iabs((int)b - (int)cvb) & xdev->cman.match_mask.blue) == 0)) {
                 gx_color_index pixel =
                     xdev->cman.dither_ramp[CUBE_INDEX(cr, cg, cb)];
 
-                if_debug4m('C', dev->memory, "[cX]%u,%u,%u (dither cube) => %lu\n",
-                          r, g, b, pixel);
+                if_debug4m('C', dev->memory, "[cX]%u,%u,%u (dither cube) => %"PRIu64"\n",
+                           r, g, b, (uint64_t)pixel);
                 return pixel;
             }
             if_debug3m('C', dev->memory, "[cX]%u,%u,%u (dither cube fails)\n", r, g, b);
@@ -702,10 +714,10 @@ gdev_x_map_rgb_color(gx_device * dev, const gx_color_value cv[])
 
             cr = r * dither_grays / CV_DENOM;
             cvr = (X_max_color_value * cr / max_gray);
-            if ((iabs((int)r - (int)cvr) & xdev->cman.match_mask.red) == 0) {
+            if (force || ((iabs((int)r - (int)cvr) & xdev->cman.match_mask.red) == 0)) {
                 gx_color_index pixel = xdev->cman.dither_ramp[cr];
 
-                if_debug2m('C', dev->memory, "[cX]%u (dither ramp) => %lu\n", r, pixel);
+                if_debug2m('C', dev->memory, "[cX]%u (dither ramp) => %"PRIu64"\n", r, (uint64_t)pixel);
                 return pixel;
             }
             if_debug1m('C', dev->memory, "[cX]%u (dither ramp fails)\n", r);
@@ -773,6 +785,18 @@ gdev_x_map_rgb_color(gx_device * dev, const gx_color_value cv[])
     if_debug3m('C', dev->memory, "[cX]%u,%u,%u fails\n", r, g, b);
     return gx_no_color_index;
 #undef CV_DENOM
+}
+
+gx_color_index
+gdev_x_map_rgb_color(gx_device * dev, const gx_color_value cv[])
+{
+    gx_color_index color;
+
+    if ((color = encode_color(dev, cv, false)) != gx_no_color_index)
+        return color;
+    /* Failure. At this point get the closest color that we can.
+    * This should not fail. */
+    return encode_color(dev, cv, true);
 }
 
 /* Map a pixel value back to r-g-b. */

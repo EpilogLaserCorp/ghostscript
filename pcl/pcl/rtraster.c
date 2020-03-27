@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,6 +19,7 @@
 #include "memory_.h"
 #include "strimpl.h"
 #include "scfx.h"
+#include "scf.h"
 #include "stream.h"
 #include "gx.h"
 #include "gsmatrix.h"
@@ -95,13 +96,12 @@ typedef struct pcl_raster_s
 
 } pcl_raster_t;
 
-gs_private_st_simple(st_seed_row_t, pcl_seed_row_t, "PCL raster seed row");
 gs_private_st_simple(st_seed_row_t_element, pcl_seed_row_t,
                      "PCL seed row array");
 gs_private_st_simple(st_raster_t, pcl_raster_t, "PCL raster object");
 
 /* forward declaration */
-static int process_zero_rows(gs_state * pgs, pcl_raster_t * prast, int nrows);
+static int process_zero_rows(gs_gstate * pgs, pcl_raster_t * prast, int nrows);
 
 /*
  * Clear the consolidation buffer, allocating it if it does not already
@@ -365,7 +365,9 @@ create_mask_enumerator(pcl_raster_t * prast)
     if (pen == 0)
         return e_Memory;
 
-    pcl_set_drawing_color(pcs, pcl_pattern_solid_white, 0, true);
+    code = pcl_set_drawing_color(pcs, pcl_pattern_solid_white, 0, true);
+    if (code < 0)
+        return code;
 
     /* generate the special two entry indexed color space required */
     if (prast->indexed)
@@ -401,7 +403,7 @@ create_mask_enumerator(pcl_raster_t * prast)
             image.i4.MaskColor[0] = 0;
 
         code = gs_image_begin_typed((const gs_image_common_t *)&image,
-                                    pcs->pgs, true, &pie);
+                                    pcs->pgs, true, false, &pie);
 
         if (code >= 0)
             code = gs_image_common_init(pen,
@@ -416,7 +418,9 @@ create_mask_enumerator(pcl_raster_t * prast)
     else
         prast->mask_pen = pen;
 
-    pcl_set_drawing_color(pcs, pcs->pattern_type, pcs->pattern_id, true);
+    if (code >= 0)
+        code = pcl_set_drawing_color(pcs, pcs->pattern_type, pcs->pattern_id, true);
+
     return code;
 }
 
@@ -516,7 +520,7 @@ create_image_enumerator(pcl_raster_t * prast)
     }
 
     code = gs_image_begin_typed((const gs_image_common_t *)&image,
-                                prast->pcs->pgs, true, &pie);
+                                prast->pcs->pgs, true, false, &pie);
     if (code >= 0)
         code = gs_image_common_init(pen,
                                     pie,
@@ -545,7 +549,7 @@ create_image_enumerator(pcl_raster_t * prast)
  *     set to false.
  */
 static void
-close_raster(gs_state * pgs, pcl_raster_t * prast, bool complete)
+close_raster(gs_gstate * pgs, pcl_raster_t * prast, bool complete)
 {
     /* see if we need to fill in any missing rows */
     if (complete &&
@@ -607,12 +611,14 @@ process_mask_row(pcl_raster_t * prast)
         pcl_state_t *pcs = prast->pcs;
 
         pen = prast->mask_pen;
-        pcl_set_drawing_color(pcs, pcl_pattern_solid_white, 0, true);
+        code = pcl_set_drawing_color(pcs, pcl_pattern_solid_white, 0, true);
+        if (code < 0) return code;
         prast->gen_mask_row(prast);
         code = gs_image_next(pen,
                              prast->mask_buff,
                              (prast->src_width + 7) / 8, &dummy);
-        pcl_set_drawing_color(pcs, pcs->pattern_type, pcs->pattern_id, true);
+        if (code < 0) return code;
+        code = pcl_set_drawing_color(pcs, pcs->pattern_type, pcs->pattern_id, true);
     }
     return code;
 }
@@ -632,11 +638,17 @@ process_zero_mask_rows(pcl_raster_t * prast, int nrows)
 
         pen = prast->mask_pen;
         memset(prast->mask_buff, 0xff, nbytes);
-        pcl_set_drawing_color(pcs, pcl_pattern_solid_white, 0, true);
-        gs_setrasterop(pcs->pgs, (gs_rop3_t) rop3_know_S_1((int)0xff));
+        code = pcl_set_drawing_color(pcs, pcl_pattern_solid_white, 0, true);
+        if (code < 0)
+            return code;
+        code = gs_setrasterop(pcs->pgs, (gs_rop3_t) rop3_know_S_1((int)0xff));
+        if (code < 0)
+            return code;
         while ((nrows-- > 0) && (code >= 0))
             code = gs_image_next(pen, prast->mask_buff, nbytes, &dummy);
-        pcl_set_drawing_color(pcs, pcs->pattern_type, pcs->pattern_id, true);
+
+        if (code < 0)
+            code = pcl_set_drawing_color(pcs, pcs->pattern_type, pcs->pattern_id, true);
     }
     return code;
 }
@@ -674,7 +686,7 @@ process_zero_mask_rows(pcl_raster_t * prast, int nrows)
  * Returns 0 on success, < 0 in the event of an error.
  */
 static int
-process_zero_rows(gs_state * pgs, pcl_raster_t * prast, int nrows)
+process_zero_rows(gs_gstate * pgs, pcl_raster_t * prast, int nrows)
 {
     int npixels = prast->src_width;
     int nbytes = (npixels * prast->bits_per_plane + 7) / 8;
@@ -707,7 +719,7 @@ process_zero_rows(gs_state * pgs, pcl_raster_t * prast, int nrows)
     /* render as raster or rectangle */
     if (((nrows * nbytes > 1024) || (prast->pen == 0)) &&
         (prast->zero_is_white || prast->zero_is_black)) {
-        gs_state *pgs = prast->pcs->pgs;
+        gs_gstate *pgs = prast->pcs->pgs;
 
         close_raster(pgs, prast, false);
         if ((prast->zero_is_black) || !prast->pcs->source_transparent) {
@@ -719,18 +731,28 @@ process_zero_rows(gs_state * pgs, pcl_raster_t * prast, int nrows)
             tmp_rect.q.x = (double)npixels;
             tmp_rect.q.y = (double)nrows;
             if (invert) {
-                gs_setrasterop(pgs,
+                code = gs_setrasterop(pgs,
                                (gs_rop3_t)
                                rop3_invert_S(gs_currentrasterop(pgs))
                     );
-                gs_rectfill(pgs, &tmp_rect, 1);
+                if (code < 0)
+                    return code;
 
-                gs_setrasterop(pgs,
+                code = gs_rectfill(pgs, &tmp_rect, 1);
+                if (code < 0)
+                    return code;
+
+                code = gs_setrasterop(pgs,
                                (gs_rop3_t)
                                rop3_invert_S(gs_currentrasterop(pgs))
                     );
-            } else
-                gs_rectfill(pgs, &tmp_rect, 1);
+                if (code < 0)
+                    return code;
+            } else {
+                code = gs_rectfill(pgs, &tmp_rect, 1);
+                if (code < 0)
+                    return code;
+            }
 
         }
 
@@ -847,11 +869,10 @@ process_row(pcl_raster_t * prast, int comp_mode /* modified compression mode */
          * by plane case will have been collapsed to an indexed by pixel case
          * by this point.
          *
-         * (The macro pcl_cmap_apply_remap_ary checks for
-         * prast->remap_ary == 0.)
          */
-        pcl_cmap_apply_remap_ary(prast->remap_ary,
-                                 pb, b_per_p, prast->src_width);
+        if (prast->remap_ary)
+            pcl_cmap_apply_remap_ary(prast->remap_ary,
+                                     pb, b_per_p, prast->src_width);
 
         code = gs_image_next(pen, pb, nbytes, &dummy);
 
@@ -876,7 +897,7 @@ process_row(pcl_raster_t * prast, int comp_mode /* modified compression mode */
  */
 
 static int
-process_block_nocompress(gs_state * pgs,
+process_block_nocompress(gs_gstate * pgs,
                          pcl_raster_t * prast, const byte * pin, uint insize)
 {
     uint32 row_bytes, nrows;
@@ -918,7 +939,7 @@ pcl_ccitt_error(stream_state * st, const char *str)
 
 
 static int
-process_ccitt_compress(gs_state * pgs,
+process_ccitt_compress(gs_gstate * pgs,
                        pcl_raster_t * prast,
                        const byte * pin,
                        uint insize, pcl_rast_buff_type_t comp)
@@ -943,6 +964,8 @@ process_ccitt_compress(gs_state * pgs,
     state.EndOfLine = false;
     state.EndOfBlock = false;
     state.Columns = pl_get_uint32(pin);
+    if (state.Columns == 0 || state.Columns > cfe_max_width)
+        return_error(e_Range);
     state.Rows = 0;             /* undetermined */
     if (comp == CCITT_GR3_1D_COMPRESS)
         state.K = 0;
@@ -952,7 +975,7 @@ process_ccitt_compress(gs_state * pgs,
         state.K = -1;
     s_CFD_template.init((stream_state *) & state);
     scr.ptr = pin + 4 - 1;
-    scr.limit = scr.ptr + insize;
+    scr.limit = scr.ptr + insize - 4;
 
     wrsize = (state.Columns + 7) / 8;
     temp_buffer = gs_alloc_bytes(prast->pmem, wrsize, "CCITT temp_buffer");
@@ -971,7 +994,11 @@ process_ccitt_compress(gs_state * pgs,
 
             case 1:            /* need output, process the scanline and continue. */
                 memcpy(pout->pdata, temp_buffer, min(pout->size, wrsize));
-                process_row(prast, 0);
+                code = process_row(prast, 0);
+                if (code < 0) {
+                    s_CFD_template.release((stream_state *) & state);
+                    return gs_rethrow(code, "CCITT decompression failed\n");
+                }
                 memset(temp_buffer, 0, wrsize);
                 scw.ptr = temp_buffer - 1;
                 scw.limit = scw.ptr + wrsize;
@@ -999,8 +1026,8 @@ process_ccitt_compress(gs_state * pgs,
  * Process an input data buffer using adpative compression.
  */
 static int
-process_adaptive_compress(gs_state * pgs,
-                          pcl_raster_t * prast, const byte * pin, uint insize)
+process_adaptive_compress(gs_gstate * pgs,
+                          pcl_raster_t * prast, const byte * pin, uint insize, bool mono)
 {
     pcl_seed_row_t *pseed_row = prast->pseed_rows;
     byte *pdata = pseed_row->pdata;
@@ -1065,8 +1092,10 @@ process_adaptive_compress(gs_state * pgs,
             break;
     }
 
-    /* clear the seed rows if Delta Row Compression at end of raster block */
-    if (cmd == DELTA_ROW_COMPRESS) {
+    /* On monochrome printers tested HP clears the seed row of delta
+       row compression after each block, color printers leave it
+       intact. */
+    if (mono) {
         memset(pdata, 0, row_size);
         pseed_row->is_blank = true;
     }
@@ -1128,7 +1157,7 @@ add_raster_plane(const byte * pdata,
         else if (comp_mode == NO_COMPRESS_BLOCK)
             return process_block_nocompress(pcs->pgs, prast, pdata, nbytes);
         else if (comp_mode == ADAPTIVE_COMPRESS)
-            return process_adaptive_compress(pcs->pgs, prast, pdata, nbytes);
+            return process_adaptive_compress(pcs->pgs, prast, pdata, nbytes, pcs->personality == pcl5e);
         else
             return process_ccitt_compress(pcs->pgs, prast, pdata, nbytes,
                                           comp_mode);
@@ -1268,6 +1297,7 @@ pcl_start_raster(uint src_width, uint src_height, pcl_state_t * pcs)
 
     /* check for memory exhaustion */
     if (pseed_rows == 0) {
+        pcl_cs_indexed_release(prast->pindexed);
         gs_free_object(prast->pmem, prast, "start PCL raster");
         return e_Memory;
     }
@@ -1413,6 +1443,9 @@ transfer_raster_row(pcl_args_t * pargs, pcl_state_t * pcs)
             process_row((pcl_raster_t *) pcs->raster_state.pcur_raster,
                         comp_mode);
 
+    if (code < 0)
+        (void)pcl_grestore(pcs);
+
     return code;
 }
 
@@ -1488,11 +1521,12 @@ raster_do_registration(pcl_parser_state_t * pcl_parser_state, gs_memory_t * pmem
     }, END_CLASS return 0;
 }
 
-static void
+static int
 raster_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
     if ((type & pcl_reset_initial) != 0)
         pcs->raster_state.pcur_raster = 0;
+    return 0;
 }
 
 const pcl_init_t rtraster_init =

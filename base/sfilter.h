@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -22,6 +22,7 @@
 #  define sfilter_INCLUDED
 
 #include "gstypes.h"		/* for gs_[const_]string */
+#include "scommon.h"
 
 /*
  * Define the processing states of the simplest Ghostscript streams.
@@ -89,9 +90,9 @@ extern const stream_template s_PFBD_template;
 typedef struct stream_SFD_state_s {
     stream_state_common;
     /* The following parameters are set by the client. */
-    long count;			/* # of chars or EODs to scan over */
+    int64_t count;			/* # of chars or EODs to scan over */
     gs_const_string eod;
-    long skip_count;		/* # of initial chars or records to skip */
+    int64_t skip_count;		/* # of initial chars or records to skip */
     /* The following change dynamically. */
     uint match;			/* # of matched chars not copied to output */
     uint copy_count;		/* # of matched characters left to copy */

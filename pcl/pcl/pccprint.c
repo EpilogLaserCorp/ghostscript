@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -39,11 +39,12 @@ pcl_logical_operation(pcl_args_t * pargs, pcl_state_t * pcs)
     if (rop > 255)
         return e_Range;
 
-    pcl_break_underline(pcs);   /* use the 5c convention; in 5e, the
-                                 * underline is not broken by a change in
-                                 * the logical operation */
     pcs->logical_op = rop;
-    return 0;
+
+    /* use the 5c convention; in 5e, the
+     * underline is not broken by a change in
+     * the logical operation */
+    return pcl_break_underline(pcs);
 }
 
 /*
@@ -88,7 +89,7 @@ pccprint_do_registration(pcl_parser_state_t * pcl_parser_state,
     }, END_CLASS return 0;
 }
 
-static void
+static int
 pccprint_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
     static const uint mask = (pcl_reset_initial
@@ -98,6 +99,8 @@ pccprint_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
         pcs->logical_op = 252;
         pcs->pp_mode = 0;
     }
+
+    return 0;
 }
 
 const pcl_init_t pccprint_init =

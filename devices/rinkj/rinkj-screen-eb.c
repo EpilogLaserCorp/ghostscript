@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -100,6 +100,8 @@ rinkj_screen_eb_init (RinkjDevice *self, const RinkjDeviceParams *params)
     strengths = strengths6;
   else if (n_planes == 7)
     strengths = strengths7;
+  else
+    return -1;
 
   ebp.source_width = params->width;
   ebp.dest_width = out_params.width;
@@ -137,7 +139,7 @@ rinkj_screen_eb_write (RinkjDevice *self, const char **data)
   int xs = z->width_out;
   int xsb;
   int status;
-  uchar **data_permuted;
+  const uchar ** data_permuted;
   int cmyk_permutation[] = { 3, 0, 1, 2 };
   int ccmmyk_permutation[] = { 3, 0, 1, 4, 5, 2 };
   int ccmmykk_permutation[] = { 3, 6, 0, 1, 4, 5, 2 };
@@ -169,21 +171,21 @@ rinkj_screen_eb_write (RinkjDevice *self, const char **data)
 
   out_data = (uchar **)malloc (n_planes * sizeof(char *));
   out_buf = (uchar **)malloc (n_planes * sizeof(char *));
-  data_permuted = (uchar **)malloc (n_planes * sizeof(char *));
+  data_permuted = (const uchar **)malloc (n_planes * sizeof(char *));
 
   for (i = 0; i < n_planes; i++)
     {
       out_data[i] = malloc (xsb);
       out_buf[i] = malloc (xs);
-      data_permuted[i] = data[permutation[i]];
+      data_permuted[i] = (const uchar *)data[permutation[i]];
     }
 
   status = 0;
   for (; status >= 0 && z->yrem < z->height_out; z->yrem += z->height_in)
     {
       even_better_line (z->dither,
-                        (unsigned char *)out_buf,
-                        (unsigned char *)data_permuted);
+                        out_buf,
+                        data_permuted);
 
       for (i = 0; i < n_planes; i++)
         {

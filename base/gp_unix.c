@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,13 +9,16 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
 /* Unix-specific routines for Ghostscript */
 
+#ifdef __MINGW32__
+#  include "windows_.h"
+#endif
 #include "pipe_.h"
 #include "string_.h"
 #include "time_.h"
@@ -207,34 +210,32 @@ gp_getenv_display(void)
 
 /* ------ Printer accessing ------ */
 
+extern gp_file *
+gp_fopen_unix(const gs_memory_t *mem, const char *fname, const char *mode, int pipe);
+
 /* Open a connection to a printer.  See gp.h for details. */
 FILE *
-gp_open_printer(const gs_memory_t *mem,
-                      char         fname[gp_file_name_sizeof],
-                      int          binary_mode)
+gp_open_printer_impl(gs_memory_t *mem,
+                     const char  *fname,
+                     int         *binary_mode,
+                     int          (**close)(FILE *))
 {
-    const char *fmode = (binary_mode ? "wb" : "w");
-
-    return (strlen(fname) == 0 ? 0 : gp_fopen(fname, fmode));
-}
-FILE *
-gp_open_printer_64(const gs_memory_t *mem,
-                         char         fname[gp_file_name_sizeof],
-                         int          binary_mode)
-{
-    const char *fmode = (binary_mode ? "wb" : "w");
-
-    return (strlen(fname) == 0 ? 0 : gp_fopen_64(fname, fmode));
+#ifdef GS_NO_FILESYSTEM
+    return NULL;
+#else
+    const char *fmode = (*binary_mode ? "wb" : "w");
+    *close = fname[0] == '|' ? pclose : fclose;
+    return gp_fopen_impl(mem, fname, fmode);
+#endif
 }
 
 /* Close the connection to the printer. */
 void
-gp_close_printer(const gs_memory_t *mem, FILE * pfile, const char *fname)
+gp_close_printer(gp_file * pfile, const char *fname)
 {
-    if (fname[0] == '|')
-        pclose(pfile);
-    else
-        fclose(pfile);
+#ifndef GS_NO_FILESYSTEM
+    gp_fclose(pfile);
+#endif
 }
 
 /* ------ Font enumeration ------ */
@@ -321,6 +322,9 @@ void *gp_enumerate_fonts_init(gs_memory_t *mem)
     unix_fontenum_t *state;
     FcPattern *pat;
     FcObjectSet *os;
+    FcStrList *fdirlist = NULL;
+    FcChar8 *dirstr;
+    int code;
 
     state = (unix_fontenum_t *)malloc(sizeof(unix_fontenum_t));
     if (state == NULL)
@@ -340,6 +344,31 @@ void *gp_enumerate_fonts_init(gs_memory_t *mem)
         return NULL;  /* Failed to open fontconfig library */
     }
 
+    fdirlist = FcConfigGetFontDirs(state->fc);
+    if (fdirlist == NULL) {
+        FcConfigDestroy(state->fc);
+        free(state);
+        return NULL;
+    }
+
+    /* We're going to trust what fontconfig tells us, and add it's known directories
+     * to our permitted read paths
+     */
+    code = 0;
+    while ((dirstr = FcStrListNext(fdirlist)) != NULL && code >= 0) {
+        char dirstr2[gp_file_name_sizeof];
+        dirstr2[0] = '\0';
+        strncat(dirstr2, (char *)dirstr, gp_file_name_sizeof - 2);
+        strncat(dirstr2, "/", gp_file_name_sizeof - 1);
+        code = gs_add_control_path(mem, gs_permit_file_reading, (char *)dirstr2);
+    }
+    FcStrListDone(fdirlist);
+    if (code < 0) {
+        FcConfigDestroy(state->fc);
+        free(state);
+        return NULL;
+    }
+
     /* load the font set that we'll iterate over */
     pat = FcPatternBuild(NULL,
             FC_OUTLINE, FcTypeBool, 1,
@@ -348,6 +377,12 @@ void *gp_enumerate_fonts_init(gs_memory_t *mem)
     os = FcObjectSetBuild(FC_FILE, FC_OUTLINE,
             FC_FAMILY, FC_WEIGHT, FC_SLANT,
             NULL);
+    /* We free the data allocated by FcFontList() when
+    gp_enumerate_fonts_free() calls FcFontSetDestroy(), but FcFontSetDestroy()
+    has been seen to leak blocks according to valgrind and asan. E.g. this can
+    be seen by running:
+        ./sanbin/gs -dNODISPLAY -dBATCH -dNOPAUSE -c "/A_Font findfont"
+    */
     state->font_list = FcFontList(0, pat, os);
     FcPatternDestroy(pat);
     FcObjectSetDestroy(os);
@@ -376,42 +411,50 @@ int gp_enumerate_fonts_next(void *enum_state, char **fontname, char **path)
         return 0;   /* gp_enumerate_fonts_init failed for some reason */
     }
 
-    if (state->index == state->font_list->nfont) {
-        return 0; /* we've run out of fonts */
-    }
+    /* We use the loop so we can skip over fonts that return errors */
+    while(1) {
+        if (state->index == state->font_list->nfont) {
+            return 0; /* we've run out of fonts */
+        }
 
-    /* Bits of the following were borrowed from Red Hat's
-     * fontconfig patch for Ghostscript 7 */
-    font = state->font_list->fonts[state->index];
+        /* Bits of the following were borrowed from Red Hat's
+         * fontconfig patch for Ghostscript 7 */
+        font = state->font_list->fonts[state->index];
+        state->index++;
 
-    result = FcPatternGetString (font, FC_FAMILY, 0, &family_fc);
-    if (result != FcResultMatch || family_fc == NULL) {
-        dmlprintf(state->mem, "DEBUG: FC_FAMILY mismatch\n");
-        return 0;
-    }
+        /* We do the FC_FILE first because this *should* never fail
+         * and it gives us a string to use in later debug prints
+         */
+        result = FcPatternGetString (font, FC_FILE, 0, &file_fc);
+        if (result != FcResultMatch || file_fc == NULL) {
+            dmlprintf(state->mem, "DEBUG: FC_FILE mismatch\n");
+            continue;
+        }
 
-    result = FcPatternGetString (font, FC_FILE, 0, &file_fc);
-    if (result != FcResultMatch || file_fc == NULL) {
-        dmlprintf(state->mem, "DEBUG: FC_FILE mismatch\n");
-        return 0;
-    }
+        result = FcPatternGetString (font, FC_FAMILY, 0, &family_fc);
+        if (result != FcResultMatch || family_fc == NULL) {
+            dmlprintf1(state->mem, "DEBUG: FC_FAMILY mismatch in %s\n", (char *)file_fc);
+            continue;
+        }
 
-    result = FcPatternGetBool (font, FC_OUTLINE, 0, &outline_fc);
-    if (result != FcResultMatch) {
-        dmlprintf1(state->mem, "DEBUG: FC_OUTLINE failed to match on %s\n", (char*)family_fc);
-        return 0;
-    }
+        result = FcPatternGetBool (font, FC_OUTLINE, 0, &outline_fc);
+        if (result != FcResultMatch) {
+            dmlprintf2(state->mem, "DEBUG: FC_OUTLINE failed to match on %s in %s\n", (char*)family_fc, (char *)file_fc);
+            continue;
+        }
 
-    result = FcPatternGetInteger (font, FC_SLANT, 0, &slant_fc);
-    if (result != FcResultMatch) {
-        dmlprintf(state->mem, "DEBUG: FC_SLANT didn't match\n");
-        return 0;
-    }
+        result = FcPatternGetInteger (font, FC_SLANT, 0, &slant_fc);
+        if (result != FcResultMatch) {
+            dmlprintf1(state->mem, "DEBUG: FC_SLANT didn't match in %s\n", (char *)file_fc);
+            continue;
+        }
 
-    result = FcPatternGetInteger (font, FC_WEIGHT, 0, &weight_fc);
-    if (result != FcResultMatch) {
-        dmlprintf(state->mem, "DEBUG: FC_WEIGHT didn't match\n");
-        return 0;
+        result = FcPatternGetInteger (font, FC_WEIGHT, 0, &weight_fc);
+        if (result != FcResultMatch) {
+            dmlprintf1(state->mem, "DEBUG: FC_WEIGHT didn't match in %s\n", (char *)file_fc);
+            continue;
+        }
+        break;
     }
 
     /* Gross hack to work around Fontconfig's inability to tell
@@ -424,7 +467,6 @@ int gp_enumerate_fonts_next(void *enum_state, char **fontname, char **path)
     /* return the font path straight out of fontconfig */
     *path = (char*)file_fc;
 
-    state->index ++;
     return 1;
 #else
     return 0;
@@ -438,7 +480,60 @@ void gp_enumerate_fonts_free(void *enum_state)
     if (state != NULL) {
         if (state->font_list != NULL)
             FcFontSetDestroy(state->font_list);
+        if (state->fc)
+            FcConfigDestroy(state->fc);
         free(state);
     }
 #endif
 }
+
+/* A function to decode the next codepoint of the supplied args from the
+ * local windows codepage, or -1 for EOF.
+ * (copied from gp_win32.c)
+ */
+
+#ifdef __MINGW32__
+int
+gp_local_arg_encoding_get_codepoint(FILE *file, const char **astr)
+{
+    int len;
+    int c;
+    char arg[3];
+    wchar_t unicode[2];
+    char utf8[4];
+
+    if (file) {
+        c = fgetc(file);
+        if (c == EOF)
+            return EOF;
+    } else if (**astr) {
+        c = *(*astr)++;
+        if (c == 0)
+            return EOF;
+    } else {
+        return EOF;
+    }
+
+    arg[0] = c;
+    if (IsDBCSLeadByte(c)) {
+        if (file) {
+            c = fgetc(file);
+            if (c == EOF)
+                return EOF;
+        } else if (**astr) {
+            c = *(*astr)++;
+            if (c == 0)
+                return EOF;
+        }
+        arg[1] = c;
+        len = 2;
+    } else {
+        len = 1;
+    }
+
+    /* Convert the string (unterminated in, unterminated out) */
+    len = MultiByteToWideChar(CP_ACP, 0, arg, len, unicode, 2);
+
+    return unicode[0];
+}
+#endif

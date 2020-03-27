@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -48,7 +48,7 @@ enumerate_range_next(psf_glyph_enum_t *ppge, gs_glyph *pglyph)
 {
     if (ppge->index >= ppge->subset.size)
         return 1;
-    *pglyph = (gs_glyph)(ppge->index++ + gs_min_cid_glyph);
+    *pglyph = (gs_glyph)(ppge->index++ + GS_MIN_CID_GLYPH);
     return 0;
 }
 void
@@ -72,7 +72,7 @@ enumerate_bits_next(psf_glyph_enum_t *ppge, gs_glyph *pglyph)
 {
     for (; ppge->index < ppge->subset.size; ppge->index++)
         if (ppge->subset.selected.bits[ppge->index >> 3] & (0x80 >> (ppge->index & 7))) {
-            *pglyph = (gs_glyph)(ppge->index++ + gs_min_cid_glyph);
+            *pglyph = (gs_glyph)(ppge->index++ + GS_MIN_CID_GLYPH);
             return 0;
         }
     return 1;
@@ -240,9 +240,9 @@ psf_check_outline_glyphs(gs_font_base *pfont, psf_glyph_enum_t *ppge,
 
         /* It may be that a single glyph is bad (eg no (h)sbw), we'll ignore it */
         /* here, the glyph may not be included in any subset, or not used at all */
-        /* (ie the /.notdef). If an invalid glyoh is actually used then the text */
+        /* (ie the /.notdef). If an invalid glyph is actually used then the text */
         /* processing will still signal an error causing the document to fail. */
-        if(code == gs_error_invalidfont)
+        if(code == gs_error_invalidfont || code == gs_error_rangecheck)
             continue;
 
         if (code < 0)
@@ -261,10 +261,17 @@ psf_get_outline_glyphs(psf_outline_glyphs_t *pglyphs, gs_font_base *pfont,
                        gs_glyph *orig_subset_glyphs, uint orig_subset_size,
                        glyph_data_proc_t glyph_data)
 {
-    gs_glyph notdef = gs_no_glyph;
+    gs_glyph notdef = GS_NO_GLYPH;
     gs_glyph *subset_glyphs = orig_subset_glyphs;
     uint subset_size = orig_subset_size;
 
+    /* Currently its impossible to hit this code (subset_glyphs is always NULL) and if
+     * we ever did, there's a problem with countof(pglyphs->subset_data), the count
+     * will always be incorrect it seems. Since we never use the code we could just
+     * leave it in place, but Coverity complains. We could remove it, but it might
+     * actually be useful one day (if fixed) so for now, ifdef it out.
+     */
+#if 0
     if (subset_glyphs) {
         if (subset_size > countof(pglyphs->subset_data))
             return_error(gs_error_limitcheck);
@@ -272,6 +279,7 @@ psf_get_outline_glyphs(psf_outline_glyphs_t *pglyphs, gs_font_base *pfont,
                sizeof(gs_glyph) * subset_size);
         subset_glyphs = pglyphs->subset_data;
     }
+#endif
 
     {
         /*
@@ -309,6 +317,7 @@ psf_get_outline_glyphs(psf_outline_glyphs_t *pglyphs, gs_font_base *pfont,
         }
     }
 
+#if 0
     if (subset_glyphs) {
         /*
          * For subset fonts, we must ensure that characters referenced
@@ -323,7 +332,7 @@ psf_get_outline_glyphs(psf_outline_glyphs_t *pglyphs, gs_font_base *pfont,
         if (code < 0)
             return code;
         /* Subset fonts require .notdef. */
-        if (notdef == gs_no_glyph)
+        if (notdef == GS_NO_GLYPH)
             return_error(gs_error_rangecheck);
         /* Remove undefined glyphs. */
         for (i = 0, keep_size = 0; i < subset_size; ++i) {
@@ -345,6 +354,7 @@ psf_get_outline_glyphs(psf_outline_glyphs_t *pglyphs, gs_font_base *pfont,
         subset_glyphs[subset_size++] = notdef;
         subset_size = psf_sort_glyphs(subset_glyphs, subset_size);
     }
+#endif
 
     pglyphs->notdef = notdef;
     pglyphs->subset_glyphs = subset_glyphs;

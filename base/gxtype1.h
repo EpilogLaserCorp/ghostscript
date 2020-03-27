@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -23,6 +23,9 @@
 #include "gsgdata.h"
 #include "gstype1.h"
 #include "gxhintn.h"
+#include "gxmatrix.h"
+#include "gspath.h"
+#include "gzpath.h"
 
 /* This file defines the structures for the state of a Type 1 / */
 /* Type 2 charstring interpreter. */
@@ -78,16 +81,6 @@ typedef struct {
 #define charstring_skip_next(ch, state, encrypted)\
   (encrypted ? decrypt_skip_next(ch, state) : 0)
 
-#ifndef gx_path_DEFINED
-#  define gx_path_DEFINED
-typedef struct gx_path_s gx_path;
-#endif
-
-#ifndef segment_DEFINED
-#  define segment_DEFINED
-typedef struct segment_s segment;
-#endif
-
 /* This is the full state of the Type 1 interpreter. */
 #define ostack_size 48		/* per Type 2 documentation */
 #define ipstack_size 10		/* per documentation */
@@ -95,7 +88,7 @@ struct gs_type1_state_s {
     t1_hinter h;
     /* The following are set at initialization */
     gs_font_type1 *pfont;	/* font-specific data */
-    gs_imager_state *pis;	/* imager state */
+    gs_gstate *pgs;              /* gs_gstate */
     gx_path *path;		/* path for appending */
     bool no_grid_fitting;
     int paint_type;		/* 0/3 for fill, 1/2 for stroke */
@@ -167,6 +160,7 @@ typedef fixed *cs_ptr;
 /* Copy the operand stack out of the saved state. */
 #define INIT_CSTACK(cstack, csp, pcis)\
   BEGIN\
+    memset(cstack, 0x00, sizeof(cstack));\
     if ( pcis->os_count == 0 )\
       CLEAR_CSTACK(cstack, csp);\
     else {\
@@ -174,10 +168,36 @@ typedef fixed *cs_ptr;
       csp = &cstack[pcis->os_count - 1];\
     }\
   END
+#define CS_CHECK_CSTACK_BOUNDS(csaddr, cs) \
+      (csaddr >= &(cs[0]) && \
+        csaddr < &(cs[ostack_size]))
+
+#define CS_CHECK_TRANSIENT_BOUNDS(csaddr, cs) \
+      (csaddr >= &(cs[0]) && \
+        csaddr < &(cs[32]))         /* size defined in gs_type1_state_s above */
 
 #define CS_CHECK_PUSH(csp, cstack)\
   BEGIN\
     if (csp >= &cstack[countof(cstack)-1])\
+      return_error(gs_error_invalidfont);\
+  END
+
+#define CS_CHECK_PUSHN(csp, cstack, n)\
+  BEGIN\
+    if (csp >= &cstack[countof(cstack) - n])\
+      return_error(gs_error_invalidfont);\
+  END
+
+#define CS_CHECK_POP(csp, cstack)\
+  BEGIN\
+    if (csp < &cstack[0])\
+      return_error(gs_error_invalidfont);\
+  END
+
+#define CS_CHECK_IPSTACK(ips, ipstack)\
+  BEGIN\
+    if (ips > &ipstack[ipstack_size + 1] \
+        || ips < &ipstack[0])\
       return_error(gs_error_invalidfont);\
   END
 
@@ -220,7 +240,7 @@ typedef fixed *cs_ptr;
 
 /* Decode a 4-byte number, but don't push it, because Type 1 and Type 2 */
 /* charstrings scale it differently. */
-#if arch_sizeof_long > 4
+#if ARCH_SIZEOF_LONG > 4
 #  define sign_extend_num4(lw)\
      lw = (lw ^ 0x80000000L) - 0x80000000L
 #else

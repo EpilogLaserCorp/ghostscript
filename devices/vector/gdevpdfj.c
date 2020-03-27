@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -392,16 +392,25 @@ pdf_begin_image_data(gx_device_pdf * pdev, pdf_image_writer * piw,
                      int alt_writer_index)
 {
 
-    cos_stream_t *s = cos_stream_from_pipeline(piw->binary[alt_writer_index].strm);
-    cos_dict_t *pcd = cos_stream_dict(s);
-    int code = pdf_put_image_values(pcd, pdev, pim, piw->pin, pcsvalue);
+    cos_stream_t *s;
+    cos_dict_t *pcd;
+    int code;
 
+    s = cos_stream_from_pipeline(piw->binary[alt_writer_index].strm);
+    if (s == 0L)
+        return gs_note_error(gs_error_ioerror);
+
+    pcd = cos_stream_dict(s);
+    code = pdf_put_image_values(pcd, pdev, pim, piw->pin, pcsvalue);
     if (code >= 0)
         code = pdf_put_image_filters(pcd, pdev, &piw->binary[alt_writer_index], piw->pin);
     if (code < 0) {
         if (!piw->pres)
             COS_FREE(piw->data, "pdf_begin_image_data");
         piw->data = 0;
+    }
+    if (pdev->JPEG_PassThrough) {
+        CHECK(cos_dict_put_c_strings(pcd, "/Filter", "/DCTDecode"));
     }
     return code;
 }
@@ -477,6 +486,48 @@ pdf_end_image_binary(gx_device_pdf *pdev, pdf_image_writer *piw, int data_h)
     return code < 0 ? code : code1;
 }
 
+/* When writing out an image, we check to see if its a duplicate of an existing image, and if so we simply
+ * use the existing image. There is one potential problem here; if we have an image with a SMask, the SMask is
+ * itself animage, and the SMask image and the image which uses it are identical. Because we don't add the SMask
+ * entry to the image dictionary until we have closed the image, its possible that the image can detect the alredy
+ * stored SMask image as being identical and attempt to use the SMask image instead. This leads to an image with
+ * an SMask entry referencing itself.
+ * We detect this here simply by checking if the detected image resource ID is the same as any current SMask. Worst
+ * case is we fail to detect a duplicate, which is better than detecting an incorrect duplicate.
+ * This check function is only used in pdf_end_write_image() below as an argument to pdf_substitute_resource().
+ */
+static int
+smask_image_check(gx_device_pdf * pdev, pdf_resource_t *pres0, pdf_resource_t *pres1)
+{
+    cos_value_t *v = NULL;
+
+    /* image_mask_id is non-zero if we have a pending SMask image */
+    if (pdev->image_mask_id != 0) {
+        if (pres0->object->id == pdev->image_mask_id || pres1->object->id == pdev->image_mask_id)
+            return 0;
+        if (pdev->image_mask_is_SMask)
+            v = (cos_value_t *)cos_dict_find_c_key((const cos_dict_t *)pres1->object, "/SMask");
+        else
+            v = (cos_value_t *)cos_dict_find_c_key((const cos_dict_t *)pres1->object, "/Mask");
+        if (v == 0)
+            return 0;
+        if (v != 0) {
+            const byte *p = v->contents.chars.data;
+            int ix = 0;
+
+            while (*p != 0x20) {
+                if (p > v->contents.chars.data + v->contents.chars.size)
+                    return 0;
+                ix *= 10;
+                ix += (*p) - 0x30;
+            }
+            if (ix != pdev->image_mask_id)
+                return 0;
+        }
+    }
+    return 1;
+}
+
 /*
  * Finish writing an image.  If in-line, write the BI/dict/ID/data/EI and
  * return 1; if a resource, write the resource definition and return 0.
@@ -521,7 +572,7 @@ pdf_end_write_image(gx_device_pdf * pdev, pdf_image_writer * piw)
                 pdf_x_object_t *pxo = (pdf_x_object_t *)piw->pres;
                 int height = pxo->height, width = pxo->width;
 
-                code = pdf_substitute_resource(pdev, &piw->pres, resourceXObject, NULL, false);
+                code = pdf_substitute_resource(pdev, &piw->pres, resourceXObject, smask_image_check, false);
                 if (code < 0)
                     return code;
 
@@ -660,11 +711,19 @@ int
 pdf_choose_compression(pdf_image_writer * piw, bool end_binary)
 {
     cos_stream_t *s[2];
+    int status;
+
     s[0] = cos_stream_from_pipeline(piw->binary[0].strm);
     s[1] = cos_stream_from_pipeline(piw->binary[1].strm);
-    if (end_binary) {
-        int status;
 
+    if (s[0] == 0L) {
+        return_error(gs_error_ioerror);
+    }
+    if (s[1] == 0L) {
+        s_close_filters(&piw->binary[0].strm, piw->binary[0].target);
+        return_error(gs_error_ioerror);
+    }
+    if (end_binary) {
         status = s_close_filters(&piw->binary[0].strm, piw->binary[0].target);
         if (status < 0)
             return_error(gs_error_ioerror);

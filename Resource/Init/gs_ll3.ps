@@ -1,4 +1,4 @@
-% Copyright (C) 2001-2012 Artifex Software, Inc.
+% Copyright (C) 2001-2019 Artifex Software, Inc.
 % All Rights Reserved.
 %
 % This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 % of the license contained in the file LICENSE in this distribution.
 %
 % Refer to licensing information at http://www.artifex.com or contact
-% Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-% CA  94903, U.S.A., +1(415)492-9861, for further information.
+% Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+% CA 94945, U.S.A., +1(415)492-9861, for further information.
 %
 
 % Initialization file for PostScript LanguageLevel 3 functions.
@@ -35,36 +35,90 @@ languagelevel dup 2 .max .setlanguagelevel
 % where IdiomRecognition may not be defined.
 /.bind_ {		% <proc> .bind <proc'>
   //.bind currentuserparams /IdiomRecognition
-  .knownget not { //false } if {
-    (*) {
-      /IdiomSet findresource
-      //false exch {
-                % Stack: proc //false dummykey [template substitute]
-        exch pop dup 1 get exch 0 get
-                % Stack: proc //false substitute template
+  .knownget not { //false } if
+  {
+    //false
+    /IdiomSet //.findcategory exec .Instances
+    {
+      exch pop                                    % pop the IdiomSet identifying key. Stack /proc /false [-dict- status size]
+      0 get                                       % get resource instance, a dictionary. Stack : /proc false -dict-
+      {
+        exch pop                                  % pop the instance identifying key
+                                                  % Stack: proc //false [template substitute]
+        dup 1 get exch 0 get                      % Stack: proc //false substitute template
         3 index .eqproc {
-          2 index gcheck 1 index gcheck not and {
-            pop
-          } {
-            3 -1 roll pop exch not exit
-          } ifelse
+                                                  % Stack: proc //false substitute
+            3 -1 roll pop exch not                % Stack: substitute true
         } {
-          pop
+          pop                                     % Stack: proc //false
         } ifelse
-      } forall { exit } if
-    } //.bindscratch /IdiomSet resourceforall
+      } forall
+      dup {exit} if                               % Stack proc <bool>
+    } forall
+
+    not                                           % Not matched in global resources
+    currentglobal not and                         % must not match local resources if currentglobal is true
+    {
+      //false
+      .LocalInstances
+      {
+        exch pop                                  % pop IdiomSet identifying key. Stack /proc /false [-dict- status size]
+        0 get                                     % get resource instance, a dictionary Stack : /proc false -dict-
+        {
+          exch pop                                % pop instance identifier key
+                                                  % Stack: proc //false [template substitute]
+          dup 1 get exch 0 get                    % Stack: proc //false substitute template
+          3 index .eqproc {
+                                                  % Stack: proc //false substitute
+            2 index gcheck                        % Stack: proc //false substitute _global?_
+            1 index gcheck not and                % Stack: proc //false substitute _global?_ _global?_
+            {                                     % must not match if candidate in global VM and substitute in local
+              pop                                 % Stack: proc //false
+            } {
+                                                  % Stack: proc //false substitute
+              3 -1 roll pop exch not              % Stack: substitute true
+            }ifelse
+          } {
+            pop                                   % Stack: proc //false
+          } ifelse
+        } forall
+        dup {exit} if
+      } forall
+      pop                                         % Stack: proc/substitute
+    } if
+    end                                           % .findcategory makes the category dictionary the current dict, so we must pop it from dict stack
   } if
 } def
 /.bind /.bind_ load odef	% note that .bind_ will get bound
 currentdict /.bindscratch .undef
 
-DELAYBIND NOBIND or not {
+DELAYBIND not {
 % We can't just do
 %   /bind /.bind load def
 % because then /bind load == prints --.bind-- .
   /bind {//.bind_ exec} odef
 } if
 currentdict /.bind_ undef
+
+/.readbytestring {	% <source> <bytestring> .readbytestring
+                        %   <bytestring> <filled>
+                % Note that since bytestrings don't implement getinterval,
+                % if filled is false, there is no way to tell how much
+                % was read.
+  //true exch 0 1 2 index length 1 sub {
+                % Stack: source true str index
+    3 index read not { pop exch not exch exit } if
+    3 copy put pop pop
+  } for 3 -1 roll pop exch
+} bind def
+
+/.bigstring {	% <size> .bigstring <string|bytestring>
+  count 1 lt { /.bigstring /stackunderflow signalerror } if
+  dup type /integertype ne {
+    /.bigstring /typecheck signalerror
+  } if
+  dup 65400 gt { .bytestring } { string } ifelse
+} bind def
 
 % ------ HalftoneTypes 6, 10, 16 and HalftoneMode ------ %
 
@@ -96,9 +150,9 @@ currentdict /.bind_ undef
   } ifelse 3 1 roll
   /Height 1 index def
   /Width 2 index def
-  mul add BitsPerSample 8 idiv mul .bigstring
+  mul add BitsPerSample 8 idiv mul //.bigstring exec
                 % Stack: dict dict source str
-  dup type /stringtype eq { readstring } { .readbytestring } ifelse
+  dup type /stringtype eq { readstring } { //.readbytestring exec} ifelse
   not { /sethalftone .systemvar /rangecheck signalerror exit } if
   readonly /Thresholds exch def
   /TransferFunction .knownget { /TransferFunction exch def } if
@@ -111,28 +165,12 @@ currentdict /.bind_ undef
   { .sethalftone5 }
 } bind def
 
-/.bigstring {	% <size> .bigstring <string|bytestring>
-  dup 65400 gt { .bytestring } { string } ifelse
-} bind def
-
-/.readbytestring {	% <source> <bytestring> .readbytestring
-                        %   <bytestring> <filled>
-                % Note that since bytestrings don't implement getinterval,
-                % if filled is false, there is no way to tell how much
-                % was read.
-  //true exch 0 1 2 index length 1 sub {
-                % Stack: source true str index
-    3 index read not { pop exch not exch exit } if
-    3 copy put pop pop
-  } for 3 -1 roll pop exch
-} bind def
-
 /.sethalftone6 {	% <dict> <dict> .sethalftone6 <setdict> <dict5>
                         %   { .sethalftone5 }
                         % Keys: Width, Height, Thresholds, T'Function
   dup /Thresholds get
   1 index /Width get 2 index /Height get
-  //null 8 .makehalftone7
+  //null 8 //.makehalftone7 exec
 } bind def
 
 /.sethalftone10 {	% <dict> <dict> .sethalftone10 <setdict> <dict5>
@@ -142,7 +180,7 @@ currentdict /.bind_ undef
                 % that allows either a file or a string for Thresholds.
   dup /Thresholds get dup type /stringtype eq { 0 () .subfiledecode } if
   1 index /Xsquare get dup 3 index /Ysquare get dup
-  8 .makehalftone7
+  8 //.makehalftone7 exec
 } bind def
 
 /.sethalftone16 {	% <dict> <dict> .sethalftone16 <setdict> <dict5>
@@ -155,13 +193,13 @@ currentdict /.bind_ undef
     4 index /Height2 get
   } {			% 1-rectangle case
     //null
-  } ifelse 16 .makehalftone7
+  } ifelse 16 //.makehalftone7 exec
 } bind def
 
 .halftonetypes begin
-  6 /.sethalftone6 load def
-  10 /.sethalftone10 load def
-  16 /.sethalftone16 load def
+  6 //.sethalftone6 def
+  10 //.sethalftone10 def
+  16 //.sethalftone16 def
 end
 
 % Redefine the halftone-setting operators to honor HalftoneMode.
@@ -169,7 +207,7 @@ end
   /HalftoneMode getuserparam 0 eq {
     //setcolorscreen
   } {
-    12 { pop } repeat .getdefaulthalftone
+    12 { pop } repeat //.getdefaulthalftone exec
     { //sethalftone }
     { .setdefaulthalftone }
     ifelse
@@ -179,7 +217,7 @@ end
   /HalftoneMode getuserparam 0 eq {
     //setscreen
   } {
-    pop pop pop .getdefaulthalftone
+    pop pop pop //.getdefaulthalftone exec
     { //sethalftone }
     { .setdefaulthalftone }
     ifelse
@@ -190,7 +228,7 @@ end
     //sethalftone
   } {
     gsave //sethalftone grestore
-    .getdefaulthalftone
+    //.getdefaulthalftone exec
     { //sethalftone }
     { .setdefaulthalftone }
     ifelse
@@ -406,6 +444,11 @@ systemdict /.reuseparamdict mark
     /shfill .systemvar /undefined signalerror
   } ifelse
 } bind def
+
+/.buildshading_and_shfill {
+  //.buildshading exec .shfill
+} bind def
+
 systemdict /.reuseparamdict undef
 
 /.buildpattern2 {	% <template> <matrix> .buildpattern2
@@ -416,7 +459,7 @@ systemdict /.reuseparamdict undef
   mark currentcolor currentcolorspace
   counttomark 4 add -3 roll mark 4 1 roll
         % Stack: -mark- ..color.. cspace -mark- template matrix shadingdict
-  { .buildshading } stopped {
+  { //.buildshading exec} stopped {
     cleartomark setcolorspace setcolor pop stop
   } if
   .buildshadingpattern
@@ -424,13 +467,13 @@ systemdict /.reuseparamdict undef
 } bind def
 
 .patterntypes
-  2 /.buildpattern2 load put
+  2 //.buildpattern2 put
 
 /shfill {		% <shadingdict> shfill -
         % Currently, .shfill requires that the color space
         % in the pattern be the current color space.
         % Disable overprintmode for shfill
-  { dup gsave 0 .setoverprintmode .buildshading .shfill } stopped
+  { dup gsave 0 .setoverprintmode .buildshading_and_shfill } stopped
   grestore {
     /$error .systemvar /errorinfo 2 copy known {
       pop pop
@@ -478,9 +521,8 @@ end
 % Define additional user and system parameters.
 /HalftoneMode 0 .definepsuserparam
 /MaxSuperScreen 1016 .definepsuserparam
-pssystemparams begin		% read-only, so use .forcedef
-  /MaxDisplayAndSourceList 160000 .forcedef
-end
+% read-only, so use .forceput
+pssystemparams  /MaxDisplayAndSourceList 160000 .forceput
 
 % Define the IdiomSet resource category.
 { /IdiomSet } {
@@ -489,11 +531,30 @@ end
   currentdict end /Category defineresource pop
 } forall
 
+(*) {
+  dup type /nametype eq not {
+    cvn
+  } if
+  /IdiomSet findresource pop
+} 256 string /IdiomSet resourceforall
+
 /languagelevel 3 def
 % When running in LanguageLevel 3 mode, this interpreter is supposed to be
 % compatible with Adobe version 3010.
 /version (3010) readonly def
 
 .setlanguagelevel
+
+% undefine things defined (or used) in this file and not referenced elsewhere
+[
+    /.buildpattern2
+    /.buildshading
+    /.buildshading1 /.buildshading2 /.buildshading3 /.buildshading4
+    /.buildshading5 /.buildshading6 /.buildshading7 /.buildshadingpattern
+    /.makehalftone7 /.sethalftone6 /.sethalftone10 /.sethalftone16
+    /.readbytestring /.bigstring
+]
+dup currentdict .undefinternalnames
+systemdict .undefinternalnames
 
 end			% ll3dict

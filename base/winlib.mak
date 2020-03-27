@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2012 Artifex Software, Inc.
+# Copyright (C) 2001-2019 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -9,15 +9,15 @@
 # of the license contained in the file LICENSE in this distribution.
 #
 # Refer to licensing information at http://www.artifex.com or contact
-# Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-# CA  94903, U.S.A., +1(415)492-9861, for further information.
+# Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+# CA 94945, U.S.A., +1(415)492-9861, for further information.
 #
 # Common makefile section for 32-bit MS Windows.
 
 # This makefile must be acceptable to Microsoft Visual C++, Watcom C++,
 # and Borland C++.  For this reason, the only conditional directives
 # allowed are !if[n]def, !else, and !endif.
-
+WINLIB_MAK=$(GLSRC)winlib.mak $(TOP_MAKEFILES)
 
 # Note that built-in third-party libraries aren't available.
 
@@ -117,7 +117,7 @@ FT_BRIDGE = 0
 
 # Which CMS are we using?
 !ifndef WHICH_CMS
-WHICH_CMS=lcms2
+WHICH_CMS=lcms2mt
 !endif
 
 # Define the files to be removed by `make clean'.
@@ -149,6 +149,7 @@ BEGINFILES=$(GLGENDIR)\ccf32.tr\
 !include $(GLSRCDIR)\ldf_jb2.mak
 !include $(GLSRCDIR)\lwf_jp2.mak
 !include $(GLSRCDIR)\openjpeg.mak
+!include $(GLSRCDIR)\cal.mak
 
 !include $(GLSRCDIR)\expat.mak
 !include $(GLSRCDIR)\jpegxr.mak
@@ -164,8 +165,6 @@ BEGINFILES=$(GLGENDIR)\ccf32.tr\
 # Define the compilation rule for Windows devices.
 # This requires GL*_ to be defined, so it has to come after lib.mak.
 GLCCWIN=$(CC_WX) $(CCWINFLAGS) $(I_)$(GLI_)$(_I) $(GLF_)
-
-GLCCWINXPSPRINT=$(CC_WX) $(XPSPRINTCFLAGS) $(CCWINFLAGS) $(I_)$(GLI_)$(_I) $(GLF_)
 
 !include $(GLSRCDIR)\winplat.mak
 !include $(GLSRCDIR)\pcwin.mak
@@ -186,40 +185,56 @@ $(gconfig__h): $(TOP_MAKEFILES)
 # The Windows Win32 platform
 
 mswin32__=$(GLOBJ)gp_mswin.$(OBJ) $(GLOBJ)gp_wgetv.$(OBJ) $(GLOBJ)gp_wpapr.$(OBJ) \
- $(GLOBJ)gp_stdia.$(OBJ) $(GLOBJ)gp_wutf8.$(OBJ)
+ $(GLOBJ)gp_stdia.$(OBJ) $(GLOBJ)gp_wutf8.$(OBJ) $(GLOBJ)gp_winfs.$(OBJ)
 mswin32_inc=$(GLD)nosync.dev $(GLD)winplat.dev
 
-$(GLGEN)mswin32_.dev:  $(mswin32__) $(ECHOGS_XE) $(mswin32_inc)
+$(GLGEN)mswin32_.dev:  $(mswin32__) $(ECHOGS_XE) $(mswin32_inc) $(WINLIB_MAK)
 	$(SETMOD) $(GLGEN)mswin32_ $(mswin32__)
 	$(ADDMOD) $(GLGEN)mswin32_ -include $(mswin32_inc)
 
 $(GLOBJ)gp_mswin.$(OBJ): $(GLSRC)gp_mswin.c $(AK) $(gp_mswin_h) \
  $(ctype__h) $(dos__h) $(malloc__h) $(memory__h) $(pipe__h) \
  $(stdio__h) $(string__h) $(windows__h) \
- $(gx_h) $(gp_h) $(gpcheck_h) $(gpmisc_h) $(gserrors_h) $(gsexit_h)
+ $(gx_h) $(gp_h) $(gpcheck_h) $(gpmisc_h) $(gserrors_h) $(gsexit_h) \
+ $(WINLIB_MAK)
 	$(GLCCWIN) $(GLO_)gp_mswin.$(OBJ) $(C_) $(GLSRC)gp_mswin.c
 
-$(GLOBJ)gp_wutf8.$(OBJ): $(GLSRC)gp_wutf8.c $(windows__h)
+$(GLOBJ)gp_winfs.$(OBJ): $(GLSRC)gp_winfs.c $(AK) $(gp_mswin_h) \
+ $(memory__h) $(stdio__h) $(windows__h) $(gp_h) $(gserrors_h) \
+ $(WINLIB_MAK)
+	$(GLCCWIN) $(GLO_)gp_winfs.$(OBJ) $(C_) $(GLSRC)gp_winfs.c
+
+$(AUX)gp_winfs.$(OBJ): $(GLSRC)gp_winfs.c $(AK) $(gp_mswin_h) \
+ $(memory__h) $(stdio__h) $(windows__h) $(gp_h) $(gserrors_h) \
+ $(WINLIB_MAK)
+	$(GLCCAUX) $(AUXO_)gp_winfs.$(OBJ) $(C_) $(GLSRC)gp_winfs.c
+
+$(AUX)gp_winfs2.$(OBJ): $(GLSRC)gp_winfs2.c $(AK) $(gp_mswin_h) \
+ $(memory__h) $(stdio__h) $(windows__h) $(gp_h) $(gserrors_h) \
+ $(WINLIB_MAK)
+	$(GLCCAUX) $(AUXO_)gp_winfs2.$(OBJ) $(C_) $(GLSRC)gp_winfs2.c
+
+$(GLOBJ)gp_wutf8.$(OBJ): $(GLSRC)gp_wutf8.c $(windows__h) $(WINLIB_MAK)
 	$(GLCCWIN) $(GLO_)gp_wutf8.$(OBJ) $(C_) $(GLSRC)gp_wutf8.c
 
-$(AUX)gp_wutf8.$(OBJ): $(GLSRC)gp_wutf8.c $(windows__h)
+$(AUX)gp_wutf8.$(OBJ): $(GLSRC)gp_wutf8.c $(windows__h) $(WINLIB_MAK)
 	$(GLCCAUX) $(AUXO_)gp_wutf8.$(OBJ) $(C_) $(GLSRC)gp_wutf8.c
 
-$(GLOBJ)gp_wgetv.$(OBJ): $(GLSRC)gp_wgetv.c $(AK) $(gscdefs_h)
+$(GLOBJ)gp_wgetv.$(OBJ): $(GLSRC)gp_wgetv.c $(AK) $(gscdefs_h) $(WINLIB_MAK)
 	$(GLCCWIN) $(GLO_)gp_wgetv.$(OBJ) $(C_) $(GLSRC)gp_wgetv.c
 
-$(GLOBJ)gp_wpapr.$(OBJ): $(GLSRC)gp_wpapr.c $(AK) $(gp_h)
+$(GLOBJ)gp_wpapr.$(OBJ): $(GLSRC)gp_wpapr.c $(AK) $(gp_h) $(WINLIB_MAK)
 	$(GLCCWIN) $(GLO_)gp_wpapr.$(OBJ) $(C_) $(GLSRC)gp_wpapr.c
 
 $(GLOBJ)gp_stdia.$(OBJ): $(GLSRC)gp_stdia.c $(AK)\
-  $(stdio__h) $(time__h) $(unistd__h) $(gx_h) $(gp_h)
+  $(stdio__h) $(time__h) $(unistd__h) $(gx_h) $(gp_h) $(WINLIB_MAK)
 	$(GLCCWIN) $(GLO_)gp_stdia.$(OBJ) $(C_) $(GLSRC)gp_stdia.c
 
 # The Metro platform
 !ifdef METRO
 METRO_OBJS=$(GLOBJ)winrtsup.$(OBJ) $(GLOBJ)gp_wutf8.$(OBJ)
 
-$(GLOBJ)winrtsup.$(OBJ): $(GLSRCDIR)/winrtsup.cpp
+$(GLOBJ)winrtsup.$(OBJ): $(GLSRCDIR)/winrtsup.cpp $(WINLIB_MAK)
 	$(GLCCWIN) /EHsc $(GLO_)winrtsup.$(OBJ) $(C_) $(GLSRCDIR)/winrtsup.cpp
 !else
 METRO_OBJS=
@@ -231,7 +246,7 @@ metro__=$(GLOBJ)gp_mswin.$(OBJ) $(GLOBJ)gp_wgetv.$(OBJ) $(GLOBJ)gp_wpapr.$(OBJ)\
 #$(GLOBJ)gp_wutf8.$(OBJ)
 metro_inc=$(GLD)nosync.dev $(GLD)winplat.dev
 
-$(GLGEN)metro_.dev:  $(metro__) $(ECHOGS_XE) $(metro_inc)
+$(GLGEN)metro_.dev:  $(metro__) $(ECHOGS_XE) $(metro_inc) $(WINLIB_MAK)
 	$(SETMOD) $(GLGEN)metro_ $(metro__)
 	$(ADDMOD) $(GLGEN)metro_ -include $(metro_inc)
 
@@ -239,50 +254,36 @@ $(GLGEN)metro_.dev:  $(metro__) $(ECHOGS_XE) $(metro_inc)
 # Define MS-Windows handles (file system) as a separable feature.
 
 mshandle_=$(GLOBJ)gp_mshdl.$(OBJ)
-$(GLD)mshandle.dev: $(ECHOGS_XE) $(mshandle_)
+$(GLD)mshandle.dev: $(ECHOGS_XE) $(mshandle_) $(WINLIB_MAK)
 	$(SETMOD) $(GLD)mshandle $(mshandle_)
 	$(ADDMOD) $(GLD)mshandle -iodev handle
 
 $(GLOBJ)gp_mshdl.$(OBJ): $(GLSRC)gp_mshdl.c $(AK)\
  $(ctype__h) $(errno__h) $(stdio__h) $(string__h)\
- $(gsmemory_h) $(gstypes_h) $(gxiodev_h) $(gserrors_h)
+ $(gsmemory_h) $(gstypes_h) $(gxiodev_h) $(gserrors_h) $(WINLIB_MAK)
 	$(GLCC) $(GLO_)gp_mshdl.$(OBJ) $(C_) $(GLSRC)gp_mshdl.c
 
 # Define MS-Windows printer (file system) as a separable feature.
 
 msprinter_=$(GLOBJ)gp_msprn.$(OBJ)
-msxpsprinter_=$(GLOBJ)xpsprint.$(OBJ)
 
-$(GLD)msprinter_0.dev: $(ECHOGS_XE) $(msprinter_)
-	$(SETMOD) $(GLD)msprinter_0 $(msprinter_)
-	$(ADDMOD) $(GLD)msprinter_0 -iodev printer
-
-$(GLD)msprinter_1.dev: $(ECHOGS_XE) $(msprinter_) $(msxpsprinter_) \
- $(DD)xpswrite.dev
-	$(SETMOD) $(GLD)msprinter_1 $(msprinter_) $(msxpsprinter_)
-	$(ADDMOD) $(GLD)msprinter_1 -iodev printer
-
-$(GLD)msprinter.dev: $(GLD)msprinter_$(XPSPRINT).dev
-	$(CP_) $(GLD)msprinter_$(XPSPRINT).dev $(GLD)msprinter.dev
+$(GLD)msprinter.dev: $(msprinter_) $(WINLIB_MAK)
+	$(SETMOD) $(GLD)msprinter $(msprinter_)
+	$(ADDMOD) $(GLD)msprinter -iodev printer
 
 $(GLOBJ)gp_msprn.$(OBJ): $(GLSRC)gp_msprn.c $(AK)\
  $(ctype__h) $(errno__h) $(stdio__h) $(string__h)\
- $(gsmemory_h) $(gstypes_h) $(gxiodev_h)
+ $(gsmemory_h) $(gstypes_h) $(gxiodev_h) $(WINLIB_MAK)
 	$(GLCCWIN) $(GLO_)gp_msprn.$(OBJ) $(C_) $(GLSRC)gp_msprn.c
-
-# The XPS printer
-$(GLOBJ)xpsprint.$(OBJ): $(GLSRC)xpsprint.cpp $(windows__h) $(string__h) \
- $(gx_h) $(gserrors_h)
-	$(GLCCWINXPSPRINT) $(GLO_)xpsprint.$(OBJ) $(C_) $(GLSRC)xpsprint.cpp
 
 # Define MS-Windows polling as a separable feature
 # because it is not needed by the gslib.
 mspoll_=$(GLOBJ)gp_mspol.$(OBJ)
-$(GLD)mspoll.dev: $(ECHOGS_XE) $(mspoll_)
+$(GLD)mspoll.dev: $(ECHOGS_XE) $(mspoll_) $(WINLIB_MAK)
 	$(SETMOD) $(GLD)mspoll $(mspoll_)
 
 $(GLOBJ)gp_mspol.$(OBJ): $(GLSRC)gp_mspol.c $(AK)\
- $(gx_h) $(gp_h) $(gpcheck_h)
+ $(gx_h) $(gp_h) $(gpcheck_h) $(WINLIB_MAK)
 	$(GLCCWIN) $(GLO_)gp_mspol.$(OBJ) $(C_) $(GLSRC)gp_mspol.c
 
 # end of winlib.mak

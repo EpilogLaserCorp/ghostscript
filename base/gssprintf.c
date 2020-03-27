@@ -16,8 +16,9 @@
 /* From: https://svn.apache.org/repos/asf/apr/apr/trunk/strings/apr_snprintf.c */
 /* Additional modifications to work outside Apache for use with Ghostscript */
 
+#include "unistd_.h"
+#include "gp.h"
 #include "stdio_.h"
-#include "stdint_.h"
 #include "string_.h"
 #include <stdarg.h>
 #include "math_.h"
@@ -132,7 +133,6 @@ static char *apr_cvt(double arg, int ndigits, int *decpt, int *sign,
         arg = -arg;
     }
     arg = modf(arg, &fi);
-    p1 = &buf[NDIG];
     /*
      * Do integer part
      */
@@ -755,6 +755,8 @@ static int apr_vformatter(int (*flush_func)(apr_vformatter_buff_t *),
 
     char num_buf[NUM_BUF_SIZE];
     char char_buf[2];                /* for printing %% and %<unknown> */
+    char inf[] = "#INF";
+    char nan[] = "#NAN";
 
     enum var_type_enum {
             IS_QUAD, IS_LONG, IS_SHORT, IS_INT
@@ -1068,14 +1070,14 @@ static int apr_vformatter(int (*flush_func)(apr_vformatter_buff_t *),
                 s = NULL;
 #ifdef HAVE_ISNAN
                 if (isnan(fp_num)) {
-                    s = "nan";
-                    s_len = 3;
+                    s = nan;
+                    s_len = strlen(nan);
                 }
 #endif
 #ifdef HAVE_ISINF
                 if (!s && isinf(fp_num)) {
-                    s = "inf";
-                    s_len = 3;
+                    s = inf;
+                    s_len = strlen(inf);
                 }
 #endif
                 if (!s) {
@@ -1094,30 +1096,46 @@ static int apr_vformatter(int (*flush_func)(apr_vformatter_buff_t *),
 
             case 'g':
             case 'G':
-                if (adjust_precision == NO)
-                    precision = FLOAT_DIGITS;
-                else if (precision == 0)
-                    precision = 1;
-                /*
-                 * * We use &num_buf[ 1 ], so that we have room for the sign
-                 */
-                s = apr_gcvt(va_arg(ap, double), (int) precision, &num_buf[1],
-                            alternate_form);
-                if (*s == '-')
-                    prefix_char = *s++;
-                else if (print_sign)
-                    prefix_char = '+';
-                else if (print_blank)
-                    prefix_char = ' ';
-
-                s_len = strlen(s);
-
-                if (alternate_form && (q = strchr(s, '.')) == NULL) {
-                    s[s_len++] = '.';
-                    s[s_len] = '\0'; /* delimit for following strchr() */
+                fp_num = va_arg(ap, double);
+                s = NULL;
+#ifdef HAVE_ISNAN
+                if (isnan(fp_num)) {
+                    s = nan;
+                    s_len = strlen(nan);
                 }
-                if (*fmt == 'G' && (q = strchr(s, 'e')) != NULL)
-                    *q = 'E';
+#endif
+#ifdef HAVE_ISINF
+                if (!s && isinf(fp_num)) {
+                    s = inf;
+                    s_len = strlen(inf);
+                }
+#endif
+                if (!s) {
+                    if (adjust_precision == NO)
+                        precision = FLOAT_DIGITS;
+                    else if (precision == 0)
+                        precision = 1;
+                    /*
+                     * * We use &num_buf[ 1 ], so that we have room for the sign
+                     */
+                    s = apr_gcvt(fp_num, (int) precision, &num_buf[1],
+                                alternate_form);
+                    if (*s == '-')
+                        prefix_char = *s++;
+                    else if (print_sign)
+                        prefix_char = '+';
+                    else if (print_blank)
+                        prefix_char = ' ';
+
+                    s_len = strlen(s);
+
+                    if (alternate_form && (q = strchr(s, '.')) == NULL) {
+                        s[s_len++] = '.';
+                        s[s_len] = '\0'; /* delimit for following strchr() */
+                    }
+                    if (*fmt == 'G' && (q = strchr(s, 'e')) != NULL)
+                        *q = 'E';
+                }
                 break;
 
 
@@ -1423,7 +1441,7 @@ static int snprintf_flush(apr_vformatter_buff_t *vbuff)
     return -1;
 }
 
-int gs_snprintf(char *buf, int32_t len,
+int gs_snprintf(char *buf, int len,
                                      const char *format, ...)
 {
     int cc;
@@ -1473,7 +1491,7 @@ int gs_sprintf(char *buf, const char *format, ...)
 }
 
 
-int gs_vsnprintf(char *buf, int32_t len, const char *format,
+int gs_vsnprintf(char *buf, int len, const char *format,
                                va_list ap)
 {
     int cc;

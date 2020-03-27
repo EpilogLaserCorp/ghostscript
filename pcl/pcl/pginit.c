@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -102,38 +102,51 @@ hpgl_default_coordinate_system(hpgl_state_t * pcs)
 /*
  * Reset all the fill patterns to solid fill.
  */
-void
+int
 hpgl_default_all_fill_patterns(hpgl_state_t * pgls)
 {
+    int code = 0;
     int i;
 
     for (i = 1; i <= 8; ++i) {
-        (void)pcl_pattern_RF(i, NULL, pgls);
-        (void)pcl_pattern_RF(-i, NULL, pgls);
+        if (((code = pcl_pattern_RF(i, NULL, pgls)) < 0) ||
+            ((code = pcl_pattern_RF(-i, NULL, pgls)) < 0))
+        {
+            return code;
+        }
     }
+    return code;
 }
 
-void
+int
 hpgl_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
+    int code;
     /* pgframe.c (Chapter 18) */
     hpgl_args_t hpgl_args;
 
     if ((type & (pcl_reset_initial | pcl_reset_printer | pcl_reset_cold)) !=
         0) {
         if ((type & (pcl_reset_initial | pcl_reset_cold)) != 0) {
-            gx_path_alloc_contained(&pcs->g.polygon.buffer.path,
-                                    pcs->memory,
-                                    "hpgl_do_reset polygon buffer");
+            code = gx_path_alloc_contained(&pcs->g.polygon.buffer.path,
+                                           pcs->memory,
+                                           "hpgl_do_reset polygon buffer");
+            if (code < 0)
+                return code;
             gs_setlimitclamp(pcs->pgs, true);
-        } else
-            gx_path_new(&pcs->g.polygon.buffer.path);
+        } else {
+            code = gx_path_new(&pcs->g.polygon.buffer.path);
+            if (code < 0)
+                return code;
+        }
 
         /* provide default anchor point, plot size and picture frame size */
         hpgl_default_coordinate_system(pcs);
 
         /* we should not have a path at this point but we make sure */
-        hpgl_clear_current_path(pcs);
+        code = hpgl_clear_current_path(pcs);
+        if (code < 0)
+            return code;
 
         /* Initialize stick/arc font instances */
         hpgl_initialize_stick_fonts(pcs);
@@ -145,7 +158,9 @@ hpgl_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
            mode */
         pcs->g.have_drawn_in_path = false;
         /* execute only the implicit portion of IN */
-        hpgl_IN_implicit(pcs);
+        code = hpgl_IN_implicit(pcs);
+        if (code < 0)
+            return code;
 
         /* we select the default pen 1 here, oddly, IN does not select
            the default pen even though it sets pen widths and units of
@@ -167,13 +182,21 @@ hpgl_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
         pcs->g.scaling_params = params;
 
         hpgl_args_setup(&hpgl_args);
-        hpgl_IW(&hpgl_args, pcs);
+        code = hpgl_IW(&hpgl_args, pcs);
+        if (code < 0)
+            return code;
         hpgl_args_set_int(&hpgl_args, 0);
-        hpgl_PM(&hpgl_args, pcs);
+        code = hpgl_PM(&hpgl_args, pcs);
+        if (code < 0)
+            return code;
         hpgl_args_set_int(&hpgl_args, 2);
-        hpgl_PM(&hpgl_args, pcs);
+        code = hpgl_PM(&hpgl_args, pcs);
+        if (code < 0)
+            return code;
         hpgl_args_setup(&hpgl_args);
-        hpgl_IP(&hpgl_args, pcs);
+        code = hpgl_IP(&hpgl_args, pcs);
+        if (code < 0)
+            return code;
     }
 
     if ((type & pcl_reset_picture_frame) != 0) {
@@ -182,9 +205,11 @@ hpgl_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
         dmprintf(pcs->memory, "PCL reset picture frame received\n");
     }
 
-    if ((type & pcl_reset_overlay) != 0)
-        /* ignore return */
-        (void)hpgl_reset_overlay(pcs);
+    if ((type & pcl_reset_overlay) != 0) {
+        code = hpgl_reset_overlay(pcs);
+        if (code < 0)
+            return code;
+    }
 
     if ((type & (pcl_reset_plot_size)) != 0) {
         /* this shouldn't happen.  Plot size side effects are handled
@@ -198,7 +223,7 @@ hpgl_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
         /* if we have allocated memory for a stick font free the memory */
         hpgl_free_stick_fonts(pcs);
     }
-    return;
+    return 0;
 }
 
 /* ------ Copy the HP-GL/2 state for macro call/overlay/exit. */

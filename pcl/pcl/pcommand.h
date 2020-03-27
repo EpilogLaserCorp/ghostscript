@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -26,12 +26,12 @@
 
 /* Define a PCL value (PCL command parameter). */
 /* The 16+16 representation is required to match the PCL5 documentation. */
-#if arch_sizeof_int == 4
+#if ARCH_SIZEOF_INT == 4
 typedef int int32;
 
 typedef uint uint32;
 #else
-# if arch_sizeof_long == 4
+# if ARCH_SIZEOF_LONG == 4
 typedef long int32;
 
 typedef ulong uint32;
@@ -133,10 +133,10 @@ pcl_command_proc(pcl_plain_char);
 
 /* Define error returns. */
 #define e_Range (0)             /* ignore range errors */
-#define e_Syntax (-18)          /* gs_error_syntaxerror */
+#define e_Syntax  gs_error_syntaxerror
 #define e_Memory gs_error_VMerror
 #define e_Unimplemented (0)   /* ignore unimplemented commands */
-#define e_ExitLanguage (-102)   /* e_InterpreterExit */
+#define e_ExitLanguage gs_error_InterpreterExit
 
 /* Define a command definition. */
 typedef struct
@@ -270,7 +270,7 @@ typedef struct pcl_init_s
     int (*do_registration) (pcl_parser_state_t * pcl_parser_state,
                             gs_memory_t * mem);
     /* Initialize state at startup, printer reset, and other times. */
-    void (*do_reset) (pcl_state_t * pcs, pcl_reset_type_t type);
+    int (*do_reset) (pcl_state_t * pcs, pcl_reset_type_t type);
     /* Partially copy the state for macro call, overlay, and exit. */
     int (*do_copy) (pcl_state_t * psaved, const pcl_state_t * pcs,
                     pcl_copy_operation_t operation);

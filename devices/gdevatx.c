@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Practical Automation ATX-23, -24, -38  and ITK-24i, -38 driver */
@@ -68,11 +68,11 @@ ATX_DEVICE("itk38", 80 /* 8.0" */, 35 /* (minimum) */,
 
 /* Output a printer command with a 2-byte, little-endian numeric argument. */
 static void
-fput_atx_command(FILE *f, const char *str, int value)
+fput_atx_command(gp_file *f, const char *str, int value)
 {
-    fputs(str, f);
-    fputc((byte)value, f);
-    fputc((byte)(value >> 8), f);
+    gp_fputs(str, f);
+    gp_fputc((byte)value, f);
+    gp_fputc((byte)(value >> 8), f);
 }
 
 /*
@@ -152,7 +152,7 @@ atx_compress(const byte *in_buf, int in_size, byte *out_buf, int out_size)
 
 /* Send the page to the printer. */
 static int
-atx_print_page(gx_device_printer *pdev, FILE *f, int max_width_bytes)
+atx_print_page(gx_device_printer *pdev, gp_file *f, int max_width_bytes)
 {
     /*
      * The page length command uses 16 bits to represent the length in
@@ -167,6 +167,7 @@ atx_print_page(gx_device_printer *pdev, FILE *f, int max_width_bytes)
         (int)ceil((height / pdev->HWResolution[1] + top_bottom_skip) * 100);
     gs_memory_t *mem = pdev->memory;
     int raster = gx_device_raster((gx_device *)pdev, true);
+    int width = pdev->width;
     byte *buf;
     /*
      * ATX_COMPRESSED_DATA only takes a 1-byte (word) count.
@@ -176,6 +177,9 @@ atx_print_page(gx_device_printer *pdev, FILE *f, int max_width_bytes)
     byte *compressed;
     int blank_lines, lnum;
     int code = 0;
+    byte mask;
+    int endidx = width>>3;
+    int rowlen = (width+7)>>3;
 
     /* Enforce a minimum 3" page length. */
     if (page_length_100ths < 300)
@@ -187,15 +191,29 @@ atx_print_page(gx_device_printer *pdev, FILE *f, int max_width_bytes)
         code = gs_note_error(gs_error_VMerror);
         goto done;
     }
+    memset(buf, 0, raster);
+    if (width & 7)
+        mask = ~(255>>(width & 7));
+    else
+        mask = 255, endidx--;
+
     fput_atx_command(f, ATX_SET_PAGE_LENGTH, page_length_100ths);
     for (blank_lines = 0, lnum = 0; lnum < height; ++lnum) {
         byte *row;
         byte *end;
         int count;
 
-        gdev_prn_get_bits(pdev, lnum, buf, &row);
+        code = gdev_prn_get_bits(pdev, lnum, buf, &row);
+        if (code < 0)
+            goto done;
+        /* Clear any trailing padding bits */
+        row[endidx] &= mask;
+	/* We need an even number of bytes to work with. */
+	end = row + rowlen;
+	if (rowlen & 1)
+	    *end++ = 0;
         /* Find the end of the non-blank data. */
-        for (end = row + raster; end > row && end[-1] == 0 && end[-2] == 0; )
+        while (end > row && end[-1] == 0 && end[-2] == 0)
             end -= 2;
         if (end == row) {		/* blank line */
             ++blank_lines;
@@ -214,14 +232,14 @@ atx_print_page(gx_device_printer *pdev, FILE *f, int max_width_bytes)
              * Note that since compressed_raster can't exceed 510, count
              * can't exceed 510 either.
              */
-            fputs(ATX_COMPRESSED_DATA, f);
-            fputc(count / 2, f);
-            fwrite(compressed, 1, count, f);
+            gp_fputs(ATX_COMPRESSED_DATA, f);
+            gp_fputc(count / 2, f);
+            gp_fwrite(compressed, 1, count, f);
         } else {			/* uncompressed line */
             int num_bytes = end - row;
 
             fput_atx_command(f, ATX_UNCOMPRESSED_DATA, num_bytes);
-            fwrite(row, 1, num_bytes, f);
+            gp_fwrite(row, 1, num_bytes, f);
         }
     }
 
@@ -240,7 +258,7 @@ atx_print_page(gx_device_printer *pdev, FILE *f, int max_width_bytes)
 #endif
 
     /* End the page. */
-    fputs(ATX_END_PAGE, f);
+    gp_fputs(ATX_END_PAGE, f);
 
  done:
     gs_free_object(mem, compressed, "atx_print_page(compressed)");
@@ -250,17 +268,17 @@ atx_print_page(gx_device_printer *pdev, FILE *f, int max_width_bytes)
 
 /* Print pages with specified maximum pixel widths. */
 static int
-atx23_print_page(gx_device_printer *pdev, FILE *f)
+atx23_print_page(gx_device_printer *pdev, gp_file *f)
 {
     return atx_print_page(pdev, f, 576 / 8);
 }
 static int
-atx24_print_page(gx_device_printer *pdev, FILE *f)
+atx24_print_page(gx_device_printer *pdev, gp_file *f)
 {
     return atx_print_page(pdev, f, 832 / 8);
 }
 static int
-atx38_print_page(gx_device_printer *pdev, FILE *f)
+atx38_print_page(gx_device_printer *pdev, gp_file *f)
 {
     return atx_print_page(pdev, f, 2400 / 8);
 }

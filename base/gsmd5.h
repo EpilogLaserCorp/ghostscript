@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 1999-2012 Artifex Software, Inc.
+  Copyright (C) 1999-2018 Artifex Software, Inc.
   All rights reserved.
 
   This software is provided 'as-is', without any express or implied
@@ -49,6 +49,8 @@
 
 #ifndef md5_INCLUDED
 #  define md5_INCLUDED
+
+#include "memory_.h"
 
 /*
  * This package supports both compile-time and run-time determination of CPU

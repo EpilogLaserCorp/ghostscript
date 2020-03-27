@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /*
@@ -107,7 +107,7 @@ const gx_device_printer far_data gs_ap3250_device =
 
 /* Send the page to the printer. */
 static int
-escp2_print_page(gx_device_printer *pdev, FILE *prn_stream)
+escp2_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
         int line_size = gdev_prn_raster((gx_device_printer *)pdev);
         int band_size = 24;	/* 1, 8, or 24 */
@@ -119,8 +119,7 @@ escp2_print_page(gx_device_printer *pdev, FILE *prn_stream)
         byte *out = buf2;
 
         int skip, lnum, top, bottom, left, width;
-        int auto_feed = 1;
-        int count, i;
+        int code = 0, count, i;
 
         /*
         ** Check for valid resolution:
@@ -142,19 +141,16 @@ escp2_print_page(gx_device_printer *pdev, FILE *prn_stream)
         ** Check buffer allocations:
         */
 
-        if ( buf1 == 0 || buf2 == 0 )
-        {	if ( buf1 )
-                  gs_free(pdev->memory, (char *)buf1, in_size, 1, "escp2_print_page(buf1)");
-                if ( buf2 )
-                  gs_free(pdev->memory, (char *)buf2, in_size, 1, "escp2_print_page(buf2)");
-                return_error(gs_error_VMerror);
+        if ( buf1 == 0 || buf2 == 0 ) {
+           code = gs_error_VMerror;
+           goto xit;
         }
 
         /*
         ** Reset printer, enter graphics mode:
         */
 
-        fwrite("\033@\033(G\001\000\001", 1, 8, prn_stream);
+        gp_fwrite("\033@\033(G\001\000\001", 1, 8, prn_stream);
 
 #ifdef A4
         /*
@@ -173,9 +169,9 @@ escp2_print_page(gx_device_printer *pdev, FILE *prn_stream)
         */
 
         if( pdev->y_pixels_per_inch == 360 )
-           fwrite("\033(U\001\0\012\033+\030", 1, 9, prn_stream);
+           gp_fwrite("\033(U\001\0\012\033+\030", 1, 9, prn_stream);
         else
-           fwrite("\033(U\001\0\024\033+\060", 1, 9, prn_stream);
+           gp_fwrite("\033(U\001\0\024\033+\060", 1, 9, prn_stream);
 
         /*
         ** If the printer has automatic page feeding, then the paper
@@ -187,14 +183,12 @@ escp2_print_page(gx_device_printer *pdev, FILE *prn_stream)
         ** to skip past the top margin.
         */
 
-        if( auto_feed ) {
-           top = (int)(dev_t_margin(pdev) * pdev->y_pixels_per_inch);
-           bottom = (int)(pdev->height -
-                        dev_b_margin(pdev) * pdev->y_pixels_per_inch);
-        } else {
-           top = 0;
-           bottom = pdev->height;
-        }
+        /* auto_feed was set to 1 and never altered, meaning the test here
+         * was irrelvant and led to dead code. Removed the code and 'auto_feed'.
+         */
+       top = (int)(dev_t_margin(pdev) * pdev->y_pixels_per_inch);
+       bottom = (int)(pdev->height -
+                    dev_b_margin(pdev) * pdev->y_pixels_per_inch);
 
         /*
         ** Make left margin and width sit on byte boundaries:
@@ -221,14 +215,18 @@ escp2_print_page(gx_device_printer *pdev, FILE *prn_stream)
                 ** Check buffer for 0 data. We can't do this mid-band
                 */
 
-                gdev_prn_get_bits(pdev, lnum, in, &in_data);
+                code = gdev_prn_get_bits(pdev, lnum, in, &in_data);
+                if (code < 0)
+                   goto xit;
                 while ( in_data[0] == 0 &&
                         !memcmp((char *)in_data, (char *)in_data + 1, line_size - 1) &&
                         lnum < bottom )
                 {
                         lnum++;
                         skip++;
-                        gdev_prn_get_bits(pdev, lnum, in, &in_data);
+                        code = gdev_prn_get_bits(pdev, lnum, in, &in_data);
+                        if (code < 0)
+                            goto xit;
                 }
 
                 if(lnum == bottom ) break;	/* finished with this page */
@@ -238,13 +236,15 @@ escp2_print_page(gx_device_printer *pdev, FILE *prn_stream)
                 */
 
                 if( skip ) {
-                   fwrite("\033(v\002\000", 1, 5, prn_stream);
-                   fputc(skip & 0xff, prn_stream);
-                   fputc(skip >> 8,   prn_stream);
+                   gp_fwrite("\033(v\002\000", 1, 5, prn_stream);
+                   gp_fputc(skip & 0xff, prn_stream);
+                   gp_fputc(skip >> 8,   prn_stream);
                    skip = 0;
                 }
 
-                lcnt = gdev_prn_copy_scan_lines(pdev, lnum, in, in_size);
+                code = lcnt = gdev_prn_copy_scan_lines(pdev, lnum, in, in_size);
+                if (lcnt < 0)
+                    goto xit;
 
                 /*
                 ** Check to see if we don't have enough data to fill an entire
@@ -378,35 +378,41 @@ escp2_print_page(gx_device_printer *pdev, FILE *prn_stream)
                 ** Output data:
                 */
 
-                fwrite("\033.\001", 1, 3, prn_stream);
+                gp_fwrite("\033.\001", 1, 3, prn_stream);
 
                 if(pdev->y_pixels_per_inch == 360)
-                   fputc('\012', prn_stream);
+                   gp_fputc('\012', prn_stream);
                 else
-                   fputc('\024', prn_stream);
+                   gp_fputc('\024', prn_stream);
 
                 if(pdev->x_pixels_per_inch == 360)
-                   fputc('\012', prn_stream);
+                   gp_fputc('\012', prn_stream);
                 else
-                   fputc('\024', prn_stream);
+                   gp_fputc('\024', prn_stream);
 
-                fputc(band_size, prn_stream);
+                gp_fputc(band_size, prn_stream);
 
-                fputc((width << 3) & 0xff, prn_stream);
-                fputc( width >> 5,         prn_stream);
+                gp_fputc((width << 3) & 0xff, prn_stream);
+                gp_fputc( width >> 5,         prn_stream);
 
-                fwrite(out, 1, (outp - out), prn_stream);
+                gp_fwrite(out, 1, (outp - out), prn_stream);
 
-                fwrite("\r\n", 1, 2, prn_stream);
+                gp_fwrite("\r\n", 1, 2, prn_stream);
                 lnum += band_size;
         }
 
         /* Eject the page and reinitialize the printer */
 
-        fputs("\f\033@", prn_stream);
-        fflush(prn_stream);
+        gp_fputs("\f\033@", prn_stream);
+        gp_fflush(prn_stream);
 
-        gs_free(pdev->memory, (char *)buf2, in_size, 1, "escp2_print_page(buf2)");
-        gs_free(pdev->memory, (char *)buf1, in_size, 1, "escp2_print_page(buf1)");
-        return 0;
+xit:
+	if ( buf1 )
+            gs_free(pdev->memory, (char *)buf1, in_size, 1, "escp2_print_page(buf1)");
+        if ( buf2 )
+            gs_free(pdev->memory, (char *)buf2, in_size, 1, "escp2_print_page(buf2)");
+        if (code < 0)
+           return_error(code);
+
+        return code;
 }

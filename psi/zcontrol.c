@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -24,6 +24,7 @@
 #include "ipacked.h"
 #include "iutil.h"
 #include "store.h"
+#include "interp.h"
 
 /* Forward references */
 static int check_for_exec(const_os_ptr);
@@ -157,34 +158,6 @@ zexecn(i_ctx_t *i_ctx_p)
     return o_push_estack;
 }
 
-/* <obj> superexec - */
-static int end_superexec(i_ctx_t *);
-static int
-zsuperexec(i_ctx_t *i_ctx_p)
-{
-    os_ptr op = osp;
-    es_ptr ep;
-
-    check_op(1);
-    if (!r_has_attr(op, a_executable))
-        return 0;		/* literal object just gets pushed back */
-    check_estack(2);
-    ep = esp += 3;
-    make_mark_estack(ep - 2, es_other, end_superexec); /* error case */
-    make_op_estack(ep - 1,  end_superexec); /* normal case */
-    ref_assign(ep, op);
-    esfile_check_cache();
-    pop(1);
-    i_ctx_p->in_superexec++;
-    return o_push_estack;
-}
-static int
-end_superexec(i_ctx_t *i_ctx_p)
-{
-    i_ctx_p->in_superexec--;
-    return 0;
-}
-
 /* <array> <executable> .runandhide <obj>				*/
 /* 	before executing  <executable>, <array> is been removed from	*/
 /*	the operand stack and placed on the execstack with attributes	*/
@@ -239,8 +212,10 @@ end_runandhide(i_ctx_t *i_ctx_p)
 {
     int code;
 
-    if ((code = runandhide_restore_hidden(i_ctx_p, esp, esp - 1)) < 0)
+    if ((code = runandhide_restore_hidden(i_ctx_p, esp, esp - 1)) < 0) {
+        esp -= 2;
         return code;
+    }
     esp -= 2;		/* pop the hidden value and its atributes */
     return o_pop_estack;
 }
@@ -333,7 +308,7 @@ zfor(i_ctx_t *i_ctx_p)
                 make_int(ep - 2, op[-1].value.intval);
                 break;
             case t_real:
-                make_int(ep - 2, (long)op[-1].value.realval);
+                make_int(ep - 2, (ps_int)op[-1].value.realval);
                 break;
             default:
                 return_op_typecheck(op - 1);
@@ -364,7 +339,7 @@ for_pos_int_continue(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
     register es_ptr ep = esp;
-    int var = ep[-3].value.intval;
+    ps_int var = ep[-3].value.intval;
 
     if (var > ep[-1].value.intval) {
         esp -= 5;		/* pop everything */
@@ -383,7 +358,7 @@ for_neg_int_continue(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
     register es_ptr ep = esp;
-    int var = ep[-3].value.intval;
+    ps_int var = ep[-3].value.intval;
 
     if (var < ep[-1].value.intval) {
         esp -= 5;		/* pop everything */
@@ -785,7 +760,7 @@ zexecstack2(i_ctx_t *i_ctx_p)
 /* Continuation operator to do the actual transfer. */
 /* r_size(op1) was set just above. */
 static int
-do_execstack(i_ctx_t *i_ctx_p, bool include_marks, os_ptr op1)
+do_execstack(i_ctx_t *i_ctx_p, bool include_marks, bool include_oparrays, os_ptr op1)
 {
     os_ptr op = osp;
     ref *arefs = op1->value.refs;
@@ -827,6 +802,12 @@ do_execstack(i_ctx_t *i_ctx_p, bool include_marks, os_ptr op1)
                                   strlen(tname), (const byte *)tname);
                 break;
             }
+            case t_array:
+            case t_shortarray:
+            case t_mixedarray:
+                if (!include_oparrays && errorexec_find(i_ctx_p, rq) < 0)
+                    make_null(rq);
+                break;
             default:
                 ;
         }
@@ -839,14 +820,14 @@ execstack_continue(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
 
-    return do_execstack(i_ctx_p, false, op);
+    return do_execstack(i_ctx_p, false, false, op);
 }
 static int
 execstack2_continue(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
 
-    return do_execstack(i_ctx_p, op->value.boolval, op - 1);
+    return do_execstack(i_ctx_p, op->value.boolval, true, op - 1);
 }
 
 /* - .needinput - */
@@ -883,8 +864,8 @@ zcurrentfile(i_ctx_t *i_ctx_p)
         ref *efp = zget_current_file(i_ctx_p);
 
         if (esfile != efp) {
-            lprintf2("currentfile: esfile=0x%lx, efp=0x%lx\n",
-                     (ulong) esfile, (ulong) efp);
+            lprintf2("currentfile: esfile="PRI_INTPTR", efp="PRI_INTPTR"\n",
+                     (intptr_t) esfile, (intptr_t) efp);
             ref_assign(op, efp);
         } else
 #endif
@@ -962,8 +943,6 @@ const op_def zcontrol3_op_defs[] = {
     {"0%loop_continue", loop_continue},
     {"0%repeat_continue", repeat_continue},
     {"0%stopped_push", stopped_push},
-    {"1superexec", zsuperexec},
-    {"0%end_superexec", end_superexec},
     {"2.runandhide", zrunandhide},
     {"0%end_runandhide", end_runandhide},
     op_def_end(0)

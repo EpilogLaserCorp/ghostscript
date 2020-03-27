@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -197,7 +197,6 @@ scan_bos(i_ctx_t *i_ctx_p, ref *pref, scanner_state *pstate)
 
         if (top_size == 0) {
             /* Extended header (2-byte array size, 4-byte length) */
-            uint lsize;
 
             if (rcnt < 7) {
                 s_end_inline(s, p - 1, rlimit);
@@ -205,11 +204,7 @@ scan_bos(i_ctx_t *i_ctx_p, ref *pref, scanner_state *pstate)
                 return scan_Refill;
             }
             pbs->top_size = top_size = sdecodeushort(p + 2, num_format);
-            pbs->lsize = lsize = sdecodeint32(p + 4, num_format);
-            if ((size = lsize) != lsize) {
-                scan_bos_error(pstate, "bin obj seq length too large");
-                return_error(gs_error_limitcheck);
-            }
+            pbs->lsize = size = sdecodeint32(p + 4, num_format);
             hsize = 8;
         } else {
             /* Normal header (1-byte array size, 2-byte length). */
@@ -263,7 +258,7 @@ scan_bos(i_ctx_t *i_ctx_p, ref *pref, scanner_state *pstate)
         pstate->s_da.base = pstate->s_da.next =
             pstate->s_da.limit = pstate->s_da.buf;
         code = scan_bos_continue(i_ctx_p, pref, pstate);
-        if (code == scan_Refill || code < 0) {
+        if ((code == scan_Refill || code < 0) && pbs->index < r_size(&pbs->bin_array)) {
             /* Clean up array for GC. */
             uint index = pbs->index;
 
@@ -359,8 +354,7 @@ scan_bin_scalar(i_ctx_t *i_ctx_p, ref *pref, scanner_state *pstate)
                  */
                 s_end_inline(s, p, rlimit);
                 make_const_string(pref, a_all | avm_foreign, arg, sbufptr(s));
-                sbufskip(s, arg);
-                return 0;
+                return sbufskip(s, arg);
             } else {
                 byte *str = ialloc_string(arg, "string token");
 
@@ -495,7 +489,7 @@ scan_bin_num_array_continue(i_ctx_t *i_ctx_p, ref * pref,
             case t_integer:
             case t_real:
                 r_set_type(np, code);
-                sbufskip(s, wanted);
+                (void)sbufskip(s, wanted);
                 break;
             case t_null:
                 scan_bos_error(pstate, "bad number format");
@@ -608,13 +602,13 @@ scan_bos_continue(i_ctx_t *i_ctx_p, ref * pref, scanner_state * pstate)
                     make_empty_string(op, attrs);
                     break;
                 }
-                if (value < max_array_index * SIZEOF_BIN_SEQ_OBJ ||
+                if (value < (int)(max_array_index * SIZEOF_BIN_SEQ_OBJ) ||
                     value + osize > size
                     ) {
                     scan_bos_error(pstate, "invalid string offset");
                     return_error(gs_error_syntaxerror);
                 }
-                if (value < min_string_index) {
+                if (value < (int)min_string_index) {
                     /* We have to (re)allocate the strings. */
                     uint str_size = size - value;
                     byte *sbase;
@@ -662,10 +656,14 @@ scan_bos_continue(i_ctx_t *i_ctx_p, ref * pref, scanner_state * pstate)
             case BS_TYPE_ARRAY:
                 atype = t_array;
               arr:
-                if (value + osize > min_string_index ||
+                if (value + osize > (int)min_string_index ||
                     value & (SIZEOF_BIN_SEQ_OBJ - 1)
                     ) {
                     scan_bos_error(pstate, "bad array offset");
+                    return_error(gs_error_syntaxerror);
+                }
+                if (osize > (size / 8)) {
+                    scan_bos_error(pstate, "bad array length");
                     return_error(gs_error_syntaxerror);
                 }
                 {

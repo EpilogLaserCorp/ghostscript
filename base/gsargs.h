@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,6 +19,8 @@
 #ifndef gsargs_INCLUDED
 #  define gsargs_INCLUDED
 
+#include "std.h"
+
 /*
  * We need to handle recursion into @-files.
  * The following structures keep track of the state.
@@ -26,7 +28,7 @@
  * decreases generality, but eliminates the need for dynamic allocation.
  */
 #define arg_str_max 2048
-#define arg_depth_max 10
+#define arg_depth_max 11
 typedef struct arg_source_s {
     bool is_file;
     union _u {
@@ -37,14 +39,14 @@ typedef struct arg_source_s {
             gs_memory_t *memory;/* if non-0, free chars when done with it */
             const char *str;    /* string being read */
         } s;
-        FILE *file;
+        gp_file *file;
     } u;
 } arg_source;
 typedef struct arg_list_s {
     bool expand_ats;            /* if true, expand @-files */
-    FILE *(*arg_fopen) (const char *fname, void *fopen_data);
+    gp_file *(*arg_fopen) (const char *fname, void *fopen_data);
     void *fopen_data;
-    int (*get_codepoint)(FILE *file, const char **astr);
+    int (*get_codepoint)(gp_file *file, const char **astr);
     gs_memory_t *memory;
     const char **argp;
     int argn;
@@ -56,11 +58,13 @@ typedef struct arg_list_s {
 int codepoint_to_utf8(char *cstr, int rune);
 
 /* Initialize an arg list. */
-void arg_init(arg_list * pal, const char **argv, int argc,
-              FILE        *(*arg_fopen)(const char *fname, void *fopen_data),
-              void        *fopen_data,
-              int          (*get_codepoint)(FILE *file, const char **astr),
-              gs_memory_t *mem);
+int arg_init(arg_list    *pal,
+             const char **argv,
+             int          argc,
+             gp_file     *(*arg_fopen)(const char *fname, void *fopen_data),
+             void        *fopen_data,
+             int          (*get_codepoint)(gp_file *file, const char **astr),
+             gs_memory_t *mem);
 
 /*
  * Push a string onto an arg list.
@@ -88,7 +92,14 @@ void arg_finit(arg_list * pal);
  * Get the next arg from a list.
  * Note that these are not copied to the heap.
  */
-const char *arg_next(arg_list * pal, int *code, const gs_memory_t *errmem);
+/* returns:
+ * >0 - valid argument
+ *  0 - arguments exhausted
+ * <0 - error condition
+ * *argstr is *always* set: to the arg string if it is valid,
+ * or to NULL otherwise
+ */
+int arg_next(arg_list * pal, const char **argstr, const gs_memory_t *errmem);
 
 /* Copy an argument string to the heap. */
 char *arg_copy(const char *str, gs_memory_t * mem);

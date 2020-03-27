@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -502,8 +502,8 @@ dict_put(ref * pdref /* t_dictionary */ , const ref * pkey, const ref * pvalue,
         } else {
             ref *kp = pdict->keys.value.refs + index;
 
-            if_debug2m('d', (const gs_memory_t *)mem, "[d]0x%lx: fill key at 0x%lx\n",
-                       (ulong) pdict, (ulong) kp);
+            if_debug2m('d', (const gs_memory_t *)mem, "[d]"PRI_INTPTR": fill key at "PRI_INTPTR"\n",
+                       (intptr_t)pdict, (intptr_t)kp);
             store_check_dest(pdref, pkey);
             ref_assign_old_in(mem, &pdict->keys, kp, pkey,
                               "dict_put(key)");	/* set key of pair */
@@ -527,10 +527,10 @@ dict_put(ref * pdref /* t_dictionary */ , const ref * pkey, const ref * pvalue,
         rcode = 1;
     }
     if_debug8m('d', (const gs_memory_t *)mem,
-               "[d]0x%lx: put key 0x%lx 0x%lx\n  value at 0x%lx: old 0x%lx 0x%lx, new 0x%lx 0x%lx\n",
-               (ulong) pdref->value.pdict,
+               "[d]"PRI_INTPTR": put key 0x%lx 0x%lx\n  value at "PRI_INTPTR": old 0x%lx 0x%lx, new 0x%lx 0x%lx\n",
+               (intptr_t) pdref->value.pdict,
                ((const ulong *)pkey)[0], ((const ulong *)pkey)[1],
-               (ulong) pvslot,
+               (intptr_t) pvslot,
                ((const ulong *)pvslot)[0], ((const ulong *)pvslot)[1],
                ((const ulong *)pvalue)[0], ((const ulong *)pvalue)[1]);
     ref_assign_old_in(mem, &pdref->value.pdict->values, pvslot, pvalue,
@@ -551,6 +551,23 @@ dict_put_string(ref * pdref, const char *kstr, const ref * pvalue,
 
     if ((code = name_ref(dict_mem(pdict),
                          (const byte *)kstr, strlen(kstr), &kname, 0)) < 0)
+        return code;
+    return dict_put(pdref, &kname, pvalue, pds);
+}
+
+/*
+ * Enter a key-value pair where the key is a C string that must be copied.
+ */
+int
+dict_put_string_copy(ref * pdref, const char *kstr, const ref * pvalue,
+                     dict_stack_t *pds)
+{
+    int code;
+    ref kname;
+    dict *pdict = pdref->value.pdict;
+
+    if ((code = name_ref(dict_mem(pdict),
+                         (const byte *)kstr, strlen(kstr), &kname, 1)) < 0)
         return code;
     return dict_put(pdref, &kname, pvalue, pds);
 }
@@ -583,8 +600,8 @@ dict_undef(ref * pdref, const ref * pkey, dict_stack_t *pds)
         bool must_save = ref_must_save_in(mem, &pdict->keys);
 
         if_debug3m('d', (const gs_memory_t *)mem,
-                   "[d]0x%lx: removing key at 0%lx: 0x%x\n",
-                   (ulong)pdict, (ulong)pkp, (uint)*pkp);
+                   "[d]"PRI_INTPTR": removing key at "PRI_INTPTR": 0x%x\n",
+                   (intptr_t)pdict, (intptr_t)pkp, (uint)*pkp);
         /* See the initial comment for why it is safe not to save */
         /* the change if the keys array itself is new. */
         if (must_save)
@@ -618,8 +635,8 @@ dict_undef(ref * pdref, const ref * pkey, dict_stack_t *pds)
         ref *kp = pdict->keys.value.refs + index;
 
         if_debug4m('d', (const gs_memory_t *)mem,
-                   "[d]0x%lx: removing key at 0%lx: 0x%lx 0x%lx\n",
-                   (ulong)pdict, (ulong)kp, ((ulong *)kp)[0], ((ulong *)kp)[1]);
+                   "[d]"PRI_INTPTR": removing key at "PRI_INTPTR": 0x%lx 0x%lx\n",
+                   (intptr_t)pdict, (intptr_t)kp, ((ulong *)kp)[0], ((ulong *)kp)[1]);
         make_null_old_in(mem, &pdict->keys, kp, "dict_undef(key)");
         /*
          * Accumulating deleted entries slows down lookup.
@@ -820,7 +837,7 @@ dict_grow(ref * pdref, dict_stack_t *pds)
         new_size *= 2;
     else
         new_size += new_size / 2;
-#if arch_sizeof_int < arch_sizeof_long
+#if ARCH_SIZEOF_INT < ARCH_SIZEOF_LONG
     if (new_size > max_uint)
         new_size = max_uint;
 #endif
@@ -870,7 +887,7 @@ dict_next(const ref * pdref, int index, ref * eltp /* ref eltp[2] */ )
             ) {
             eltp[1] = *vp;
             if_debug6m('d', dict_mem(pdict), "[d]0x%lx: index %d: %lx %lx, %lx %lx\n",
-                       (ulong) pdict, index,
+                       (intptr_t)pdict, index,
                        ((ulong *) eltp)[0], ((ulong *) eltp)[1],
                        ((ulong *) vp)[0], ((ulong *) vp)[1]);
             return index;

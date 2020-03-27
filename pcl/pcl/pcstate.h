@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -44,6 +44,7 @@
 
                                 /*#include "pgstate.h"*//* HP-GL/2 state, included below */
 #include "pjtop.h"
+#include "gsgstate.h"
 
 /* type for string id's */
 typedef struct pcl_string_id_s
@@ -81,10 +82,6 @@ typedef struct pstack_entry_s
 #ifndef pcl_state_DEFINED
 #  define pcl_state_DEFINED
 typedef struct pcl_state_s pcl_state_t;
-#endif
-#ifndef gs_state_DEFINED
-#  define gs_state_DEFINED
-typedef struct gs_state_s gs_state;
 #endif
 
 /*
@@ -138,7 +135,7 @@ struct pcl_state_s
     void *client_data;
 
     /* graphics state */
-    gs_state *pgs;
+    gs_gstate *pgs;
 
     /* Define an optional procedure for parsing non-ESC data. */
     int (*parse_other) (void *parse_data,
@@ -340,7 +337,11 @@ struct pcl_state_s
     /* ---------------- HP-GL/2 state ---------------- */
     pcl_hpgl_state_t g;         /* see pgstate.h */
     /* ---------------- PJL state -------------------- */
-    pl_interp_instance_t *pjls;
+    pl_interp_implementation_t *pjls;
+    /* we need a separate PJL number for downloaded fonts. PJL
+       numbers for internal fonts are defined statically in the font
+       table. */
+    int pjl_dlfont_number;
     /* ---------------- page size table -------------- */
     pcl_paper_type_t *ppaper_type_table;
     /* yet another poorly documented pjl variable - this should widen
@@ -374,6 +375,7 @@ struct pcl_state_s
     bool high_level_device;
     /* last entry mode to hpgl/2 */
     int hpgl_mode;
+    int scanconverter;
 };
 
 /* accessor functions for the pcl target device.  These live in
@@ -392,8 +394,11 @@ int pcl_do_printer_reset(pcl_state_t * pcs);
 int pcl_end_page_top(pcl_state_t * pcs, int num_copies, int flush);
 
 /* exported from pcl to support PCL XL pass through mode */
-bool pcl_downloaded_and_bound(pl_font_t * plfont);
+bool pcl_downloaded_and_bound(const pl_font_t * plfont);
 
 void pcl_font_scale(pcl_state_t *, gs_point * psz);
+
+/* exported from pcl to support HPGL label */
+bool char_is_printable(const pl_font_t *font, const pl_symbol_map_t *map, gs_char chr, bool is_stick, bool literal);
 
 #endif /* pcstate_INCLUDED */

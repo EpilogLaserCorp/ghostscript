@@ -346,15 +346,18 @@ static int
 svg_setlogop(gx_device_vector *vdev, gs_logical_operation_t lop,
 gs_logical_operation_t diff);
 
-static int
-svg_can_handle_hl_color(gx_device_vector *vdev, const gs_imager_state *pis,
-const gx_drawing_color * pdc);
-static int
-svg_setfillcolor(gx_device_vector *vdev, const gs_imager_state *pis,
-const gx_drawing_color *pdc);
-static int
-svg_setstrokecolor(gx_device_vector *vdev, const gs_imager_state *pis,
-const gx_drawing_color *pdc);
+static int svg_can_handle_hl_color(
+	gx_device_vector* vdev,
+	const gs_gstate* pis,
+	const gx_drawing_color* pdc);
+static int svg_setfillcolor(
+	gx_device_vector* vdev,
+	const gs_gstate* pis,
+	const gx_drawing_color* pdc);
+static int svg_setstrokecolor(
+	gx_device_vector* vdev,
+	const gs_gstate* pis,
+	const gx_drawing_color* pdc);
 
 static int
 svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix);
@@ -747,10 +750,13 @@ print_path(const gx_path *path)
 }
 
 /* Stroke a path. */
-static int
-gdev_svg_stroke_path(gx_device * dev, const gs_imager_state * pis,
-gx_path * ppath, const gx_stroke_params * params,
-const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
+static int gdev_svg_stroke_path(
+	gx_device* dev,
+	const gs_gstate* pis,
+	gx_path* ppath,
+	const gx_stroke_params* params,
+	const gx_drawing_color* pdcolor,
+	const gx_clip_path* pcpath)
 {
 	gx_device_svg *svg = (gx_device_svg *)dev;
 	gx_drawing_color color;
@@ -808,13 +814,13 @@ const gx_drawing_color * pdcolor, const gx_clip_path * pcpath)
 }
 
 /* Fill a path */
-int
-gdev_svg_fill_path(gx_device * dev, 
-const gs_imager_state * pis,
-gx_path * ppath,
-const gx_fill_params * params,
-const gx_drawing_color * pdcolor, 
-const gx_clip_path * pcpath)
+static int gdev_svg_fill_path(
+	gx_device* dev,
+	const gs_gstate* pis,
+	gx_path* ppath,
+	const gx_fill_params* params,
+	const gx_drawing_color* pdcolor,
+	const gx_clip_path* pcpath)
 {
 	gx_device_svg *svg = (gx_device_svg *)dev;
 	gx_drawing_color color;
@@ -839,7 +845,7 @@ const gx_clip_path * pcpath)
 		gs_matrix m;
 		gx_drawing_color dc = *pdcolor;
 		gs_pattern1_instance_t pi = *(gs_pattern1_instance_t *)dc.ccolor.pattern;
-		gs_state *pgs = gs_state_copy(pi.saved, gs_state_memory(pi.saved));
+		gs_gstate *pgs = gs_gstate_copy(pi.saved, gs_gstate_memory(pi.saved));
 
 		gs_make_identity(&m);
 
@@ -898,7 +904,7 @@ const gx_clip_path * pcpath)
 		close_clip_groups(svg);
 		svg_write(svg, "</g> <!-- pathfillimage -->\n");
 
-		gs_state_free(pgs);
+		gs_gstate_free(pgs);
 
 		return code;
 	}
@@ -912,16 +918,16 @@ const gx_clip_path * pcpath)
 			gs_fixed_rect bbox, bbox1;
 			gx_device_memory *pmdev;
 			int mark = svg->mark;
-			gs_imager_state *pis_noconst = (gs_imager_state *)pis; /* Break const. */
+			gs_gstate* pis_noconst = (gs_gstate*)pis; /* Break const. */
 			gs_matrix_fixed oldCTM = pis_noconst->ctm;
 			gs_matrix save_ctm = ctm_only(pis);
 			gs_matrix m;
 			gx_drawing_color dc = *pdcolor;
 			gs_pattern2_instance_t pi = *(gs_pattern2_instance_t *)dc.ccolor.pattern;
 
-			// Note: Do not use gs_state_memory(pi.saved)
+			// Note: Do not use gs_gstate_memory(pi.saved)
 			// This strips the pointer to 32 bits and causes a crash
-			gs_state *pgs = gs_state_copy(pi.saved, pi.saved->memory /*gs_state_memory(pi.saved)*/);
+			gs_gstate *pgs = gs_gstate_copy(pi.saved, pi.saved->memory /*gs_state_memory(pi.saved)*/);
 
 			gs_make_identity(&m);
 
@@ -961,8 +967,13 @@ const gx_clip_path * pcpath)
 			pis_noconst->ctm.ty_fixed = 0;
 			pis_noconst->ctm.txy_fixed_valid = false;
 
-			code = gs_shading_do_fill_rectangle(pi.templat.Shading,
-				NULL, (gx_device *)pmdev, (gs_imager_state *)pis, !pi.shfill);
+			code = gs_shading_do_fill_rectangle(
+				pi.templat.Shading,
+				NULL,
+				(gx_device*)pmdev,
+				(gs_gstate*)pis,
+				!pi.shfill
+				);
 
 			pis_noconst->ctm = oldCTM;
 
@@ -975,8 +986,8 @@ const gx_clip_path * pcpath)
 			close_clip_groups(svg);
 			svg_write(svg, "</g> <!-- pathfillimage -->\n");
 
-			gs_setmatrix((gs_state *)pis, &save_ctm);
-			gs_state_free(pgs);
+			gs_setmatrix((gs_gstate*)pis, &save_ctm);
+			gs_gstate_free(pgs);
 		}
 		return code;
 	}
@@ -1356,17 +1367,19 @@ gs_logical_operation_t diff)
 
 /* Other state */
 
-static int
-svg_can_handle_hl_color(gx_device_vector *vdev, const gs_imager_state *pis,
-const gx_drawing_color * pdc)
+static int svg_can_handle_hl_color(
+	gx_device_vector* vdev,
+	const gs_gstate* pis,
+	const gx_drawing_color* pdc)
 {
 	if_debug0m('_', vdev->memory, "svg_can_handle_hl_color\n");
 	return 0;
 }
 
-static int
-svg_setfillcolor(gx_device_vector *vdev, const gs_imager_state *pis,
-const gx_drawing_color *pdc)
+static int svg_setfillcolor(
+	gx_device_vector* vdev,
+	const gs_gstate* pis,
+	const gx_drawing_color* pdc)
 {
 	gx_device_svg *svg = (gx_device_svg*)vdev;
 	const gx_device_color *pdevc = (gx_device_color *)pdc;
@@ -1424,9 +1437,10 @@ const gx_drawing_color *pdc)
 	return 0;
 }
 
-static int
-svg_setstrokecolor(gx_device_vector *vdev, const gs_imager_state *pis,
-const gx_drawing_color *pdc)
+static int svg_setstrokecolor(
+	gx_device_vector* vdev,
+	const gs_gstate* pis,
+	const gx_drawing_color* pdc)
 {
 	gx_device_svg *svg = (gx_device_svg*)vdev;
 	gx_color_index stroke = svg_get_color(svg, pdc);
@@ -2181,26 +2195,30 @@ static const gx_image_enum_procs_t svg_image_enum_procs = {
 	svg_end_image
 };
 
-static int
-svg_begin_image(gx_device * dev,
-const gs_imager_state * pis, const gs_image_t * pim,
-gs_image_format_t format, const gs_int_rect * prect,
-const gx_drawing_color * pdcolor, const gx_clip_path * pcpath,
-gs_memory_t * memory, gx_image_enum_common_t ** pinfo)
+static int svg_begin_image(
+	gx_device* dev,
+	const gs_gstate* pis,
+	const gs_image_t* pim,
+	gs_image_format_t format,
+	const gs_int_rect* prect,
+	const gx_drawing_color* pdcolor,
+	const gx_clip_path* pcpath,
+	gs_memory_t* memory,
+	gx_image_enum_common_t** pinfo)
 {
 	return 0;
 }
 
 static int svg_begin_typed_image(
-	gx_device * dev,
-	const gs_imager_state * pis,
-	const gs_matrix * pmat,
-	const gs_image_common_t * pim,
-	const gs_int_rect * prect,
-	const gx_drawing_color * pdcolor,
-	const gx_clip_path * pcpath,
-	gs_memory_t * memory,
-	gx_image_enum_common_t ** pinfo)
+	gx_device* dev,
+	const gs_gstate* pis,
+	const gs_matrix* pmat,
+	const gs_image_common_t* pim,
+	const gs_int_rect* prect,
+	const gx_drawing_color* pdcolor,
+	const gx_clip_path* pcpath,
+	gs_memory_t* memory,
+	gx_image_enum_common_t** pinfo)
 {
 	gx_device_svg *svg = (gx_device_svg *)dev;
 	svg_image_enum_t *pie;
@@ -2319,10 +2337,10 @@ done:
 	return code;
 }
 
-static
-int svg_fillpage(gx_device *dev,
-gs_imager_state * pis,
-gx_device_color *pdevc)
+static int svg_fillpage(
+	gx_device* dev,
+	gs_gstate* pis,
+	gx_device_color* pdevc)
 {
 	gx_device_svg *const svg = (gx_device_svg*)dev;
 

@@ -241,13 +241,13 @@ lxm_device far_data gs_lex2050_device = {
 
 static byte ofs8[8]={128,64,32,16,8,4,2,1};
 /* Lexmark 5xxx, 7xxx page eject */
-static void lex_eject(FILE *out)
+static void lex_eject(gp_file *out)
 {
    byte buf[4]={0x1b,0x2a,0x7,0x65};
 #ifdef DEBUG
    dprintf("Sending page eject.\n");
 #endif
-   fwrite(buf,sizeof(buf),1,out);
+   gp_fwrite(buf,sizeof(buf),1,out);
 }
 
 /*
@@ -256,7 +256,7 @@ static void lex_eject(FILE *out)
  * 384 for 192 pixels or
  * 416 for 208 pixels etc...
  */
-static void paper_shift(FILE *out,int offset)
+static void paper_shift(gp_file *out,int offset)
 {
    byte buf[5]={0x1b,0x2a,0x3,0x0,0x0};
    buf[3]=(byte)(offset >> 8);   /* just to be endian safe we don't use short */
@@ -265,7 +265,7 @@ static void paper_shift(FILE *out,int offset)
    dprintf3("paper_shift() %d 1200dpi = %d 600dpi = %d 300dpi pixels\n",
          offset,offset/2,offset/4);
 #endif
-   fwrite(buf,sizeof(buf),1,out);
+   gp_fwrite(buf,sizeof(buf),1,out);
 }
 
 /* return coordinate of leftmost pixel (in pixels) */
@@ -361,18 +361,22 @@ static void find_lr_pixels(byte *buf[],int bytelen,int bufheight,
 /* ------ Driver procedures ------ */
 
 /*** THIS NEED TO BE REWORKED SOON ***/
-static const int LEFT_MARGIN=50;
-static const int VERTSIZE=LX7_BSW_H;
+enum {
+    LEFT_MARGIN=50,
+    VERTSIZE=LX7_BSW_H
+};
 /* offsets to print line sequence (defined in outbuf)
  */
-static const int IDX_SEQLEN=5;
-static const int IDX_HORRES=8;
-static const int IDX_PACKETS=13;
-static const int IDX_5700DIF=12;
-static const int IDX_HSTART=15;
-static const int IDX_HEND=17;
-static const int IDX_DATA=26;
-static const int IDX_CARTRIDGE=10;
+enum {
+    IDX_SEQLEN=5,
+    IDX_HORRES=8,
+    IDX_PACKETS=13,
+    IDX_5700DIF=12,
+    IDX_HSTART=15,
+    IDX_HEND=17,
+    IDX_DATA=26,
+    IDX_CARTRIDGE=10
+};
 
 #define DIV8(x) ( (x) >> 3 )
 #define MOD8(x) ( (x) & 0x7 )
@@ -395,7 +399,7 @@ static byte outb[]={0x1B,0x2A,0x04,0x00,0x00,0xFF,0xFF,
 
 #define BITSTART12 4096
 
-static int print_cols(FILE *prn_stream,gx_device_printer *pdev,
+static int print_cols(gp_file *prn_stream,gx_device_printer *pdev,
       byte *outbuf,
       int left,int right,int vstart, int vend,byte *buf[],
       int width,int LR_SHIFT)
@@ -539,7 +543,7 @@ static int print_cols(FILE *prn_stream,gx_device_printer *pdev,
    outbuf[IDX_SEQLEN-1]  =(unsigned char)(clen >> 16);
    outbuf[IDX_SEQLEN]  =(unsigned char)(clen >> 8);
    outbuf[IDX_SEQLEN+1]=(unsigned char)(clen & 0xFF);
-   fwrite(outbuf,1,clen,prn_stream);
+   gp_fwrite(outbuf,1,clen,prn_stream);
 #ifdef DEBUG
    dprintf1("\nSent %d data bytes\n",clen);
 #endif
@@ -551,7 +555,7 @@ static int print_cols(FILE *prn_stream,gx_device_printer *pdev,
 /* Send the page to the printer. */
 /* Lexmark generic print page routine */
 static int
-lxmgen_print_page(gx_device_printer *pdev, FILE *prn_stream)
+lxmgen_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
    int pheight=pdev->height; /* page height (pixels) */
 #ifdef DEBUG
@@ -577,6 +581,7 @@ lxmgen_print_page(gx_device_printer *pdev, FILE *prn_stream)
    int lr_shift=((lxm_device*)pdev)->headSeparation;
    byte *obp[LX7_BSW_H];    /* pointers to buffer lines */
    int bufHeight;
+   int code = 0;
 
    /* initiate vres mapping variable */
    vres=LXR_600; /* default vertical resolution */
@@ -669,13 +674,13 @@ lxmgen_print_page(gx_device_printer *pdev, FILE *prn_stream)
    }
 
    if(gdev_prn_file_is_new(pdev))
-      fwrite(((lxm_device*)pdev)->fullInit,
-            ((lxm_device*)pdev)->nfullInit,
-            1,prn_stream);
+      gp_fwrite(((lxm_device*)pdev)->fullInit,
+                ((lxm_device*)pdev)->nfullInit,
+                1,prn_stream);
    else
-      fwrite(((lxm_device*)pdev)->pageInit,
-            ((lxm_device*)pdev)->npageInit,
-            1,prn_stream);
+      gp_fwrite(((lxm_device*)pdev)->pageInit,
+                ((lxm_device*)pdev)->npageInit,
+                1,prn_stream);
 
    while(prest>0)
    {
@@ -685,19 +690,24 @@ lxmgen_print_page(gx_device_printer *pdev, FILE *prn_stream)
       int c1200;     /* testing empty line for 1200dpi... */
 
       /* copy one line & test for all zeroes */
-      gdev_prn_get_bits(pdev, pheight-prest, /* current line No. */
+      code = gdev_prn_get_bits(pdev, pheight-prest, /* current line No. */
             pbuf,                /* our buffer if needed */
             &ppbuf);             /* returns pointer to scanline
                                   * either our buffer or
                                   * gs internal data buffer
                                   */
+      if (code < 0)
+          goto error;
+
       if (vres==LXR_1200 && (pheight-prest+LXH_DSKIP1<pheight))
       {
-         gdev_prn_get_bits(pdev, pheight-prest+LXH_DSKIP1,
+         code = gdev_prn_get_bits(pdev, pheight-prest+LXH_DSKIP1,
                                   /* current line No. */
             pbuf+bwidth,                /* our buffer if needed */
             &ppbuf2);
        c1200=LX_LINE_EMPTY(ppbuf2,bwidth);
+         if (code < 0)
+             goto error;
       }
       else
          c1200=1;
@@ -787,13 +797,14 @@ lxmgen_print_page(gx_device_printer *pdev, FILE *prn_stream)
 
    /* eject page */
    lex_eject(prn_stream);
+error:
    gs_free(pdev->memory->non_gc_memory, (char*)pbuf,rpbufsize, 1, "lxmgen_print_page(pbuf)");
    gs_free(pdev->memory->non_gc_memory, (char*)outbuf,OUT_BUF_SIZE, 1, "lxmgen_print_page(outbuf)");
 
 #ifdef DEBUG
    dprintf1("[%s] print_page() end\n",pdev->dname);
 #endif
-   return 0;
+   return code;
 }
 
    static int

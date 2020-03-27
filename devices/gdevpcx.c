@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -147,7 +147,7 @@ const gx_device_printer gs_pcxcmyk_device =
 /* ------ Private definitions ------ */
 
 /* All two-byte quantities are stored LSB-first! */
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
 #  define assign_ushort(a,v) a = ((v) >> 8) + ((v) << 8)
 #else
 #  define assign_ushort(a,v) a = (v)
@@ -215,12 +215,12 @@ static const pcx_header pcx_header_prototype =
 #define dcx_max_pages 1023
 
 /* Forward declarations */
-static void pcx_write_rle(const byte *, const byte *, int, FILE *);
-static int pcx_write_page(gx_device_printer *, FILE *, pcx_header *, bool);
+static void pcx_write_rle(const byte *, const byte *, int, gp_file *);
+static int pcx_write_page(gx_device_printer *, gp_file *, pcx_header *, bool);
 
 /* Write a monochrome PCX page. */
 static int
-pcxmono_print_page(gx_device_printer * pdev, FILE * file)
+pcxmono_print_page(gx_device_printer * pdev, gp_file * file)
 {
     pcx_header header;
 
@@ -243,7 +243,7 @@ static const byte pcx_ega_palette[16 * 3] =
     0xff, 0x55, 0x55, 0xff, 0x55, 0xff, 0xff, 0xff, 0x55, 0xff, 0xff, 0xff
 };
 static int
-pcx16_print_page(gx_device_printer * pdev, FILE * file)
+pcx16_print_page(gx_device_printer * pdev, gp_file * file)
 {
     pcx_header header;
 
@@ -259,7 +259,7 @@ pcx16_print_page(gx_device_printer * pdev, FILE * file)
 
 /* Write a "new" PCX page. */
 static int
-pcx256_print_page(gx_device_printer * pdev, FILE * file)
+pcx256_print_page(gx_device_printer * pdev, gp_file * file)
 {
     pcx_header header;
     int code;
@@ -273,7 +273,7 @@ pcx256_print_page(gx_device_printer * pdev, FILE * file)
                    palinfo_color : palinfo_gray));
     code = pcx_write_page(pdev, file, &header, false);
     if (code >= 0) {		/* Write out the palette. */
-        fputc(0x0c, file);
+        gp_fputc(0x0c, file);
         code = pc_write_palette((gx_device *) pdev, 256, file);
     }
     return code;
@@ -281,7 +281,7 @@ pcx256_print_page(gx_device_printer * pdev, FILE * file)
 
 /* Write a 24-bit color PCX page. */
 static int
-pcx24b_print_page(gx_device_printer * pdev, FILE * file)
+pcx24b_print_page(gx_device_printer * pdev, gp_file * file)
 {
     pcx_header header;
 
@@ -302,7 +302,7 @@ static const byte pcx_cmyk_palette[16 * 3] =
     0x00, 0x00, 0xff, 0x00, 0x00, 0x0f, 0x1f, 0x1f, 0x1f, 0x0f, 0x0f, 0x0f,
 };
 static int
-pcxcmyk_print_page(gx_device_printer * pdev, FILE * file)
+pcxcmyk_print_page(gx_device_printer * pdev, gp_file * file)
 {
     pcx_header header;
 
@@ -320,7 +320,7 @@ pcxcmyk_print_page(gx_device_printer * pdev, FILE * file)
 /* This routine is used for all formats. */
 /* The caller has set header->bpp, nplanes, and palette. */
 static int
-pcx_write_page(gx_device_printer * pdev, FILE * file, pcx_header * phdr,
+pcx_write_page(gx_device_printer * pdev, gp_file * file, pcx_header * phdr,
                bool planar)
 {
     int raster = gdev_prn_raster(pdev);
@@ -347,7 +347,7 @@ pcx_write_page(gx_device_printer * pdev, FILE * file, pcx_header * phdr,
 
     /* Write the header. */
 
-    if (fwrite((const char *)phdr, 1, 128, file) < 128) {
+    if (gp_fwrite((const char *)phdr, 1, 128, file) < 128) {
         code = gs_error_ioerror;
         goto pcx_done;
     }
@@ -407,7 +407,7 @@ pcx_write_page(gx_device_printer * pdev, FILE * file, pcx_header * phdr,
                         for (pnum = 0; pnum < 3; ++pnum) {
                             pcx_write_rle(row + pnum, row + raster, 3, file);
                             if (pdev->width & 1)
-                                fputc(0, file);		/* pad to even */
+                                gp_fputc(0, file);		/* pad to even */
                         }
                     }
                     break;
@@ -429,7 +429,7 @@ pcx_write_page(gx_device_printer * pdev, FILE * file, pcx_header * phdr,
 
 /* Write one line in PCX run-length-encoded format. */
 static void
-pcx_write_rle(const byte * from, const byte * end, int step, FILE * file)
+pcx_write_rle(const byte * from, const byte * end, int step, gp_file * file)
 {				/*
                                  * The PCX format theoretically allows encoding runs of 63
                                  * identical bytes, but some readers can't handle repetition
@@ -442,9 +442,9 @@ pcx_write_rle(const byte * from, const byte * end, int step, FILE * file)
         byte data = *from;
 
         from += step;
-        if (data != *from || from == end) {
+        if (from >= end || data != *from) {
             if (data >= 0xc0)
-                putc(0xc1, file);
+                gp_fputc(0xc1, file);
         } else {
             const byte *start = from;
 
@@ -452,14 +452,14 @@ pcx_write_rle(const byte * from, const byte * end, int step, FILE * file)
                 from += step;
             /* Now (from - start) / step + 1 is the run length. */
             while (from - start >= max_run) {
-                putc(0xc0 + MAX_RUN_COUNT, file);
-                putc(data, file);
+                gp_fputc(0xc0 + MAX_RUN_COUNT, file);
+                gp_fputc(data, file);
                 start += max_run;
             }
             if (from > start || data >= 0xc0)
-                putc((from - start) / step + 0xc1, file);
+                gp_fputc((from - start) / step + 0xc1, file);
         }
-        putc(data, file);
+        gp_fputc(data, file);
     }
 #undef MAX_RUN_COUNT
 }

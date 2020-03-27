@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -308,7 +308,7 @@ int
 obj_cvp(const ref * op, byte * str, uint len, uint * prlen,
         int full_print, uint start_pos, const gs_memory_t *mem, bool restart)
 {
-    char buf[50];  /* big enough for any float, double, or struct name */
+    char buf[256];  /* big enough for any float, double, or struct name */
     const byte *data = (const byte *)buf;
     uint size;
     int code;
@@ -341,7 +341,7 @@ obj_cvp(const ref * op, byte * str, uint len, uint * prlen,
             float scanned;
 
             gs_sprintf(buf, "%g", value);
-            sscanf(buf, "%f", &scanned);
+            (void)sscanf(buf, "%f", &scanned);
             if (scanned != value)
                 gs_sprintf(buf, "%.9g", value);
             ensure_dot(buf);
@@ -438,13 +438,15 @@ obj_cvp(const ref * op, byte * str, uint len, uint * prlen,
                 if (truncate) {
                     if (len - *prlen < 4 - skip)
                         return 1;
-                    memcpy(w.ptr + 1, "...)" + skip, 4 - skip);
+                    memcpy(w.ptr + 1, &"...)"[skip], 4 - skip);
                     *prlen += 4 - skip;
                 } else {
                     if (len - *prlen < 1 - skip)
                         return 1;
-                    memcpy(w.ptr + 1, ")" + skip, 1 - skip);
-                    *prlen += 1 - skip;
+                    if (!skip) {
+                        w.ptr[1] = ')';
+                        *prlen += 1;
+                    }
                 }
             }
             return 0;
@@ -466,7 +468,7 @@ obj_cvp(const ref * op, byte * str, uint len, uint * prlen,
             size = strlen((const char *)data);
             if (size > 4 && !memcmp(data + size - 4, "type", 4))
                 size -= 4;
-            if (size > sizeof(buf) - 2)
+            if (size > sizeof(buf) - 3)
                 return_error(gs_error_rangecheck);
             buf[0] = '-';
             memcpy(buf + 1, data, size);
@@ -529,7 +531,7 @@ other:
             break;
         }
         /* Internal operator, no name. */
-        gs_sprintf(buf, "@0x%lx", (ulong) op->value.opproc);
+        gs_sprintf(buf, "@"PRI_INTPTR, (intptr_t) op->value.opproc);
         break;
     }
     case t_real:
@@ -570,7 +572,7 @@ ensure_dot(char *buf)
     char *pe = strchr(buf, 'e');
     if (pe) {
         int i;
-        sscanf(pe + 1, "%d", &i);
+        (void)sscanf(pe + 1, "%d", &i);
         /* MSVC .net 2005 express doesn't support "%+02d" */
         if (i >= 0)
             gs_sprintf(pe + 1, "+%02d", i);
@@ -781,7 +783,7 @@ num_params(const ref * op, int count, double *pval)
                 *--pval = op->value.realval;
                 break;
             case t_integer:
-                *--pval = op->value.intval;
+                *--pval = (double)op->value.intval;
                 mask++;
                 break;
             case t__invalid:
@@ -851,7 +853,7 @@ real_param(const ref * op, double *pparam)
 {
     switch (r_type(op)) {
         case t_integer:
-            *pparam = op->value.intval;
+            *pparam = (double)op->value.intval;
             break;
         case t_real:
             *pparam = op->value.realval;

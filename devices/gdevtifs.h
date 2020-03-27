@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -23,6 +23,7 @@
                            which is used in a function __attribute__ by
                            tiffio.h */
 #include "gdevprn.h"
+#include "gxdownscale.h"
 
 /* ================ Implementation ================ */
 
@@ -33,9 +34,10 @@ typedef struct gx_device_tiff_s {
     bool  UseBigTIFF;           /* true = output big tiff file, false don't */
     uint16 Compression;         /* same values as TIFFTAG_COMPRESSION */
     long MaxStripSize;
-    long DownScaleFactor;
     long AdjustWidth;            /* 0 = no adjust, 1 = adjust to fax values, >1 = adjust to this */
-    long MinFeatureSize;         /* < 2 == no darkening */
+    bool write_datetime;
+    gx_downscaler_params downscale;
+    gsicc_link_t *icclink;
     TIFF *tif;                  /* TIFF file opened on gx_device_common.file */
 } gx_device_tiff;
 
@@ -43,14 +45,20 @@ dev_proc_open_device(tiff_open);
 dev_proc_close_device(tiff_close);
 dev_proc_get_params(tiff_get_params);
 dev_proc_get_params(tiff_get_params_downscale);
+dev_proc_get_params(tiff_get_params_downscale_cmyk);
+dev_proc_get_params(tiff_get_params_downscale_cmyk_ets);
 dev_proc_put_params(tiff_put_params);
 dev_proc_put_params(tiff_put_params_downscale);
+dev_proc_put_params(tiff_put_params_downscale_cmyk);
+dev_proc_put_params(tiff_put_params_downscale_cmyk_ets);
 
 int tiff_print_page(gx_device_printer *dev, TIFF *tif, int min_feature_size);
 
 int tiff_downscale_and_print_page(gx_device_printer *dev, TIFF *tif,
                                   int factor, int msf, int aw, int bpc,
-                                  int num_comps);
+                                  int num_comps,
+                                  int trap_w, int trap_h, const int *trap_order,
+                                  int ets);
 void tiff_set_handlers (void);
 
 /*
@@ -67,9 +75,9 @@ int tiff_set_compression(gx_device_printer *pdev,
                          long max_strip_size);
 
 int tiff_set_fields_for_printer(gx_device_printer *pdev, TIFF *tif, int factor,
-                                int adjustWidth);
+                                int adjustWidth, bool writedatetime);
 
-int gdev_tiff_begin_page(gx_device_tiff *tfdev, FILE *file);
+int gdev_tiff_begin_page(gx_device_tiff *tfdev, gp_file *file);
 
 /*
  * Returns the gs_param_string that corresponds to the tiff COMPRESSION_* id.

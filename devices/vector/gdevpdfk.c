@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -64,30 +64,18 @@ pdf_cie_add_ranges(gx_device_pdf *pdev, cos_dict_t *pcd, const gs_range *prange,
 /* Transform a CIEBased color to XYZ. */
 static int
 cie_to_xyz(const double *in, double out[3], const gs_color_space *pcs,
-           const gs_imager_state *pis, const gs_cie_common *pciec)
+           const gs_gstate *pgs, const gs_cie_common *pciec)
 {
     gs_client_color cc;
     frac xyz[3];
     int ncomp = gs_color_space_num_components(pcs);
     int i;
-    gx_device dev;
-    cmm_dev_profile_t dev_profile;
 
     gs_color_space_index cs_index;
     const gs_vector3 *const pWhitePoint = &pciec->points.WhitePoint;
     float xyz_float[3];
 
     cs_index = gs_color_space_get_index(pcs);
-    /* Need a device profile */
-    dev_profile.device_profile[0] = pcs->cmm_icc_profile_data;
-    dev_profile.device_profile[1] = NULL;
-    dev_profile.device_profile[2] = NULL;
-    dev_profile.device_profile[3] = NULL;
-    dev_profile.link_profile = NULL;
-    dev_profile.proof_profile = NULL;
-    dev_profile.spotnames = NULL;
-    dev_profile.oi_profile = NULL;
-    dev.icc_struct = &(dev_profile);
 
     for (i = 0; i < ncomp; ++i)
         cc.paint.values[i] = in[i];
@@ -102,16 +90,16 @@ cie_to_xyz(const double *in, double out[3], const gs_color_space *pcs,
 
     switch (cs_index) {
         case gs_color_space_index_CIEA:
-            gx_psconcretize_CIEA(&cc, pcs, xyz, xyz_float, pis);
+            gx_psconcretize_CIEA(&cc, pcs, xyz, xyz_float, pgs);
             break;
         case gs_color_space_index_CIEABC:
-            gx_psconcretize_CIEABC(&cc, pcs, xyz, xyz_float, pis);
+            gx_psconcretize_CIEABC(&cc, pcs, xyz, xyz_float, pgs);
             break;
         case gs_color_space_index_CIEDEF:
-            gx_psconcretize_CIEDEF(&cc, pcs, xyz, xyz_float, pis);
+            gx_psconcretize_CIEDEF(&cc, pcs, xyz, xyz_float, pgs);
             break;
         case gs_color_space_index_CIEDEFG:
-           gx_psconcretize_CIEDEFG(&cc, pcs, xyz, xyz_float, pis);
+           gx_psconcretize_CIEDEFG(&cc, pcs, xyz, xyz_float, pgs);
            break;
         default:
             /* Only to silence a Coverity uninitialised variable warning */
@@ -180,8 +168,8 @@ lab_range(gs_range range_out[3] /* only [1] and [2] used */,
      * mapping at all of its extrema.
      */
     int ncomp = gs_color_space_num_components(pcs);
-    gs_imager_state *pis;
-    int code = gx_cie_to_xyz_alloc(&pis, pcs, mem);
+    gs_gstate *pgs;
+    int code = gx_cie_to_xyz_alloc(&pgs, pcs, mem);
     int i, j;
 
     if (code < 0)
@@ -193,7 +181,7 @@ lab_range(gs_range range_out[3] /* only [1] and [2] used */,
 
         for (j = 0; j < ncomp; ++j)
             in[j] = (i & (1 << j) ? ranges[j].rmax : ranges[j].rmin);
-        if (cie_to_xyz(in, xyz, pcs, pis, pciec) >= 0) {
+        if (cie_to_xyz(in, xyz, pcs, pgs, pciec) >= 0) {
             double lab[3];
 
             xyz_to_lab(xyz, lab, pciec);
@@ -203,7 +191,7 @@ lab_range(gs_range range_out[3] /* only [1] and [2] used */,
             }
         }
     }
-    gx_cie_to_xyz_free(pis);
+    gx_cie_to_xyz_free(pgs);
     return 0;
 }
 /*
@@ -255,7 +243,7 @@ pdf_convert_cie_to_lab(gx_device_pdf *pdev, cos_array_t *pca,
  * the profile data on *ppcstrm.
  */
 static int
-pdf_make_iccbased(gx_device_pdf *pdev, const gs_imager_state * pis,
+pdf_make_iccbased(gx_device_pdf *pdev, const gs_gstate * pgs,
                   cos_array_t *pca, int ncomps,
                   const gs_range *prange /*[4]*/,
                   const gs_color_space *pcs_alt,
@@ -267,31 +255,6 @@ pdf_make_iccbased(gx_device_pdf *pdev, const gs_imager_state * pis,
     int code;
     cos_stream_t * pcstrm = 0;
     cos_array_t * prngca = 0;
-    bool std_ranges = true;
-    bool scale_inputs = false;
-    int i;
-
-    /* This code makes no sense to me, and if I remove it we get better
-     * results. So we'll chop it out for the new colour work.
-     */
-    if (pdev->UseOldColor) {
-    /* Check the ranges. */
-    if (pprange)
-        *pprange = 0;
-    for (i = 0; i < ncomps; ++i) {
-        double rmin = prange[i].rmin, rmax = prange[i].rmax;
-
-        if (rmin < 0.0 || rmax > 1.0) {
-            /* We'll have to scale the inputs.  :-( */
-            if (pprange == 0)
-                return_error(gs_error_rangecheck); /* scaling not allowed */
-            *pprange = prange;
-            scale_inputs = true;
-        }
-        else if (rmin > 0.0 || rmax < 1.0)
-            std_ranges = false;
-    }
-    }
 
     /* Range values are a bit tricky to check.
        For example, CIELAB ICC profiles have
@@ -316,13 +279,6 @@ pdf_make_iccbased(gx_device_pdf *pdev, const gs_imager_state * pis,
     if (code < 0)
         goto fail;
 
-    /* Indicate the range, if needed. */
-    if (!std_ranges && !scale_inputs) {
-        code = pdf_cie_add_ranges(pdev, cos_stream_dict(pcstrm), prange, ncomps, true);
-        if (code < 0)
-            goto fail;
-    }
-
     /* In the new design there may not be a specified alternate color space */
     if (pcs_alt != NULL){
 
@@ -333,7 +289,7 @@ pdf_make_iccbased(gx_device_pdf *pdev, const gs_imager_state * pis,
         case gs_color_space_index_DeviceCMYK:
             break;			/* implicit (default) */
         default:
-            if ((code = pdf_color_space_named(pdev, pis, &v, NULL, pcs_alt,
+            if ((code = pdf_color_space_named(pdev, pgs, &v, NULL, pcs_alt,
                                         &pdf_color_space_names, false, NULL, 0, true)) < 0 ||
                 (code = cos_dict_put_c_key(cos_stream_dict(pcstrm), "/Alternate",
                                            &v)) < 0
@@ -577,7 +533,7 @@ write_a2b0(gx_device_pdf *pdev, cos_stream_t *pcstrm, const profile_table_t *pnt
     static const byte v01[MAX_NCOMPS * 2 * 2] = {
         0,0, 255,255,   0,0, 255,255,   0,0, 255,255,   0,0, 255,255
     };
-    gs_imager_state *pis;
+    gs_gstate *pgs;
     int code;
 
     /* Write the input table. */
@@ -588,7 +544,7 @@ write_a2b0(gx_device_pdf *pdev, cos_stream_t *pcstrm, const profile_table_t *pnt
 
     /* Write the lookup table. */
 
-    code = gx_cie_to_xyz_alloc(&pis, pcs, mem);
+    code = gx_cie_to_xyz_alloc(&pgs, pcs, mem);
     if (code < 0)
         return code;
     for (i = 0; i < pa2b->count; ++i) {
@@ -600,7 +556,7 @@ write_a2b0(gx_device_pdf *pdev, cos_stream_t *pcstrm, const profile_table_t *pnt
         for (n = i, j = ncomps - 1; j >= 0; --j, n /= num_points)
             in[j] = cache_arg(n % num_points, num_points - 1,
                               (pnt->ranges ? pnt->ranges + j : NULL));
-        cie_to_xyz(in, xyz, pcs, pis, pciec);
+        cie_to_xyz(in, xyz, pcs, pgs, pciec);
         /*
          * NOTE: Due to an obscure provision of the ICC Profile
          * specification, values in a2b0 lookup tables do *not* represent
@@ -615,7 +571,7 @@ write_a2b0(gx_device_pdf *pdev, cos_stream_t *pcstrm, const profile_table_t *pnt
         if ((code = cos_stream_add_bytes(pdev, pcstrm, entry, sizeof(entry))) < 0)
             break;
     }
-    gx_cie_to_xyz_free(pis);
+    gx_cie_to_xyz_free(pgs);
     if (code < 0)
         return code;
 
@@ -818,16 +774,44 @@ pdf_convert_cie_to_iccbased(gx_device_pdf *pdev, cos_array_t *pca,
  * broken out only for readability.
  */
 int
-pdf_iccbased_color_space(gx_device_pdf *pdev, const gs_imager_state * pis, cos_value_t *pvalue,
+pdf_iccbased_color_space(gx_device_pdf *pdev, const gs_gstate * pgs, cos_value_t *pvalue,
                          const gs_color_space *pcs, cos_array_t *pca)
 {
+    cos_stream_t * pcstrm;
+    int code = 0;
+    unsigned char major = 0, minor = 0;
+    bool downgrade_icc = false;
+
     /*
      * This would arise only in a pdf ==> pdf translation, but we
      * should allow for it anyway.
      */
-    cos_stream_t * pcstrm;
-    int code =
-        pdf_make_iccbased(pdev, pis, pca, pcs->cmm_icc_profile_data->num_comps,
+    /* Not all ICC profile types are valid for embedding in a PDF file.
+     * The code here duplicates a check in zicc.c, .numicc_components()
+     * where we check to see if an embedded profile is valid. Because
+     * we could be getting input from other sources, we need to do the same
+     * check here. If the profile can't be embedded in PDF, then we
+     * return gs_error_rangecheck which will cause pdfwrtie to fall back
+     * to the device space. At least the PDF file will be valid and have
+     * 'correct' colours.
+     */
+    switch (pcs->cmm_icc_profile_data->data_cs) {
+        case gsCIEXYZ:
+        case gsCIELAB:
+        case gsRGB:
+        case gsGRAY:
+        case gsCMYK:
+            break;
+        case gsUNDEFINED:
+        case gsNCHANNEL:
+        case gsNAMED:
+            emprintf(pdev->memory, "\n An ICC profile which is not suitable for use in PDF has been identified.\n All colours using this profile will be converted into device space\n instead and the profile will not be used.\n");
+            return gs_error_rangecheck;
+            break;
+    }
+
+    code =
+        pdf_make_iccbased(pdev, pgs, pca, pcs->cmm_icc_profile_data->num_comps,
                           pcs->cmm_icc_profile_data->Range.ranges,
                           pcs->base_space,
                           &pcstrm, NULL);
@@ -837,18 +821,43 @@ pdf_iccbased_color_space(gx_device_pdf *pdev, const gs_imager_state * pis, cos_v
 
     /* Transfer the buffer data  */
 
-    /* PDF/A-1 only supports version 2 ICC profiles, and the PDF spec
-     * only supports Version 4 profiles in PDF 1.5 and above
+    (void)gsicc_getprofilevers(pcs->cmm_icc_profile_data, &major, &minor);
+    minor = minor >> 4;
+
+    /* Determine whether we need to get the CMS to give us an earlier ICC version
+     * of the profile.
      */
-    if (pdev->CompatibilityLevel < 1.5 || pdev->PDFA == 1) {
+    if (pdev->CompatibilityLevel < 1.3) {
+        return_error(gs_error_rangecheck);
+    } else {
+        if (pdev->CompatibilityLevel < 1.5) {
+            if (major > 2)
+                downgrade_icc = true;
+        } else {
+            if (pdev->CompatibilityLevel == 1.5) {
+                if (major > 4 || minor > 0)
+                    downgrade_icc = true;
+            } else {
+                if (pdev->CompatibilityLevel == 1.6) {
+                    if (major > 4 || minor > 1)
+                        downgrade_icc = true;
+                } else {
+                    if (major > 4 || minor > 2)
+                        downgrade_icc = true;
+                }
+            }
+        }
+    }
+
+    if (downgrade_icc) {
         byte *v2_buffer;
         int size;
 
-        if (pis == NULL)
+        if (pgs == NULL)
             return (gs_error_undefined);
         if (pcs->cmm_icc_profile_data->profile_handle == NULL)
             gsicc_initialize_default_profile(pcs->cmm_icc_profile_data);
-        v2_buffer = gsicc_create_getv2buffer(pis, pcs->cmm_icc_profile_data, &size);
+        v2_buffer = gsicc_create_getv2buffer(pgs, pcs->cmm_icc_profile_data, &size);
         code = cos_stream_add_bytes(pdev, pcstrm, v2_buffer, size);
     }else{
         code = cos_stream_add_bytes(pdev, pcstrm, pcs->cmm_icc_profile_data->buffer,

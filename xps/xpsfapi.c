@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -7,8 +7,8 @@
    This software is distributed under license and may not be copied, modified
    or distributed except as expressly authorized under the terms of that
    license.  Refer to licensing information at http://www.artifex.com/
-   or contact Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134,
-   San Rafael, CA  94903, U.S.A., +1(415)492-9861, for further information.
+   or contact Artifex Software, Inc.,  1305 Grant Avenue - Suite 200,
+   Novato, CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Font API support  */
@@ -67,6 +67,7 @@ static const gs_fapi_font pl_ff_stub = {
     {3,10}, {3,1},{3,5},{3,4},\
       {3,3},{3,2},{3,0},{1,0},
       {-1,-1}},                 /* ttf_cmap_req */
+    {-1, -1},                   /* ttf_cmap_selected */
     0,                          /* client_ctx_p */
     0,                          /* client_font_data */
     0,                          /* client_font_data2 */
@@ -136,7 +137,7 @@ xps_fapi_set_cache(gs_text_enum_t *penum, const gs_font_base *pbfont,
                    const double pwidth[2], const gs_rect *pbbox,
                    const double Metrics2_sbw_default[4], bool *imagenow)
 {
-    gs_state *pgs = (gs_state *) penum->pis;
+    gs_gstate *pgs = penum->pgs;
     float w2[6];
 
     w2[0] = pwidth[0];
@@ -160,7 +161,7 @@ xps_fapi_set_cache(gs_text_enum_t *penum, const gs_font_base *pbfont,
 }
 
 static int
-xps_fapi_build_char(gs_show_enum *penum, gs_state *pgs, gs_font *pfont,
+xps_fapi_build_char(gs_show_enum *penum, gs_gstate *pgs, gs_font *pfont,
                     gs_char chr, gs_glyph glyph)
 {
     int code;

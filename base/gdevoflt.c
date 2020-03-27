@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2015 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Derived from gdevflp.c */
@@ -23,7 +23,7 @@
 #include "gsdevice.h"		/* requires gsmatrix.h */
 #include "gxdcolor.h"		/* for gx_device_black/white */
 #include "gxiparam.h"		/* for image source size */
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gxpaint.h"
 #include "gxpath.h"
 #include "gxcpath.h"
@@ -31,6 +31,7 @@
 #include "gsstype.h"
 #include "gdevprn.h"
 #include "gdevp14.h"        /* Needed to patch up the procs after compositor creation */
+#include "gximage.h"        /* For gx_image_enum */
 #include "gdevsclass.h"
 #include "gdevoflt.h"
 
@@ -66,6 +67,7 @@ static dev_proc_fill_linear_color_triangle(obj_filter_fill_linear_color_triangle
 static dev_proc_put_image(obj_filter_put_image);
 static dev_proc_strip_copy_rop2(obj_filter_strip_copy_rop2);
 static dev_proc_strip_tile_rect_devn(obj_filter_strip_tile_rect_devn);
+static dev_proc_fill_stroke_path(obj_filter_fill_stroke_path);
 
 /* The device prototype */
 #define MAX_COORD (max_int_in_fixed - 1000)
@@ -73,7 +75,7 @@ static dev_proc_strip_tile_rect_devn(obj_filter_strip_tile_rect_devn);
 
 #define public_st_obj_filter_device()	/* in gsdevice.c */\
   gs_public_st_complex_only(st_obj_filter_device, gx_device, "object filter",\
-    0, obj_filter_enum_ptrs, obj_filter_reloc_ptrs, gx_device_finalize)
+    0, obj_filter_enum_ptrs, obj_filter_reloc_ptrs, default_subclass_finalize)
 
 static
 ENUM_PTRS_WITH(obj_filter_enum_ptrs, gx_device *dev);
@@ -172,7 +174,9 @@ gx_device_obj_filter gs_obj_filter_device =
      obj_filter_strip_copy_rop2,
      obj_filter_strip_tile_rect_devn,
      default_subclass_copy_alpha_hl_color,
-     default_subclass_process_page
+     default_subclass_process_page,
+     default_subclass_transform_pixel_region,
+     obj_filter_fill_stroke_path,
     }
 };
 
@@ -202,21 +206,31 @@ int obj_filter_draw_line(gx_device *dev, int x0, int y0, int x1, int y1, gx_colo
     return 0;
 }
 
-int obj_filter_fill_path(gx_device *dev, const gs_imager_state *pis, gx_path *ppath,
+int obj_filter_fill_path(gx_device *dev, const gs_gstate *pgs, gx_path *ppath,
     const gx_fill_params *params,
     const gx_drawing_color *pdcolor, const gx_clip_path *pcpath)
 {
     if ((dev->ObjectFilter & FILTERVECTOR) == 0)
-        return default_subclass_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
+        return default_subclass_fill_path(dev, pgs, ppath, params, pdcolor, pcpath);
     return 0;
 }
 
-int obj_filter_stroke_path(gx_device *dev, const gs_imager_state *pis, gx_path *ppath,
+int obj_filter_stroke_path(gx_device *dev, const gs_gstate *pgs, gx_path *ppath,
     const gx_stroke_params *params,
     const gx_drawing_color *pdcolor, const gx_clip_path *pcpath)
 {
     if ((dev->ObjectFilter & FILTERVECTOR) == 0)
-        return default_subclass_stroke_path(dev, pis, ppath, params, pdcolor, pcpath);
+        return default_subclass_stroke_path(dev, pgs, ppath, params, pdcolor, pcpath);
+    return 0;
+}
+
+int obj_filter_fill_stroke_path(gx_device *dev, const gs_gstate *pgs, gx_path *ppath,
+        const gx_fill_params *fill_params, const gx_drawing_color *pdcolor_fill,
+        const gx_stroke_params *stroke_params, const gx_drawing_color *pdcolor_stroke,
+        const gx_clip_path *pcpath)
+{
+    if ((dev->ObjectFilter & FILTERVECTOR) == 0)
+        return default_subclass_fill_stroke_path(dev, pgs, ppath, fill_params, pdcolor_fill, stroke_params, pdcolor_stroke, pcpath);
     return 0;
 }
 
@@ -264,13 +278,13 @@ int obj_filter_draw_thin_line(gx_device *dev, fixed fx0, fixed fy0, fixed fx1, f
     return 0;
 }
 
-int obj_filter_begin_image(gx_device *dev, const gs_imager_state *pis, const gs_image_t *pim,
+int obj_filter_begin_image(gx_device *dev, const gs_gstate *pgs, const gs_image_t *pim,
     gs_image_format_t format, const gs_int_rect *prect,
     const gx_drawing_color *pdcolor, const gx_clip_path *pcpath,
     gs_memory_t *memory, gx_image_enum_common_t **pinfo)
 {
     if ((dev->ObjectFilter & FILTERIMAGE) == 0)
-        return default_subclass_begin_image(dev, pis, pim, format, prect, pdcolor, pcpath, memory, pinfo);
+        return default_subclass_begin_image(dev, pgs, pim, format, prect, pdcolor, pcpath, memory, pinfo);
     return 0;
 }
 
@@ -311,15 +325,19 @@ int obj_filter_strip_copy_rop(gx_device *dev, const byte *sdata, int sourcex, ui
 
 typedef struct obj_filter_image_enum_s {
     gx_image_enum_common;
+    int y;
+    int height;
 } obj_filter_image_enum;
 gs_private_st_composite(st_obj_filter_image_enum, obj_filter_image_enum, "obj_filter_image_enum",
   obj_filter_image_enum_enum_ptrs, obj_filter_image_enum_reloc_ptrs);
 
 static ENUM_PTRS_WITH(obj_filter_image_enum_enum_ptrs, obj_filter_image_enum *pie)
+    (void)pie; /* Silence unused var warning */
     return ENUM_USING_PREFIX(st_gx_image_enum_common, 0);
 ENUM_PTRS_END
 static RELOC_PTRS_WITH(obj_filter_image_enum_reloc_ptrs, obj_filter_image_enum *pie)
 {
+    (void)pie; /* Silence unused var warning */
     RELOC_USING(st_gx_image_enum_common, vptr, size);
 }
 RELOC_PTRS_END
@@ -329,7 +347,17 @@ obj_filter_image_plane_data(gx_image_enum_common_t * info,
                      const gx_image_plane_t * planes, int height,
                      int *rows_used)
 {
-    return 0;
+    obj_filter_image_enum *pie = (obj_filter_image_enum *)info;
+
+    if (height > pie->height - pie->y)
+        height = pie->height - pie->y;
+
+    pie->y += height;
+    *rows_used = height;
+
+    if (pie->y < pie->height)
+        return 0;
+    return 1;
 }
 
 static int
@@ -343,7 +371,7 @@ static const gx_image_enum_procs_t obj_filter_image_enum_procs = {
     obj_filter_image_end_image
 };
 
-int obj_filter_begin_typed_image(gx_device *dev, const gs_imager_state *pis, const gs_matrix *pmat,
+int obj_filter_begin_typed_image(gx_device *dev, const gs_gstate *pgs, const gs_matrix *pmat,
     const gs_image_common_t *pic, const gs_int_rect *prect,
     const gx_drawing_color *pdcolor, const gx_clip_path *pcpath,
     gs_memory_t *memory, gx_image_enum_common_t **pinfo)
@@ -353,7 +381,7 @@ int obj_filter_begin_typed_image(gx_device *dev, const gs_imager_state *pis, con
     int num_components;
 
     if ((dev->ObjectFilter & FILTERIMAGE) == 0)
-        return default_subclass_begin_typed_image(dev, pis, pmat, pic, prect, pdcolor, pcpath, memory, pinfo);
+        return default_subclass_begin_typed_image(dev, pgs, pmat, pic, prect, pdcolor, pcpath, memory, pinfo);
 
     if (pic->type->index == 1) {
         const gs_image_t *pim1 = (const gs_image_t *)pic;
@@ -376,6 +404,8 @@ int obj_filter_begin_typed_image(gx_device *dev, const gs_imager_state *pis, con
                         (gx_device *)dev, num_components, pim->format);
     pie->memory = memory;
     pie->skipping = true;
+    pie->height = pim->Height;
+    pie->y = 0;
 
     return 0;
 }
@@ -443,7 +473,7 @@ static const gs_text_enum_procs_t obj_filter_text_procs = {
  * in which case we create a text enumerator with our dummy procedures, or we are leaving it
  * up to the device, in which case we simply pass on the 'begin' method to the device.
  */
-int obj_filter_text_begin(gx_device *dev, gs_imager_state *pis, const gs_text_params_t *text,
+int obj_filter_text_begin(gx_device *dev, gs_gstate *pgs, const gs_text_params_t *text,
     gs_font *font, gx_path *path, const gx_device_color *pdcolor, const gx_clip_path *pcpath,
     gs_memory_t *memory, gs_text_enum_t **ppte)
 {
@@ -455,21 +485,21 @@ int obj_filter_text_begin(gx_device *dev, gs_imager_state *pis, const gs_text_pa
      * secondly  because op_show_restore executes an unconditional grestore, assuming
      * that a gsave has been done simply *because* its a tringwidth operation !
      */
-    if ((text->operation & TEXT_DO_NONE) && (text->operation & TEXT_RETURN_WIDTH) && pis->text_rendering_mode != 3)
+    if ((text->operation & TEXT_DO_NONE) && (text->operation & TEXT_RETURN_WIDTH) && pgs->text_rendering_mode != 3)
         /* Note that the high level devices *must* be given the opportunity to 'see' the
          * stringwidth operation, or they won;t be able to cache the glyphs properly.
          * So always pass stringwidth operations to the child.
          */
-        return default_subclass_text_begin(dev, pis, text, font, path, pdcolor, pcpath, memory, ppte);
+        return default_subclass_text_begin(dev, pgs, text, font, path, pdcolor, pcpath, memory, ppte);
 
     if ((dev->ObjectFilter & FILTERTEXT) == 0)
-        return default_subclass_text_begin(dev, pis, text, font, path, pdcolor, pcpath, memory, ppte);
+        return default_subclass_text_begin(dev, pgs, text, font, path, pdcolor, pcpath, memory, ppte);
 
     rc_alloc_struct_1(penum, obj_filter_text_enum_t, &st_obj_filter_text_enum, memory,
                   return_error(gs_error_VMerror), "gdev_obj_filter_text_begin");
     penum->rc.free = rc_free_text_enum;
     code = gs_text_enum_init((gs_text_enum_t *)penum, &obj_filter_text_procs,
-                         dev, pis, text, font, path, pdcolor, pcpath, memory);
+                         dev, pgs, text, font, path, pdcolor, pcpath, memory);
     if (code < 0) {
         gs_free_object(memory, penum, "gdev_obj_filter_text_begin");
         return code;
@@ -480,10 +510,10 @@ int obj_filter_text_begin(gx_device *dev, gs_imager_state *pis, const gs_text_pa
 }
 
 int obj_filter_fill_rectangle_hl_color(gx_device *dev, const gs_fixed_rect *rect,
-        const gs_imager_state *pis, const gx_drawing_color *pdcolor, const gx_clip_path *pcpath)
+        const gs_gstate *pgs, const gx_drawing_color *pdcolor, const gx_clip_path *pcpath)
 {
     if ((dev->ObjectFilter & FILTERVECTOR) == 0)
-        return default_subclass_fill_rectangle_hl_color(dev, rect, pis, pdcolor, pcpath);
+        return default_subclass_fill_rectangle_hl_color(dev, rect, pgs, pdcolor, pcpath);
     return 0;
 }
 
@@ -516,12 +546,12 @@ int obj_filter_fill_linear_color_triangle(gx_device *dev, const gs_fill_attribut
     return 0;
 }
 
-int obj_filter_put_image(gx_device *dev, const byte *buffer, int num_chan, int x, int y,
-            int width, int height, int row_stride, int plane_stride,
+int obj_filter_put_image(gx_device *dev, gx_device *mdev, const byte **buffers, int num_chan, int x, int y,
+            int width, int height, int row_stride,
             int alpha_plane_index, int tag_plane_index)
 {
     if ((dev->ObjectFilter & FILTERIMAGE) == 0)
-        return default_subclass_put_image(dev, buffer, num_chan, x, y, width, height, row_stride, plane_stride, alpha_plane_index, tag_plane_index);
+        return default_subclass_put_image(dev, mdev, buffers, num_chan, x, y, width, height, row_stride, alpha_plane_index, tag_plane_index);
     return 0;
 }
 

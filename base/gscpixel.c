@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -21,7 +21,7 @@
 #include "gxcspace.h"
 #include "gscpixel.h"
 #include "gxdevice.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gsovrc.h"
 #include "gsstate.h"
 #include "gzstate.h"
@@ -89,7 +89,7 @@ gx_restrict_DevicePixel(gs_client_color * pcc, const gs_color_space * pcs)
 
 static int
 gx_concretize_DevicePixel(const gs_client_color * pc, const gs_color_space * pcs,
-                          frac * pconc, const gs_imager_state * pis, gx_device *dev)
+                          frac * pconc, const gs_gstate * pgs, gx_device *dev)
 {
     /****** NOT ENOUGH BITS IN float OR frac ******/
     pconc[0] = (frac) (ulong) pc->paint.values[0];
@@ -97,9 +97,10 @@ gx_concretize_DevicePixel(const gs_client_color * pc, const gs_color_space * pcs
 }
 
 static int
-gx_remap_concrete_DevicePixel(const frac * pconc, const gs_color_space * pcs,
-        gx_device_color * pdc, const gs_imager_state * pis, gx_device * dev,
-                              gs_color_select_t select)
+gx_remap_concrete_DevicePixel(const gs_color_space * pcs, const frac * pconc,
+                              gx_device_color * pdc, const gs_gstate * pgs,
+                              gx_device * dev, gs_color_select_t select,
+                              const cmm_dev_profile_t *dev_profile)
 {
     color_set_pure(pdc, pconc[0] & ((1 << dev->color_info.depth) - 1));
     return 0;
@@ -107,13 +108,14 @@ gx_remap_concrete_DevicePixel(const frac * pconc, const gs_color_space * pcs,
 
 /* DevicePixel disables overprint */
 static int
-gx_set_overprint_DevicePixel(const gs_color_space * pcs, gs_state * pgs)
+gx_set_overprint_DevicePixel(const gs_color_space * pcs, gs_gstate * pgs)
 {
     gs_overprint_params_t   params;
 
     params.retain_any_comps = false;
-    pgs->effective_overprint_mode = 0;
-    return gs_state_update_overprint(pgs, &params);
+    params.effective_opm = pgs->color[0].effective_opm = 0;
+    params.is_fill_color = pgs->is_fill_color;
+    return gs_gstate_update_overprint(pgs, &params);
 }
 
 /* ---------------- Serialization. -------------------------------- */

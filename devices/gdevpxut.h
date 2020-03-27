@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,10 +20,17 @@
 #ifndef gdevpxut_INCLUDED
 #  define gdevpxut_INCLUDED
 
+#include "gsdevice.h"
+#include "scommon.h"
+#include "gdevpxen.h"
+#include "gdevpxat.h"
+#include "gdevpxop.h"
+#include "gxfixed.h"
+
 /* ---------------- High-level constructs ---------------- */
 
 /* Write the file header, including the resolution. */
-int px_write_file_header(stream *s, const gx_device *dev);
+int px_write_file_header(stream *s, const gx_device *dev, bool staple);
 
 /* Write the page header, including orientation. */
 int px_write_page_header(stream *s, const gx_device *dev);
@@ -36,10 +43,10 @@ int px_write_select_media(stream *s, const gx_device *dev,
                           int media_type_set, char *media_type);
 
 /*
- * Write the file trailer.  Note that this takes a FILE *, not a stream *,
+ * Write the file trailer.  Note that this takes a gp_file *, not a stream *,
  * since it may be called after the stream is closed.
  */
-int px_write_file_trailer(FILE *file);
+int px_write_file_trailer(gp_file *file);
 
 /* ---------------- Low-level data output ---------------- */
 

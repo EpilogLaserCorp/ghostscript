@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -81,23 +81,32 @@ display_set_callback(gs_main_instance *minst, display_callback *callback)
          * setting callback, then reopen it.
          */
         check_read_type(op[-1], t_device);
+        if (op[-1].value.pdevice == NULL)
+            /* This can happen if we invalidated devices on the stack by calling nulldevice after they were pushed */
+            return_error(gs_error_undefined);
+
         dev = op[-1].value.pdevice;
 
         was_open = dev->is_open;
         if (was_open) {
             code = gs_closedevice(dev);
             if (code < 0)
-                return_error(code);
+                return code;
         }
 
         ddev = (gx_device_display *) dev;
+
+        /* Deal with the case where we subclassed the device before we got here */
+        while (ddev->child)
+            ddev = (gx_device_display *)ddev->child;
+
         ddev->callback = callback;
 
         if (was_open) {
             code = gs_opendevice(dev);
             if (code < 0) {
                 dmprintf(dev->memory, "**** Unable to open the display device, quitting.\n");
-                return_error(code);
+                return code;
             }
         }
         pop(1);	/* device */

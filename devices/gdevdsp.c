@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* gdevdsp.c */
@@ -49,6 +49,8 @@
 #include "gdevpccm.h"		/* 4-bit PC color */
 #include "gxdevmem.h"
 #include "gdevdevn.h"
+#include "gxpcolor.h"		/* for gx_dc_devn_masked */
+#include "gxdevsop.h"
 #include "gsequivc.h"
 #include "gdevdsp.h"
 #include "gdevdsp2.h"
@@ -94,6 +96,8 @@ static dev_proc_encode_color(display_separation_encode_color);
 static dev_proc_decode_color(display_separation_decode_color);
 static dev_proc_update_spot_equivalent_colors(display_update_spot_equivalent_colors);
 static dev_proc_ret_devn_params(display_ret_devn_params);
+static dev_proc_dev_spec_op(display_spec_op);
+static dev_proc_fill_rectangle_hl_color(display_fill_rectangle_hl_color);
 
 static const gx_device_procs display_procs =
 {
@@ -152,13 +156,18 @@ static const gx_device_procs display_procs =
     NULL,           			/* encode_color */
     NULL,           			/* decode_color */
     NULL,                          	/* pattern_manage */
-    NULL,				/* fill_rectangle_hl_color */\
+    display_fill_rectangle_hl_color,	/* fill_rectangle_hl_color */\
     NULL,				/* include_color_space */\
     NULL,				/* fill_linear_color_scanline */\
     NULL,				/* fill_linear_color_trapezoid */\
     NULL,				/* fill_linear_color_triangle */\
     display_update_spot_equivalent_colors, /* update_spot_equivalent_colors */
-    display_ret_devn_params		/* ret_devn_params */\
+    display_ret_devn_params,		/* ret_devn_params */\
+    NULL,                        /* fillpage */\
+    NULL,                        /* push_transparency_state */\
+    NULL,                        /* pop_transparency_state */\
+    NULL,                        /* put_image */\
+    display_spec_op              /* dev_spec_op */\
 };
 
 /* GC descriptor */
@@ -246,7 +255,10 @@ display_open(gx_device * dev)
     ccode = install_internal_subclass_devices((gx_device **)&ddev, NULL);
     if (ccode < 0)
         return ccode;
-    dev = ddev;
+    dev = (gx_device *)ddev;
+
+    while(dev->parent)
+        dev = dev->parent;
 
     /* Make sure we have been passed a valid callback structure. */
     if ((ccode = display_check_structure(ddev)) < 0)
@@ -306,8 +318,11 @@ display_sync_output(gx_device * dev)
 {
     gx_device_display *ddev = (gx_device_display *) dev;
     if (ddev->callback == NULL)
-        return 0;
+        return 0;	/* ignore the call */
     display_set_separations(ddev);
+
+    while(dev->parent)
+        dev = dev->parent;
 
     (*(ddev->callback->display_sync))(ddev->pHandle, dev);
     return (0);
@@ -321,8 +336,11 @@ display_output_page(gx_device * dev, int copies, int flush)
     gx_device_display *ddev = (gx_device_display *) dev;
     int code;
     if (ddev->callback == NULL)
-        return 0;
+        return gs_error_Fatal;
     display_set_separations(ddev);
+
+    while(dev->parent)
+        dev = dev->parent;
 
     code = (*(ddev->callback->display_page))
                         (ddev->pHandle, dev, copies, flush);
@@ -338,13 +356,16 @@ display_close(gx_device * dev)
 {
     gx_device_display *ddev = (gx_device_display *) dev;
     if (ddev->callback == NULL)
-        return 0;
+        return 0;	/* ignore the call since we were never properly opened */
 
     /* Tell caller that device is about to be closed. */
     (*(ddev->callback->display_preclose))(ddev->pHandle, dev);
 
     /* Release memory. */
     display_free_bitmap(ddev);
+
+    while(dev->parent)
+        dev = dev->parent;
 
     /* Tell caller that device is closed. */
     /* This is always the last callback */
@@ -579,7 +600,7 @@ display_map_rgb_color_rgb(gx_device * dev, const gx_color_value cv[])
                 return gx_default_rgb_map_rgb_color(dev, rgb); /* RGB */
             }
             else
-                return (blue<<16) + (green<<8) + red;		/* BGR */
+                return ((gx_color_index)blue<<16) + (green<<8) + red;		/* BGR */
         case DISPLAY_ALPHA_FIRST:
         case DISPLAY_UNUSED_FIRST:
             if ((ddev->nFormat & DISPLAY_ENDIAN_MASK) == DISPLAY_BIGENDIAN)
@@ -589,9 +610,9 @@ display_map_rgb_color_rgb(gx_device * dev, const gx_color_value cv[])
         case DISPLAY_ALPHA_LAST:
         case DISPLAY_UNUSED_LAST:
             if ((ddev->nFormat & DISPLAY_ENDIAN_MASK) == DISPLAY_BIGENDIAN)
-                return ((gx_color_index)red<<24) + (green<<16) + (blue<<8);	/* RGBx */
+                return ((gx_color_index)red<<24) + ((gx_color_index)green<<16) + (blue<<8);	/* RGBx */
             else
-                return ((gx_color_index)blue<<24) + (green<<16) + (red<<8);	/* BGRx */
+                return ((gx_color_index)blue<<24) + ((gx_color_index)green<<16) + (red<<8);	/* BGRx */
     }
     return 0;
 }
@@ -709,9 +730,13 @@ display_fill_rectangle(gx_device * dev, int x, int y, int w, int h,
 {
     gx_device_display *ddev = (gx_device_display *) dev;
     if (ddev->callback == NULL)
-        return 0;
+        return 0;		/* ignore -- needed for fillpage when device wasn't really opened */
     dev_proc(ddev->mdev, fill_rectangle)((gx_device *)ddev->mdev,
         x, y, w, h, color);
+
+    while(dev->parent)
+        dev = dev->parent;
+
     if (ddev->callback->display_update)
         (*(ddev->callback->display_update))(ddev->pHandle, dev, x, y, w, h);
     return 0;
@@ -726,9 +751,13 @@ display_copy_mono(gx_device * dev,
 {
     gx_device_display *ddev = (gx_device_display *) dev;
     if (ddev->callback == NULL)
-        return 0;
+        return gs_error_Fatal;
     dev_proc(ddev->mdev, copy_mono)((gx_device *)ddev->mdev,
         base, sourcex, raster, id, x, y, w, h, zero, one);
+
+    while(dev->parent)
+        dev = dev->parent;
+
     if (ddev->callback->display_update)
         (*(ddev->callback->display_update))(ddev->pHandle, dev, x, y, w, h);
     return 0;
@@ -742,9 +771,13 @@ display_copy_color(gx_device * dev,
 {
     gx_device_display *ddev = (gx_device_display *) dev;
     if (ddev->callback == NULL)
-        return 0;
+        return gs_error_Fatal;
     dev_proc(ddev->mdev, copy_color)((gx_device *)ddev->mdev,
         base, sourcex, raster, id, x, y, w, h);
+
+    while(dev->parent)
+        dev = dev->parent;
+
     if (ddev->callback->display_update)
         (*(ddev->callback->display_update))(ddev->pHandle, dev, x, y, w, h);
     return 0;
@@ -755,7 +788,7 @@ display_get_bits(gx_device * dev, int y, byte * str, byte ** actual_data)
 {
     gx_device_display *ddev = (gx_device_display *) dev;
     if (ddev->callback == NULL)
-        return 0;
+        return gs_error_Fatal;
     return dev_proc(ddev->mdev, get_bits)((gx_device *)ddev->mdev,
         y, str, actual_data);
 }
@@ -822,13 +855,11 @@ display_put_params(gx_device * dev, gs_param_list * plist)
     int old_height = dev->height;
     int old_format = ddev->nFormat;
     void *old_handle = ddev->pHandle;
-
     gs_devn_params *pdevn_params = &ddev->devn_params;
     equivalent_cmyk_color_params *pequiv_colors = &ddev->equiv_cmyk_colors;
     /* Save current data in case we have a problem */
     gs_devn_params saved_devn_params = *pdevn_params;
     equivalent_cmyk_color_params saved_equiv_colors = *pequiv_colors;
-
     int format;
     void *handle;
     int found_string_handle = 0;
@@ -982,11 +1013,11 @@ display_put_params(gx_device * dev, gs_param_list * plist)
         /* Use utility routine to handle devn parameters */
         ecode = devn_put_params(dev, plist, pdevn_params, pequiv_colors);
         /*
-         * Setting MaxSeparations changes color_info.depth in
-         * devn_put_params, but we always use 64bpp,
-         * so reset it to the the correct value.
+         * If we support_devn, setting MaxSeparations or PageSpotColors changed the
+         * color_info.depth in devn_put_params, but we always use 64bpp, so reset it
+         * to the correct value.
          */
-        dev->color_info.depth = arch_sizeof_color_index * 8;
+        ddev->color_info.depth = ARCH_SIZEOF_COLOR_INDEX * 8;
     }
 
     if (ecode >= 0) {
@@ -1012,9 +1043,15 @@ display_put_params(gx_device * dev, gs_param_list * plist)
         /* We can resize this device while it is open, but we cannot
          * change the color format or handle.
          */
+
+        while(dev->parent) {
+            dev = dev->parent;
+            gx_update_from_subclass(dev);
+        }
+
         /* Tell caller we are about to change the device parameters */
         if ((*ddev->callback->display_presize)(ddev->pHandle, dev,
-            dev->width, dev->height, display_raster(ddev),
+            ddev->width, ddev->height, display_raster(ddev),
             ddev->nFormat) < 0) {
             /* caller won't let us change the size */
             /* restore parameters then return an error */
@@ -1023,18 +1060,35 @@ display_put_params(gx_device * dev, gs_param_list * plist)
             display_set_color_format(ddev, old_format);
             ddev->nFormat = old_format;
             ddev->pHandle = old_handle;
-            dev->width = old_width;
-            dev->height = old_height;
+            ddev->width = old_width;
+            ddev->height = old_height;
             return_error(gs_error_rangecheck);
+        }
+
+        dev = (gx_device *)ddev;
+        while(dev->parent) {
+            dev = dev->parent;
+            gx_update_from_subclass(dev);
         }
 
         display_free_bitmap(ddev);
 
         code = display_alloc_bitmap(ddev, dev);
         if (code < 0) {
-            /* No bitmap, so tell the caller it is zero size */
-            (*ddev->callback->display_size)(ddev->pHandle, dev,
-                0, 0, 0, ddev->nFormat, NULL);
+            int ecode;
+
+            /* if we failed (probably VMerror) try to revert to old settings */
+            *pdevn_params = saved_devn_params;
+            *pequiv_colors = saved_equiv_colors;
+            display_set_color_format(ddev, old_format);
+            ddev->nFormat = old_format;
+            dev->width = old_width;
+            dev->height = old_height;
+            ecode = display_alloc_bitmap(ddev, dev);
+            if (ecode < 0) {
+                emprintf(dev->memory, "*** Fatal error in display_put_params, could not allocate bitmap ***\n");
+                return_error(gs_error_Fatal);
+            }
             return_error(code);
         }
 
@@ -1044,7 +1098,15 @@ display_put_params(gx_device * dev, gs_param_list * plist)
             ddev->nFormat, ddev->mdev->base) < 0)
             return_error(gs_error_rangecheck);
     }
-
+        /*
+         * Make the color_info.depth correct for the bpc and num_components since
+         * devn mode always has the display bitmap set up for 64-bits, but others,
+         * such as pdf14 compositor expect it to match (for "deep" detection).
+         */
+        if (ddev->icc_struct && ddev->icc_struct->supports_devn) {
+            ddev->color_info.depth = ddev->devn_params.bitspercomponent *
+                                         ddev->color_info.num_components;
+        }
     return 0;
 }
 
@@ -1080,12 +1142,12 @@ display_separation_gray_cs_to_cmyk_cm(gx_device * dev, frac gray, frac out[])
 
 static void
 display_separation_rgb_cs_to_cmyk_cm(gx_device * dev,
-    const gs_imager_state *pis, frac r, frac g, frac b, frac out[])
+    const gs_gstate *pgs, frac r, frac g, frac b, frac out[])
 {
     int * map =
       (int *)(&((gx_device_display *) dev)->devn_params.separation_order_map);
 
-    rgb_cs_to_devn_cm(dev, map, pis, r, g, b, out);
+    rgb_cs_to_devn_cm(dev, map, pgs, r, g, b, out);
 }
 
 static void
@@ -1117,7 +1179,6 @@ static gx_color_index
 display_separation_encode_color(gx_device *dev, const gx_color_value colors[])
 {
     int bpc = ((gx_device_display *)dev)->devn_params.bitspercomponent;
-    int drop = sizeof(gx_color_value) * 8 - bpc;
     gx_color_index color = 0;
     int i = 0;
     int ncomp = dev->color_info.num_components;
@@ -1128,8 +1189,8 @@ display_separation_encode_color(gx_device *dev, const gx_color_value colors[])
         color <<= bpc;
         color |= COLROUND_ROUND(colors[i]);
     }
-    if (bpc*ncomp < arch_sizeof_color_index * 8)
-        color <<= (arch_sizeof_color_index * 8 - ncomp * bpc);
+    if (bpc*ncomp < ARCH_SIZEOF_COLOR_INDEX * 8)
+        color <<= (ARCH_SIZEOF_COLOR_INDEX * 8 - ncomp * bpc);
     return (color == gx_no_color_index ? color ^ 1 : color);
 }
 
@@ -1141,15 +1202,14 @@ display_separation_decode_color(gx_device * dev, gx_color_index color,
     gx_color_value * out)
 {
     int bpc = ((gx_device_display *)dev)->devn_params.bitspercomponent;
-    int drop = sizeof(gx_color_value) * 8 - bpc;
     int mask = (1 << bpc) - 1;
     int i = 0;
     int ncomp = dev->color_info.num_components;
     COLDUP_VARS;
 
     COLDUP_SETUP(bpc);
-    if (bpc*ncomp < arch_sizeof_color_index * 8)
-        color >>= (arch_sizeof_color_index * 8 - ncomp * bpc);
+    if (bpc*ncomp < ARCH_SIZEOF_COLOR_INDEX * 8)
+        color >>= (ARCH_SIZEOF_COLOR_INDEX * 8 - ncomp * bpc);
     for (; i<ncomp; i++) {
         out[ncomp - i - 1] = COLDUP_DUP(color & mask);
         color >>= bpc;
@@ -1161,7 +1221,7 @@ display_separation_decode_color(gx_device * dev, gx_color_index color,
  *  Device proc for updating the equivalent CMYK color for spot colors.
  */
 static int
-display_update_spot_equivalent_colors(gx_device * dev, const gs_state * pgs)
+display_update_spot_equivalent_colors(gx_device * dev, const gs_gstate * pgs)
 {
     gx_device_display * ddev = (gx_device_display *)dev;
 
@@ -1180,6 +1240,37 @@ display_ret_devn_params(gx_device * dev)
     gx_device_display * pdev = (gx_device_display *)dev;
 
     return &pdev->devn_params;
+}
+
+static int
+display_spec_op(gx_device *dev, int op, void *data, int datasize)
+{
+
+    if (op == gxdso_supports_devn) {
+        return (dev_proc(dev, fill_rectangle_hl_color) == display_fill_rectangle_hl_color);
+    }
+    return gx_default_dev_spec_op(dev, op, data, datasize);
+}
+
+/* Fill a rectangle with a high level color.  This is used in separation mode */
+static int
+display_fill_rectangle_hl_color(gx_device *dev, const gs_fixed_rect *rect,
+    const gs_gstate *pgs, const gx_drawing_color *pdcolor,
+    const gx_clip_path *pcpath)
+{
+    int x = fixed2int(rect->p.x);
+    int y = fixed2int(rect->p.y);
+    int w = fixed2int(rect->q.x) - x;
+    int h = fixed2int(rect->q.y) - y;
+    gx_color_index pure_color;
+
+    /* We can only handle devn cases, so use the default if not */
+    /* We can get called here from gx_dc_devn_masked_fill_rectangle */
+    if (pdcolor->type != gx_dc_type_devn && pdcolor->type != &gx_dc_devn_masked) {
+        return gx_fill_rectangle_device_rop( x, y, w, h, pdcolor, dev, lop_default);
+    }
+    pure_color = display_separation_encode_color(dev, pdcolor->colors.devn.values);
+    return display_fill_rectangle(dev, x, y, w, h, pure_color);
 }
 
 /*
@@ -1317,8 +1408,9 @@ display_alloc_bitmap(gx_device_display * ddev, gx_device * param_dev)
 {
     int ccode;
     const gx_device_memory *mdproto;
+
     if (ddev->callback == NULL)
-        return 0;
+        return gs_error_Fatal;
 
     /* free old bitmap (if any) */
     display_free_bitmap(ddev);
@@ -1382,6 +1474,10 @@ display_alloc_bitmap(gx_device_display * ddev, gx_device * param_dev)
         display_free_bitmap(ddev);
 
     /* erase bitmap - before display gets redrawn */
+    /*
+     * Note that this will fill all 64 bits even if we've reset depth in the
+     * devn case, since the underlying mdev is 64-bit (see above).
+     */
     if (ccode == 0) {
         int i;
         gx_color_value cv[GX_DEVICE_COLOR_MAX_COMPONENTS];
@@ -1390,7 +1486,7 @@ display_alloc_bitmap(gx_device_display * ddev, gx_device * param_dev)
                 ? gx_max_color_value : 0;
         dev_proc(ddev, fill_rectangle)((gx_device *)ddev,
                  0, 0, ddev->width, ddev->height,
-                 ddev->procs.encode_color((gx_device *)ddev, cv));
+                 dev_proc(ddev, encode_color)((gx_device *)ddev, cv));
     }
 
     return ccode;
@@ -1460,6 +1556,9 @@ display_set_separations(gx_device_display *dev)
                            * 65535 / frac_1;
                 }
             }
+            while(dev->parent)
+                dev = (gx_device_display *)dev->parent;
+
             (*dev->callback->display_separation)(dev->pHandle, dev,
                 comp_num, name,
                 (unsigned short)c, (unsigned short)m,
@@ -1533,16 +1632,14 @@ set_color_procs(gx_device * pdev,
         dev_t_proc_encode_color((*encode_color), gx_device),
         dev_t_proc_decode_color((*decode_color), gx_device),
         dev_t_proc_get_color_mapping_procs((*get_color_mapping_procs), gx_device),
-        dev_t_proc_get_color_comp_index((*get_color_comp_index), gx_device))
+        dev_t_proc_get_color_comp_index((*get_color_comp_index), gx_device),
+        dev_t_proc_fill_rectangle_hl_color((*fill_hl_color), gx_device))
 {
-#if 0				/* These procs are no longer used */
-    pdev->procs.map_rgb_color = encode_color;
-    pdev->procs.map_color_rgb = decode_color;
-#endif
     pdev->procs.get_color_mapping_procs = get_color_mapping_procs;
     pdev->procs.get_color_comp_index = get_color_comp_index;
     pdev->procs.encode_color = encode_color;
     pdev->procs.decode_color = decode_color;
+    pdev->procs.fill_rectangle_hl_color = fill_hl_color;
 }
 
 /*
@@ -1556,7 +1653,8 @@ set_gray_color_procs(gx_device * pdev,
 {
     set_color_procs(pdev, encode_color, decode_color,
         gx_default_DevGray_get_color_mapping_procs,
-        gx_default_DevGray_get_color_comp_index);
+        gx_default_DevGray_get_color_comp_index,
+        gx_default_fill_rectangle_hl_color);
 }
 
 /*
@@ -1570,7 +1668,8 @@ set_rgb_color_procs(gx_device * pdev,
 {
     set_color_procs(pdev, encode_color, decode_color,
         gx_default_DevRGB_get_color_mapping_procs,
-        gx_default_DevRGB_get_color_comp_index);
+        gx_default_DevRGB_get_color_comp_index,
+        gx_default_fill_rectangle_hl_color);
 }
 
 /*
@@ -1584,7 +1683,8 @@ set_rgbk_color_procs(gx_device * pdev,
 {
     set_color_procs(pdev, encode_color, decode_color,
         gx_default_DevRGBK_get_color_mapping_procs,
-        gx_default_DevRGBK_get_color_comp_index);
+        gx_default_DevRGBK_get_color_comp_index,
+        gx_default_fill_rectangle_hl_color);
 }
 
 /*
@@ -1598,7 +1698,8 @@ set_cmyk_color_procs(gx_device * pdev,
 {
     set_color_procs(pdev, encode_color, decode_color,
         gx_default_DevCMYK_get_color_mapping_procs,
-        gx_default_DevCMYK_get_color_comp_index);
+        gx_default_DevCMYK_get_color_comp_index,
+        gx_default_fill_rectangle_hl_color);
 }
 
 /* Set the color_info and mapping functions for this instance of the device */
@@ -1761,16 +1862,18 @@ display_set_color_format(gx_device_display *ddev, int nFormat)
         case DISPLAY_COLORS_SEPARATION:
             if ((nFormat & DISPLAY_ENDIAN_MASK) != DISPLAY_BIGENDIAN)
                 return_error(gs_error_rangecheck);
-            bpp = arch_sizeof_color_index * 8;
+            bpp = ARCH_SIZEOF_COLOR_INDEX * 8;
             set_color_info(&dci, DISPLAY_MODEL_SEP, bpp/bpc, bpp,
                 maxvalue, maxvalue);
             if ((nFormat & DISPLAY_DEPTH_MASK) == DISPLAY_DEPTH_8) {
                 ddev->devn_params.bitspercomponent = bpc;
+                ddev->icc_struct->supports_devn = true;
                 set_color_procs(pdev,
                     display_separation_encode_color,
                     display_separation_decode_color,
                     display_separation_get_color_mapping_procs,
-                    display_separation_get_color_comp_index);
+                    display_separation_get_color_comp_index,
+                    display_fill_rectangle_hl_color);
             }
             else
                 return_error(gs_error_rangecheck);

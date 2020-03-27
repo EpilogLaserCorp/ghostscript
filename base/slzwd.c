@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -117,6 +117,7 @@ s_LZWD_process(stream_state * st, stream_cursor_read * pr,
     int code_escape = 1 << ss->InitialCodeLength;
     int eod = code_eod;
     bool low_order = ss->FirstBitLowOrder;
+    bool old_tiff = ss->OldTiff;
     uint len;
     int c;
     byte b;
@@ -241,10 +242,10 @@ s_LZWD_process(stream_state * st, stream_cursor_read * pr,
      * equal to next_code.
      */
     if (code >= next_code) {
-        if (code > next_code) {
+        if ((code > next_code) || (prev_code < 0)) {
 #ifdef DEBUG
-            mlprintf2(ss->memory, "[W]code = %d > next_code = %d\n",
-                     code, next_code);
+            mlprintf3(ss->memory, "[W]code = %d > next_code = %d  or prev_code = %d < 0\n",
+                     code, next_code, prev_code);
 #endif
             status = ERRC;
             goto out;
@@ -323,7 +324,7 @@ reset:
          * lzw_decode_max every time: just checking at power
          * of 2 boundaries stops us one code too soon.
          */
-        if (next_code == lzw_decode_max) {
+        if (!old_tiff && next_code == lzw_decode_max) {
             /*
              * A few anomalous files have one data item too many before the
              * reset code.  We think this is a bug in the application that
@@ -363,12 +364,14 @@ reset:
             status = ERRC;
             goto out;
         }
-        dc_next->datum = b;	/* added char of string */
-        dc_next->len = min(prev_len, 254) + 1;
-        dc_next->prefix = prev_code;
-        dc_next++;
-        if_debug4m('W', ss->memory, "[W]adding 0x%x=0x%x+%c(%d)\n",
-                   next_code, prev_code, b, min(len, 255));
+        if (next_code < lzw_decode_max) {
+            dc_next->datum = b;	/* added char of string */
+            dc_next->len = min(prev_len, 254) + 1;
+            dc_next->prefix = prev_code;
+            dc_next++;
+            if_debug4m('W', ss->memory, "[W]adding 0x%x=0x%x+%c(%d)\n",
+                       next_code, prev_code, b, min(len, 255));
+        }
         if (++next_code == switch_code) {	/* Crossed a power of 2. */
             /* We have to make a strange special check for */
             /* reaching the end of the code space. */

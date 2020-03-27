@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* High level device color save/compare procedures */
@@ -43,29 +43,15 @@ void gx_hld_saved_color_init(gx_hl_saved_color * psc)
 }
 
 /*
- * Get graphics state pointer (from imager state pointer)
- */
-const gs_state * gx_hld_get_gstate_ptr(const gs_imager_state * pis)
-{
-
-    /* Check to verify the structure type is really (gs_state *) */
-    if (pis == NULL || pis->is_gstate == false)
-        return NULL;
-
-    return (const gs_state *) pis;
-}
-
-/*
  * Save the device color information including the color space id and
  * client color data (if available).
  *
  * More description in src/gxhldevc.h
  */
 bool
-gx_hld_save_color(const gs_imager_state * pis, const gx_device_color * pdevc,
+gx_hld_save_color(const gs_gstate * pgs, const gx_device_color * pdevc,
                 gx_hl_saved_color * psc)
 {
-    const gs_state * pgs = gx_hld_get_gstate_ptr(pis);
     memset(psc, 0, sizeof(*psc));	/* clear the entire structure */
 
     if (pdevc == NULL) {
@@ -128,6 +114,24 @@ bool gx_hld_saved_color_equal(const gx_hl_saved_color * psc1,
         return(false);
     }
 
+    /* early bailout for pattern comparison */
+    if (gx_dc_is_pattern1_color((gx_device_color *)(&psc1->saved_dev_color.type))) {
+
+        if (psc1->saved_dev_color.colors.pattern.id != psc2->saved_dev_color.colors.pattern.id
+         || psc1->saved_dev_color.colors.pattern.phase.x != psc2->saved_dev_color.colors.pattern.phase.x
+         || psc1->saved_dev_color.colors.pattern.phase.y != psc2->saved_dev_color.colors.pattern.phase.y)
+            return(false);
+        else
+            return true;
+    }
+    if (gx_dc_is_pattern2_color((gx_device_color *)(&psc1->saved_dev_color.type))) {
+        if (psc1->saved_dev_color.colors.pattern2.id != psc2->saved_dev_color.colors.pattern2.id
+         || psc1->saved_dev_color.colors.pattern2.shfill != psc2->saved_dev_color.colors.pattern2.shfill)
+            return(false);
+        else
+            return true;
+    }
+
     for (i = 0; i < GX_DEVICE_COLOR_MAX_COMPONENTS; i++) {
         if (psc1->ccolor.paint.values[i] != psc2->ccolor.paint.values[i]) {
             return(false);
@@ -168,22 +172,6 @@ bool gx_hld_saved_color_equal(const gx_hl_saved_color * psc1,
              }
         }
     }
-    else if (gx_dc_is_pattern1_color((gx_device_color *)(&psc1->saved_dev_color.type))) {
-
-        if (psc1->saved_dev_color.colors.pattern.id != psc2->saved_dev_color.colors.pattern.id
-         || psc1->saved_dev_color.colors.pattern.phase.x != psc2->saved_dev_color.colors.pattern.phase.x
-         || psc1->saved_dev_color.colors.pattern.phase.y != psc2->saved_dev_color.colors.pattern.phase.y) {
-
-            return(false);
-        }
-    }
-    else if (gx_dc_is_pattern2_color((gx_device_color *)(&psc1->saved_dev_color.type))) {
-        if (psc1->saved_dev_color.colors.pattern2.id != psc2->saved_dev_color.colors.pattern2.id
-         || psc1->saved_dev_color.colors.pattern2.shfill != psc2->saved_dev_color.colors.pattern2.shfill) {
-
-            return(false);
-        }
-    }
 
     return (true);
 }
@@ -209,12 +197,10 @@ bool gx_hld_saved_color_same_cspace(const gx_hl_saved_color * psc1,
  * Check if a high level color is availavble.
  */
 bool
-gx_hld_is_hl_color_available(const gs_imager_state * pis,
+gx_hld_is_hl_color_available(const gs_gstate * pgs,
                 const gx_device_color * pdevc)
 {
-    const gs_state * pgs = gx_hld_get_gstate_ptr(pis);
-
-    if (pgs != NULL && pdevc != NULL && pdevc->ccolor_valid)
+    if (pgs != NULL && pdevc != NULL && pdevc->type != gx_dc_type_null && pdevc->ccolor_valid)
         return true;
     return false;
 }
@@ -225,13 +211,12 @@ gx_hld_is_hl_color_available(const gs_imager_state * pis,
  * More description in src/gxhldevc.h
  */
 gx_hld_get_color_space_and_ccolor_status
-gx_hld_get_color_space_and_ccolor(const gs_imager_state * pis,
+gx_hld_get_color_space_and_ccolor(const gs_gstate * pgs,
                 const gx_device_color * pdevc, const gs_color_space ** ppcs,
                 const gs_client_color ** ppcc)
 {
     /* Check if the current color space was used to build the device color */
-    if (gx_hld_is_hl_color_available(pis, pdevc)) {
-        const gs_state * pgs = gx_hld_get_gstate_ptr(pis);
+    if (gx_hld_is_hl_color_available(pgs, pdevc)) {
         const gs_color_space * pcs = gs_currentcolorspace_inline(pgs);
 
         *ppcs = pcs;
@@ -256,10 +241,8 @@ gx_hld_get_color_space_and_ccolor(const gs_imager_state * pis,
  * More description in src/gxhldevc.h
  */
 int
-gx_hld_get_number_color_components(const gs_imager_state * pis)
+gx_hld_get_number_color_components(const gs_gstate * pgs)
 {
-    const gs_state * pgs = gx_hld_get_gstate_ptr(pis);
-
     if (pgs != NULL) {
         const gs_color_space * pcs = gs_currentcolorspace_inline(pgs);
         int n = gs_color_space_num_components(pcs);
@@ -275,12 +258,12 @@ gx_hld_get_number_color_components(const gs_imager_state * pis)
  * More description in src/gxhldevc.h
  */
 gx_hld_get_color_component_status
-gx_hld_get_color_component(const gs_imager_state * pis,
+gx_hld_get_color_component(const gs_gstate * pgs,
                           const gx_device_color * pdevc,
                           int comp_num, float * output)
 {
     if (pdevc != NULL && pdevc->ccolor_valid) {
-        int ncomp = gx_hld_get_number_color_components(pis);
+        int ncomp = gx_hld_get_number_color_components(pgs);
 
         if (ncomp < 0)
             return invalid_color_info;

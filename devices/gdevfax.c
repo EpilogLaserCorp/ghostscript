@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Fax devices */
@@ -65,6 +65,11 @@ gdev_fax_get_params(gx_device * dev, gs_param_list * plist)
         ecode = code;
     if ((code = param_write_int(plist, "MinFeatureSize", &fdev->MinFeatureSize)) < 0)
         ecode = code;
+    if ((code = param_write_int(plist, "FillOrder", &fdev->FillOrder)) < 0)
+        ecode = code;
+     if ((code = param_write_bool(plist, "BlackIs1", &fdev->BlackIs1)) < 0)
+        ecode = code;
+ 
     return ecode;
 }
 int
@@ -73,6 +78,8 @@ gdev_fax_put_params(gx_device * dev, gs_param_list * plist)
     gx_device_fax *const fdev = (gx_device_fax *)dev;
     int ecode = 0;
     int code;
+    int fill_order = fdev->FillOrder;
+    bool blackis1 = fdev->BlackIs1;
     int aw = fdev->AdjustWidth;
     int mfs = fdev->MinFeatureSize;
     const char *param_name;
@@ -88,7 +95,25 @@ gdev_fax_put_params(gx_device * dev, gs_param_list * plist)
         case 1:
             break;
     }
-
+    switch (code = param_read_int(plist, (param_name = "FillOrder"), &fill_order)) {
+        case 0:
+            if (fill_order == 1 || fill_order == 2)
+                break;
+            code = gs_error_rangecheck;
+        default:
+            ecode = code;
+            param_signal_error(plist, param_name, ecode);
+        case 1:
+            break;
+    }
+    switch (code = param_read_bool(plist, (param_name = "BlackIs1"), &blackis1)) {
+        default:
+            ecode = code;
+            param_signal_error(plist, param_name, ecode);
+        case 0:
+        case 1:
+            break;
+    }
     switch (code = param_read_int(plist, (param_name = "MinFeatureSize"), &mfs)) {
         case 0:
             if (mfs >= 0 && mfs <= 4)
@@ -109,6 +134,8 @@ gdev_fax_put_params(gx_device * dev, gs_param_list * plist)
 
     fdev->AdjustWidth = aw;
     fdev->MinFeatureSize = mfs;
+    fdev->FillOrder = fill_order;
+
     return code;
 }
 
@@ -123,7 +150,8 @@ gdev_fax_init_state_adjust(stream_CFE_state *ss,
     s_CFE_template.set_defaults((stream_state *)ss);
     ss->Columns = fdev->width;
     ss->Rows = fdev->height;
-    ss->BlackIs1 = true;
+    ss->BlackIs1 = fdev->BlackIs1;
+    ss->FirstBitLowOrder = fdev->FillOrder == 2;
     ss->Columns = fax_adjusted_width(ss->Columns, adjust_width);
 }
 
@@ -143,7 +171,7 @@ gdev_fax_init_fax_state(stream_CFE_state *ss, const gx_device_fax *fdev)
  * page; TIFF devices call this once per strip.
  */
 int
-gdev_fax_print_strip(gx_device_printer * pdev, FILE * prn_stream,
+gdev_fax_print_strip(gx_device_printer * pdev, gp_file * prn_stream,
                      const stream_template * temp, stream_state * ss,
                      int width, int row_first, int row_end /* last + 1 */)
 {
@@ -187,9 +215,16 @@ gdev_fax_print_strip(gx_device_printer * pdev, FILE * prn_stream,
         goto done;
     }
     /* Init the min_feature_size expansion for entire image (not strip) */
-    if ((min_feature_size > 1) && (row_first == 0))
+    /* This is only called from gdev_fax_print_page() and row_first is *always* 0
+     * By removing this check, we can make it synonymous with the use of
+     * min_feature_data below, so we don't need to check min_feature_data there.
+     */
+    if ((min_feature_size > 1) /* && (row_first == 0) */) {
         code = min_feature_size_init(mem, min_feature_size,
                                      width, pdev->height, &min_feature_data);
+        if (code < 0)
+            goto done;
+    }
     if (min_feature_size > 1)
         row_in = max(0, row_first-min_feature_size);    /* need some data before this row */
 
@@ -204,14 +239,14 @@ gdev_fax_print_strip(gx_device_printer * pdev, FILE * prn_stream,
         int status;
 
         if_debug7m('w', mem,
-                   "[w]lnum=%d r=0x%lx,0x%lx,0x%lx w=0x%lx,0x%lx,0x%lx\n", lnum,
-                   (ulong)in, (ulong)r.ptr, (ulong)r.limit,
-                   (ulong)out, (ulong)w.ptr, (ulong)w.limit);
+                   "[w]lnum=%d r="PRI_INTPTR","PRI_INTPTR","PRI_INTPTR" w="PRI_INTPTR","PRI_INTPTR","PRI_INTPTR"\n", lnum,
+                   (intptr_t)in, (intptr_t)r.ptr, (intptr_t)r.limit,
+                   (intptr_t)out, (intptr_t)w.ptr, (intptr_t)w.limit);
         status = temp->process(ss, &r, &w, lnum == row_end);
         if_debug7m('w', mem,
-                   "...%d, r=0x%lx,0x%lx,0x%lx w=0x%lx,0x%lx,0x%lx\n", status,
-                   (ulong)in, (ulong)r.ptr, (ulong)r.limit,
-                   (ulong)out, (ulong)w.ptr, (ulong)w.limit);
+                   "...%d, r="PRI_INTPTR","PRI_INTPTR","PRI_INTPTR" w="PRI_INTPTR","PRI_INTPTR","PRI_INTPTR"\n", status,
+                   (intptr_t)in, (intptr_t)r.ptr, (intptr_t)r.limit,
+                   (intptr_t)out, (intptr_t)w.ptr, (intptr_t)w.limit);
         switch (status) {
             case 0:             /* need more input data */
                 if (lnum == row_end)
@@ -245,7 +280,7 @@ gdev_fax_print_strip(gx_device_printer * pdev, FILE * prn_stream,
                 break;
             case 1:             /* need to write output */
                 if (!nul)
-                    fwrite(out, 1, w.ptr + 1 - out, prn_stream);
+                    gp_fwrite(out, 1, w.ptr + 1 - out, prn_stream);
                 w.ptr = out - 1;
                 break;
         }
@@ -254,10 +289,16 @@ gdev_fax_print_strip(gx_device_printer * pdev, FILE * prn_stream,
   ok:
     /* Write out any remaining output. */
     if (!nul)
-        fwrite(out, 1, w.ptr + 1 - out, prn_stream);
+        gp_fwrite(out, 1, w.ptr + 1 - out, prn_stream);
 
   done:
-    if ((min_feature_size > 1) && (lnum == pdev->height))
+    /* We only get one strip, we need to free min_feature_data without
+     * any further checks or we will leak memory as we will allocate a
+     * new one next time round. In truth it should only be possible to
+     * get here with lnum != pdev-.Height in the case of an error, in
+     * which case we still want to free the buffer!
+     */
+    if ((min_feature_size > 1) /* && (lnum == pdev->height) */)
         min_feature_size_dnit(min_feature_data);
     gs_free_object(mem, out, "gdev_stream_print_page(out)");
     gs_free_object(mem, in, "gdev_stream_print_page(in)");
@@ -268,7 +309,7 @@ gdev_fax_print_strip(gx_device_printer * pdev, FILE * prn_stream,
 
 /* Print a fax page.  Other fax drivers use this. */
 int
-gdev_fax_print_page(gx_device_printer * pdev, FILE * prn_stream,
+gdev_fax_print_page(gx_device_printer * pdev, gp_file * prn_stream,
                     stream_CFE_state * ss)
 {
     return gdev_fax_print_strip(pdev, prn_stream, &s_CFE_template,
@@ -278,7 +319,7 @@ gdev_fax_print_page(gx_device_printer * pdev, FILE * prn_stream,
 
 /* Print a 1-D Group 3 page. */
 static int
-faxg3_print_page(gx_device_printer * pdev, FILE * prn_stream)
+faxg3_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
     stream_CFE_state state;
 
@@ -290,7 +331,7 @@ faxg3_print_page(gx_device_printer * pdev, FILE * prn_stream)
 
 /* Print a 2-D Group 3 page. */
 static int
-faxg32d_print_page(gx_device_printer * pdev, FILE * prn_stream)
+faxg32d_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
     stream_CFE_state state;
 
@@ -303,7 +344,7 @@ faxg32d_print_page(gx_device_printer * pdev, FILE * prn_stream)
 
 /* Print a Group 4 page. */
 static int
-faxg4_print_page(gx_device_printer * pdev, FILE * prn_stream)
+faxg4_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
     stream_CFE_state state;
 

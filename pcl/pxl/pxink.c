@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -174,7 +174,7 @@ px_set_halftone(px_state_t * pxs)
                                    /* width */ 16, /*height */ 16,
                                    /* dither data */ thresh,
                                    /* x phase */ (int)pxgs->halftone.origin.x,
-                                   /* y phase */ 
+                                   /* y phase */
                                    (int)pxgs->halftone.origin.y);
     } else {                    /* downloaded */
         int ht_width, ht_height;
@@ -201,7 +201,7 @@ px_set_halftone(px_state_t * pxs)
                                    /* dither data */
                                    pxgs->halftone.thresholds,
                                    /* x phase */ (int)pxgs->halftone.origin.x,
-                                   /* y phase */ 
+                                   /* y phase */
                                    (int)pxgs->halftone.origin.y);
         if (code < 0)
             gs_free_string(pxs->memory, pxgs->halftone.thresholds.data,
@@ -240,7 +240,7 @@ ilcm(uint x, uint y)
 
 /* Render a pattern. */
 static int
-px_paint_pattern(const gs_client_color * pcc, gs_state * pgs)
+px_paint_pattern(const gs_client_color * pcc, gs_gstate * pgs)
 {
     const gs_client_pattern *ppat = gs_getpattern(pcc);
     const px_pattern_t *pattern = ppat->client_data;
@@ -296,7 +296,7 @@ px_paint_pattern(const gs_client_color * pcc, gs_state * pgs)
     return code;
 }
 
-int px_high_level_pattern(gs_state * pgs)
+int px_high_level_pattern(gs_gstate * pgs)
 {
     gs_matrix m;
     gs_rect bbox;
@@ -309,8 +309,8 @@ int px_high_level_pattern(gs_state * pgs)
         (gs_pattern1_instance_t *)gs_currentcolor(pgs)->pattern;
     const px_pattern_t * pattern = ppat->client_data;
 
-    code = gx_pattern_cache_add_dummy_entry((gs_imager_state *)pgs,
-        pinst, pgs->device->color_info.depth);
+    code = gx_pattern_cache_add_dummy_entry(pgs, pinst,
+        pgs->device->color_info.depth);
     if (code < 0)
         return code;
 
@@ -395,7 +395,7 @@ int px_high_level_pattern(gs_state * pgs)
     return code;
 }
 
-static int px_remap_pattern(const gs_client_color *pcc, gs_state *pgs)
+static int px_remap_pattern(const gs_client_color *pcc, gs_gstate *pgs)
 {
     const gs_client_pattern *ppat = gs_getpattern(pcc);
     int code = 0;
@@ -418,8 +418,7 @@ static int px_remap_pattern(const gs_client_color *pcc, gs_state *pgs)
          */
         return_error(gs_error_Remap_Color);
     } else {
-        px_paint_pattern(pcc, pgs);
-        return 0;
+        return px_paint_pattern(pcc, pgs);
     }
 }
 
@@ -433,7 +432,7 @@ render_pattern(gs_client_color * pcc, const px_pattern_t * pattern,
     uint rep_width = pattern->params.width;
     uint rep_height = pattern->params.height;
     uint full_width, full_height;
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     gs_client_pattern templat;
 
     /*
@@ -738,14 +737,13 @@ set_source(const px_args_t * par, px_state_t * pxs, px_paint_t * ppt)
 int
 px_set_paint(const px_paint_t * ppt, px_state_t * pxs)
 {
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     px_paint_type_t type;
 
     type = ppt->type;
     switch (type) {
         case pxpNull:
-            gs_setnullcolor(pgs);
-            return 0;
+            return gs_setnullcolor(pgs);
         case pxpRGB:
             return gs_setrgbcolor(pgs, ppt->value.rgb[0], ppt->value.rgb[1],
                                   ppt->value.rgb[2]);
@@ -871,13 +869,13 @@ const byte apxSetHalftoneMethod[] = {
 int
 pxSetHalftoneMethod(px_args_t * par, px_state_t * pxs)
 {
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     px_gstate_t *pxgs = pxs->pxgs;
     pxeDitherMatrix_t method;
 
-    if (par->pv[6] || par->pv[7] || par->pv[8] || par->pv[9])
-        /* ignore object type arguments */
-        return 0;
+    if (par->pv[5] || par->pv[6] || par->pv[7] || par->pv[8])
+        /* Placeholder to support halftones per object type. */
+        ;
 
     if (par->pv[1]) {           /* Internal halftone */
         if (par->pv[2] || par->pv[3] || par->pv[4])
@@ -916,6 +914,8 @@ pxSetHalftoneMethod(px_args_t * par, px_state_t * pxs)
             } else {            /* Read data. */
                 const byte *src = par->source.data;
                 byte *dest = pxs->download_string.data;
+                byte *pdata_min = dest;
+                byte *pdata_max = pdata_min + pxs->download_string.size;
                 uint i;
                 int skip;
 
@@ -933,7 +933,7 @@ pxSetHalftoneMethod(px_args_t * par, px_state_t * pxs)
                         break;
                     case eLandscapeOrientation:
                         dest += (width - 1 - source_x) * height + source_y;
-                        skip = -height;
+                        skip = -(int)height;
                         break;
                     case eReversePortrait:
                         dest += (height - 1 - source_y) * width +
@@ -947,6 +947,8 @@ pxSetHalftoneMethod(px_args_t * par, px_state_t * pxs)
                     default:
                         return -1;
                 }
+                if ((dest < pdata_min) || (pdata_max < dest + ((used - 1) * (int64_t)skip)))
+                    return_error(gs_error_rangecheck);
                 for (i = 0; i < used; ++i, ++src, dest += skip)
                     *dest = *src;
             }
@@ -959,7 +961,7 @@ pxSetHalftoneMethod(px_args_t * par, px_state_t * pxs)
         pxgs->halftone.height = height;
         method = eDownloaded;
     } else
-        return_error(errorMissingAttribute);
+        return 0;
     if (par->pv[0])
         gs_transform(pgs, real_value(par->pv[0], 0),
                      real_value(par->pv[0], 1), &pxgs->halftone.origin);

@@ -33,12 +33,6 @@
 
 ******************************************************************************/
 
-/* Configuration management identification */
-#ifndef lint
-static const char
-  cm_id[] = "@(#)$Id: gdeveprn.c,v 1.25 2001/04/30 05:15:51 Martin Rel $";
-#endif
-
 /*****************************************************************************/
 
 #ifndef _XOPEN_SOURCE
@@ -108,32 +102,6 @@ static const char
 /* Prefix for error messages */
 #define ERRPREF "? eprn: "
 
-
-static
-ENUM_PTRS_WITH(eprn_Device_enum_ptrs, eprn_Device *pdev)
-{
-  if (index < st_device_max_ptrs) {
-    gs_ptr_type_t ret = ENUM_USING_PREFIX(st_device_printer, 0);
-    return (ret ? ret : ENUM_OBJ(0));
-  }
-  index -= st_device_max_ptrs;
-
-  if (index == 0) {
-    return ENUM_OBJ(pdev->eprn.pis);
-  }
-
-  return 0;
-}
-ENUM_PTRS_END
-
-static RELOC_PTRS_WITH(eprn_Device_reloc_ptrs, eprn_Device *pdev)
-{
-  RELOC_PREFIX(st_device_printer);
-  RELOC_VAR(pdev->eprn.pis);
-}
-RELOC_PTRS_END
-
-private_st_device_EPRN(eprn_Device_enum_ptrs, eprn_Device_reloc_ptrs);
 
 /******************************************************************************
 
@@ -688,9 +656,9 @@ int eprn_set_page_layout(eprn_Device *dev)
         best_cmatch->code: best_cdmatch->code);
 
     if (best_dmatch == NULL ||
-        best_cmatch != NULL &&
-          better_flag_match(desired, eprn->optional_flags, best_dmatch->code,
-            custom_code)) {
+        (best_cmatch != NULL &&
+         better_flag_match(desired, eprn->optional_flags, best_dmatch->code,
+                           custom_code))) {
       if (flag_match(desired, eprn->optional_flags, custom_code)) {
         if (eprn->media_overrides == NULL) {
           eprn->code = best_cmatch->code;
@@ -868,11 +836,12 @@ int eprn_set_page_layout(eprn_Device *dev)
 
 ******************************************************************************/
 
-void eprn_init_device(eprn_Device *dev, const eprn_PrinterDescription *desc)
+int eprn_init_device(eprn_Device *dev, const eprn_PrinterDescription *desc)
 {
   eprn_Eprn *eprn = &dev->eprn;
   int j;
   float hres, vres;
+  int code;
 
   if (dev->is_open) gs_closedevice((gx_device *)dev);
 
@@ -899,9 +868,11 @@ void eprn_init_device(eprn_Device *dev, const eprn_PrinterDescription *desc)
   eprn->intensity_rendering = eprn_IR_halftones;
   hres = dev->HWResolution[0];
   vres = dev->HWResolution[1];
-  eprn_check_colour_info(desc->colour_info, &eprn->colour_model,
+  code = eprn_check_colour_info(desc->colour_info, &eprn->colour_model,
       &hres, &vres, &eprn->black_levels, &eprn->non_black_levels);
-
+  if (code) {
+    return code;
+  }
   if (eprn->pagecount_file != NULL) {
     gs_free(dev->memory->non_gc_memory, eprn->pagecount_file, strlen(eprn->pagecount_file) + 1,
       sizeof(char), "eprn_init_device");
@@ -910,7 +881,7 @@ void eprn_init_device(eprn_Device *dev, const eprn_PrinterDescription *desc)
 
   eprn->media_position_set = false;
 
-  return;
+  return 0;
 }
 
 /******************************************************************************
@@ -1041,7 +1012,7 @@ int eprn_open_device(gx_device *device)
   /* Read the page count value */
   if (eprn->pagecount_file != NULL) {
     unsigned long count;
-    if (pcf_getcount(eprn->pagecount_file, &count) == 0)
+    if (pcf_getcount(device->memory, eprn->pagecount_file, &count) == 0)
       device->PageCount = count;
        /* unsigned to signed. The C standard permits
           an implementation to generate an overflow indication if the value is
@@ -1145,7 +1116,7 @@ static void eprn_forget_defaultmatrix(gx_device *device)
 {
   eprn_Eprn *eprn = &((eprn_Device *)device)->eprn;
 
-  gs_setdefaultmatrix((gs_state *)eprn->pis, NULL);
+  gs_setdefaultmatrix((gs_gstate *)eprn->pgs, NULL);
 
   return;
 }
@@ -1195,7 +1166,7 @@ int eprn_output_page(gx_device *dev, int num_copies, int flush)
   /* On success, record the number of pages printed */
   if (rc == 0 && eprn->pagecount_file != NULL) {
     assert(num_copies > 0);     /* because of signed/unsigned */
-    if (pcf_inccount(eprn->pagecount_file, num_copies) != 0) {
+    if (pcf_inccount(dev->memory, eprn->pagecount_file, num_copies) != 0) {
       /* pcf_inccount() has issued an error message. */
       eprintf(
         "  No further attempts will be made to access the page count file.\n");

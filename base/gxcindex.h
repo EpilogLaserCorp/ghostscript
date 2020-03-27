@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,12 +20,11 @@
 #  define gxcindex_INCLUDED
 
 #include "stdint_.h"		/* for uint64_t and uint32_t */
-#include "gsbitops.h"		/* for sample_store macros */
 
 /*
  * Define the maximum number of components in a device color.
  * The minimum value is 4, to handle CMYK; the maximum value is
- * arch_sizeof_color_index * 8, since for larger values, there aren't enough
+ * ARCH_SIZEOF_COLOR_INDEX * 8, since for larger values, there aren't enough
  * bits in a gx_color_index to have even 1 bit per component.
  */
 #define GX_DEVICE_COLOR_MAX_COMPONENTS (ARCH_SIZEOF_GX_COLOR_INDEX * 8)
@@ -73,7 +72,7 @@ typedef GX_COLOR_INDEX_TYPE gx_color_index_data;
 
 /* Define the type for device color indices (pixel values). */
 typedef gx_color_index_data * gx_color_index;
-#define arch_sizeof_color_index arch_sizeof_ptr
+#define ARCH_SIZEOF_COLOR_INDEX ARCH_SIZEOF_PTR
 
 extern const gx_color_index_data gx_no_color_index_data;
 #define gx_no_color_index_values (&gx_no_color_index_data)
@@ -81,7 +80,7 @@ extern const gx_color_index_data gx_no_color_index_data;
 
 #else  /* !TEST_CINDEX_POINTER */
 
-#define arch_sizeof_color_index sizeof(gx_color_index_data)
+#define ARCH_SIZEOF_COLOR_INDEX sizeof(gx_color_index_data)
 
 /* Define the type for device color indices (pixel values). */
 typedef gx_color_index_data gx_color_index;
@@ -98,50 +97,5 @@ typedef gx_color_index_data gx_color_index;
 #define gx_no_color_index ((gx_color_index)gx_no_color_index_value)
 
 #endif /* (!)TEST_CINDEX_POINTER */
-
-/*
- * Define macros for accumulating a scan line of a colored image.
- * The usage is as follows:
- *	DECLARE_LINE_ACCUM(line, bpp, xo);
- *	for ( x = xo; x < xe; ++x ) {
- *	    << compute color at x >>
- *          LINE_ACCUM(color, bpp);
- *      }
- * This code must be enclosed in { }, since DECLARE_LINE_ACCUM declares
- * variables.  Supported values of bpp are 1, 2, 4, or n * 8, where n <= 8.
- *
- * Note that DECLARE_LINE_ACCUM declares the variables l_dptr, l_dbyte, and
- * l_dbit.  Other code in the loop may use these variables.
- */
-#define DECLARE_LINE_ACCUM(line, bpp, xo)\
-        sample_store_declare_setup(l_dptr, l_dbit, l_dbyte, line, 0, bpp)
-#define LINE_ACCUM(color, bpp)\
-        sample_store_next_any(color, l_dptr, l_dbit, bpp, l_dbyte)
-#define LINE_ACCUM_SKIP(bpp)\
-        sample_store_skip_next(l_dptr, l_dbit, bpp, l_dbyte)
-#define LINE_ACCUM_STORE(bpp)\
-        sample_store_flush(l_dptr, l_dbit, bpp, l_dbyte)
-/*
- * Declare additional macros for accumulating a scan line with copying
- * to a device.  Note that DECLARE_LINE_ACCUM_COPY also declares l_xprev.
- * LINE_ACCUM_COPY is called after the accumulation loop.
- */
-#define DECLARE_LINE_ACCUM_COPY(line, bpp, xo)\
-        DECLARE_LINE_ACCUM(line, bpp, xo);\
-        int l_xprev = (xo)
-#define LINE_ACCUM_COPY(dev, line, bpp, xo, xe, raster, y)\
-        if ( (xe) > l_xprev ) {\
-            int code;\
-            LINE_ACCUM_STORE(bpp);\
-            code = (*dev_proc(dev, copy_color))\
-              (dev, line, l_xprev - (xo), raster,\
-               gx_no_bitmap_id, l_xprev, y, (xe) - l_xprev, 1);\
-            if ( code < 0 )\
-              return code;\
-        }
-#define LINE_ACCUM_FLUSH_AND_RESTART(dev, line, bpp, xo, xe, raster, y)\
-        { LINE_ACCUM_COPY(dev, line, bpp, xo, xe, raster, y);\
-          sample_store_reset(l_dptr, l_dbit, l_dbyte, line, 0, bpp);\
-          l_xprev = xe+1; }
 
 #endif /* gxcindex_INCLUDED */

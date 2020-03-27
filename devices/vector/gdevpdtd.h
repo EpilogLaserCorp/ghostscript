@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -54,6 +54,40 @@
  * that references it, so we set the FontName at the same time as the
  * BaseFont of the font resource.  For more information, see gdevpdtf.h.
  */
+
+/*
+ * Start by defining the elements common to font descriptors and sub-font
+ * (character class) descriptors.
+ */
+typedef struct pdf_font_descriptor_values_s {
+    /* Required elements */
+    int Ascent, CapHeight, Descent, ItalicAngle, StemV;
+    gs_int_rect FontBBox;
+    gs_string FontName;
+    uint Flags;
+    /* Optional elements (default to 0) */
+    int AvgWidth, Leading, MaxWidth, MissingWidth, StemH, XHeight;
+} pdf_font_descriptor_values_t;
+typedef struct pdf_font_descriptor_common_s pdf_font_descriptor_common_t;
+struct pdf_font_descriptor_common_s {
+    pdf_resource_common(pdf_font_descriptor_common_t);
+    pdf_font_descriptor_values_t values;
+};
+/*
+ * Define a (top-level) FontDescriptor.  CID-keyed vs. non-CID-keyed fonts
+ * are distinguished by their FontType.
+ */
+struct pdf_font_descriptor_s {
+    pdf_font_descriptor_common_t common;
+    pdf_base_font_t *base_font;
+    font_type FontType;		/* (copied from base_font) */
+    bool embed;
+    struct cid_ {		/* (CIDFonts only) */
+        cos_dict_t *Style;
+        char Lang[3];		/* 2 chars + \0 */
+        cos_dict_t *FD;		/* value = COS_VALUE_RESOURCE */
+    } cid;
+};
 
 #ifndef pdf_font_descriptor_DEFINED
 #  define pdf_font_descriptor_DEFINED

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /*
@@ -179,6 +179,189 @@ is_MM_font(gs_fapi_font * a_fapi_font)
 }
 
 static void
+write_private_blend_dictionary(gs_fapi_font * a_fapi_font, WRF_output * a_output)
+{
+    short x, x1, x2, i, j, acc;
+    if (is_MM_font(a_fapi_font)) {
+
+        WRF_wstring(a_fapi_font->memory, a_output, "3 index /Blend get /Private get begin\n");
+        x = a_fapi_font->get_word(a_fapi_font,
+                                  gs_fapi_font_feature_BlendBlueValues_length, 0);
+        if (x > 0) {
+            WRF_wstring(a_fapi_font->memory, a_output, "/BlueValues [");
+            acc = 0;
+            for (i = 0; i < x; i++) {
+                WRF_wstring(a_fapi_font->memory, a_output, " [");
+                x1 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendBlueValues_count, i);
+                for (j = 0; j < x1; j++) {
+                    x2 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendBlueValues, acc++);
+                    WRF_wint(a_fapi_font->memory, a_output, x2);
+                    WRF_wbyte(a_fapi_font->memory, a_output, (byte)' ');
+                }
+                WRF_wstring(a_fapi_font->memory, a_output, " ]");
+            }
+            WRF_wstring(a_fapi_font->memory, a_output, " ]\n");
+        }
+
+        x = a_fapi_font->get_word(a_fapi_font,
+                                  gs_fapi_font_feature_BlendOtherBlues_length, 0);
+        if (x > 0) {
+            WRF_wstring(a_fapi_font->memory, a_output, "/OtherBlues [");
+            acc = 0;
+            for (i = 0; i < x; i++) {
+                WRF_wstring(a_fapi_font->memory, a_output, " [");
+                x1 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendOtherBlues_count, i);
+                for (j = 0; j < x1; j++) {
+                    x2 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendOtherBlues, acc++);
+                    WRF_wint(a_fapi_font->memory, a_output, x2);
+                    WRF_wbyte(a_fapi_font->memory, a_output, (byte)' ');
+                }
+                WRF_wstring(a_fapi_font->memory, a_output, " ]");
+            }
+            WRF_wstring(a_fapi_font->memory, a_output, " ]\n");
+        }
+        x = a_fapi_font->get_word(a_fapi_font,
+                                  gs_fapi_font_feature_BlendBlueScale_count, 0);
+        if (x > 0) {
+            float v;
+            WRF_wstring(a_fapi_font->memory, a_output, "/BlueScale [");
+            for (i =0; i < x; i++) {
+                v = a_fapi_font->get_float(a_fapi_font,
+                                      gs_fapi_font_feature_BlendBlueScale, i);
+                WRF_wfloat(a_fapi_font->memory, a_output, v);
+                WRF_wbyte(a_fapi_font->memory, a_output, (byte)' ');
+            }
+            WRF_wstring(a_fapi_font->memory, a_output, " ]\n");
+        }
+
+        x = a_fapi_font->get_word(a_fapi_font,
+                                  gs_fapi_font_feature_BlendBlueShift_count, 0);
+        if (x > 0) {
+            WRF_wstring(a_fapi_font->memory, a_output, "/BlueShift [");
+            for (i =0; i < x; i++) {
+                x2 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendBlueShift, i);
+                WRF_wint(a_fapi_font->memory, a_output, x2);
+                WRF_wbyte(a_fapi_font->memory, a_output, (byte)' ');
+            }
+            WRF_wstring(a_fapi_font->memory, a_output, " ]\n");
+        }
+
+        x = a_fapi_font->get_word(a_fapi_font,
+                                  gs_fapi_font_feature_BlendBlueFuzz_count, 0);
+        if (x > 0) {
+            WRF_wstring(a_fapi_font->memory, a_output, "/BlueFuzz [");
+            for (i =0; i < x; i++) {
+                x2 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendBlueFuzz, i);
+                WRF_wint(a_fapi_font->memory, a_output, x2);
+                WRF_wbyte(a_fapi_font->memory, a_output, (byte)' ');
+            }
+            WRF_wstring(a_fapi_font->memory, a_output, " ]\n");
+        }
+
+        x = a_fapi_font->get_word(a_fapi_font,
+                                  gs_fapi_font_feature_BlendForceBold_count, 0);
+        if (x > 0) {
+            WRF_wstring(a_fapi_font->memory, a_output, "/ForceBold [");
+            for (i =0; i < x; i++) {
+                x2 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendForceBold, i);
+                WRF_wstring(a_fapi_font->memory, a_output, x2 ? "/true" : "/false");
+                WRF_wbyte(a_fapi_font->memory, a_output, (byte)' ');
+            }
+            WRF_wstring(a_fapi_font->memory, a_output, " ]\n");
+        }
+
+        x = a_fapi_font->get_word(a_fapi_font,
+                                  gs_fapi_font_feature_BlendStdHW_length, 0);
+        if (x > 0) {
+            WRF_wstring(a_fapi_font->memory, a_output, "/StdHW [");
+            acc = 0;
+            for (i = 0; i < x; i++) {
+                WRF_wstring(a_fapi_font->memory, a_output, " [");
+                x1 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendStdHW_count, i);
+                for (j = 0; j < x1; j++) {
+                    x2 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendStdHW, acc++);
+                    WRF_wint(a_fapi_font->memory, a_output, x2);
+                    WRF_wbyte(a_fapi_font->memory, a_output, (byte)' ');
+                }
+                WRF_wstring(a_fapi_font->memory, a_output, " ]");
+            }
+            WRF_wstring(a_fapi_font->memory, a_output, " ]\n");
+        }
+
+        x = a_fapi_font->get_word(a_fapi_font,
+                                  gs_fapi_font_feature_BlendStdVW_length, 0);
+        if (x > 0) {
+            WRF_wstring(a_fapi_font->memory, a_output, "/StdVW [");
+            acc = 0;
+            for (i = 0; i < x; i++) {
+                WRF_wstring(a_fapi_font->memory, a_output, " [");
+                x1 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendStdVW_count, i);
+                for (j = 0; j < x1; j++) {
+                    x2 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendStdVW, acc++);
+                    WRF_wint(a_fapi_font->memory, a_output, x2);
+                    WRF_wbyte(a_fapi_font->memory, a_output, (byte)' ');
+                }
+                WRF_wstring(a_fapi_font->memory, a_output, " ]");
+            }
+            WRF_wstring(a_fapi_font->memory, a_output, " ]\n");
+        }
+
+        x = a_fapi_font->get_word(a_fapi_font,
+                                  gs_fapi_font_feature_BlendStemSnapH_length, 0);
+        if (x > 0) {
+            WRF_wstring(a_fapi_font->memory, a_output, "/StemSnapH [");
+            acc = 0;
+            for (i = 0; i < x; i++) {
+                WRF_wstring(a_fapi_font->memory, a_output, " [");
+                x1 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendStemSnapH_count, i);
+                for (j = 0; j < x1; j++) {
+                    x2 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendStemSnapH, acc++);
+                    WRF_wint(a_fapi_font->memory, a_output, x2);
+                    WRF_wbyte(a_fapi_font->memory, a_output, (byte)' ');
+                }
+                WRF_wstring(a_fapi_font->memory, a_output, " ]");
+            }
+            WRF_wstring(a_fapi_font->memory, a_output, " ]\n");
+        }
+
+        x = a_fapi_font->get_word(a_fapi_font,
+                                  gs_fapi_font_feature_BlendStemSnapV_length, 0);
+        if (x > 0) {
+            WRF_wstring(a_fapi_font->memory, a_output, "/StemSnapV [");
+            acc = 0;
+            for (i = 0; i < x; i++) {
+                WRF_wstring(a_fapi_font->memory, a_output, " [");
+                x1 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendStemSnapV_count, i);
+                for (j = 0; j < x1; j++) {
+                    x2 = a_fapi_font->get_word(a_fapi_font,
+                                      gs_fapi_font_feature_BlendStemSnapV, acc++);
+                    WRF_wint(a_fapi_font->memory, a_output, x2);
+                    WRF_wbyte(a_fapi_font->memory, a_output, (byte)' ');
+                }
+                WRF_wstring(a_fapi_font->memory, a_output, " ]");
+            }
+            WRF_wstring(a_fapi_font->memory, a_output, " ]\n");
+        }
+
+        WRF_wstring(a_fapi_font->memory, a_output, "end\n");
+    }
+}
+
+static void
 write_private_dictionary(gs_fapi_font * a_fapi_font, WRF_output * a_output,
                          int Write_CharStrings)
 {
@@ -228,21 +411,14 @@ write_private_dictionary(gs_fapi_font * a_fapi_font, WRF_output * a_output,
     write_array_entry(a_fapi_font, a_output, "StemSnapV",
                       gs_fapi_font_feature_StemSnapV, 16);
 
-    if (is_MM_font(a_fapi_font)) {
-        WRF_wstring(a_fapi_font->memory, a_output, "3 index /Blend get /Private get begin\n");
-        WRF_wstring(a_fapi_font->memory, a_output, "|-\n");
-    }
+    write_private_blend_dictionary(a_fapi_font, a_output);
+
     if (Write_CharStrings)
         write_subrs(a_fapi_font, a_output, 1);
     else
         write_subrs(a_fapi_font, a_output, 0);
     if (Write_CharStrings)
         write_charstrings(a_fapi_font, a_output);
-}
-
-static void
-write_blend_dictionary(gs_fapi_font * a_fapi_font, WRF_output * a_output)
-{
 }
 
 static void
@@ -264,7 +440,6 @@ write_main_dictionary(gs_fapi_font * a_fapi_font, WRF_output * a_output,
         WRF_wbyte(a_fapi_font->memory, a_output, (byte) (i == 5 ? ']' : ' '));
     }
     WRF_wbyte(a_fapi_font->memory, a_output, '\n');
-
     /* For now, specify standard encoding - I think GS will pass glyph indices so doesn't matter. */
     WRF_wstring(a_fapi_font->memory, a_output, "/Encoding StandardEncoding def\n");
 
@@ -391,6 +566,7 @@ write_main_dictionary(gs_fapi_font * a_fapi_font, WRF_output * a_output,
             WRF_wstring(a_fapi_font->memory, a_output,
                         "/$Blend {0.1 mul exch 0.45 mul add exch 0.17 mul add add} def\n");
         }
+#if 1
         WRF_wstring(a_fapi_font->memory, a_output, "/WeightVector [");
         x = a_fapi_font->get_word(a_fapi_font,
                                   gs_fapi_font_feature_WeightVector_count, 0);
@@ -401,12 +577,30 @@ write_main_dictionary(gs_fapi_font * a_fapi_font, WRF_output * a_output,
             WRF_wstring(a_fapi_font->memory, a_output, Buffer);
         }
         WRF_wstring(a_fapi_font->memory, a_output, "] def\n");
+#endif
+
+        WRF_wstring(a_fapi_font->memory, a_output, "/Blend 3 dict dup begin\n");
+        WRF_wstring(a_fapi_font->memory, a_output, "/FontBBox {");
+        x = a_fapi_font->get_word(a_fapi_font,
+                                 gs_fapi_font_feature_BlendFontBBox_length , 0);
+        for (i = 0; i < x; i++) {
+            int j;
+            WRF_wstring(a_fapi_font->memory, a_output, " {");
+            for (j = 0; j < 4; j++) {
+                x2 = a_fapi_font->get_word(a_fapi_font,
+                                  gs_fapi_font_feature_BlendFontBBox,
+                                  j + (i * 4));
+                WRF_wint(a_fapi_font->memory, a_output, x2);
+                WRF_wbyte(a_fapi_font->memory, a_output, (byte)' ');
+            }
+            WRF_wstring(a_fapi_font->memory, a_output, "}");
+        }
+        WRF_wstring(a_fapi_font->memory, a_output, " } def\n");
+        WRF_wstring(a_fapi_font->memory, a_output, "/Private 14 dict def\n");
+        WRF_wstring(a_fapi_font->memory, a_output, "end def\n");
     }
     WRF_wstring(a_fapi_font->memory, a_output, "currentdict end\ncurrentfile eexec\n");
     write_private_dictionary(a_fapi_font, a_output, Write_CharStrings);
-    if (is_MM_font(a_fapi_font)) {
-        write_blend_dictionary(a_fapi_font, a_output);
-    }
 }
 
 /**
@@ -430,6 +624,14 @@ gs_fapi_serialize_type1_font(gs_fapi_font * a_fapi_font,
     WRF_wstring(a_fapi_font->memory, &output, "%!PS-AdobeFont-1\n");
 
     write_main_dictionary(a_fapi_font, &output, 0);
+#if 0
+    {
+        extern FILE *stdout;
+        if (is_MM_font(a_fapi_font) && a_buffer && a_buffer_size >= output.m_count) {
+            fwrite(a_buffer, 1, output.m_count, stdout);
+        }
+    }
+#endif
     return output.m_count;
 }
 

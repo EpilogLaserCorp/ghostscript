@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,6 +19,9 @@
 #ifndef gsccode_INCLUDED
 #  define gsccode_INCLUDED
 
+#include "std.h"
+#include "gstypes.h"
+
 /*
  * Define a character code.  Normally this is just a single byte from a
  * string, but because of composite fonts, character codes must be
@@ -26,7 +29,7 @@
  */
 typedef ulong gs_char;
 
-#define GS_NO_CHAR ((gs_char)~0L)
+#define GS_NO_CHAR ((gs_char)~0UL)
 /* Backward compatibility */
 #define gs_no_char GS_NO_CHAR
 
@@ -74,7 +77,7 @@ typedef ulong gs_char;
 typedef ulong gs_glyph;
 
 #define GS_NO_GLYPH ((gs_glyph)0x7fffffff)
-#if arch_sizeof_long > 4
+#if ARCH_SIZEOF_LONG > 4
 #  define GS_MIN_CID_GLYPH ((gs_glyph)0x80000000L)
 #else
 /* Avoid compiler warnings about signed/unsigned constants. */
@@ -83,10 +86,6 @@ typedef ulong gs_glyph;
 #define GS_MIN_GLYPH_INDEX (GS_MIN_CID_GLYPH | (GS_MIN_CID_GLYPH >> 1))
 #define GS_GLYPH_TAG (gs_glyph)(GS_MIN_CID_GLYPH | GS_MIN_GLYPH_INDEX)
 #define GS_MAX_GLYPH max_ulong
-/* Backward compatibility */
-#define gs_no_glyph GS_NO_GLYPH
-#define gs_min_cid_glyph GS_MIN_CID_GLYPH
-#define gs_max_glyph GS_MAX_GLYPH
 
 /* Define a procedure for marking a gs_glyph during garbage collection. */
 typedef bool (*gs_glyph_mark_proc_t)(const gs_memory_t *mem, gs_glyph glyph, void *proc_data);

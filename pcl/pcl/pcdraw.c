@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -74,21 +74,25 @@ pcl_set_drawing_color(pcl_state_t * pcs,
     /* use PCL's pattern transparency */
     pcs->pattern_transparent = pcs->pcl_pattern_transparent;
 
-    pcl_ht_set_halftone(pcs);
+    code = pcl_ht_set_halftone(pcs);
+    if (code < 0)
+        return code;
 
     if (type == pcl_pattern_raster_cspace)
         code = (pcl_pattern_get_proc_PCL(type)) (pcs, 0, true);
     else
         code = (pcl_pattern_get_proc_PCL(type)) (pcs, id, (int)for_image);
     if (code >= 0) {
-        gs_setrasterop(pcs->pgs, (gs_rop3_t) pcs->logical_op);
+        code = gs_setrasterop(pcs->pgs, (gs_rop3_t) pcs->logical_op);
+        if (code < 0)
+            return code;
         gs_setfilladjust(pcs->pgs, 0.0, 0.0);
         code = gx_set_dev_color(pcs->pgs);
         if (code == gs_error_Remap_Color)
             code = pixmap_high_level_pattern(pcs->pgs);
         return code;
     }
-    return 0;
+    return code;
 }
 
 /*
@@ -132,12 +136,15 @@ pcl_gsave(pcl_state_t * pcs)
 int
 pcl_grestore(pcl_state_t * pcs)
 {
-    pcl_gstate_ids_t *pids = pcs->pids->prev;
+    pcl_gstate_ids_t *pids;
     int code = 0;
 
     /* check for bottom of graphic state stack */
-    if (pcs == 0 || pcs->pids == 0 || pids == 0)
+    if (pcs == 0 || pcs->pids == 0 || pcs->pids->prev == 0)
         return e_Range;
+    
+    pids = pcs->pids->prev;
+    
     if ((code = gs_grestore(pcs->pgs)) >= 0) {
         pcs->pids->prev = pids->prev;
         pcl_ccolor_copy_from(pcs->pids->pccolor, pids->pccolor);

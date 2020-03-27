@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -22,6 +22,7 @@
 #include "gscompt.h"
 #include "gsrefct.h"
 #include "gxbitfmt.h"
+#include "gsdevice.h"
 
 /*
  * Because compositor information is passed through the command list,
@@ -51,22 +52,9 @@
 /*
  * Define the abstract superclass for all compositing function types.
  */
-                                                   /*typedef struct gs_composite_s gs_composite_t; *//* in gscompt.h */
+/*typedef struct gs_composite_s gs_composite_t; *//* in gscompt.h */
 
-#ifndef gs_imager_state_DEFINED
-#  define gs_imager_state_DEFINED
-typedef struct gs_imager_state_s gs_imager_state;
-#endif
-
-#ifndef gx_device_DEFINED
-#  define gx_device_DEFINED
-typedef struct gx_device_s gx_device;
-#endif
-
-#ifndef gx_device_clist_writer_DEFINED
-#define gx_device_clist_writer_DEFINED
 typedef struct gx_device_clist_writer_s gx_device_clist_writer;
-#endif
 
 typedef struct gs_composite_type_procs_s {
 
@@ -75,7 +63,7 @@ typedef struct gs_composite_type_procs_s {
      */
 #define composite_create_default_compositor_proc(proc)\
   int proc(const gs_composite_t *pcte, gx_device **pcdev,\
-    gx_device *dev, gs_imager_state *pis, gs_memory_t *mem)
+    gx_device *dev, gs_gstate *pgs, gs_memory_t *mem)
     composite_create_default_compositor_proc((*create_default_compositor));
 
     /*
@@ -112,7 +100,7 @@ typedef struct gs_composite_type_procs_s {
      * Adjust CTM before applying the compositor. Used with banding.
      */
 #define composite_adjust_ctm_proc(proc)\
-  int proc(gs_composite_t *pcte, int x0, int y0, gs_imager_state *pis)
+  int proc(gs_composite_t *pcte, int x0, int y0, gs_gstate *pgs)
     composite_adjust_ctm_proc((*adjust_ctm));
 
     /*
@@ -123,7 +111,7 @@ typedef struct gs_composite_type_procs_s {
      * 3 - closing and replacing, 4 - replace one, 5 - drop queue.
      */
 #define composite_is_closing_proc(proc)\
-  int proc(const gs_composite_t *this, gs_composite_t **pcte, gx_device *dev)
+  gs_compositor_closing_state proc(const gs_composite_t *this, gs_composite_t **pcte, gx_device *dev)
     composite_is_closing_proc((*is_closing));
 
     /*
@@ -139,7 +127,7 @@ typedef struct gs_composite_type_procs_s {
      */
 #define composite_clist_write_update(proc)\
   int proc(const gs_composite_t * pcte, gx_device * dev, gx_device ** pcdev,\
-                        gs_imager_state * pis, gs_memory_t * mem)
+                        gs_gstate * pgs, gs_memory_t * mem)
     composite_clist_write_update((*clist_compositor_write_update));
 
     /*
@@ -147,7 +135,7 @@ typedef struct gs_composite_type_procs_s {
      */
 #define composite_clist_read_update(proc)\
   int proc(gs_composite_t * pcte, gx_device * cdev, gx_device * tdev,\
-                        gs_imager_state * pis, gs_memory_t * mem)
+                        gs_gstate * pgs, gs_memory_t * mem)
     composite_clist_read_update((*clist_compositor_read_update));
 
     /*

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -24,17 +24,16 @@
 #include "gsrect.h"		/* for prototypes */
 #include "gsuid.h"
 #include "gsutil.h"		/* for prototypes */
-#include "gzstate.h"
-#include "gxdcolor.h"
 
 /* ------ Unique IDs ------ */
 
 ulong
 gs_next_ids(const gs_memory_t *mem, uint count)
 {
-    ulong id = mem->gs_lib_ctx->gs_next_id;
+    gs_lib_ctx_core_t *core = mem->gs_lib_ctx->core;
+    ulong id = core->gs_next_id;
 
-    mem->gs_lib_ctx->gs_next_id += count;
+    core->gs_next_id += count;
     return id;
 }
 
@@ -112,11 +111,100 @@ memflip8x8(const byte * inp, int line_size, byte * outp, int dist)
     outp[dist] = (byte)(bdfh >> 8);
 }
 
+#ifdef PACIFY_VALGRIND
+void
+memflip8x8_eol(const byte * inp, int line_size, byte * outp, int dist, int bits)
+{
+    uint aceg, bdfh;
+    uint mask;
+
+    {
+        const byte *ptr4 = inp + (line_size << 2);
+        const int ls2 = line_size << 1;
+
+        aceg = ((uint)*inp) | ((uint)inp[ls2] << 8) |
+            ((uint)*ptr4 << 16) | ((uint)ptr4[ls2] << 24);
+        inp += line_size, ptr4 += line_size;
+        bdfh = ((uint)*inp) | ((uint)inp[ls2] << 8) |
+            ((uint)*ptr4 << 16) | ((uint)ptr4[ls2] << 24);
+    }
+
+    /* Keep just the defined bits */
+    mask = (0xff00>>(bits&7)) & 0xff;
+    mask |= mask<<8;
+    mask |= mask<<16;
+    aceg &= mask;
+    bdfh &= mask;
+
+    /* Check for all 8 bytes being the same. */
+    /* This is especially worth doing for the case where all are zero. */
+    if (aceg == bdfh && (aceg >> 8) == (aceg & 0xffffff)) {
+        if (aceg == 0 || aceg == 0xffffffff)
+            goto store;
+        *outp = (byte)-(int)((aceg >> 7) & 1);
+        outp[dist] = (byte)-(int)((aceg >> 6) & 1);
+        outp += dist << 1;
+        *outp = (byte)-(int)((aceg >> 5) & 1);
+        outp[dist] = (byte)-(int)((aceg >> 4) & 1);
+        outp += dist << 1;
+        *outp = (byte)-(int)((aceg >> 3) & 1);
+        outp[dist] = (byte)-(int)((aceg >> 2) & 1);
+        outp += dist << 1;
+        *outp = (byte)-(int)((aceg >> 1) & 1);
+        outp[dist] = (byte)-(int)(aceg & 1);
+        return;
+    } {
+        register uint temp;
+
+/* Transpose a block of bits between registers. */
+#define TRANSPOSE(r,s,mask,shift)\
+  (r ^= (temp = ((s >> shift) ^ r) & mask),\
+   s ^= temp << shift)
+
+/* Transpose blocks of 4 x 4 */
+        TRANSPOSE(aceg, aceg, 0x00000f0f, 20);
+        TRANSPOSE(bdfh, bdfh, 0x00000f0f, 20);
+
+/* Transpose blocks of 2 x 2 */
+        TRANSPOSE(aceg, aceg, 0x00330033, 10);
+        TRANSPOSE(bdfh, bdfh, 0x00330033, 10);
+
+/* Transpose blocks of 1 x 1 */
+        TRANSPOSE(aceg, bdfh, 0x55555555, 1);
+
+#undef TRANSPOSE
+    }
+
+  store:
+    *outp = (byte)aceg;
+    outp[dist] = (byte)bdfh;
+    outp += dist << 1;
+    *outp = (byte)(aceg >>= 8);
+    outp[dist] = (byte)(bdfh >>= 8);
+    outp += dist << 1;
+    *outp = (byte)(aceg >>= 8);
+    outp[dist] = (byte)(bdfh >>= 8);
+    outp += dist << 1;
+    *outp = (byte)(aceg >> 8);
+    outp[dist] = (byte)(bdfh >> 8);
+}
+#endif
+
 /* Get an unsigned, big-endian 32-bit value. */
 ulong
 get_u32_msb(const byte *p)
 {
     return ((uint)p[0] << 24) + ((uint)p[1] << 16) + ((uint)p[2] << 8) + p[3];
+}
+
+/* Put an unsigned, big-endian 32-bit value. */
+void
+put_u32_msb(byte *p, const ulong n, const int offs)
+{
+    (p + offs)[0] = n >> 24 & 255;
+    (p + offs)[1] = n >> 16 & 255;
+    (p + offs)[2] = n >> 8  & 255;
+    (p + offs)[3] = n & 255;
 }
 
 /* ------ String utilities ------ */

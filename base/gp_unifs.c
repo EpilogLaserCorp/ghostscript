@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -70,13 +70,16 @@ const char gp_current_directory_name[] = ".";
 
 /* Create and open a scratch file with a given name prefix. */
 /* Write the actual file name at fname. */
-static FILE *
-gp_open_scratch_file_generic(const gs_memory_t *mem,
-                             const char        *prefix,
-                                   char         fname[gp_file_name_sizeof],
-                             const char        *mode,
-                                   bool         b64)
+FILE *
+gp_open_scratch_file_impl(const gs_memory_t *mem,
+                          const char        *prefix,
+                                char         fname[gp_file_name_sizeof],
+                          const char        *mode,
+                                int          remove)
 {       /* The -8 is for XXXXXX plus a possible final / and -. */
+#ifdef GS_NO_FILESYSTEM
+    return NULL;
+#else
     int prefix_length = strlen(prefix);
     int len = gp_file_name_sizeof - prefix_length - 8;
     FILE *fp;
@@ -104,79 +107,74 @@ gp_open_scratch_file_generic(const gs_memory_t *mem,
 
         /* save the old filename template in case mkstemp fails */
         memcpy(ofname, fname, gp_file_name_sizeof);
-#ifdef HAVE_MKSTEMP64
-        if (b64)
-            file = mkstemp64(fname);
-        else
-            file = mkstemp(fname);
-#else
+#  ifdef HAVE_MKSTEMP64
+        file = mkstemp64(fname);
+#  else
         file = mkstemp(fname);
-#endif
+#  endif
         if (file < -1) {
             emprintf1(mem, "**** Could not open temporary file %s\n", ofname);
             return NULL;
         }
-#if defined(O_LARGEFILE) && defined(__hpux)
-        if (b64)
-            fcntl(file, F_SETFD, fcntl(file, F_GETFD) | O_LARGEFILE);
-#else
+#  if defined(O_LARGEFILE) && defined(__hpux)
+        fcntl(file, F_SETFD, fcntl(file, F_GETFD) | O_LARGEFILE);
+#  else
         /* Fixme : what to do with b64 and 32-bit mkstemp? Unimplemented. */
-#endif
+#  endif
 
         fp = fdopen(file, mode);
-        if (fp == NULL)
-            close(file);
+        if (fp == NULL) {
+	    close(file);
+	}
     }
 #else
+    /* Coverity thinks that any use of mktemp() is insecure. But if we
+    reach here then there is no mkstemp() alternative available, so there's
+    not much we can do. Haven't been able to disable this - e.g. '//
+    coverity[SECURE_TEMP]' doesn't have any affect. */
     mktemp(fname);
-    fp = (b64 ? gp_fopentemp : gp_fopentemp_64)(fname, mode);
+    fp = gp_fopentemp(fname, mode);
 #endif
     if (fp == NULL)
         emprintf1(mem, "**** Could not open temporary file %s\n", fname);
+
+    if (remove)
+        unlink(fname);
+
     return fp;
-}
-FILE *
-gp_open_scratch_file(const gs_memory_t *mem,
-                     const char        *prefix,
-                           char         fname[gp_file_name_sizeof],
-                     const char        *mode)
-{
-    return gp_open_scratch_file_generic(mem, prefix, fname, mode, false);
+#endif
 }
 
 /* Open a file with the given name, as a stream of uninterpreted bytes. */
 FILE *
-gp_fopen(const char *fname, const char *mode)
+gp_fopen_impl(gs_memory_t *mem, const char *fname, const char *mode)
 {
+#if defined(HAVE_FILE64)
+    return fopen64(fname, mode);
+#else
     return fopen(fname, mode);
+#endif
 }
 
-int gp_stat(const char *path, struct stat *buf)
+int gp_stat_impl(const gs_memory_t *mem, const char *path, struct stat *buf)
 {
     return stat(path, buf);
 }
 
 int gp_can_share_fdesc(void)
 {
+#if defined(HAVE_PREAD_PWRITE) && HAVE_PREAD_PWRITE == 1
     return 1;
+#else
+    return 0;	/* can't share FILE * descriptors w/o pread due to seek..read..seek */
+#endif
 }
 
-FILE *gp_open_scratch_file_rm(const gs_memory_t *mem,
-                              const char        *prefix,
-                                    char         fname[gp_file_name_sizeof],
-                              const char        *mode)
+FILE *gp_fdup_impl(FILE *f, const char *mode)
 {
-    FILE *f = gp_open_scratch_file_generic(mem, prefix, fname, mode, false);
-    /* Unlink file immediately to avoid it being left around if the program
-     * is killed. On this platform readers access temp files by cloning the
-     * FILE pointer and without accessing the file by name */
-    if (f)
-        unlink(fname);
-    return f;
-}
-
-FILE *gp_fdup(FILE *f, const char *mode)
-{
+#ifdef GS_NO_FILESYSTEM
+    return NULL;
+#else
     int fd = fileno(f);
     if (fd < 0)
         return NULL;
@@ -184,55 +182,60 @@ FILE *gp_fdup(FILE *f, const char *mode)
     if (fd < 0)
         return NULL;
     return fdopen(fd, mode);
+#endif
 }
 
-int gp_fpread(char *buf, uint count, int64_t offset, FILE *f)
+int gp_pread_impl(char *buf, size_t count, gs_offset_t offset, FILE *f)
 {
-#if defined(HAVE_PREAD_PWRITE) && HAVE_PREAD_PWRITE == 1
+#ifdef GS_NO_FILESYSTEM
+    return 0;
+#elif defined(HAVE_PREAD_PWRITE) && HAVE_PREAD_PWRITE == 1
     return pread(fileno(f), buf, count, offset);
 #else
     int c;
-    int64_t os, curroff = gp_ftell_64(f);
+    int64_t os, curroff = gp_ftell_impl(f);
     if (curroff < 0) return curroff;
-    
-    os = gp_fseek_64(f, offset, 0);
+
+    os = gp_fseek_impl(f, offset, 0);
     if (os < 0) return os;
-    
+
     c = fread(buf, 1, count, f);
     if (c < 0) return c;
-    
-    os = gp_fseek_64(f, curroff, 0);
+
+    os = gp_fseek_impl(f, curroff, 0);
     if (os < 0) return os;
-    
+
     return c;
 #endif
 }
 
-int gp_fpwrite(char *buf, uint count, int64_t offset, FILE *f)
+int gp_pwrite_impl(const char *buf, size_t count, gs_offset_t offset, FILE *f)
 {
-#if defined(HAVE_PREAD_PWRITE) && HAVE_PREAD_PWRITE == 1
+#ifdef GS_NO_FILESYSTEM
+    return 0;
+#elif defined(HAVE_PREAD_PWRITE) && HAVE_PREAD_PWRITE == 1
     return pwrite(fileno(f), buf, count, offset);
 #else
     int c;
-    int64_t os, curroff = gp_ftell_64(f);
+    int64_t os, curroff = gp_ftell_impl(f);
     if (curroff < 0) return curroff;
-    
-    os = gp_fseek_64(f, offset, 0);
+
+    os = gp_fseek_impl(f, offset, 0);
     if (os < 0) return os;
-    
+
     c = fwrite(buf, 1, count, f);
     if (c < 0) return c;
-    
-    os = gp_fseek_64(f, curroff, 0);
+
+    os = gp_fseek_impl(f, curroff, 0);
     if (os < 0) return os;
-    
+
     return c;
 #endif
 }
 
 /* Set a file into binary or text mode. */
 int
-gp_setmode_binary(FILE * pfile, bool mode)
+gp_setmode_binary_impl(FILE * pfile, bool mode)
 {
     return 0;                   /* Noop under Unix */
 }
@@ -243,6 +246,13 @@ gp_setmode_binary(FILE * pfile, bool mode)
 /* the original version of the following code, and Richard Mlynarik */
 /* (mly@adoc.xerox.com) for an improved version. */
 
+#ifdef GS_NO_FILESYSTEM
+struct file_enum_s {
+    int dummy;
+};
+
+static file_enum dummy_enum;
+#else
 typedef struct dirstack_s dirstack;
 struct dirstack_s {
     dirstack *next;
@@ -319,11 +329,15 @@ popdir(file_enum * pfen)
     gs_free_object(pfen->memory, d, "gp_enumerate_files(popdir)");
     return true;
 }
+#endif
 
 /* Initialize an enumeration. */
 file_enum *
-gp_enumerate_files_init(const char *pat, uint patlen, gs_memory_t * mem)
+gp_enumerate_files_init_impl(gs_memory_t * mem, const char *pat, uint patlen)
 {
+#ifdef GS_NO_FILESYSTEM
+    return &dummy_enum;
+#else
     file_enum *pfen;
     char *p;
     char *work;
@@ -361,14 +375,14 @@ gp_enumerate_files_init(const char *pat, uint patlen, gs_memory_t * mem)
         (char *)gs_alloc_bytes(mem, patlen + 1,
                                "gp_enumerate_files(pattern)");
     if (pfen->pattern == 0)
-        return 0;
+        goto fail1;
     memcpy(pfen->pattern, pat, patlen);
     pfen->pattern[patlen] = 0;
 
     work = (char *)gs_alloc_bytes(mem, FILENAME_MAX + 1,
                                   "gp_enumerate_files(work)");
     if (work == 0)
-        return 0;
+        goto fail2;
     pfen->work = work;
 
     p = work;
@@ -379,9 +393,9 @@ gp_enumerate_files_init(const char *pat, uint patlen, gs_memory_t * mem)
     /* Remove directory specifications beyond the first wild card. */
     /* Some systems don't have strpbrk, so we code it open. */
     p = pfen->work;
-    while (!(*p == '*' || *p == '?' || *p == 0))
+    while (*p != '*' && *p != '?' && *p != 0)
         p++;
-    while (!(*p == '/' || *p == 0))
+    while (*p != '/' && *p != 0)
         p++;
     if (*p == '/')
         *p = 0;
@@ -402,26 +416,35 @@ gp_enumerate_files_init(const char *pat, uint patlen, gs_memory_t * mem)
     }
 
     return pfen;
+
+fail2:
+    gs_free_object(mem, pfen->pattern, "gp_enumerate_files(pattern)");
+fail1:
+    gs_free_object(mem, pfen, "gp_enumerate_files");
+    return NULL;
+#endif
 }
 
 /* Enumerate the next file. */
 uint
-gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
+gp_enumerate_files_next_impl(gs_memory_t * mem, file_enum * pfen, char *ptr, uint maxlen)
 {
+#ifdef GS_NO_FILESYSTEM
+    return ~(uint)0;
+#else
     const dir_entry *de;
     char *work = pfen->work;
     int worklen = pfen->worklen;
     char *pattern = pfen->pattern;
     int pathead = pfen->pathead;
     int len;
-    struct stat stbuf;
 
     if (pfen->first_time) {
         pfen->dirp = ((worklen == 0) ? opendir(".") : opendir(work));
         if_debug1m('e', pfen->memory, "[e]file_enum:First-Open '%s'\n", work);
         pfen->first_time = false;
         if (pfen->dirp == 0) {  /* first opendir failed */
-            gp_enumerate_files_close(pfen);
+            gp_enumerate_files_close(mem, pfen);
             return ~(uint) 0;
         }
     }
@@ -453,7 +476,7 @@ gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
             goto top;
         } else {
             if_debug0m('e', pfen->memory, "[e]file_enum:Dirstack empty\n");
-            gp_enumerate_files_close(pfen);
+            gp_enumerate_files_close(mem, pfen);
             return ~(uint) 0;
         }
     }
@@ -481,31 +504,24 @@ gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
 
     /* Perhaps descend into subdirectories */
     if (pathead < maxlen) {
-        DIR *dp;
-
-        if (((stat(work, &stbuf) >= 0)
-             ? !stat_is_dir(stbuf)
-        /* Couldn't stat it.
-         * Well, perhaps it's a directory and
-         * we'll be able to list it anyway.
-         * If it isn't or we can't, no harm done. */
-             : 0))
+        /* Using stat() to decide whether this item is a directory then opening
+        using opendir(), results in Coverity complaining about races. Se
+        instead we simple call opendir() immediately and look at whether it
+        succeeded. */
+        DIR *dp = opendir(work);
+        if (!dp) {
+            /* Not a directory. */
             goto winner;
+        }
 
         if (pfen->patlen == pathead + 1) {      /* Listing "foo/?/" -- return this entry */
-            /* if it's a directory. */
-            if (!stat_is_dir(stbuf)) {  /* Do directoryp test the hard way */
-                dp = opendir(work);
-                if (!dp)
-                    goto top;
-                closedir(dp);
-            }
+            closedir(dp);
             work[len++] = '/';
             goto winner;
         }
+
         /* >>> Should optimise the case in which the next level */
         /* >>> of directory has no wildcards. */
-        dp = opendir(work);
 #ifdef DEBUG
         {
             char save_end = pattern[pathead];
@@ -516,21 +532,22 @@ gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
             pattern[pathead] = save_end;
         }
 #endif /* DEBUG */
-        if (!dp)
-            /* Can't list this one */
-            goto top;
-        else {                  /* Advance to the next directory-delimiter */
+        {                  /* Advance to the next directory-delimiter */
             /* in pattern */
             char *p;
             dirstack *d;
 
-            for (p = pattern + pathead + 1;; p++) {
-                if (*p == 0) {  /* No more subdirectories to match */
-                    pathead = pfen->patlen;
-                    break;
-                } else if (*p == '/') {
-                    pathead = p - pattern;
-                    break;
+	    if (pattern[pathead] == 0) {
+                pathead = pfen->patlen;
+	    } else {
+                for (p = pattern + pathead + 1;; p++) {
+                    if (*p == 0) {  /* No more subdirectories to match */
+                        pathead = pfen->patlen;
+                        break;
+                    } else if (*p == '/') {
+                        pathead = p - pattern;
+                        break;
+                    }
                 }
             }
 
@@ -543,7 +560,7 @@ gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
                 d->entry = pfen->dirp;
                 pfen->dstack = d;
             } else
-                DO_NOTHING;     /* >>> e_VMerror!!! */
+                DO_NOTHING;     /* >>> gs_error_VMerror!!! */
 
             if_debug1m('e', pfen->memory, "[e]file_enum:Dir pushed '%s'\n",
                        work);
@@ -559,22 +576,28 @@ gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen)
     memcpy(ptr, work, len > maxlen ? maxlen : len);
 
     return len;
+#endif
 }
 
 /* Clean up the file enumeration. */
 void
-gp_enumerate_files_close(file_enum * pfen)
+gp_enumerate_files_close_impl(gs_memory_t * mem, file_enum * pfen)
 {
-    gs_memory_t *mem = pfen->memory;
+#ifdef GS_NO_FILESYSTEM
+    /* No cleanup necessary */
+#else
+    gs_memory_t *mem2 = pfen->memory;
+    (void)mem;
 
-    if_debug0m('e', mem, "[e]file_enum:Cleanup\n");
+    if_debug0m('e', mem2, "[e]file_enum:Cleanup\n");
     while (popdir(pfen))        /* clear directory stack */
         DO_NOTHING;
-    gs_free_object(mem, (byte *) pfen->work,
+    gs_free_object(mem2, (byte *) pfen->work,
                    "gp_enumerate_close(work)");
-    gs_free_object(mem, (byte *) pfen->pattern,
+    gs_free_object(mem2, (byte *) pfen->pattern,
                    "gp_enumerate_files_close(pattern)");
-    gs_free_object(mem, pfen, "gp_enumerate_files_close");
+    gs_free_object(mem2, pfen, "gp_enumerate_files_close");
+#endif
 }
 
 /* Test-cases:
@@ -586,26 +609,7 @@ gp_enumerate_files_close(file_enum * pfen)
 
 /* --------- 64 bit file access ----------- */
 
-FILE *gp_fopen_64(const char *filename, const char *mode)
-{
-#if defined(HAVE_FILE64)
-    return fopen64(filename, mode);
-#else
-    return fopen(filename, mode);
-#endif
-}
-
-FILE *gp_open_scratch_file_64(const gs_memory_t *mem,
-                              const char        *prefix,
-                                    char         fname[gp_file_name_sizeof],
-                              const char        *mode)
-{
-    return gp_open_scratch_file_generic(mem, prefix, fname, mode, true);
-}
-
-/* gp_open_printer_64 is defined in gp_unix.h */
-
-int64_t gp_ftell_64(FILE *strm)
+gs_offset_t gp_ftell_impl(FILE *strm)
 {
 #if defined(HAVE_FILE64)
     return ftello64(strm);
@@ -614,7 +618,7 @@ int64_t gp_ftell_64(FILE *strm)
 #endif
 }
 
-int gp_fseek_64(FILE *strm, int64_t offset, int origin)
+int gp_fseek_impl(FILE *strm, gs_offset_t offset, int origin)
 {
 #if defined(HAVE_FILE64)
     return fseeko64(strm, offset, origin);
@@ -627,15 +631,15 @@ int gp_fseek_64(FILE *strm, int64_t offset, int origin)
 #endif
 }
 
-bool gp_fseekable (FILE *f)
+bool gp_fseekable_impl(FILE *f)
 {
     struct stat s;
     int fno;
-    
+
     fno = fileno(f);
     if (fno < 0)
         return(false);
-    
+
     if (fstat(fno, &s) < 0)
         return(false);
 

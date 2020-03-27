@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,6 +20,7 @@
 #ifndef gp_INCLUDED
 #  define gp_INCLUDED
 
+#include "stat_.h"
 #include "gstypes.h"
 #include "gscdefs.h"		/* for gs_serialnumber */
 /*
@@ -43,6 +44,8 @@
  * int64_t is used in the 64 bits file access.
  */
 #include "stdint_.h"
+
+#include "memory_.h"
 
 /* ------ Initialization/termination ------ */
 
@@ -112,13 +115,13 @@ int gp_serialnumber(void);
  * Read the current time (in seconds since an implementation-defined epoch)
  * into ptm[0], and fraction (in nanoseconds) into ptm[1].
  */
-void gp_get_realtime(long ptm[2]);
+void gp_get_realtime(long *ptm);
 
 /*
  * Read the current user CPU time (in seconds) into ptm[0],
  * and fraction (in nanoseconds) into ptm[1].
  */
-void gp_get_usertime(long ptm[2]);
+void gp_get_usertime(long *ptm);
 
 /* ------ Reading lines from stdin ------ */
 
@@ -147,6 +150,195 @@ int gp_readline(stream *s_in, stream *s_out, void *readline_data,
  * Free a readline state.
  */
 void gp_readline_finit(void *readline_data);
+
+/* ------ File access functions ------ */
+
+typedef struct {
+    int          (*close)(gp_file *);
+    int          (*getc)(gp_file *);
+    int          (*putc)(gp_file *, int);
+    int          (*read)(gp_file *, size_t size, unsigned int count, void *buf);
+    int          (*write)(gp_file *, size_t size, unsigned int count, const void *buf);
+    int          (*seek)(gp_file *, gs_offset_t offset, int whence);
+    gs_offset_t  (*tell)(gp_file *);
+    int          (*eof)(gp_file *);
+    gp_file     *(*dup)(gp_file *, const char *mode);
+    int          (*seekable)(gp_file *);
+    int          (*pread)(gp_file *, size_t count, gs_offset_t offset, void *buf);
+    int          (*pwrite)(gp_file *, size_t count, gs_offset_t offset, const void *buf);
+    int          (*is_char_buffered)(gp_file *file);
+    void         (*fflush)(gp_file *file);
+    int          (*ferror)(gp_file *file);
+    FILE        *(*get_file)(gp_file *file);
+    void         (*clearerr)(gp_file *file);
+    gp_file     *(*reopen)(gp_file *f, const char *fname, const char *mode);
+} gp_file_ops_t;
+
+struct gp_file_s {
+    gp_file_ops_t ops;
+
+    gs_memory_t *memory;
+    char        *buffer;
+    int          buffer_size;
+};
+
+/* Implementers of gp_file instances will need to provide
+ * implementations of the above function pointers, together with
+ * one (or more) functions to create gp_file instances. We
+ * provide the following convenience functions to aid in this:
+ */
+
+/* Allocate a structure based on a gp_file, initialise it with the
+ * given prototype, and zero the rest of it. Returns NULL on failure
+ * to allocate. */
+gp_file *gp_file_alloc(gs_memory_t *mem, const gp_file_ops_t *prototype, size_t size, const char *cname);
+
+/* Called automatically by gp_fclose. May be needed for implementers to
+ * clear up allocations if errors occur while opening files. */
+void gp_file_dealloc(gp_file *file);
+
+/* Called to allocate a gp_file based on a FILE * (yet to be
+ * opened). Returns NULL on failure to allocate. */
+gp_file *gp_file_FILE_alloc(const gs_memory_t *mem);
+
+/* Called to set a newly opened FILE * into a gp_file previously
+ * allocated by gp_file_FILE_alloc. If f is NULL, then the
+ * allocation is taken to have failed, file is freed, and the
+ * function returns 1. Otherwise, f is recorded within file and
+ * the function returns 0. */
+int gp_file_FILE_set(gp_file *file, FILE *f, int (*close)(FILE *));
+
+
+/* The actual API that people call to use gp_files: */
+
+static inline int
+gp_fgetc(gp_file *f) {
+    return (f->ops.getc)(f);
+}
+
+static inline int
+gp_fputc(int c, gp_file *f) {
+    return (f->ops.putc)(f, c);
+}
+
+static inline int
+gp_fread(void *buf, size_t size, size_t count, gp_file *f) {
+    return (f->ops.read)(f, size, count, buf);
+}
+
+static inline int
+gp_fwrite(const void *buf, size_t size, size_t count, gp_file *f) {
+    return (f->ops.write)(f, size, count, buf);
+}
+
+static inline int
+gp_fseek(gp_file *f, gs_offset_t offset, int whence) {
+    if (f->ops.seek == NULL)
+        return -1;
+    return (f->ops.seek)(f, offset, whence);
+}
+
+static inline gs_offset_t
+gp_ftell(gp_file *f) {
+    if (f->ops.tell == NULL)
+        return -1;
+    return (f->ops.tell)(f);
+}
+
+static inline int
+gp_feof(gp_file *f) {
+    return f->ops.eof(f);
+}
+
+static inline int
+gp_fclose(gp_file *f) {
+    int ret = (f->ops.close)(f);
+    gp_file_dealloc(f);
+    return ret;
+}
+
+static inline gp_file *
+gp_fdup(gp_file *f, const char *mode) {
+    if (f == NULL || f->ops.dup == NULL)
+        return NULL;
+
+    return (f->ops.dup)(f, mode);
+}
+
+static inline int
+gp_fseekable(gp_file *f) {
+    if (f == NULL || f->ops.seekable == NULL)
+        return 0;
+    return f->ops.seekable(f);
+}
+
+static inline int
+gp_fpread(void *buf, size_t count, gs_offset_t offset, gp_file *f) {
+    return (f->ops.pread)(f, count, offset, buf);
+}
+
+static inline int
+gp_fpwrite(void *buf, size_t count, gs_offset_t offset, gp_file *f) {
+    return (f->ops.pwrite)(f, count, offset, buf);
+}
+
+static inline int
+gp_file_is_char_buffered(gp_file *f) {
+    if (f->ops.is_char_buffered == NULL)
+        return 0;
+    return (f->ops.is_char_buffered)(f);
+}
+
+static inline void
+gp_fflush(gp_file *f) {
+    if (f->ops.fflush)
+        (f->ops.fflush)(f);
+}
+
+static inline int
+gp_ferror(gp_file *f) {
+    return (f->ops.ferror)(f);
+}
+
+static inline FILE *
+gp_get_file(gp_file *f) {
+    if (f->ops.get_file == NULL)
+        return NULL;
+    return (f->ops.get_file)(f);
+}
+
+static inline void
+gp_clearerr(gp_file *f) {
+    if (f->ops.clearerr)
+        (f->ops.clearerr)(f);
+}
+
+/* fname is always in utf8 format */
+static inline gp_file *
+gp_freopen(const char *fname, const char *mode, gp_file *f) {
+    if (f->ops.reopen == NULL)
+        return NULL;
+    return (f->ops.reopen)(f, fname, mode);
+}
+
+static inline int
+gp_fputs(const char *string, gp_file *f) {
+    size_t len = strlen(string);
+    return (f->ops.write)(f, 1, len, string);
+}
+
+static inline int
+gp_rewind(gp_file *f) {
+    return gp_fseek(f, 0, SEEK_SET);
+}
+
+char *gp_fgets(char *buffer, size_t n, gp_file *f);
+
+int gp_fprintf(gp_file *f, const char *fmt, ...)
+#ifdef __GNUC__
+    __attribute__ ((format (__printf__, 2, 3)))
+#endif
+    ;
 
 /* ------ Reading from stdin, unbuffered if possible ------ */
 
@@ -200,7 +392,7 @@ extern const char gp_current_directory_name[];
 /* Define the string to be concatenated with the file mode */
 /* for opening files without end-of-line conversion. */
 /* This is always either "" or "b". */
-extern const char gp_fmode_binary_suffix[];
+extern const char* gp_fmode_binary_suffix;
 
 /* Define the file modes for binary reading or writing. */
 /* (This is just a convenience: they are "r" or "w" + the suffix.) */
@@ -211,7 +403,7 @@ extern const char gp_fmode_wb[];
  * gp_open_scratch_file: Create a scratch file.
  * @mem: Memory pointer
  * @prefix: Name prefix.
- * @fname: Where to store filename of newly created file.
+ * @fname: Where to store filename of newly created file (utf8).
  * @mode: File access mode (in fopen syntax).
  *
  * Creates a scratch (temporary) file in the filesystem. The exact
@@ -220,41 +412,24 @@ extern const char gp_fmode_wb[];
  * an appropriate system directory, usually as determined from
  * gp_gettmpdir(), followed by a path as returned from a system call.
  *
- * Implementations should make sure that
- *
  * Return value: Opened file object, or NULL on error.
  **/
-FILE *gp_open_scratch_file(const gs_memory_t *mem,
-                           const char        *prefix,
-                                 char         fname[gp_file_name_sizeof],
-                           const char        *mode);
-
-/* Open a file with the given name, as a stream of uninterpreted bytes. */
-FILE *gp_fopen(const char *fname, const char *mode);
-
-/* gp_stat is defined in stat_.h rather than here due to macro problems */
-
-/* Test whether this platform supports the sharing of file descriptors */
-int gp_can_share_fdesc(void);
-
-/* Create a self-deleting scratch file */
-FILE *gp_open_scratch_file_rm(const gs_memory_t *mem,
+gp_file *gp_open_scratch_file(const gs_memory_t *mem,
                               const char        *prefix,
                                     char         fname[gp_file_name_sizeof],
                               const char        *mode);
 
-/* Create a second open FILE on the basis of a given one */
-FILE *gp_fdup(FILE *f, const char *mode);
+/* Open a file with the given (utf8) name, as a stream of uninterpreted
+ * bytes. */
+gp_file *gp_fopen(const gs_memory_t *mem, const char *fname, const char *mode);
 
-/* Read from a specified offset within a FILE into a buffer */
-int gp_fpread(char *buf, uint count, int64_t offset, FILE *f);
+/* Create a self-deleting scratch file (utf8) */
+gp_file *gp_open_scratch_file_rm(const gs_memory_t *mem,
+                                 const char        *prefix,
+                                       char         fname[gp_file_name_sizeof],
+                                 const char        *mode);
 
-/* Write to a specified offset within a FILE from a buffer */
-int gp_fpwrite(char *buf, uint count, int64_t offset, FILE *f);
-
-/* Force given file into binary mode (no eol translations, etc) */
-/* if 2nd param true, text mode if 2nd param false */
-int gp_setmode_binary(FILE * pfile, bool mode);
+/* gp_stat is defined in stat_.h rather than here due to macro problems */
 
 typedef enum {
     gp_combine_small_buffer = -1,
@@ -349,37 +524,6 @@ int gp_read_macresource(byte *buf, const char *fname,
 /* Returns true when the character can be used in the file name. */
 bool gp_file_name_good_char(unsigned char c);
 
-/* ------ persistent cache interface ------ */
-
-/*
- * This is used for access to data cached between invocations of
- * Ghostscript. It is generally used for saving reusable data that
- * is expensive to compute. Concurrent access by multiple instances
- * is safe. Because of this care should be taken to use a new data
- * type when the format of the cached data changes.
- *
- * Generic data buffers are stored under a combination of type and
- * key. It is up the to client to interpret the data buffer appropriately.
- * An insert overwrites any previous entry under that type and key.
- * A query if successful uses the passed callback to allocate a buffer
- * and fills it with the retrieved data. The caller is thus responsible
- * for the buffer's memory management.
- *
- * See zmisc.c for postscript test operators and an example implementation.
- */
-
-/* return 0 on successful insert, non-zero otherwise */
-int gp_cache_insert(int type, byte *key, int keylen, void *buffer, int buflen);
-
-/* return the length of the buffer on success, a negative value otherwise */
-typedef void *(*gp_cache_alloc)(void *userdata, int bytes);
-int gp_cache_query(int type, byte* key, int keylen, void **buffer,
-    gp_cache_alloc alloc, void *userdata);
-
-/* cache data types */
-#define GP_CACHE_TYPE_TEST 0
-#define GP_CACHE_TYPE_FONTMAP 1
-
 /* ------ Printer accessing ------ */
 
 /*
@@ -396,9 +540,9 @@ int gp_cache_query(int type, byte* key, int keylen, void **buffer,
  * for spooling.  If the file name is null and no default printer is
  * available, this procedure returns 0.
  */
-FILE *gp_open_printer(const gs_memory_t *mem,
-                            char         fname[gp_file_name_sizeof],
-                            int          binary_mode);
+gp_file *gp_open_printer(const gs_memory_t *mem,
+                               char         fname[gp_file_name_sizeof],
+                               int          binary_mode);
 
 /*
  * Close the connection to the printer.  Note that this is only called
@@ -407,16 +551,12 @@ FILE *gp_open_printer(const gs_memory_t *mem,
  * values of filedevice are handled by calling the fclose procedure
  * associated with that kind of "file".
  */
-void gp_close_printer(const gs_memory_t *mem,
-                            FILE        *pfile,
-                      const char        *fname);
+void gp_close_printer(      gp_file *pfile,
+                      const char    *fname);
 
 /* ------ File enumeration ------ */
 
-#ifndef file_enum_DEFINED	/* also defined in iodev.h */
-#  define file_enum_DEFINED
 typedef struct file_enum_s file_enum;
-#endif
 
 /*
  * Begin an enumeration.  pat is a C string that may contain *s or ?s.
@@ -429,8 +569,7 @@ typedef struct file_enum_s file_enum;
  * string of ?s should be interpreted as *.  Note that \ can appear in
  * the pattern also, as a quoting character.
  */
-file_enum *gp_enumerate_files_init(const char *pat, uint patlen,
-                                   gs_memory_t * memory);
+file_enum *gp_enumerate_files_init(gs_memory_t *memory, const char *pat, uint patlen);
 
 /*
  * Return the next file name in the enumeration.  The client passes in
@@ -439,7 +578,7 @@ file_enum *gp_enumerate_files_init(const char *pat, uint patlen,
  * returns max length +1.  If there are no more files, the procedure
  * returns -1.
  */
-uint gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen);
+uint gp_enumerate_files_next(gs_memory_t *memory, file_enum * pfen, char *ptr, uint maxlen);
 
 /*
  * Clean up a file enumeration.  This is only called to abandon
@@ -447,7 +586,7 @@ uint gp_enumerate_files_next(file_enum * pfen, char *ptr, uint maxlen);
  * no more files to enumerate.  This should deallocate the file_enum
  * structure and any subsidiary structures, strings, buffers, etc.
  */
-void gp_enumerate_files_close(file_enum * pfen);
+void gp_enumerate_files_close(gs_memory_t *memory, file_enum * pfen);
 
 /* ------ Font enumeration ------ */
 
@@ -472,49 +611,56 @@ int gp_enumerate_fonts_next(void *enum_state, char **fontname, char **path);
 /* clean up and deallocate the iterator */
 void gp_enumerate_fonts_free(void *enum_state);
 
-/* --------- 64 bit file access ----------- */
+/* ----- Platform specific file operations ----- */
 
-/* The following functions are analogues of ones with
-   same name without the "_64" suffix.
-   They perform same function with allowing big files
-   (over 4 gygabytes length).
+/* The following functions are implemented by each platform, and
+ * never called directly by devices or core code (only by the
+ * gp_file functions themselves). */
 
-   If the platform does not allow big files,
-   these functions are mapped to regular file i/o functions.
-   On 64 bits platforms they work same as
-   regular file i/o functions.
+FILE *gp_fopen_impl(gs_memory_t *mem, const char *fname, const char *mode);
 
-   We continue using the old file i/o functions
-   because most files do not need 64 bits access.
-   The upgrading of old code to the new 64 bits access
-   to be done step by step on real necessity,
-   with replacing old function names with
-   new function names through code,
-   together with providing the int64_t type for storing
-   file offsets in intermediate structures and variables.
+FILE *gp_fdup_impl(FILE *f, const char *mode);
 
-   We assume that the result of 64 bits variant of 'ftell'
-   can be represented in int64_t on all platforms,
-   rather the result type of the native 64 bits function is
-   compiler dependent (__off_t on Linux, _off_t on Cygwin,
-   __int64 on Windows).
- */
+int gp_pread_impl(char *buf, size_t count, gs_offset_t offset, FILE *f);
 
-FILE *gp_fopen_64(const char *filename, const char *mode);
+int gp_pwrite_impl(const char *buf, size_t count, gs_offset_t offset, FILE *f);
 
-FILE *gp_open_scratch_file_64(const gs_memory_t *mem,
-                              const char        *prefix,
-                                    char         fname[gp_file_name_sizeof],
-                              const char        *mode);
-FILE *gp_open_printer_64(const gs_memory_t *mem,
-                               char         fname[gp_file_name_sizeof],
-                               int          binary_mode);
+gs_offset_t gp_ftell_impl(FILE *f);
 
-int64_t gp_ftell_64(FILE *strm);
+int gp_fseek_impl(FILE *strm, gs_offset_t offset, int origin);
 
-int gp_fseek_64(FILE *strm, int64_t offset, int origin);
+/* Create a second open gp_file on the basis of a given one */
+FILE *gp_fdup_impl(FILE *f, const char *mode);
 
-bool gp_fseekable (FILE *f);
+int gp_fseekable_impl(FILE *f);
+
+/* Force given file into binary mode (no eol translations, etc) */
+/* if 2nd param true, text mode if 2nd param false */
+int gp_setmode_binary_impl(FILE * pfile, bool mode);
+
+FILE *
+gp_open_printer_impl(gs_memory_t *mem,
+                     const char  *fname,
+                     int         *binary_mode,
+                     int          (**close)(FILE *));
+
+/* Create a scratch file (utf8) (self-deleting if remove) */
+FILE *gp_open_scratch_file_impl(const gs_memory_t *mem,
+                                const char        *prefix,
+                                      char         fname[gp_file_name_sizeof],
+                                const char        *mode,
+                                      int          remove);
+
+/* Test whether this platform supports the sharing of file descriptors */
+int gp_can_share_fdesc(void);
+
+int gp_stat_impl(const gs_memory_t *mem, const char *path, struct stat *buf);
+
+file_enum *gp_enumerate_files_init_impl(gs_memory_t *memory, const char *pat, uint patlen);
+
+uint gp_enumerate_files_next_impl(gs_memory_t *memory, file_enum * pfen, char *ptr, uint maxlen);
+
+void gp_enumerate_files_close_impl(gs_memory_t *memory, file_enum * pfen);
 
 /* We don't define gp_fread_64, gp_fwrite_64,
    because (1) known platforms allow regular fread, fwrite
@@ -529,6 +675,20 @@ bool gp_fseekable (FILE *f);
  * a unicode codepoint. Returns EOF for end of file (or string).
  */
 int
-gp_local_arg_encoding_get_codepoint(FILE *file, const char **astr);
+gp_local_arg_encoding_get_codepoint(gp_file *file, const char **astr);
+
+int
+gp_xpsprint(char *filename, char *printername, int *result);
+
+int
+gp_validate_path_len(const gs_memory_t *mem,
+                 const char        *path,
+                 const uint         rlen,
+                 const char        *mode);
+
+int
+gp_validate_path(const gs_memory_t *mem,
+                 const char        *path,
+                 const char        *mode);
 
 #endif /* gp_INCLUDED */

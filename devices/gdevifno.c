@@ -46,7 +46,7 @@ struct Rectangle {
 };
 static const Point ZP = { 0, 0 };
 
-static WImage* initwriteimage(FILE *f, Rectangle r, int ldepth, gs_memory_t *mem);
+static WImage* initwriteimage(gp_file *f, Rectangle r, int ldepth, gs_memory_t *mem);
 static int writeimageblock(WImage *w, uchar *data, int ndata, gs_memory_t *mem);
 static int bytesperline(Rectangle, int);
 static int rgb2cmap(int, int, int);
@@ -164,7 +164,7 @@ inferno_cmap2rgb(gx_device *dev, gx_color_index color,
         int nbits = bdev->nbits;
         int mask = (1<<nbits)-1;
 
-        if(color < 0 || color > 255)
+        if((int)color < 0 || (int)color > 255)
                 return_error(gs_error_rangecheck);
 
         rgb[2] = (color >> (2*nbits)) & mask;
@@ -268,7 +268,7 @@ inferno_close(gx_device *dev)
  * worry about that).
  */
 static int
-inferno_print_page(gx_device_printer *pdev, FILE *f)
+inferno_print_page(gx_device_printer *pdev, gp_file *f)
 {
         uchar *buf;
         uchar *p;
@@ -281,6 +281,7 @@ inferno_print_page(gx_device_printer *pdev, FILE *f)
         int gsbpl;
         ulong u;
         ushort us;
+        int code = 0;
 
         inferno_device *bdev = (inferno_device *) pdev;
         Rectangle r;
@@ -319,9 +320,13 @@ inferno_print_page(gx_device_printer *pdev, FILE *f)
          * to save all the ldepth lookups.
          */
         for(y=0; y<pdev->height; y++) {
-                gdev_prn_get_bits(pdev, y, buf, &p);
+
+                code = gdev_prn_get_bits(pdev, y, buf, &p);
+                if (code < 0)
+                    goto xit;
                 for(x=0; x<pdev->width; x++) {
                         us = (p[2*x]<<8) | p[2*x+1];
+
                         switch(ldepth) {
                         case 3:
                                 if(0){
@@ -335,6 +340,8 @@ inferno_print_page(gx_device_printer *pdev, FILE *f)
                                         p[x] = rgb2cmap(r,g,b);
                                 }
                                 if(1){
+                                        if (us >= p9color_size)
+                                            return_error(gs_error_rangecheck);
                                         u = bdev->p9color[us];
                                         /* the ulong in p9color is a 2x2 matrix.  pull the entry
                                          * u[x%2][y%2], more or less.
@@ -369,12 +376,13 @@ inferno_print_page(gx_device_printer *pdev, FILE *f)
                         return_error(gs_error_Fatal);
                 }
         }
-        gs_free_object(bdev->memory, buf, "inferno line buffer");
         if(writeimageblock(w, nil, 0, bdev->memory) == ERROR) {
                 return_error(gs_error_Fatal);
         }
+xit:
+        gs_free_object(bdev->memory, buf, "inferno line buffer");
 
-        return 0;
+        return code;
 }
 
 /*
@@ -413,7 +421,7 @@ struct Dump {
 };
 
 struct WImage {
-        FILE *f;
+        gp_file *f;
 
         /* image attributes */
         Rectangle origr, r;
@@ -467,8 +475,8 @@ addbuf(WImage *w, uchar *buf, int nbuf)
                         return ERROR;
                 }
                 n=w->loutp-w->outbuf;
-                fprintf(w->f, "%11d %11d ", w->r.max.y, n);
-                fwrite(w->outbuf, 1, n, w->f);
+                gp_fprintf(w->f, "%11d %11d ", w->r.max.y, n);
+                gp_fwrite(w->outbuf, 1, n, w->f);
                 w->r.min.y=w->r.max.y;
                 w->outp=w->outbuf;
                 w->loutp=w->outbuf;
@@ -660,7 +668,7 @@ shiftwindow(WImage *w, uchar *data, uchar *edata)
 }
 
 static WImage*
-initwriteimage(FILE *f, Rectangle r, int ldepth, gs_memory_t *mem)
+initwriteimage(gp_file *f, Rectangle r, int ldepth, gs_memory_t *mem)
 {
         WImage *w;
         int n, bpl;
@@ -691,8 +699,8 @@ initwriteimage(FILE *f, Rectangle r, int ldepth, gs_memory_t *mem)
         w->dump.ndump = 0;
         zerohash(w);
 
-        fprintf(f, "compressed\n%11d %11d %11d %11d %11d ",
-                ldepth, r.min.x, r.min.y, r.max.x, r.max.y);
+        gp_fprintf(f, "compressed\n%11d %11d %11d %11d %11d ",
+                   ldepth, r.min.x, r.min.y, r.max.x, r.max.y);
         return w;
 }
 
@@ -721,7 +729,7 @@ writeimageblock(WImage *w, uchar *data, int ndata, gs_memory_t *mem)
                 data = shiftwindow(w, data, edata);
         }
         if(data != edata) {
-                fprintf(w->f, "data != edata.  uh oh\n");
+                gp_fprintf(w->f, "data != edata.  uh oh\n");
                 return ERROR; /* can't happen */
         }
         return 0;

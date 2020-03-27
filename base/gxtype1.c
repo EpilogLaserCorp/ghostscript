@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -25,7 +25,7 @@
 #include "gxarith.h"
 #include "gxchrout.h"
 #include "gxfixed.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gxmatrix.h"
 #include "gxcoord.h"
 #include "gxfont.h"
@@ -63,7 +63,7 @@ ENUM_PTRS_WITH(gs_type1_state_enum_ptrs, gs_type1_state *pcis)
                           index % ST_GLYPH_DATA_NUM_PTRS);
     return 0;
 }
-ENUM_PTR3(0, gs_type1_state, pfont, pis, path);
+ENUM_PTR3(0, gs_type1_state, pfont, pgs, path);
 ENUM_PTR(3, gs_type1_state, callback_data);
 ENUM_PTRS_END
 static RELOC_PTRS_WITH(gs_type1_state_reloc_ptrs, gs_type1_state *pcis)
@@ -71,7 +71,7 @@ static RELOC_PTRS_WITH(gs_type1_state_reloc_ptrs, gs_type1_state *pcis)
     int i;
 
     RELOC_PTR(gs_type1_state, pfont);
-    RELOC_PTR(gs_type1_state, pis);
+    RELOC_PTR(gs_type1_state, pgs);
     RELOC_PTR(gs_type1_state, path);
     RELOC_PTR(gs_type1_state, callback_data);
     for (i = 0; i < pcis->ips_count; i++) {
@@ -96,7 +96,7 @@ const char gx_extendeg_glyph_name_separator[] = "~GS~";
 /* Initialize a Type 1 interpreter. */
 /* The caller must supply a string to the first call of gs_type1_interpret. */
 int
-gs_type1_interp_init(register gs_type1_state * pcis, gs_imager_state * pis,
+gs_type1_interp_init(register gs_type1_state * pcis, gs_gstate * pgs,
     gx_path * ppath, const gs_log2_scale_point * pscale,
     const gs_log2_scale_point * psubpixels, bool no_grid_fitting,
                      int paint_type, gs_font_type1 * pfont)
@@ -107,9 +107,9 @@ gs_type1_interp_init(register gs_type1_state * pcis, gs_imager_state * pis,
     const gs_log2_scale_point *plog2_subpixels =
         (FORCE_HINTS_TO_BIG_PIXELS ? (psubpixels != NULL ? psubpixels : plog2_scale) : &no_scale);
 
-    if_debug0m('1', pis->memory, "[1]gs_type1_interp_init\n");
+    if_debug0m('1', pgs->memory, "[1]gs_type1_interp_init\n");
     pcis->pfont = pfont;
-    pcis->pis = pis;
+    pcis->pgs = pgs;
     pcis->path = ppath;
     pcis->callback_data = pfont; /* default callback data */
     pcis->no_grid_fitting = no_grid_fitting;
@@ -163,11 +163,11 @@ gs_type1_set_width(gs_type1_state * pcis, const gs_point * pwpt)
 void
 gs_type1_finish_init(gs_type1_state * pcis)
 {
-    gs_imager_state *pis = pcis->pis;
+    gs_gstate *pgs = pcis->pgs;
     const int max_coeff_bits = 11;	/* max coefficient in char space */
 
     /* Set up the fixed version of the transformation. */
-    gx_matrix_to_fixed_coeff(&ctm_only(pis), &pcis->fc, max_coeff_bits);
+    gx_matrix_to_fixed_coeff(&ctm_only(pgs), &pcis->fc, max_coeff_bits);
 
     /* Set the current point of the path to the origin, */
     pcis->origin.x = pcis->path->position.x;
@@ -180,7 +180,7 @@ gs_type1_finish_init(gs_type1_state * pcis)
     pcis->vs_offset.x = pcis->vs_offset.y = 0;
 
     /* Compute the flatness needed for accurate rendering. */
-    pcis->flatness = gs_char_flatness(pis, 0.001);
+    pcis->flatness = gs_char_flatness(pgs, 0.001);
 
     pcis->init_done = 1;
 }
@@ -272,7 +272,7 @@ gs_type1_seac(gs_type1_state * pcis, const fixed * cstack, fixed asb,
 int
 gs_type1_endchar(gs_type1_state * pcis)
 {
-    gs_imager_state *pis = pcis->pis;
+    gs_gstate *pgs = pcis->pgs;
 
     if (pcis->seac_accent >= 0) {	/* We just finished the base character of a seac. */
         /* Do the accent. */
@@ -321,10 +321,10 @@ gs_type1_endchar(gs_type1_state * pcis)
         return 1;
     }
     if (pcis->pfont->PaintType == 0)
-        pis->fill_adjust.x = pis->fill_adjust.y = -1;
+        pgs->fill_adjust.x = pgs->fill_adjust.y = -1;
     /* Set the flatness for curve rendering. */
     if (!pcis->no_grid_fitting)
-        gs_imager_setflat(pis, pcis->flatness);
+        gs_setflat(pgs, pcis->flatness);
     return 0;
 }
 
@@ -389,13 +389,15 @@ gs_type1_piece_codes(/*const*/ gs_font_type1 *pfont,
     for (;;) {
         uint c0;
 
-        if (cip > end)
+        if (cip >= end) {
              /* We used to treat buffer overrun as a simple invalid font, now we assume that
-             * there is an implicit endcharr.
+             * there is an implicit endchar/return.
              * Part of bug #693170 where the fonts are invalid (no endchar on some glyphs).
              */
+            if (call_depth > 0)
+                goto c_return;
             goto out;
-
+        }
         c0 = *cip++;
 
         charstring_next(c0, state, c, encrypted);
@@ -419,7 +421,7 @@ gs_type1_piece_codes(/*const*/ gs_font_type1 *pfont,
         switch ((char_command) c) {
         default:
             cnext;
-            goto out;
+            break;
         case c2_shortint:
             {
                 short sint = *cip++;
@@ -490,6 +492,7 @@ gs_type1_piece_codes(/*const*/ gs_font_type1 *pfont,
             end = ipsp->cs_data.bits.data + ipsp->cs_data.bits.size;
             goto call;
         case c_return:
+c_return:
             if (call_depth == 0)
                 return (gs_note_error(gs_error_invalidfont));
             else
@@ -515,9 +518,14 @@ gs_type1_piece_codes(/*const*/ gs_font_type1 *pfont,
                 goto out;	/* not seac */
         do_seac:
             /* This is the payoff for all this code! */
-            chars[0] = fixed2int(csp[-1]);
-            chars[1] = fixed2int(csp[0]);
-            return 1;
+            if (CS_CHECK_CSTACK_BOUNDS(&csp[-1], cstack)) {
+                chars[0] = fixed2int(csp[-1]);
+                chars[1] = fixed2int(csp[0]);
+                return 1;
+            }
+            else {
+                return_error(gs_error_invalidfont);
+            }
         case cx_escape:
             charstring_next(*cip, state, c, encrypted);
             ++cip;
@@ -631,11 +639,11 @@ gs_type1_glyph_info(gs_font *font, gs_glyph glyph, const gs_matrix *pmat,
         /*
          * Interpret the CharString until we get to the [h]sbw.
          */
-        gs_imager_state gis;
+        gs_gstate gis;
         gs_type1_state cis;
         int value;
 
-        /* Initialize just enough of the imager state. */
+        /* Initialize just enough of the gs_gstate. */
         if (pmat)
             gs_matrix_fixed_from_matrix(&gis.ctm, pmat);
         else {
@@ -650,6 +658,7 @@ gs_type1_glyph_info(gs_font *font, gs_glyph glyph, const gs_matrix *pmat,
         if (code < 0)
             return code;
         cis.no_grid_fitting = true;
+        memset(&path, 0x00, sizeof(path));
         gx_path_init_bbox_accumulator(&path);
         cis.path = &path;
         code = pdata->interpret(&cis, &gdata, &value);

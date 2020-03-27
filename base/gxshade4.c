@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -25,24 +25,21 @@
 #include "gxcspace.h"
 #include "gxdcolor.h"
 #include "gxdevcli.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gxpath.h"
 #include "gxshade.h"
 #include "gxshade4.h"
-#include "vdtrace.h"
 #include "gsicc_cache.h"
-
-#define VD_TRACE_TRIANGLE_PATCH 1
 
 /* Initialize the fill state for triangle shading. */
 int
 mesh_init_fill_state(mesh_fill_state_t * pfs, const gs_shading_mesh_t * psh,
                      const gs_fixed_rect * rect_clip, gx_device * dev,
-                     gs_imager_state * pis)
+                     gs_gstate * pgs)
 {
     int code;
     code = shade_init_fill_state((shading_fill_state_t *) pfs,
-                                 (const gs_shading_t *)psh, dev, pis);
+                                 (const gs_shading_t *)psh, dev, pgs);
     if (code < 0)
         return code;
     pfs->pshm = psh;
@@ -57,8 +54,10 @@ Gt_next_vertex(const gs_shading_mesh_t * psh, shade_coord_stream_t * cs,
                shading_vertex_t * vertex, patch_color_t *c)
 {
     int code = shade_next_vertex(cs, vertex, c);
+    if (code < 0)
+        return code;
 
-    if (code >= 0 && psh->params.Function) {
+    if (psh->params.Function) {
         c->t[0] = c->cc.paint.values[0];
         c->t[1] = 0;
         /* Decode the color with the function. */
@@ -90,7 +89,7 @@ Gt_fill_triangle(patch_fill_state_t * pfs, const shading_vertex_t * va,
 int
 gs_shading_FfGt_fill_rectangle(const gs_shading_t * psh0, const gs_rect * rect,
                                const gs_fixed_rect * rect_clip,
-                               gx_device * dev, gs_imager_state * pis)
+                               gx_device * dev, gs_gstate * pgs)
 {
     const gs_shading_FfGt_t * const psh = (const gs_shading_FfGt_t *)psh0;
     patch_fill_state_t pfs;
@@ -103,14 +102,8 @@ gs_shading_FfGt_fill_rectangle(const gs_shading_t * psh0, const gs_rect * rect,
                                         provides a non-const access. */
     int code;
 
-    if (VD_TRACE_TRIANGLE_PATCH && vd_allowed('s')) {
-        vd_get_dc('s');
-        vd_set_shift(0, 0);
-        vd_set_scale(0.01);
-        vd_set_origin(0, 0);
-    }
     code = shade_init_fill_state((shading_fill_state_t *)&pfs,
-                                 (const gs_shading_t *)psh, dev, pis);
+                                 (const gs_shading_t *)psh, dev, pgs);
     if (code < 0)
         return code;
     pfs.Function = pshm->params.Function;
@@ -125,7 +118,7 @@ gs_shading_FfGt_fill_rectangle(const gs_shading_t * psh0, const gs_rect * rect,
     vb.c = cb = C[1];
     vc.c = cc = C[2];
     shade_next_init(&cs, (const gs_shading_mesh_params_t *)&psh->params,
-                    pis);
+                    pgs);
     /* CET 09-47J.PS SpecialTestI04Test01 does not need the color data alignment. */
     while ((flag = shade_next_flag(&cs, num_bits)) >= 0) {
         switch (flag) {
@@ -144,6 +137,7 @@ gs_shading_FfGt_fill_rectangle(const gs_shading_t * psh0, const gs_rect * rect,
                 va = vb;
                 ca = cb;
                 vb.c = cb = c;
+                /* fall through */
             case 2:
                 c = cb;
                 vb = vc;
@@ -156,8 +150,6 @@ v2:		if ((code = Gt_next_vertex(pshm, &cs, &vc, cc)) < 0)
         }
         cs.align(&cs, 8); /* Debugged with 12-14O.PS page 2. */
     }
-    if (VD_TRACE_TRIANGLE_PATCH && vd_allowed('s'))
-        vd_release_dc;
     release_colors(&pfs, pfs.color_stack, 3);
     if (pfs.icclink != NULL) gsicc_release_link(pfs.icclink);
     if (term_patch_fill_state(&pfs))
@@ -170,7 +162,7 @@ v2:		if ((code = Gt_next_vertex(pshm, &cs, &vc, cc)) < 0)
 int
 gs_shading_LfGt_fill_rectangle(const gs_shading_t * psh0, const gs_rect * rect,
                                const gs_fixed_rect * rect_clip,
-                               gx_device * dev, gs_imager_state * pis)
+                               gx_device * dev, gs_gstate * pgs)
 {
     const gs_shading_LfGt_t * const psh = (const gs_shading_LfGt_t *)psh0;
     patch_fill_state_t pfs;
@@ -184,14 +176,8 @@ gs_shading_LfGt_fill_rectangle(const gs_shading_t * psh0, const gs_rect * rect,
     patch_color_t *c, *cn; /* cn == next.c always, provides a non-contst access. */
     int i, code;
 
-    if (VD_TRACE_TRIANGLE_PATCH && vd_allowed('s')) {
-        vd_get_dc('s');
-        vd_set_shift(0, 0);
-        vd_set_scale(0.01);
-        vd_set_origin(0, 0);
-    }
     code = shade_init_fill_state((shading_fill_state_t *)&pfs,
-                                 (const gs_shading_t *)psh, dev, pis);
+                                 (const gs_shading_t *)psh, dev, pgs);
     if (code < 0)
         return code;
     pfs.Function = pshm->params.Function;
@@ -202,20 +188,20 @@ gs_shading_LfGt_fill_rectangle(const gs_shading_t * psh0, const gs_rect * rect,
     reserve_colors(&pfs, &cn, 1); /* Can't fail. */
     next.c = cn;
     shade_next_init(&cs, (const gs_shading_mesh_params_t *)&psh->params,
-                    pis);
+                    pgs);
     vertex = (shading_vertex_t *)
-        gs_alloc_byte_array(pis->memory, per_row, sizeof(*vertex),
+        gs_alloc_byte_array(pgs->memory, per_row, sizeof(*vertex),
                             "gs_shading_LfGt_render");
     if (vertex == NULL) {
         code = gs_note_error(gs_error_VMerror);
         goto out;
     }
-    color_buffer = gs_alloc_bytes(pis->memory, pfs.color_stack_step * per_row, "gs_shading_LfGt_fill_rectangle");
+    color_buffer = gs_alloc_bytes(pgs->memory, pfs.color_stack_step * per_row, "gs_shading_LfGt_fill_rectangle");
     if (color_buffer == NULL) {
         code = gs_note_error(gs_error_VMerror);
         goto out;
     }
-    color_buffer_ptrs = (patch_color_t **)gs_alloc_bytes(pis->memory,
+    color_buffer_ptrs = (patch_color_t **)gs_alloc_bytes(pgs->memory,
                             sizeof(patch_color_t *) * per_row, "gs_shading_LfGt_fill_rectangle");
     if (color_buffer_ptrs == NULL) {
         code = gs_note_error(gs_error_VMerror);
@@ -253,11 +239,9 @@ gs_shading_LfGt_fill_rectangle(const gs_shading_t * psh0, const gs_rect * rect,
         next.c = cn = c;
     }
 out:
-    if (VD_TRACE_TRIANGLE_PATCH && vd_allowed('s'))
-        vd_release_dc;
-    gs_free_object(pis->memory, vertex, "gs_shading_LfGt_render");
-    gs_free_object(pis->memory, color_buffer, "gs_shading_LfGt_render");
-    gs_free_object(pis->memory, color_buffer_ptrs, "gs_shading_LfGt_render");
+    gs_free_object(pgs->memory, vertex, "gs_shading_LfGt_render");
+    gs_free_object(pgs->memory, color_buffer, "gs_shading_LfGt_render");
+    gs_free_object(pgs->memory, color_buffer_ptrs, "gs_shading_LfGt_render");
     release_colors(&pfs, pfs.color_stack, 1);
     if (pfs.icclink != NULL) gsicc_release_link(pfs.icclink);
     if (term_patch_fill_state(&pfs))

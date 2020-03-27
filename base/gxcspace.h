@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -25,23 +25,9 @@
 #include "gscsel.h"
 #include "gxfrac.h"		/* for concrete colors */
 #include "gxcindex.h"           /* for gx_color_index  */
-
-/* Define opaque types. */
-
-#ifndef gx_device_color_DEFINED
-#  define gx_device_color_DEFINED
-typedef struct gx_device_color_s gx_device_color;
-#endif
-
-#ifndef gx_device_DEFINED
-#  define gx_device_DEFINED
-typedef struct gx_device_s gx_device;
-#endif
-
-#ifndef stream_DEFINED
-#  define stream_DEFINED
-typedef struct stream_s stream;
-#endif
+#include "gsdevice.h"
+#include "gsdcolor.h"
+#include "scommon.h"
 
 /* Color space types (classes): */
 /*typedef struct gs_color_space_type_s gs_color_space_type; */
@@ -104,9 +90,9 @@ struct gs_color_space_type_s {
 
 #define cs_proc_concrete_space(proc)\
   const gs_color_space *proc(const gs_color_space *,\
-                                const gs_imager_state *)
-#define cs_concrete_space(pcs, pis)\
-  (*(pcs)->type->concrete_space)(pcs, pis)
+                                const gs_gstate *)
+#define cs_concrete_space(pcs, pgs)\
+  (*(pcs)->type->concrete_space)(pcs, pgs)
         cs_proc_concrete_space((*concrete_space));
 
     /*
@@ -119,31 +105,32 @@ struct gs_color_space_type_s {
 
 #define cs_proc_concretize_color(proc)\
   int proc(const gs_client_color *, const gs_color_space *,\
-    frac *, const gs_imager_state *, gx_device *)
-#define cs_concretize_color(pcc, pcs, values, pis, dev)\
-  (*(pcs)->type->concretize_color)(pcc, pcs, values, pis, dev)
+    frac *, const gs_gstate *, gx_device *)
+#define cs_concretize_color(pcc, pcs, values, pgs, dev)\
+  (*(pcs)->type->concretize_color)(pcc, pcs, values, pgs, dev)
         cs_proc_concretize_color((*concretize_color));
 
     /* Map a concrete color to a device color. */
     /* (Only defined for concrete color spaces.) */
 
 #define cs_proc_remap_concrete_color(proc)\
-  int proc(const frac *, const gs_color_space * pcs, gx_device_color *,\
-        const gs_imager_state *, gx_device *, gs_color_select_t)
+  int proc(const gs_color_space * pcs, const frac *, gx_device_color *,\
+        const gs_gstate *, gx_device *, gs_color_select_t,\
+        const cmm_dev_profile_t *dev_profile)
         cs_proc_remap_concrete_color((*remap_concrete_color));
 
     /* Map a color directly to a device color. */
 
 #define cs_proc_remap_color(proc)\
   int proc(const gs_client_color *, const gs_color_space *,\
-    gx_device_color *, const gs_imager_state *, gx_device *,\
+    gx_device_color *, const gs_gstate *, gx_device *,\
     gs_color_select_t)
         cs_proc_remap_color((*remap_color));
 
     /* Install the color space in a graphics state. */
 
 #define cs_proc_install_cspace(proc)\
-  int proc(gs_color_space *, gs_state *)
+  int proc(gs_color_space *, gs_gstate *)
         cs_proc_install_cspace((*install_cspace));
 
     /*
@@ -159,7 +146,7 @@ struct gs_color_space_type_s {
      */
 
 #define cs_proc_set_overprint(proc)\
-  int proc(const gs_color_space *, gs_state *)
+  int proc(const gs_color_space *, gs_gstate *)
         cs_proc_set_overprint((*set_overprint));
 
     /* Free contents of composite colorspace objects. */
@@ -203,13 +190,13 @@ struct gs_color_space_type_s {
     /* A color mapping linearity check. */
 
 #define cs_proc_is_linear(proc)\
-  int proc(const gs_color_space *cs, const gs_imager_state * pis,\
+  int proc(const gs_color_space *cs, const gs_gstate * pgs,\
                 gx_device *dev,\
                 const gs_client_color *c0, const gs_client_color *c1,\
                 const gs_client_color *c2, const gs_client_color *c3,\
                 float smoothness, gsicc_link_t *icclink)
-#define cs_is_linear(pcs, pis, dev, c0, c1, c2, c3, smoothness, icclink)\
-  (*(pcs)->type->is_linear)(pcs, pis, dev, c0, c1, c2, c3, smoothness, icclink)
+#define cs_is_linear(pcs, pgs, dev, c0, c1, c2, c3, smoothness, icclink)\
+  (*(pcs)->type->is_linear)(pcs, pgs, dev, c0, c1, c2, c3, smoothness, icclink)
         cs_proc_is_linear((*is_linear));
 
     /* Define the polarity of a color space.  We will use gx_color_polarity_t
@@ -247,7 +234,6 @@ cs_proc_remap_color(gx_default_remap_color);
 cs_proc_remap_color(gx_remap_named_color);
 cs_proc_install_cspace(gx_no_install_cspace);
 cs_proc_set_overprint(gx_spot_colors_set_overprint);
-cs_proc_set_overprint(gx_simulated_set_overprint);
 cs_proc_adjust_color_count(gx_no_adjust_color_count);
 cs_proc_serialize(gx_serialize_cspace_type);
 cs_proc_is_linear(gx_cspace_no_linear);
@@ -275,13 +261,10 @@ gs_color_space *
 gs_cspace_alloc(gs_memory_t *mem, const gs_color_space_type *pcstype);
 
 /* Determine if the current color model is a "DeviceCMYK" color model, and */
-/* if so what are its process color components. Also the same for the RGB */
-/* device that simulates CMYK overprinting */
+/* if so what are its process color components. */
 gx_color_index check_cmyk_color_model_comps(gx_device * dev);
-gx_color_index check_rgb_color_model_comps(gx_device * dev);
 
 /* Shared code with ICC overprint */
-int gx_set_overprint_cmyk(const gs_color_space * pcs, gs_state * pgs);
-int gx_set_overprint_rgb(const gs_color_space * pcs, gs_state * pgs);
+int gx_set_overprint_cmyk(const gs_color_space * pcs, gs_gstate * pgs);
 
 #endif /* gxcspace_INCLUDED */

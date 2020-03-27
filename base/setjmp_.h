@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -29,8 +29,15 @@ typedef struct {
 
 #define gsfix_jmp_buf_align ((size_t)&((gsfix_jmp_buf_test*)0)->j)
 
+/* We previously used sizeof(jmp_buf) + gsfix_jmp_buf_align for the
+   content of gsfix_jmp_buf, but the compiler (gcc/clang) considered
+   gsfix_jmp_buf_align to be a variable which meant a variable sized
+   array, and that's not allowed.
+   Using 2 * sizeof(jmp_buf) solves that. It is slightly wasteful but
+   this is not an object that many instances will exist at a given time.
+ */
 typedef struct {
-    unsigned char stuff[sizeof(jmp_buf) + gsfix_jmp_buf_align];
+    unsigned char stuff[sizeof(jmp_buf) * 2];
 } gsfix_jmp_buf;
 
 /* This could be moved into a function, but it's fairly harmless as a macro. */

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -30,13 +30,15 @@
 
 /* Define the special devices. */
 const char iodev_dtype_stdio[] = "Special";
-#define iodev_special(dname, init, open) {\
+#define iodev_special(dname, init, finit, open) {\
     dname, iodev_dtype_stdio,\
-        { init, open, iodev_no_open_file, iodev_no_fopen, iodev_no_fclose,\
+        { init, finit, open, iodev_no_open_file, iodev_no_fopen, iodev_no_fclose,\
           iodev_no_delete_file, iodev_no_rename_file, iodev_no_file_status,\
           iodev_no_enumerate_files, NULL, NULL,\
           iodev_no_get_params, iodev_no_put_params\
-        }\
+        }, \
+        NULL, \
+        NULL \
 }
 
 /*
@@ -49,19 +51,20 @@ const char iodev_dtype_stdio[] = "Special";
 
 #define STDIN_BUF_SIZE 1024
 static iodev_proc_init(stdin_init);
+static iodev_proc_finit(stdin_finit);
 static iodev_proc_open_device(stdin_open);
 const gx_io_device gs_iodev_stdin =
-    iodev_special("%stdin%", stdin_init, stdin_open);
+    iodev_special("%stdin%", stdin_init, stdin_finit, stdin_open);
 
 #define STDOUT_BUF_SIZE 128
 static iodev_proc_open_device(stdout_open);
 const gx_io_device gs_iodev_stdout =
-    iodev_special("%stdout%", iodev_no_init, stdout_open);
+    iodev_special("%stdout%", iodev_no_init, iodev_no_finit, stdout_open);
 
 #define STDERR_BUF_SIZE 128
 static iodev_proc_open_device(stderr_open);
 const gx_io_device gs_iodev_stderr =
-    iodev_special("%stderr%", iodev_no_init, stderr_open);
+    iodev_special("%stderr%", iodev_no_init, iodev_no_finit, stderr_open);
 
 /* ------- %stdin, %stdout, and %stderr ------ */
 
@@ -74,14 +77,17 @@ const gx_io_device gs_iodev_stderr =
  */
 
 static int
-    s_stdin_read_process(stream_state *, stream_cursor_read *,
-                         stream_cursor_write *, bool);
-
-static int
 stdin_init(gx_io_device * iodev, gs_memory_t * mem)
 {
-    mem->gs_lib_ctx->stdin_is_interactive = true;
+    mem->gs_lib_ctx->core->stdin_is_interactive = true;
     return 0;
+}
+
+static void
+stdin_finit(gx_io_device * iodev, gs_memory_t * mem)
+{
+    mem->gs_lib_ctx->core->stdin_is_interactive = false;
+    return;
 }
 
 /* Read from stdin into the buffer. */
@@ -93,19 +99,20 @@ s_stdin_read_process(stream_state * st, stream_cursor_read * ignore_pr,
     int wcount = (int)(pw->limit - pw->ptr);
     int count;
     gs_memory_t *mem = st->memory;
+    gs_lib_ctx_core_t *core = mem->gs_lib_ctx->core;
 
     if (wcount <= 0)
         return 0;
 
     /* do the callout */
-    if (mem->gs_lib_ctx->stdin_fn)
-        count = (*mem->gs_lib_ctx->stdin_fn)
-            (mem->gs_lib_ctx->caller_handle, (char *)pw->ptr + 1,
-             mem->gs_lib_ctx->stdin_is_interactive ? 1 : wcount);
+    if (core->stdin_fn)
+        count = (*core->stdin_fn)
+            (core->caller_handle, (char *)pw->ptr + 1,
+             core->stdin_is_interactive ? 1 : wcount);
     else
         count = gp_stdin_read((char *)pw->ptr + 1, wcount,
-                      mem->gs_lib_ctx->stdin_is_interactive,
-                      mem->gs_lib_ctx->fstdin);
+                      core->stdin_is_interactive,
+                      core->fstdin);
 
     pw->ptr += (count < 0) ? 0 : count;
     return ((count < 0) ? ERRC : (count == 0) ? EOFC : count);
@@ -143,7 +150,7 @@ stdin_open(gx_io_device * iodev, const char *access, stream ** ps,
         s->file = 0;
         s->file_modes = s->modes;
         s->file_offset = 0;
-        s->file_limit = max_long;
+        s->file_limit = S_FILE_LIMIT_MAX;
         s->save_close = s_std_null;
         make_file(&ref_stdin, a_readonly | avm_system, s->read_id, s);
         *ps = s;
@@ -220,7 +227,7 @@ stdout_open(gx_io_device * iodev, const char *access, stream ** ps,
         s->file = 0;
         s->file_modes = s->modes;
         s->file_offset = 0;		/* in case we switch to reading later */
-        s->file_limit = max_long;	/* ibid. */
+        s->file_limit = S_FILE_LIMIT_MAX;
         s->save_close = s->procs.flush;
         make_file(&ref_stdout, a_write | avm_system, s->write_id, s);
         *ps = s;
@@ -291,7 +298,7 @@ stderr_open(gx_io_device * iodev, const char *access, stream ** ps,
         s->file = 0;
         s->file_modes = s->modes;
         s->file_offset = 0;		/* in case we switch to reading later */
-        s->file_limit = max_long;	/* ibid. */
+        s->file_limit = S_FILE_LIMIT_MAX;
         s->save_close = s->procs.flush;
         make_file(&ref_stderr, a_write | avm_system, s->write_id, s);
         *ps = s;

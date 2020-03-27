@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,25 +20,17 @@
 #  define gsdcolor_INCLUDED
 
 #include "gsccolor.h"
+#include "gscms.h"		/* for gs_graphics_type_tag_t */
 #include "gxarith.h"		/* for imod */
 #include "gxbitmap.h"
 #include "gxhttile.h"
 #include "gxcindex.h"
 
-#ifndef gx_device_color_DEFINED
-#  define gx_device_color_DEFINED
 typedef struct gx_device_color_s gx_device_color;
-#endif
 
-#ifndef gx_device_saved_color_DEFINED
-#  define gx_device_saved_color_DEFINED
 typedef struct gx_device_color_saved_s  gx_device_color_saved;
-#endif
 
-#ifndef gx_device_halftone_DEFINED
-#  define gx_device_halftone_DEFINED
 typedef struct gx_device_halftone_s gx_device_halftone;
-#endif
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  * The definitions in the following section of the file are the only
@@ -101,7 +93,7 @@ bool gx_device_color_equal(const gx_device_color *pdevc1,
 #define color_is_set(pdc)\
   ((pdc)->type != gx_dc_type_none)
 #define color_unset(pdc)\
-  ((pdc)->type = gx_dc_type_none)
+  (((pdc)->type = gx_dc_type_none), ((pdc)->tag = 0))
 
 #define gx_dc_is_null(pdc)\
   ((pdc)->type == gx_dc_type_null)
@@ -180,15 +172,7 @@ void gx_complete_halftone(gx_device_color *pdevc, int num_comps,
 
 /* Define opaque types for objects referenced by device colors. */
 
-#ifndef gx_ht_tile_DEFINED
-#  define gx_ht_tile_DEFINED
-typedef struct gx_ht_tile_s gx_ht_tile;
-#endif
-
-#ifndef gx_color_tile_DEFINED
-#  define gx_color_tile_DEFINED
 typedef struct gx_color_tile_s gx_color_tile;
-#endif
 
 /*
  * The device color in the graphics state is computed from client color
@@ -266,6 +250,7 @@ struct gx_device_color_s {
      * union, we put the type first.
      */
     gx_device_color_type type;
+    gs_graphics_type_tag_t tag;	/* value used to set dev_color */
     /*
      * See the comment above for descriptions of the members.  We use
      * b_, c_, and p_ member names because some old compilers don't
@@ -375,6 +360,7 @@ struct gx_device_color_s {
 
 struct gx_device_color_saved_s {
     gx_device_color_type    type;
+    int                     devn_type;		/* for fill / stroke */
     union _svc {
         gx_color_index  pure;
         struct _svbin {

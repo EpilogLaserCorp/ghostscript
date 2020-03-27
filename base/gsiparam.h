@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -41,11 +41,8 @@
  * Define the data common to all image types.  The type structure is
  * opaque here, defined in gxiparam.h.
  */
-#ifndef gx_image_type_DEFINED
-#  define gx_image_type_DEFINED
 typedef struct gx_image_type_s gx_image_type_t;
 
-#endif
 #define gs_image_common\
         const gx_image_type_t *type;\
                 /*\
@@ -151,12 +148,12 @@ typedef enum {
 } gs_image_format_t;
 
 /* Define an opaque type for a color space. */
-#ifndef gs_color_space_DEFINED
-#  define gs_color_space_DEFINED
 typedef struct gs_color_space_s gs_color_space;
 
-#endif
-
+/* NOTE: Ensure that this macro always ends on a pointer
+ * (or on something that will align at least with a pointer).
+ * Otherwise you'll get problems on 64bit builds, presumably
+ * because something is doing sizeof(this) ? */
 #define gs_pixel_image_common\
         gs_data_image_common;\
                 /*\
@@ -169,6 +166,14 @@ typedef struct gs_color_space_s gs_color_space;
                  * see the discussion of RasterOp in Language.htm.\
                  */\
         bool CombineWithColor;\
+                 /*\
+                  * Usually we can tell whether we are in an smask\
+                  * by asking the device we are in. Sometimes (like\
+                  * when dealing with the masked portion of a type 3\
+                  * image), we are using a different device, and so\
+                  * can't use that method. Instead the caller will\
+                  * indicate it here. */\
+        int override_in_smask;\
                 /*\
                  * Define the source color space (must be NULL for masks).\
                  *\

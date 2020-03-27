@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -29,12 +29,14 @@
 #include "gxdevice.h"
 #include "gxcmap.h"
 #include "gxdcolor.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 #include "gxdevmem.h"
 #include "gdevmem.h"		/* for mem_mono_device */
 #include "gxcpath.h"
 #include "gximage.h"
 #include "gzht.h"
+
+#include "valgrind.h"
 
 /* Conditionally include statistics code. */
 #if defined(DEBUG) && !defined(GS_THREADSAFE)
@@ -50,10 +52,10 @@ iclass_proc(gs_image_class_1_simple);
 static irender_proc(image_render_skip);
 static irender_proc(image_render_simple);
 static irender_proc(image_render_landscape);
-irender_proc_t
-gs_image_class_1_simple(gx_image_enum * penum)
+
+int
+gs_image_class_1_simple(gx_image_enum * penum, irender_proc_t *render_fn)
 {
-    irender_proc_t rproc;
     fixed ox = dda_current(penum->dda.pixel0.x);
     fixed oy = dda_current(penum->dda.pixel0.y);
 
@@ -82,15 +84,12 @@ gs_image_class_1_simple(gx_image_enum * penum)
                     penum->line = gs_alloc_bytes(penum->memory,
                                             penum->line_size, "image line");
                     if (penum->line == 0) {
-                        gx_default_end_image(penum->dev,
-                                             (gx_image_enum_common_t *)penum,
-                                             false);
-                        return 0;
+                        return gs_error_VMerror;
                     }
                 }
                 if_debug2m('b', penum->memory, "[b]render=simple, unpack=copy; rect.w=%d, dev_width=%ld\n",
                            penum->rect.w, dev_width);
-                rproc = image_render_simple;
+                *render_fn = image_render_simple;
                 break;
             }
         case image_landscape:
@@ -113,10 +112,7 @@ gs_image_class_1_simple(gx_image_enum * penum)
                 penum->line = gs_alloc_bytes(penum->memory,
                                              penum->line_size, "image line");
                 if (penum->line == 0) {
-                    gx_default_end_image(penum->dev,
-                                         (gx_image_enum_common_t *) penum,
-                                         false);
-                    return 0;
+                    return gs_error_VMerror;
                 }
 #ifdef PACIFY_VALGRIND
                 memset(penum->line, 0, penum->line_size); /* For the number of scan lined < 8 */
@@ -125,7 +121,7 @@ gs_image_class_1_simple(gx_image_enum * penum)
                 if_debug3m('b', penum->memory,
                            "[b]render=landscape, unpack=copy; rect.w=%d, dev_width=%ld, line_size=%ld\n",
                            penum->rect.w, dev_width, line_size);
-                rproc = image_render_landscape;
+                *render_fn = image_render_landscape;
                 /* Precompute values needed for rasterizing. */
                 penum->dxy =
                     float2fixed(penum->matrix.xy +
@@ -164,11 +160,11 @@ gs_image_class_1_simple(gx_image_enum * penum)
              * The only other possible in-range value is v0 = 0, v1 = 1.
              * The image is completely transparent!
              */
-            rproc = image_render_skip;
+            *render_fn = image_render_skip;
         }
         penum->map[0].decoding = sd_none;
     }
-    return rproc;
+    return 0;
 }
 
 /* ------ Rendering procedures ------ */
@@ -217,6 +213,7 @@ fill_row(byte *line, int line_x, uint raster, int value)
 {
     memset(line + (line_x >> 3), value, raster - (line_x >> 3));
 }
+
 static void
 image_simple_expand(byte * line, int line_x, uint raster,
                     const byte * buffer, int data_x, uint w,
@@ -256,6 +253,9 @@ image_simple_expand(byte * line, int line_x, uint raster,
     byte data;
     byte one = ~zero;
     fixed xl0;
+#ifdef PACIFY_VALGRIND
+    byte vbits;
+#endif
 
     if (w == 0)
         return;
@@ -267,6 +267,33 @@ image_simple_expand(byte * line, int line_x, uint raster,
     else
         stopbit <<= 1;
     /* Now (stop, stopbit) give the last bit of the row. */
+#ifdef PACIFY_VALGRIND
+    /* Here, we are dealing with a row of bits, rather than bytes.
+     * If the width of the bits is not a multiple of 8, we don't
+     * fill out the last byte, and valgrind (correctly) tracks the
+     * bits in that last byte as being a mix of defined and undefined.
+     * When we are scanning through the row bitwise, everything works
+     * fine, but our "skip whole bytes" code can confuse valgrind.
+     * We know that we won't match the "data == 0xff" for the final
+     * byte (i.e. the undefinedness of some of the bits doesn't matter
+     * to the correctness of the routine), but valgrind is not smart
+     * enough to realise that we know this. Accordingly, we get a false
+     * positive "undefined memory read".
+     * How do we fix this? Well, one way would be to read in the
+     * partial last byte, and explicitly set the undefined bits to
+     * be 0.
+     *   *stop &= ~(stopbit-1);
+     * Unfortunately, stop is a const *, so we can't do that (we could
+     * break const, but it is just conceivable that the caller might
+     * pass the next string of bits out in a later call, and so we
+     * might be corrupting valid data).
+     * Instead, we make a call to a valgrind helper. */
+    VALGRIND_GET_VBITS(stop,&vbits,1);
+    if ((vbits & stopbit)==0) { /* At least our stop bit must be addressable already! */
+      byte zero = 0;
+      VALGRIND_SET_VBITS(stop,&zero,1);
+    }
+#endif
     {
         byte stopmask = -stopbit << 1;
         byte last = *stop;
@@ -286,7 +313,7 @@ image_simple_expand(byte * line, int line_x, uint raster,
                     /* The input is all 1s.  Clear the row and exit. */
                     INCS(all1s);
                     fill_row(line, line_x, raster, one);
-                    return;
+                    goto end;
                 }
                 last = *--stop;
             }
@@ -304,7 +331,7 @@ image_simple_expand(byte * line, int line_x, uint raster,
                     /* The input is all 0s.  Clear the row and exit. */
                     INCS(all0s);
                     fill_row(line, line_x, raster, zero);
-                    return;
+                    goto end;
                 }
                 last = *--stop;
             }
@@ -318,12 +345,21 @@ image_simple_expand(byte * line, int line_x, uint raster,
     /* Pre-clear the row. */
     fill_row(line, line_x, raster, zero);
 
+
+    /* Extreme negative values of x_extent cause the xl0 calculation
+     * to explode. Workaround this here. */
+    if (x_extent < min_int + 0x100)
+      x_extent += 0x100;
+
     /* Set up the DDAs. */
     xl0 =
         (x_extent >= 0 ?
          fixed_fraction(fixed_pre_pixround(xcur)) :
          fixed_fraction(fixed_pre_pixround(xcur + x_extent)) - x_extent);
     xl0 += int2fixed(line_x);
+    /* We should never get a negative x10 here. If we do, all bets are off. */
+    if (xl0 < 0)
+        xl0 = 0, x_extent = 0;
     dda_init(xl, xl0, x_extent, w);
     dxx4 = xl.step;
     dda_step_add(dxx4, xl.step);
@@ -470,6 +506,8 @@ sw:	    if ((data = psrc[1]) != 0) {
         if (psrc >= stop && sbit == stopbit)
             break;
     }
+ end:
+    VALGRIND_SET_VBITS(stop,&vbits,1);
 }
 
 /* Copy one rendered scan line to the device. */
@@ -554,9 +592,9 @@ image_render_simple(gx_image_enum * penum, const byte * buffer, int data_x,
     if (h == 0)
         return 0;
     if ((!DC_IS_NULL(pdc0) &&
-         (code = gx_color_load(pdc0, penum->pis, dev)) < 0) ||
+         (code = gx_color_load(pdc0, penum->pgs, dev)) < 0) ||
         (!DC_IS_NULL(pdc1) &&
-         (code = gx_color_load(pdc1, penum->pis, dev)) < 0)
+         (code = gx_color_load(pdc1, penum->pgs, dev)) < 0)
         )
         return code;
     if (penum->line == 0) {	/* A direct BitBlt is possible. */
@@ -739,9 +777,19 @@ copy_landscape(gx_image_enum * penum, int x0, int x1, bool y_neg,
     /* Flip the buffered data from raster x 8 to align_bitmap_mod x */
     /* line_width. */
     if (line_width > 0) {
-        int i;
+        int i = (line_width-1)>>3;
 
-        for (i = (line_width - 1) >> 3; i >= 0; --i)
+#ifdef PACIFY_VALGRIND
+        if (line_width & 7) {
+            memflip8x8_eol(line + i, raster,
+                           flipped + (i << (log2_align_bitmap_mod + 3)),
+                           align_bitmap_mod,
+                           line_width & 7);
+            i--;
+        }
+#endif
+
+        for (; i >= 0; --i)
             memflip8x8(line + i, raster,
                        flipped + (i << (log2_align_bitmap_mod + 3)),
                        align_bitmap_mod);

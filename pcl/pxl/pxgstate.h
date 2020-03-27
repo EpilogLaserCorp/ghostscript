@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -30,12 +30,7 @@
 #include "plfont.h"
 #include "pxdict.h"
 #include "pxenum.h"
-
-/* Define an abstract type for the PostScript graphics state. */
-#ifndef gs_state_DEFINED
-#  define gs_state_DEFINED
-typedef struct gs_state_s gs_state;
-#endif
+#include "gsgstate.h"
 
 /* Define the type of the PCL XL state. */
 #ifndef px_state_DEFINED
@@ -121,7 +116,7 @@ typedef enum
 typedef struct px_gstate_s
 {
     gs_memory_t *memory;
-    /* Since this is what the 'client data' of the gs_state points to, */
+    /* Since this is what the 'client data' of the gs_gstate points to, */
     /* we need a pointer back to the px_state_t. */
     px_state_t *pxs;
     /* State information */
@@ -176,7 +171,7 @@ typedef struct px_gstate_s
 px_gstate_t *px_gstate_alloc(gs_memory_t *);
 
 /* Initialize a px_gstate_t. */
-void px_gstate_init(px_gstate_t *, gs_state *);
+void px_gstate_init(px_gstate_t *, gs_gstate *);
 
 /* Initialize the graphics state for a page. */
 /* Note that this takes a px_state_t, not a px_gstate_t. */
@@ -191,13 +186,13 @@ void px_gstate_reset(px_gstate_t *);
 /* Set up the color space information for a bitmap image or pattern. */
 int px_image_color_space(gs_image_t * pim,
                          const px_bitmap_params_t * params,
-                         const gs_string * palette, const gs_state * pgs);
+                         const gs_string * palette, const gs_gstate * pgs);
 
 /* Set the color in the graphics state to the pen or brush. */
 int px_set_paint(const px_paint_t * ppt, px_state_t * pxs);
 
 /* Capture a pattern as high level in the device */
-int px_high_level_pattern(gs_state * pgs);
+int px_high_level_pattern(gs_gstate * pgs);
 
 /* Set the halftone in the graphics state to the most recently selected one. */
 int px_set_halftone(px_state_t * pxs);

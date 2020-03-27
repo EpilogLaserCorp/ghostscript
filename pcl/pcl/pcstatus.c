@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -71,13 +71,17 @@ stputs(stream * s, const char *str)
 static void
 stprintf(stream * s, const char *fmt, ...)
 {
-    uint count;
+    int count;
     va_list args;
     char buf[1024];
 
     va_start(args, fmt);
     count = gs_vsprintf(buf, fmt, args);
-    sputs(s, (const byte *)buf, count, &count);
+    if (count >= 0) {
+        unsigned count_u = count;
+        sputs(s, (const byte *)buf, count_u, &count_u);
+    }
+    va_end(args);
 }
 
 /* Set up a stream for writing into the status buffer. */
@@ -675,7 +679,7 @@ pcl_flush_all_pages(pcl_args_t * pargs, pcl_state_t * pcs)
                 int code = pcl_end_page_if_marked(pcs);
 
                 if (code >= 0)
-                    pcl_home_cursor(pcs);
+                    code = pcl_home_cursor(pcs);
                 return code;
             }
         default:
@@ -723,7 +727,7 @@ pcstatus_do_registration(pcl_parser_state_t * pcl_parser_state,
                                   pcl_echo, pca_neg_ok | pca_big_error)
         return 0;
 }
-static void
+static int
 pcstatus_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
     if (type & (pcl_reset_initial | pcl_reset_printer)) {
@@ -735,6 +739,8 @@ pcstatus_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
         pcs->location_type = 0;
         pcs->location_unit = 0;
     }
+
+    return 0;
 }
 
 const pcl_init_t pcstatus_init = {

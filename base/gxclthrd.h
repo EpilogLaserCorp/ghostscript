@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,7 +20,9 @@
 #ifndef gxclthrd_INCLUDED
 #  define gxclthrd_INCLUDED
 
-#include "gxsync.h"
+#include "gscms.h"
+#include "gxdevcli.h"
+#include "gxclist.h"
 
 /* clone a device and set params and its chunk memory                   */
 /* The chunk_base_mem MUST be thread safe                               */
@@ -43,11 +45,6 @@ typedef enum {
     THREAD_DONE = 1,
     THREAD_BUSY = 2
 } thread_status;
-
-#ifndef clist_render_thread_control_t_DEFINED
-#  define clist_render_thread_control_t_DEFINED
-typedef struct clist_render_thread_control_s clist_render_thread_control_t;
-#endif
 
 struct clist_render_thread_control_s {
     thread_status status;	/* 0: not started, 1: done, 2: busy, < 0: error */

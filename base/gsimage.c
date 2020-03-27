@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -30,8 +30,8 @@
 #include "gximask.h"
 #include "gzstate.h"
 #include "gsutil.h"
-#include "vdtrace.h"
 #include "gxdevsop.h"
+#include "gximage.h"
 
 /*
   The main internal invariant for the gs_image machinery is
@@ -152,7 +152,7 @@ static RELOC_PTRS_WITH(gs_image_enum_reloc_ptrs, gs_image_enum *eptr)
 RELOC_PTRS_END
 
 static int
-is_image_visible(const gs_image_common_t * pic, gs_state * pgs, gx_clip_path *pcpath)
+is_image_visible(const gs_image_common_t * pic, gs_gstate * pgs, gx_clip_path *pcpath)
 {
     /* HACK : We need the source image size here,
        but gs_image_common_t doesn't pass it.
@@ -201,8 +201,8 @@ is_image_visible(const gs_image_common_t * pic, gs_state * pgs, gx_clip_path *pc
 
 /* Create an image enumerator given image parameters and a graphics state. */
 int
-gs_image_begin_typed(const gs_image_common_t * pic, gs_state * pgs,
-                     bool uses_color, gx_image_enum_common_t ** ppie)
+gs_image_begin_typed(const gs_image_common_t * pic, gs_gstate * pgs,
+                     bool uses_color, bool image_is_text, gx_image_enum_common_t ** ppie)
 {
     gx_device *dev = gs_currentdevice(pgs);
     gx_clip_path *pcpath;
@@ -212,36 +212,68 @@ gs_image_begin_typed(const gs_image_common_t * pic, gs_state * pgs,
 
     if (code < 0)
         return code;
-    /* Processing an image object operation */
-    dev_proc(pgs->device, set_graphics_type_tag)(pgs->device, GS_IMAGE_TAG);
+    /* Processing an image object operation, but this may be for a text object */
+    ensure_tag_is_set(pgs, pgs->device, image_is_text ? GS_TEXT_TAG : GS_IMAGE_TAG);	/* NB: may unset_dev_color */
 
     if (uses_color) {
         code = gx_set_dev_color(pgs);
         if (code != 0)
             return code;
-        code = gs_state_color_load(pgs);
+        code = gs_gstate_color_load(pgs);
         if (code < 0)
             return code;
     }
+
+    if (pgs->overprint || (!pgs->overprint && dev_proc(pgs->device, dev_spec_op)(pgs->device,
+        gxdso_overprint_active, NULL, 0))) {
+        gs_overprint_params_t op_params = { 0 };
+
+        if_debug0m(gs_debug_flag_overprint, pgs->memory,
+            "[overprint] Image Overprint\n");
+        code = gs_do_set_overprint(pgs);
+        if (code < 0)
+            return code;
+
+        op_params.op_state = OP_STATE_FILL;
+        gs_gstate_update_overprint(pgs, &op_params);
+
+        dev = gs_currentdevice(pgs);
+        dev2 = dev;
+    }
+
     /* Imagemask with shading color needs a special optimization
        with converting the image into a clipping.
-       Check for such case after gs_state_color_load is done,
+       Check for such case after gs_gstate_color_load is done,
        because it can cause interpreter callout.
      */
     if (pic->type->begin_typed_image == &gx_begin_image1) {
         gs_image_t *image = (gs_image_t *)pic;
 
         if(image->ImageMask) {
-            code = gx_image_fill_masked_start(dev, gs_currentdevicecolor_inline(pgs), pcpath, pgs->memory, &dev2);
+            bool transpose = false;
+            gs_matrix_double mat;
+
+            if((code = gx_image_compute_mat(pgs, NULL, &(image->ImageMatrix), &mat)) < 0)
+                return code;
+            if ((any_abs(mat.xy) > any_abs(mat.xx)) && (any_abs(mat.yx) > any_abs(mat.yy)))
+                transpose = true;		/* pure landscape */
+            code = gx_image_fill_masked_start(dev, gs_currentdevicecolor_inline(pgs), transpose,
+                                              pcpath, pgs->memory, pgs->log_op, &dev2);
             if (code < 0)
                 return code;
+        }
+        if (dev->interpolate_control < 0) {		/* Force interpolation before begin_typed_image */
+            ((gs_data_image_t *)pic)->Interpolate = true;
+        }
+        else if (dev->interpolate_control == 0) {
+            ((gs_data_image_t *)pic)->Interpolate = false;	/* Suppress interpolation */
         }
         if (dev2 != dev) {
             set_nonclient_dev_color(&dc_temp, 1);
             pdevc = &dc_temp;
         }
     }
-    code = gx_device_begin_typed_image(dev2, (const gs_imager_state *)pgs,
+    code = gx_device_begin_typed_image(dev2, (const gs_gstate *)pgs,
                 NULL, pic, NULL, pdevc, pcpath, pgs->memory, ppie);
     if (code < 0)
         return code;
@@ -279,7 +311,7 @@ gs_image_enum_alloc(gs_memory_t * mem, client_name_t cname)
 /* Start processing an ImageType 1 image. */
 int
 gs_image_init(gs_image_enum * penum, const gs_image_t * pim, bool multi,
-              gs_state * pgs)
+              bool image_is_text, gs_gstate * pgs)
 {
     gs_image_t image;
     gx_image_enum_common_t *pie;
@@ -299,11 +331,13 @@ gs_image_init(gs_image_enum * penum, const gs_image_t * pim, bool multi,
              * incorrect, but it appears this case doesn't arise.
              */
             image.ColorSpace = gs_cspace_new_DeviceGray(pgs->memory);
+            if (image.ColorSpace == NULL)
+                return_error(gs_error_VMerror);
         }
     }
     code = gs_image_begin_typed((const gs_image_common_t *)&image, pgs,
                                 image.ImageMask | image.CombineWithColor,
-                                &pie);
+                                image_is_text, &pie);
     if (code < 0)
         return code;
     return gs_image_enum_init(penum, pie, (const gs_data_image_t *)&image,
@@ -411,7 +445,7 @@ gs_image_common_init(gs_image_enum * penum, gx_image_enum_common_t * pie,
 */
 int
 gs_image_enum_init(gs_image_enum * penum, gx_image_enum_common_t * pie,
-                   const gs_data_image_t * pim, gs_state *pgs)
+                   const gs_data_image_t * pim, gs_gstate *pgs)
 {
     pgs->device->sgr.stroke_stored = false;
     return gs_image_common_init(penum, pie, pim,
@@ -455,8 +489,8 @@ free_row_buffers(gs_image_enum *penum, int num_planes, client_name_t cname)
     int i;
 
     for (i = num_planes - 1; i >= 0; --i) {
-        if_debug3m('b', penum->memory, "[b]free plane %d row (0x%lx,%u)\n",
-                   i, (ulong)penum->planes[i].row.data,
+        if_debug3m('b', penum->memory, "[b]free plane %d row ("PRI_INTPTR",%u)\n",
+                   i, (intptr_t)penum->planes[i].row.data,
                    penum->planes[i].row.size);
         gs_free_string(gs_image_row_memory(penum), penum->planes[i].row.data,
                        penum->planes[i].row.size, cname);
@@ -500,18 +534,14 @@ gs_image_next_planes(gs_image_enum * penum,
     int code = 0;
 
 #ifdef DEBUG
-    vd_get_dc('i');
-    vd_set_shift(0, 0);
-    vd_set_scale(0.01);
-    vd_set_origin(0, 0);
     if (gs_debug_c('b')) {
         int pi;
 
         for (pi = 0; pi < num_planes; ++pi)
-            dmprintf6(penum->memory, "[b]plane %d source=0x%lx,%u pos=%u data=0x%lx,%u\n",
-                     pi, (ulong)penum->planes[pi].source.data,
+            dmprintf6(penum->memory, "[b]plane %d source="PRI_INTPTR",%u pos=%u data="PRI_INTPTR",%u\n",
+                     pi, (intptr_t)penum->planes[pi].source.data,
                      penum->planes[pi].source.size, penum->planes[pi].pos,
-                     (ulong)plane_data[pi].data, plane_data[pi].size);
+                     (intptr_t)plane_data[pi].data, plane_data[pi].size);
     }
 #endif
     for (i = 0; i < num_planes; ++i) {
@@ -552,9 +582,9 @@ gs_image_next_planes(gs_image_enum * penum,
                              gs_resize_string(mem, old_data, old_size, raster,
                                               "gs_image_next(row)"));
 
-                        if_debug5m('b', mem, "[b]plane %d row (0x%lx,%u) => (0x%lx,%u)\n",
-                                   i, (ulong)old_data, old_size,
-                                   (ulong)row, raster);
+                        if_debug5m('b', mem, "[b]plane %d row ("PRI_INTPTR",%u) => ("PRI_INTPTR",%u)\n",
+                                   i, (intptr_t)old_data, old_size,
+                                   (intptr_t)row, raster);
                         if (row == 0) {
                             code = gs_note_error(gs_error_VMerror);
                             free_row_buffers(penum, i, "gs_image_next(row)");
@@ -582,8 +612,12 @@ gs_image_next_planes(gs_image_enum * penum,
                 penum->image_planes[i].data = penum->planes[i].row.data;
             } else if (pos == 0 && size >= raster) {
                 /* We can transfer 1 or more planes from the source. */
-                h = min(h, size / raster);
-                penum->image_planes[i].data = penum->planes[i].source.data;
+                if (raster) {
+                    h = min(h, size / raster);
+                    penum->image_planes[i].data = penum->planes[i].source.data;
+                }
+                else
+                    h = 0;
             } else
                 h = 0;		/* not enough data in this plane */
         }
@@ -634,14 +668,13 @@ gs_image_next_planes(gs_image_enum * penum,
     /* Return the retained data pointers. */
     for (i = 0; i < num_planes; ++i)
         plane_data[i] = penum->planes[i].source;
-    vd_release_dc;
     return code;
 }
 
 /* Clean up after processing an image. */
 /* Public for ghostpcl. */
 int
-gs_image_cleanup(gs_image_enum * penum, gs_state *pgs)
+gs_image_cleanup(gs_image_enum * penum, gs_gstate *pgs)
 {
     int code = 0, code1;
 
@@ -666,7 +699,7 @@ gs_image_cleanup(gs_image_enum * penum, gs_state *pgs)
 
 /* Clean up after processing an image and free the enumerator. */
 int
-gs_image_cleanup_and_free_enum(gs_image_enum * penum, gs_state *pgs)
+gs_image_cleanup_and_free_enum(gs_image_enum * penum, gs_gstate *pgs)
 {
     int code = gs_image_cleanup(penum, pgs);
 

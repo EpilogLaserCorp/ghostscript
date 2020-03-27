@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -18,6 +18,9 @@
 
 #ifndef gsrefct_INCLUDED
 #  define gsrefct_INCLUDED
+
+#include "memento.h"
+#include "std.h"
 
 /*
  * A reference-counted object must include the following header:
@@ -61,7 +64,7 @@ void rc_trace_init_free(const void *vp, const rc_header *prc);
 void rc_trace_free_struct(const void *vp, const rc_header *prc,
                           client_name_t cname);
 void rc_trace_increment(const void *vp, const rc_header *prc);
-void rc_trace_adjust(const void *vp, const rc_header *prc, int delta);
+void rc_trace_adjust(const void *vp, const rc_header *prc, int delta, const char *cname);
 #define IF_RC_DEBUG(call) BEGIN if (gs_debug_c('^')) { dlputs(""); call; } END
 #else
 #define IF_RC_DEBUG(call) DO_NOTHING
@@ -128,17 +131,17 @@ rc_free_proc(rc_free_struct_only);
   END
 
 /* Guarantee that a structure is allocated and is not shared. */
-#define RC_DO_ADJUST(vp, delta)\
+#define RC_DO_ADJUST(vp, delta, cname)\
   BEGIN\
-    IF_RC_DEBUG(rc_trace_adjust(vp, &(vp)->rc, delta));\
+    IF_RC_DEBUG(rc_trace_adjust(vp, &(vp)->rc, delta, cname));\
     (vp)->rc.ref_count += (delta);\
   END
 #define rc_unshare_struct(vp, typ, pstype, mem, errstat, cname)\
   BEGIN\
     if ( (vp) == 0 || (vp)->rc.ref_count > 1 || (vp)->rc.memory != (mem) ) {\
       typ *new;\
+      if ( vp ) RC_DO_ADJUST(vp, -1, cname);\
       rc_alloc_struct_1(new, typ, pstype, mem, errstat, cname);\
-      if ( vp ) RC_DO_ADJUST(vp, -1);\
       (vp) = new;\
     }\
   END
@@ -148,7 +151,7 @@ rc_free_proc(rc_free_struct_only);
 #  define rc_check_(vp)\
      BEGIN\
        if (gs_debug_c('?') && (vp)->rc.ref_count < 0)\
-         lprintf2("0x%lx has ref_count of %ld!\n", (ulong)(vp),\
+         lprintf2(PRI_INTPTR" has ref_count of %ld!\n", (intptr_t)(vp),\
                   (vp)->rc.ref_count);\
      END
 #else
@@ -157,7 +160,7 @@ rc_free_proc(rc_free_struct_only);
 #define rc_adjust_(vp, delta, cname, body)\
   BEGIN\
     if (vp) {\
-      RC_DO_ADJUST(vp, delta);\
+      RC_DO_ADJUST(vp, delta, cname);\
       if (!(vp)->rc.ref_count) {\
         rc_free_struct(vp, cname);\
         body;\

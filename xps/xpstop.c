@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Top-level API implementation of XML Paper Specification */
@@ -20,11 +20,15 @@
 #include "ghostxps.h"
 
 #include "pltop.h"
-#include "plparse.h" /* for e_ExitLanguage */
+#include "plmain.h"
 
+#include "plparse.h" /* for e_ExitLanguage */
+#include "plmain.h"
 #include "gxdevice.h" /* so we can include gxht.h below */
 #include "gxht.h" /* gsht1.h is incomplete, we need storage size of gs_halftone */
 #include "gsht1.h"
+
+#include <assert.h>
 
 int xps_zip_trace = 0;
 int xps_doc_trace = 0;
@@ -35,22 +39,17 @@ static int xps_install_halftone(xps_context_t *ctx, gx_device *pdevice);
 
 /*
  * The XPS interpeter is identical to pl_interp_t.
- * The XPS interpreter instance is derived from pl_interp_instance_t.
+ * The XPS interpreter instance is derived from pl_interp_implementation_t.
  */
 
 typedef struct xps_interp_instance_s xps_interp_instance_t;
 
 struct xps_interp_instance_s
 {
-    pl_interp_instance_t pl;            /* common part: must be first */
-
-    pl_page_action_t pre_page_action;   /* action before page out */
-    void *pre_page_closure;             /* closure to call pre_page_action with */
-    pl_page_action_t post_page_action;  /* action before page out */
-    void *post_page_closure;            /* closure to call post_page_action with */
+    gs_memory_t *memory;                /* memory allocator to use */
 
     xps_context_t *ctx;
-    FILE *scratch_file;
+    gp_file *scratch_file;
     char scratch_name[gp_file_name_sizeof];
 };
 
@@ -58,13 +57,23 @@ struct xps_interp_instance_s
 #define XPS_VERSION NULL
 #define XPS_BUILD_DATE NULL
 
+static int
+xps_detect_language(const char *s, int len)
+{
+    if (len < 2)
+        return 0;
+    if (memcmp(s, "PK", 2) == 0)
+        return 100;
+    return 0;
+}
+
 static const pl_interp_characteristics_t *
-xps_imp_characteristics(const pl_interp_implementation_t *pimpl)
+xps_impl_characteristics(const pl_interp_implementation_t *pimpl)
 {
     static pl_interp_characteristics_t xps_characteristics =
     {
         "XPS",
-        "PK", /* string to recognize XPS files */
+        xps_detect_language,
         "Artifex",
         XPS_VERSION,
         XPS_BUILD_DATE,
@@ -73,85 +82,50 @@ xps_imp_characteristics(const pl_interp_implementation_t *pimpl)
     return &xps_characteristics;
 }
 
-static int
-xps_imp_allocate_interp(pl_interp_t **ppinterp,
-        const pl_interp_implementation_t *pimpl,
-        gs_memory_t *pmem)
-{
-    static pl_interp_t interp; /* there's only one interpreter */
-    *ppinterp = &interp;
-    return 0;
-}
-
 static void
-xps_set_nocache(pl_interp_instance_t *instance, gs_font_dir *font_dir)
+xps_set_nocache(pl_interp_implementation_t *impl, gs_font_dir *font_dir)
 {
-    if (instance->nocache)
+    bool nocache;
+    xps_interp_instance_t *xpsi  = impl->interp_client_data;
+    nocache = pl_main_get_nocache(xpsi->memory);
+    if (nocache)
         gs_setcachelimit(font_dir, 0);
     return;
 }
 
-static int
-xps_set_icc_user_params(pl_interp_instance_t *instance, gs_state *pgs)
-{    gs_param_string p;
-    int code = 0;
 
-    if (instance->pdefault_gray_icc) {
-        param_string_from_transient_string(p, instance->pdefault_gray_icc);
-        code = gs_setdefaultgrayicc(pgs, &p);
-        if (code < 0)
-            return gs_throw_code(gs_error_Fatal);
-    }
-    if (instance->pdefault_rgb_icc) {
-        param_string_from_transient_string(p, instance->pdefault_rgb_icc);
-        code = gs_setdefaultrgbicc(pgs, &p);
-        if (code < 0)
-            return gs_throw_code(gs_error_Fatal);
-    }
-    if (instance->pdefault_cmyk_icc) {
-        param_string_from_transient_string(p, instance->pdefault_cmyk_icc);
-        code = gs_setdefaultcmykicc(pgs, &p);
-        if (code < 0)
-            return gs_throw_code(gs_error_Fatal);
-    }
-    if (instance->piccdir) {
-        param_string_from_transient_string(p, instance->piccdir);
-        code = gs_seticcdirectory(pgs, &p);
-        if (code < 0)
-            return gs_throw_code(gs_error_Fatal);
-    }
-    return code;
+static int
+xps_set_icc_user_params(pl_interp_implementation_t *impl, gs_gstate *pgs)
+{
+    xps_interp_instance_t *xpsi  = impl->interp_client_data;
+    return pl_set_icc_params(xpsi->memory, pgs);
 }
 
 /* Do per-instance interpreter allocation/init. No device is set yet */
 static int
-xps_imp_allocate_interp_instance(pl_interp_instance_t **ppinstance,
-        pl_interp_t *pinterp,
-        gs_memory_t *pmem)
+xps_impl_allocate_interp_instance(pl_interp_implementation_t *impl,
+                                 gs_memory_t *pmem)
 {
+    int code = 0;
     xps_interp_instance_t *instance;
     xps_context_t *ctx;
-    gs_state *pgs;
+    gs_gstate *pgs;
 
     instance = (xps_interp_instance_t *) gs_alloc_bytes(pmem,
-            sizeof(xps_interp_instance_t), "xps_imp_allocate_interp_instance");
+            sizeof(xps_interp_instance_t), "xps_impl_allocate_interp_instance");
 
     ctx = (xps_context_t *) gs_alloc_bytes(pmem,
-            sizeof(xps_context_t), "xps_imp_allocate_interp_instance");
+            sizeof(xps_context_t), "xps_impl_allocate_interp_instance");
 
-    pgs = gs_state_alloc(pmem);
+    pgs = gs_gstate_alloc(pmem);
 
     if (!instance || !ctx || !pgs)
     {
-        if (instance)
-            gs_free_object(pmem, instance, "xps_imp_allocate_interp_instance");
-        if (ctx)
-            gs_free_object(pmem, ctx, "xps_imp_allocate_interp_instance");
-        if (pgs)
-            gs_state_free(pgs);
-        return gs_error_VMerror;
+        code = gs_error_VMerror;
+        goto end;
     }
 
+    /* FIXME: check return value */
     gsicc_init_iccmanager(pgs);
     memset(ctx, 0, sizeof(xps_context_t));
 
@@ -174,67 +148,73 @@ xps_imp_allocate_interp_instance(pl_interp_instance_t **ppinstance,
     ctx->gray = gs_cspace_new_ICC(ctx->memory, ctx->pgs, 1);
     ctx->cmyk = gs_cspace_new_ICC(ctx->memory, ctx->pgs, 4);
     ctx->srgb = gs_cspace_new_ICC(ctx->memory, ctx->pgs, 3);
-    ctx->scrgb = gs_cspace_new_ICC(ctx->memory, ctx->pgs, 3);
 
-    instance->pre_page_action = 0;
-    instance->pre_page_closure = 0;
-    instance->post_page_action = 0;
-    instance->post_page_closure = 0;
+    /* scrgb needs special treatment */
+    ctx->scrgb = gs_cspace_new_scrgb(ctx->memory, ctx->pgs);
 
     instance->ctx = ctx;
     instance->scratch_file = NULL;
     instance->scratch_name[0] = 0;
-
+    instance->memory = pmem;
+    
     /* NB needs error handling */
     ctx->fontdir = gs_font_dir_alloc(ctx->memory);
-
+    if (!ctx->fontdir) {
+        code = gs_error_VMerror;
+        goto end;
+    }
     gs_setaligntopixels(ctx->fontdir, 1); /* no subpixels */
     gs_setgridfittt(ctx->fontdir, 1); /* see gx_ttf_outline in gxttfn.c for values */
 
-    *ppinstance = (pl_interp_instance_t *)instance;
+    impl->interp_client_data = instance;
 
-    return 0;
+    end:
+    if (code < 0) {
+        if (instance) {
+            gs_free_object(pmem, instance, "xps_impl_allocate_interp_instance");
+        }
+        if (ctx) {
+            assert(!ctx->fontdir);
+            rc_decrement(ctx->gray_lin, "gs_cspace_new_ICC");
+            rc_decrement(ctx->gray, "gs_cspace_new_ICC");
+            rc_decrement(ctx->cmyk, "gs_cspace_new_ICC");
+            rc_decrement(ctx->srgb, "gs_cspace_new_ICC");
+            rc_decrement(ctx->scrgb, "gs_cspace_new_ICC");
+            gs_free_object(pmem, ctx, "xps_impl_allocate_interp_instance");
+        }
+        if (pgs) {
+            gs_gstate_free(pgs);
+        }
+    }
+    return code;
 }
 
-/* Set a client language into an interperter instance */
+/* Prepare interp instance for the next "job" */
 static int
-xps_imp_set_client_instance(pl_interp_instance_t *pinstance,
-        pl_interp_instance_t *pclient,
-        pl_interp_instance_clients_t which_client)
+xps_impl_init_job(pl_interp_implementation_t *impl,
+                 gx_device                  *pdevice)
 {
-    /* ignore */
-    return 0;
-}
-
-static int
-xps_imp_set_pre_page_action(pl_interp_instance_t *pinstance,
-        pl_page_action_t action, void *closure)
-{
-    xps_interp_instance_t *instance = (xps_interp_instance_t *)pinstance;
-    instance->pre_page_action = action;
-    instance->pre_page_closure = closure;
-    return 0;
-}
-
-static int
-xps_imp_set_post_page_action(pl_interp_instance_t *pinstance,
-        pl_page_action_t action, void *closure)
-{
-    xps_interp_instance_t *instance = (xps_interp_instance_t *)pinstance;
-    instance->post_page_action = action;
-    instance->post_page_closure = closure;
-    return 0;
-}
-
-static int
-xps_imp_set_device(pl_interp_instance_t *pinstance, gx_device *pdevice)
-{
-    xps_interp_instance_t *instance = (xps_interp_instance_t *)pinstance;
+    xps_interp_instance_t *instance = impl->interp_client_data;
     xps_context_t *ctx = instance->ctx;
     gs_c_param_list list;
     int code;
 
-    gs_opendevice(pdevice);
+    if (gs_debug_c('|'))
+        xps_zip_trace = 1;
+    if (gs_debug_c('|'))
+        xps_doc_trace = 1;
+
+    ctx->font_table = xps_hash_new(ctx);
+    ctx->colorspace_table = xps_hash_new(ctx);
+
+    ctx->start_part = NULL;
+
+    ctx->use_transparency = 1;
+    if (getenv("XPS_DISABLE_TRANSPARENCY"))
+        ctx->use_transparency = 0;
+
+    ctx->opacity_only = 0;
+    ctx->fill_rule = 0;
 
     code = gs_setdevice_no_erase(ctx->pgs, pdevice);
     if (code < 0)
@@ -243,18 +223,20 @@ xps_imp_set_device(pl_interp_instance_t *pinstance, gx_device *pdevice)
     /* Check if the device wants PreserveTrMode (pdfwrite) */
     gs_c_param_list_write(&list, pdevice->memory);
     code = gs_getdeviceparams(pdevice, (gs_param_list *)&list);
-    if (code < 0)
-        return code;
-    gs_c_param_list_read(&list);
-    code = param_read_bool((gs_param_list *)&list, "PreserveTrMode", &ctx->preserve_tr_mode);
-    if (code < 0)
-        return code;
+    if (code >= 0) {
+        gs_c_param_list_read(&list);
+        code = param_read_bool((gs_param_list *)&list, "PreserveTrMode", &ctx->preserve_tr_mode);
+    }
     gs_c_param_list_release(&list);
+    if (code < 0)
+        return code;
 
     gs_setaccuratecurves(ctx->pgs, true); /* NB not sure */
     gs_setfilladjust(ctx->pgs, 0, 0);
-    (void)xps_set_icc_user_params((pl_interp_instance_t *)instance, ctx->pgs);
-    xps_set_nocache((pl_interp_instance_t *)instance, ctx->fontdir);
+    (void)xps_set_icc_user_params(impl, ctx->pgs);
+    xps_set_nocache(impl, ctx->fontdir);
+
+    gs_setscanconverter(ctx->pgs, pl_main_get_scanconverter(ctx->memory));    
 
     /* gsave and grestore (among other places) assume that */
     /* there are at least 2 gstates on the graphics stack. */
@@ -287,18 +269,11 @@ cleanup_setdevice:
     return code;
 }
 
-static int
-xps_imp_get_device_memory(pl_interp_instance_t *pinstance, gs_memory_t **ppmem)
-{
-    /* huh? we do nothing here */
-    return 0;
-}
-
 /* Parse an entire random access file */
 static int
-xps_imp_process_file(pl_interp_instance_t *pinstance, char *filename)
+xps_impl_process_file(pl_interp_implementation_t *impl, const char *filename)
 {
-    xps_interp_instance_t *instance = (xps_interp_instance_t *)pinstance;
+    xps_interp_instance_t *instance = impl->interp_client_data;
     xps_context_t *ctx = instance->ctx;
     int code;
 
@@ -309,11 +284,18 @@ xps_imp_process_file(pl_interp_instance_t *pinstance, char *filename)
     return code;
 }
 
+/* Do any setup for parser per-cursor */
+static int                      /* ret 0 or +ve if ok, else -ve error code */
+xps_impl_process_begin(pl_interp_implementation_t * impl)
+{
+    return 0;
+}
+
 /* Parse a cursor-full of data */
 static int
-xps_imp_process(pl_interp_instance_t *pinstance, stream_cursor_read *cursor)
+xps_impl_process(pl_interp_implementation_t *impl, stream_cursor_read *cursor)
 {
-    xps_interp_instance_t *instance = (xps_interp_instance_t *)pinstance;
+    xps_interp_instance_t *instance = impl->interp_client_data;
     xps_context_t *ctx = instance->ctx;
     int avail, n;
 
@@ -330,7 +312,7 @@ xps_imp_process(pl_interp_instance_t *pinstance, stream_cursor_read *cursor)
     }
 
     avail = cursor->limit - cursor->ptr;
-    n = fwrite(cursor->ptr + 1, 1, avail, instance->scratch_file);
+    n = gp_fwrite(cursor->ptr + 1, 1, avail, instance->scratch_file);
     if (n != avail)
     {
         gs_catch(gs_error_invalidfileaccess, "cannot write to scratch file");
@@ -341,11 +323,17 @@ xps_imp_process(pl_interp_instance_t *pinstance, stream_cursor_read *cursor)
     return 0;
 }
 
+static int                      /* ret 0 or +ve if ok, else -ve error code */
+xps_impl_process_end(pl_interp_implementation_t * impl)
+{
+    return 0;
+}
+
 /* Skip to end of job.
  * Return 1 if done, 0 ok but EOJ not found, else negative error code.
  */
 static int
-xps_imp_flush_to_eoj(pl_interp_instance_t *pinstance, stream_cursor_read *pcursor)
+xps_impl_flush_to_eoj(pl_interp_implementation_t *impl, stream_cursor_read *pcursor)
 {
     /* assume XPS cannot be pjl embedded */
     pcursor->ptr = pcursor->limit;
@@ -354,16 +342,16 @@ xps_imp_flush_to_eoj(pl_interp_instance_t *pinstance, stream_cursor_read *pcurso
 
 /* Parser action for end-of-file */
 static int
-xps_imp_process_eof(pl_interp_instance_t *pinstance)
+xps_impl_process_eof(pl_interp_implementation_t *impl)
 {
-    xps_interp_instance_t *instance = (xps_interp_instance_t *)pinstance;
+    xps_interp_instance_t *instance = impl->interp_client_data;
     xps_context_t *ctx = instance->ctx;
     int code;
 
     if (instance->scratch_file)
     {
         if_debug0m('|', ctx->memory, "xps: executing scratch file\n");
-        fclose(instance->scratch_file);
+        gp_fclose(instance->scratch_file);
         instance->scratch_file = NULL;
         code = xps_process_file(ctx, instance->scratch_name);
         unlink(instance->scratch_name);
@@ -379,39 +367,12 @@ xps_imp_process_eof(pl_interp_instance_t *pinstance)
 
 /* Report any errors after running a job */
 static int
-xps_imp_report_errors(pl_interp_instance_t *pinstance,
+xps_impl_report_errors(pl_interp_implementation_t *impl,
         int code,           /* prev termination status */
         long file_position, /* file position of error, -1 if unknown */
         bool force_to_cout  /* force errors to cout */
         )
 {
-    return 0;
-}
-
-/* Prepare interp instance for the next "job" */
-static int
-xps_imp_init_job(pl_interp_instance_t *pinstance)
-{
-    xps_interp_instance_t *instance = (xps_interp_instance_t *)pinstance;
-    xps_context_t *ctx = instance->ctx;
-
-    if (gs_debug_c('|'))
-        xps_zip_trace = 1;
-    if (gs_debug_c('|'))
-        xps_doc_trace = 1;
-
-    ctx->font_table = xps_hash_new(ctx);
-    ctx->colorspace_table = xps_hash_new(ctx);
-
-    ctx->start_part = NULL;
-
-    ctx->use_transparency = 1;
-    if (getenv("XPS_DISABLE_TRANSPARENCY"))
-        ctx->use_transparency = 0;
-
-    ctx->opacity_only = 0;
-    ctx->fill_rule = 0;
-
     return 0;
 }
 
@@ -425,13 +386,22 @@ static void xps_free_font_func(xps_context_t *ctx, void *ptr)
     xps_free_font(ctx, ptr);
 }
 
+static void xps_free_hashed_colorspace(xps_context_t *ctx, void *ptr)
+{
+    gs_color_space *cs = (gs_color_space *)ptr;
+    rc_decrement(cs, "xps_free_hashed_colorspace");
+}
+
 /* Wrap up interp instance after a "job" */
 static int
-xps_imp_dnit_job(pl_interp_instance_t *pinstance)
+xps_impl_dnit_job(pl_interp_implementation_t *impl)
 {
-    xps_interp_instance_t *instance = (xps_interp_instance_t *)pinstance;
+    xps_interp_instance_t *instance = impl->interp_client_data;
     xps_context_t *ctx = instance->ctx;
-    int i;
+    int i, code;
+
+    /* return to original gstate */
+    code = gs_grestore_only(ctx->pgs); /* destroys gs_save stack */
 
     if (gs_debug_c('|'))
         xps_debug_fixdocseq(ctx);
@@ -442,82 +412,61 @@ xps_imp_dnit_job(pl_interp_instance_t *pinstance)
 
     /* TODO: free resources too */
     xps_hash_free(ctx, ctx->font_table, xps_free_key_func, xps_free_font_func);
-    xps_hash_free(ctx, ctx->colorspace_table, xps_free_key_func, NULL);
+    xps_hash_free(ctx, ctx->colorspace_table, xps_free_key_func, xps_free_hashed_colorspace);
 
     xps_free_fixed_pages(ctx);
     xps_free_fixed_documents(ctx);
-
-    return 0;
-}
-
-/* Remove a device from an interperter instance */
-static int
-xps_imp_remove_device(pl_interp_instance_t *pinstance)
-{
-    xps_interp_instance_t *instance = (xps_interp_instance_t *)pinstance;
-    xps_context_t *ctx = instance->ctx;
-
-    int code = 0; /* first error status encountered */
-    int error;
-
-    /* return to original gstate */
-    gs_grestore_only(ctx->pgs); /* destroys gs_save stack */
-
-    /* Deselect device */
-    /* NB */
-    error = gs_nulldevice(ctx->pgs);
-    if (code >= 0)
-        code = error;
 
     return code;
 }
 
 /* Deallocate a interpreter instance */
 static int
-xps_imp_deallocate_interp_instance(pl_interp_instance_t *pinstance)
+xps_impl_deallocate_interp_instance(pl_interp_implementation_t *impl)
 {
-    xps_interp_instance_t *instance = (xps_interp_instance_t *)pinstance;
+    xps_interp_instance_t *instance = impl->interp_client_data;
     xps_context_t *ctx = instance->ctx;
     gs_memory_t *mem = ctx->memory;
 
     /* language clients don't free the font cache machinery */
+    rc_decrement_cs(ctx->gray_lin, "xps_impl_deallocate_interp_instance");
+    rc_decrement_cs(ctx->gray, "xps_impl_deallocate_interp_instance");
+    rc_decrement_cs(ctx->cmyk, "xps_impl_deallocate_interp_instance");
+    rc_decrement_cs(ctx->srgb, "xps_impl_deallocate_interp_instance");
+    rc_decrement_cs(ctx->scrgb, "xps_impl_deallocate_interp_instance");
 
-    // free gstate?
-    gs_free_object(mem, ctx, "xps_imp_deallocate_interp_instance");
-    gs_free_object(mem, instance, "xps_imp_deallocate_interp_instance");
+    gx_pattern_cache_free(ctx->pgs->pattern_cache);
+    gs_gstate_free(ctx->pgs);
 
-    return 0;
-}
+    gs_free_object(mem, ctx->start_part, "xps_impl_deallocate_interp_instance");
+    gs_free_object(mem, ctx->fontdir, "xps_impl_deallocate_interp_instance");
+    gs_free_object(mem, ctx, "xps_impl_deallocate_interp_instance");
+    gs_free_object(mem, instance, "xps_impl_deallocate_interp_instance");
 
-/* Do static deinit of XPS interpreter */
-static int
-xps_imp_deallocate_interp(pl_interp_t *pinterp)
-{
-    /* nothing to do */
     return 0;
 }
 
 /* Parser implementation descriptor */
-const pl_interp_implementation_t xps_implementation =
+pl_interp_implementation_t xps_implementation =
 {
-    xps_imp_characteristics,
-    xps_imp_allocate_interp,
-    xps_imp_allocate_interp_instance,
-    xps_imp_set_client_instance,
-    xps_imp_set_pre_page_action,
-    xps_imp_set_post_page_action,
-    xps_imp_set_device,
-    xps_imp_init_job,
-    xps_imp_process_file,
-    xps_imp_process,
-    xps_imp_flush_to_eoj,
-    xps_imp_process_eof,
-    xps_imp_report_errors,
-    xps_imp_dnit_job,
-    xps_imp_remove_device,
-    xps_imp_deallocate_interp_instance,
-    xps_imp_deallocate_interp,
-    xps_imp_get_device_memory,
+    xps_impl_characteristics,
+    xps_impl_allocate_interp_instance,
+    NULL,                       /* get_device_memory */
+    NULL,                       /* set_param */
+    NULL,                       /* add_path */
+    NULL,                       /* post_args_init */
+    xps_impl_init_job,
+    NULL,                       /* run_prefix_commands */
+    xps_impl_process_file,
+    xps_impl_process_begin,
+    xps_impl_process,
+    xps_impl_process_end,
+    xps_impl_flush_to_eoj,
+    xps_impl_process_eof,
+    xps_impl_report_errors,
+    xps_impl_dnit_job,
+    xps_impl_deallocate_interp_instance,
+    NULL,
 };
 
 /*
@@ -526,35 +475,8 @@ const pl_interp_implementation_t xps_implementation =
 int
 xps_show_page(xps_context_t *ctx, int num_copies, int flush)
 {
-    pl_interp_instance_t *pinstance = ctx->instance;
-    xps_interp_instance_t *instance = ctx->instance;
-
-    int code = 0;
-
-    /* do pre-page action */
-    if (instance->pre_page_action)
-    {
-        code = instance->pre_page_action(pinstance, instance->pre_page_closure);
-        if (code < 0)
-            return code;
-        if (code != 0)
-            return 0;    /* code > 0 means abort w/no error */
-    }
-
-    /* output the page */
-    code = gs_output_page(ctx->pgs, num_copies, flush);
-    if (code < 0)
-        return code;
-
-    /* do post-page action */
-    if (instance->post_page_action)
-    {
-        code = instance->post_page_action(pinstance, instance->post_page_closure);
-        if (code < 0)
-            return code;
-    }
-
-    return 0;
+    return pl_finish_page(ctx->memory->gs_lib_ctx->top_of_system,
+                          ctx->pgs, num_copies, flush);
 }
 
 /*

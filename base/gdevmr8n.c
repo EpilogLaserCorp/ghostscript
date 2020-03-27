@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* RasterOp implementation for 8N-bit memory devices */
@@ -26,13 +26,9 @@
 #include "gxdevrop.h"
 #include "gdevmem.h"
 #include "gdevmrop.h"
-#include "vdtrace.h"
 
-/* Enable the following to use RUN_ROPs. Benefits of this are not proven yet
- * so disabled, even though cluster testing shows that the results are the
- * same.
- */
-#undef USE_RUN_ROP
+/* Use the RUN_ROP code. */
+#define USE_RUN_ROP
 #undef COMPARE_AND_CONTRAST
 
 /*
@@ -56,10 +52,11 @@ mem_gray8_rgb24_strip_copy_rop(gx_device * dev,
                                const gx_color_index * scolors,
            const gx_strip_bitmap * textures, const gx_color_index * tcolors,
                                int x, int y, int width, int height,
-                       int phase_x, int phase_y, gs_logical_operation_t lop)
+                       int phase_x, int phase_y, gs_logical_operation_t dirty_lop)
 {
     gx_device_memory *mdev = (gx_device_memory *) dev;
-    gs_rop3_t rop = lop_rop(lop);
+    gs_logical_operation_t lop = lop_sanitize(dirty_lop);
+    gs_rop3_t rop;
     gx_color_index const_source = gx_no_color_index;
     gx_color_index const_texture = gx_no_color_index;
     uint draster = mdev->raster;
@@ -68,10 +65,9 @@ mem_gray8_rgb24_strip_copy_rop(gx_device * dev,
     int depth = dev->color_info.depth;
     int bpp = depth >> 3;       /* bytes per pixel, 1 or 3 */
     gx_color_index all_ones = ((gx_color_index) 1 << depth) - 1;
-    gx_color_index strans =
-        (lop & lop_S_transparent ? all_ones : gx_no_color_index);
-    gx_color_index ttrans =
-        (lop & lop_T_transparent ? all_ones : gx_no_color_index);
+    gx_color_index local_scolors[2];
+    gx_color_index local_tcolors[2];
+
 #ifdef USE_RUN_ROP
     rop_run_op ropper;
 #ifdef COMPARE_AND_CONTRAST
@@ -82,28 +78,32 @@ mem_gray8_rgb24_strip_copy_rop(gx_device * dev,
 #endif
 
     /* Check for constant source. */
-    if (!rop3_uses_S(rop))
+    if (!rop3_uses_S(lop)) {
         const_source = 0;       /* arbitrary */
-    else if (scolors != 0 && scolors[0] == scolors[1]) {
+    } else if (scolors != 0 && scolors[0] == scolors[1]) {
         /* Constant source */
         const_source = scolors[0];
         if (const_source == gx_device_black(dev))
-            rop = rop3_know_S_0(rop);
-        else if (const_source == gx_device_white(dev))
-            rop = rop3_know_S_1(rop);
+            lop = lop_know_S_0(lop);
+        else if (const_source == gx_device_white(dev)) {
+            lop = lop_know_S_1(lop);
+        }
     }
 
     /* Check for constant texture. */
-    if (!rop3_uses_T(rop))
+    if (!rop3_uses_T(lop))
         const_texture = 0;      /* arbitrary */
     else if (tcolors != 0 && tcolors[0] == tcolors[1]) {
         /* Constant texture */
         const_texture = tcolors[0];
         if (const_texture == gx_device_black(dev))
-            rop = rop3_know_T_0(rop);
-        else if (const_texture == gx_device_white(dev))
-            rop = rop3_know_T_1(rop);
+            lop = lop_know_T_0(lop);
+        else if (const_texture == gx_device_white(dev)) {
+            lop = lop_know_T_1(lop);
+        }
     }
+
+    rop = lop_rop(lop);
 
     if (bpp == 1 &&
         (gx_device_has_color(dev) ||
@@ -132,12 +132,8 @@ bw:         if (bw_pixel == 0x00)
         case rop3_D:
             break;
         case rop3_S:
-            if (lop & lop_S_transparent)
-                goto df;
             break;
         case rop3_T:
-            if (lop & lop_T_transparent)
-                goto df;
             break;
         default:
 df:         return mem_default_strip_copy_rop(dev,
@@ -146,6 +142,8 @@ df:         return mem_default_strip_copy_rop(dev,
                                               x, y, width, height,
                                               phase_x, phase_y, lop);
         }
+        /* Put the updated rop back into the lop */
+        lop = rop;
     }
 
     /* Adjust coordinates to be in bounds. */
@@ -160,6 +158,25 @@ df:         return mem_default_strip_copy_rop(dev,
     line_count = height;
     base = scan_line_base(mdev, y);
     drow = base + x * bpp;
+
+    /* Allow for colors being passed in with tags in the top bits.
+     * This confuses transparency code.
+     */
+    {
+        gx_color_index color_mask = (bpp == 1 ? 0xff : 0xffffff);
+        if (scolors)
+        {
+            local_scolors[0] = scolors[0] & color_mask;
+            local_scolors[1] = scolors[1] & color_mask;
+            scolors = local_scolors;
+        }
+        if (tcolors)
+        {
+            local_tcolors[0] = tcolors[0] & color_mask;
+            local_tcolors[1] = tcolors[1] & color_mask;
+            tcolors = local_tcolors;
+        }
+    }
 
     /*
      * There are 18 cases depending on whether each of the source and
@@ -176,12 +193,10 @@ df:         return mem_default_strip_copy_rop(dev,
 /* 8-bit */
 #define cbit8(base, i, colors)\
   (dbit(base, i) ? (byte)colors[1] : (byte)colors[0])
+#ifdef COMPARE_AND_CONTRAST
 #define rop_body_8(s_pixel, t_pixel)\
-  if ( (s_pixel) == strans ||   /* So = 0, s_tr = 1 */\
-       (t_pixel) == ttrans      /* Po = 0, p_tr = 1 */\
-     )\
-    continue;\
   *dptr = (*rop_proc_table[rop])(*dptr, s_pixel, t_pixel)
+#endif
 /* 24-bit */
 #define get24(ptr)\
   (((gx_color_index)(ptr)[0] << 16) | ((gx_color_index)(ptr)[1] << 8) | (ptr)[2])
@@ -191,154 +206,143 @@ df:         return mem_default_strip_copy_rop(dev,
   (ptr)[2] = (byte)(pixel)
 #define cbit24(base, i, colors)\
   (dbit(base, i) ? colors[1] : colors[0])
+#ifdef COMPARE_AND_CONTRAST
 #define rop_body_24(s_pixel, t_pixel)\
-  if ( (s_pixel) == strans ||   /* So = 0, s_tr = 1 */\
-       (t_pixel) == ttrans      /* Po = 0, p_tr = 1 */\
-     )\
-    continue;\
   { gx_color_index d_pixel = get24(dptr);\
     d_pixel = (*rop_proc_table[rop])(d_pixel, s_pixel, t_pixel);\
     put24(dptr, d_pixel);\
   }
+#endif
     if (const_texture != gx_no_color_index) {
 /**** Constant texture ****/
         if (const_source != gx_no_color_index) {
 /**** Constant source & texture ****/
-            rop_get_run_op(&ropper, lop, depth, rop_s_constant | rop_t_constant);
             rop_set_s_constant(&ropper, const_source);
             rop_set_t_constant(&ropper, const_texture);
-            for (; line_count-- > 0; drow += draster) {
+            if (rop_get_run_op(&ropper, lop, depth, rop_s_constant | rop_t_constant)) {
+                for (; line_count-- > 0; drow += draster) {
 #ifdef COMPARE_AND_CONTRAST
-                byte *dptr = drow;
-                int left = width;
+                    byte *dptr = drow;
+                    int left = width;
 
-                bytelen = left*bpp; start = dptr;
-                memcpy(testbuffer, dptr, bytelen);
-                rop_run(&ropper, testbuffer, left);
+                    bytelen = left*bpp; start = dptr;
+                    memcpy(testbuffer, dptr, bytelen);
+                    rop_run(&ropper, testbuffer, left);
 
-                if (bpp == 1)
+                    if (bpp == 1)
 /**** 8-bit destination ****/
-                    for (; left > 0; ++dptr, --left) {
-                        vd_pixel(int2fixed((dptr - base) % draster),
-                                 int2fixed((dptr - base) / draster + y), const_texture);
-                        rop_body_8((byte)const_source, (byte)const_texture);
-                    }
-                else
+                        for (; left > 0; ++dptr, --left) {
+                            rop_body_8((byte)const_source, (byte)const_texture);
+                        }
+                    else
 /**** 24-bit destination ****/
-                    for (; left > 0; dptr += 3, --left) {
-                        vd_pixel(int2fixed((dptr - base) % draster / 3),
-                                 int2fixed((dptr - base) / draster + y), const_texture);
-                        rop_body_24(const_source, const_texture);
+                        for (; left > 0; dptr += 3, --left) {
+                            rop_body_24(const_source, const_texture);
+                        }
+                    if (memcmp(testbuffer, start, bytelen) != 0) {
+                        emprintf(dev->memory, "Failed!\n");
                     }
-                if (memcmp(testbuffer, start, bytelen) != 0) {
-                    emprintf(dev->memory, "Failed!\n");
-                }
 #else
-                rop_run(&ropper, drow, width);
+                    rop_run(&ropper, drow, width);
 #endif
+                }
+                rop_release_run_op(&ropper);
             }
-            rop_release_run_op(&ropper);
         } else {
 /**** Data source, const texture ****/
             if (scolors) {
                 const byte *srow = sdata;
 
-                rop_get_run_op(&ropper, lop, depth, rop_t_constant | rop_s_1bit);
                 rop_set_t_constant(&ropper, const_texture);
                 rop_set_s_colors(&ropper, scolors);
+                if (rop_get_run_op(&ropper, lop, depth, rop_t_constant | rop_s_1bit)) {
 
-                for (; line_count-- > 0; drow += draster, srow += sraster) {
+                    for (; line_count-- > 0; drow += draster, srow += sraster) {
 #ifdef COMPARE_AND_CONTRAST
-                    byte *dptr = drow;
-                    int left = width;
+                        byte *dptr = drow;
+                        int left = width;
 /**** 1-bit source ****/
-                    int sx = sourcex;
+                        int sx = sourcex;
 
-                    rop_set_s_bitmap_subbyte(&ropper, srow, sourcex);
-                    bytelen = left*bpp; start = dptr;
-                    memcpy(testbuffer, dptr, bytelen);
-                    rop_run(&ropper, testbuffer, width);
-                    if (bpp == 1)
+                        rop_set_s_bitmap_subbyte(&ropper, srow, sourcex);
+                        bytelen = left*bpp; start = dptr;
+                        memcpy(testbuffer, dptr, bytelen);
+                        rop_run(&ropper, testbuffer, width);
+                        if (bpp == 1)
 /**** 8-bit destination ****/
-                        for (; left > 0; ++dptr, ++sx, --left) {
-                            byte s_pixel = cbit8(srow, sx, scolors);
+                            for (; left > 0; ++dptr, ++sx, --left) {
+                                byte s_pixel = cbit8(srow, sx, scolors);
 
-                            vd_pixel(int2fixed((dptr - base) % draster),
-                                 int2fixed((dptr - base) / draster + y), const_texture);
-                            rop_body_8(s_pixel, (byte)const_texture);
-                        }
-                    else
+                                rop_body_8(s_pixel, (byte)const_texture);
+                            }
+                        else
 /**** 24-bit destination ****/
-                        for (; left > 0; dptr += 3, ++sx, --left) {
-                            bits32 s_pixel = cbit24(srow, sx, scolors);
+                            for (; left > 0; dptr += 3, ++sx, --left) {
+                                bits32 s_pixel = cbit24(srow, sx, scolors);
 
-                            vd_pixel(int2fixed((dptr - base) % draster / 3),
-                                 int2fixed((dptr - base) / draster + y), const_texture);
-                            rop_body_24(s_pixel, const_texture);
+                                rop_body_24(s_pixel, const_texture);
+                            }
+                        if (memcmp(testbuffer, start, bytelen) != 0) {
+                            emprintf(dev->memory, "Failed!\n");
                         }
-                    if (memcmp(testbuffer, start, bytelen) != 0) {
-                        emprintf(dev->memory, "Failed!\n");
-                    }
 #else
 /**** 1-bit source ****/
 /**** 8-bit destination ****/
 /**** 24-bit destination ****/
-                    rop_set_s_bitmap_subbyte(&ropper, srow, sourcex);
-                    rop_run(&ropper, drow, width);
+                        rop_set_s_bitmap_subbyte(&ropper, srow, sourcex);
+                        rop_run(&ropper, drow, width);
 #endif
+                    }
+                    rop_release_run_op(&ropper);
                 }
-                rop_release_run_op(&ropper);
             } else {
                 const byte *srow = sdata;
-                rop_get_run_op(&ropper, lop, depth, rop_t_constant);
                 rop_set_t_constant(&ropper, const_texture);
-                for (; line_count-- > 0; drow += draster, srow += sraster) {
+                if (rop_get_run_op(&ropper, lop, depth, rop_t_constant)) {
+                    for (; line_count-- > 0; drow += draster, srow += sraster) {
 #ifdef COMPARE_AND_CONTRAST
-                    byte *dptr = drow;
-                    int left = width;
-
-                    bytelen = left*bpp; start = dptr;
-                    memcpy(testbuffer, dptr, bytelen);
-
-                    rop_set_s_bitmap(&ropper, srow + sourcex * bpp);
-                    rop_run(&ropper, testbuffer, left);
-/**** 8-bit source & dest ****/
-                    if (bpp == 1) {
-                        const byte *sptr = srow + sourcex;
-
-                        for (; left > 0; ++dptr, ++sptr, --left) {
-                            byte s_pixel = *sptr;
-
-                            vd_pixel(int2fixed((dptr - base) % draster),
-                                     int2fixed((dptr - base) / draster + y), const_texture);
-                            rop_body_8(s_pixel, (byte)const_texture);
-                        }
-                    } else {
-/**** 24-bit source & dest ****/
-                        const byte *sptr = srow + sourcex * 3;
+                        byte *dptr = drow;
+                        int left = width;
 
                         bytelen = left*bpp; start = dptr;
                         memcpy(testbuffer, dptr, bytelen);
 
-                        for (; left > 0; dptr += 3, sptr += 3, --left) {
-                            bits32 s_pixel = get24(sptr);
+                        rop_set_s_bitmap(&ropper, srow + sourcex * bpp);
+                        rop_run(&ropper, testbuffer, left);
+/**** 8-bit source & dest ****/
+                        if (bpp == 1) {
+                            const byte *sptr = srow + sourcex;
 
-                            vd_pixel(int2fixed((dptr - base) % draster / 3),
-                                     int2fixed((dptr - base) / draster + y), const_texture);
-                            rop_body_24(s_pixel, const_texture);
+                            for (; left > 0; ++dptr, ++sptr, --left) {
+                                byte s_pixel = *sptr;
+
+                                rop_body_8(s_pixel, (byte)const_texture);
+                            }
+                        } else {
+/**** 24-bit source & dest ****/
+                            const byte *sptr = srow + sourcex * 3;
+
+                            bytelen = left*bpp; start = dptr;
+                            memcpy(testbuffer, dptr, bytelen);
+
+                            for (; left > 0; dptr += 3, sptr += 3, --left) {
+                                bits32 s_pixel = get24(sptr);
+
+                                rop_body_24(s_pixel, const_texture);
+                            }
                         }
-                    }
-                    if (memcmp(testbuffer, start, bytelen) != 0) {
-                        emprintf(dev->memory, "Failed!\n");
-                    }
+                        if (memcmp(testbuffer, start, bytelen) != 0) {
+                            emprintf(dev->memory, "Failed!\n");
+                        }
 #else
 /**** 8-bit source & dest ****/
 /**** 24-bit source & dest ****/
-                    rop_set_s_bitmap(&ropper, srow + sourcex * bpp);
-                    rop_run(&ropper, drow, width);
+                        rop_set_s_bitmap(&ropper, srow + sourcex * bpp);
+                        rop_run(&ropper, drow, width);
 #endif
+                    }
+                    rop_release_run_op(&ropper);
                 }
-                rop_release_run_op(&ropper);
             }
         }
     } else if (const_source != gx_no_color_index) {
@@ -347,190 +351,187 @@ df:         return mem_default_strip_copy_rop(dev,
             uint traster = textures->raster;
             int ty = y + phase_y;
 
-            rop_get_run_op(&ropper, lop, depth, rop_s_constant | rop_t_1bit);
             rop_set_s_constant(&ropper, const_source);
-            for (; line_count-- > 0; drow += draster, ++ty) {   /* Loop over copies of the tile. */
-                int dx = x, w = width, nw;
-                byte *dptr = drow;
-                const byte *trow =
-                textures->data + (ty % textures->size.y) * traster;
-                int xoff = x_offset(phase_x, ty, textures);
+            if (rop_get_run_op(&ropper, lop, depth, rop_s_constant | rop_t_1bit)) {
+                for (; line_count-- > 0; drow += draster, ++ty) {   /* Loop over copies of the tile. */
+                    int dx = x, w = width, nw;
+                    byte *dptr = drow;
+                    const byte *trow =
+                    textures->data + (ty % textures->size.y) * traster;
+                    int xoff = x_offset(phase_x, ty, textures);
 
-                for (; w > 0; dx += nw, w -= nw) {
-                    int tx = (dx + xoff) % textures->rep_width;
-                    int left = nw = min(w, textures->size.x - tx);
-                    const byte *tptr = trow;
-
-                    rop_set_t_bitmap_subbyte(&ropper, trow, tx);
+                    for (; w > 0; dx += nw, w -= nw) {
+                        int tx = (dx + xoff) % textures->rep_width;
+                        int left = nw = min(w, textures->size.x - tx);
 #ifdef COMPARE_AND_CONTRAST
-                    bytelen = left*bpp; start = dptr;
-                    memcpy(testbuffer, dptr, bytelen);
-                    rop_run(&ropper, testbuffer, left);
-/**** 1-bit texture ****/
-                    if (bpp == 1)
-/**** 8-bit dest ****/
-                        for (; left > 0; ++dptr, ++tx, --left) {
-                            byte t_pixel = cbit8(tptr, tx, tcolors);
-
-                            vd_pixel(int2fixed((dptr - base) % draster),
-                                 int2fixed((dptr - base) / draster + y), t_pixel);
-                            rop_body_8((byte)const_source, t_pixel);
-                        }
-                    else
-/**** 24-bit dest ****/
-                        for (; left > 0; dptr += 3, ++tx, --left) {
-                            bits32 t_pixel = cbit24(tptr, tx, tcolors);
-
-                            vd_pixel(int2fixed((dptr - base) % draster / 3),
-                                 int2fixed((dptr - base) / draster + y), t_pixel);
-                            rop_body_24(const_source, t_pixel);
-                        }
-                    if (memcmp(testbuffer, start, bytelen) != 0) {
-                        emprintf(dev->memory, "Failed!\n");
-                    }
-#else
-                    rop_run(&ropper, dptr, left);
-                    dptr += left;
+                        const byte *tptr = trow;
 #endif
+
+                        rop_set_t_bitmap_subbyte(&ropper, trow, tx);
+#ifdef COMPARE_AND_CONTRAST
+                        bytelen = left*bpp; start = dptr;
+                        memcpy(testbuffer, dptr, bytelen);
+                        rop_run(&ropper, testbuffer, left);
+/**** 1-bit texture ****/
+                        if (bpp == 1)
+/**** 8-bit dest ****/
+                            for (; left > 0; ++dptr, ++tx, --left) {
+                                byte t_pixel = cbit8(tptr, tx, tcolors);
+
+                                rop_body_8((byte)const_source, t_pixel);
+                            }
+                        else
+/**** 24-bit dest ****/
+                            for (; left > 0; dptr += 3, ++tx, --left) {
+                                bits32 t_pixel = cbit24(tptr, tx, tcolors);
+
+                                rop_body_24(const_source, t_pixel);
+                            }
+                        if (memcmp(testbuffer, start, bytelen) != 0) {
+                            emprintf(dev->memory, "Failed!\n");
+                        }
+#else
+                        rop_run(&ropper, dptr, left);
+                        dptr += left;
+#endif
+                    }
                 }
             }
         } else {
             uint traster = textures->raster;
             int ty = y + phase_y;
 
-            rop_get_run_op(&ropper, lop, depth, rop_s_constant);
             rop_set_s_constant(&ropper, const_source);
+            if (rop_get_run_op(&ropper, lop, depth, rop_s_constant)) {
 
-            for (; line_count-- > 0; drow += draster, ++ty) {   /* Loop over copies of the tile. */
-                int dx = x, w = width, nw;
-                byte *dptr = drow;
-                const byte *trow =
-                textures->data + (ty % textures->size.y) * traster;
-                int xoff = x_offset(phase_x, ty, textures);
+                for (; line_count-- > 0; drow += draster, ++ty) {   /* Loop over copies of the tile. */
+                    int dx = x, w = width, nw;
+                    byte *dptr = drow;
+                    const byte *trow =
+                    textures->data + (ty % textures->size.y) * traster;
+                    int xoff = x_offset(phase_x, ty, textures);
 
-                for (; w > 0; dx += nw, w -= nw) {
-                    int tx = (dx + xoff) % textures->rep_width;
-                    int left = nw = min(w, textures->size.x - tx);
-                    const byte *tptr = trow + tx*bpp;
-                    rop_set_t_bitmap(&ropper, tptr);
+                    for (; w > 0; dx += nw, w -= nw) {
+                        int tx = (dx + xoff) % textures->rep_width;
+                        int left = nw = min(w, textures->size.x - tx);
+                        const byte *tptr = trow + tx*bpp;
+                        rop_set_t_bitmap(&ropper, tptr);
 #ifdef COMPARE_AND_CONTRAST
-                    bytelen = left*bpp; start = dptr;
-                    memcpy(testbuffer, dptr, bytelen);
-                    rop_run(&ropper, testbuffer, left);
+                        bytelen = left*bpp; start = dptr;
+                        memcpy(testbuffer, dptr, bytelen);
+                        rop_run(&ropper, testbuffer, left);
 /**** 8-bit T & D ****/
-                    if (bpp == 1) {
-                        for (; left > 0; ++dptr, ++tptr, --left) {
-                            byte t_pixel = *tptr;
+                        if (bpp == 1) {
+                            for (; left > 0; ++dptr, ++tptr, --left) {
+                                byte t_pixel = *tptr;
 
-                            vd_pixel(int2fixed((dptr - base) % draster),
-                                    int2fixed((dptr - base) / draster + y), t_pixel);
-                            rop_body_8((byte)const_source, t_pixel);
-                        }
-                    } else {
+                                rop_body_8((byte)const_source, t_pixel);
+                            }
+                        } else {
 /**** 24-bit T & D ****/
-                        for (; left > 0; dptr += 3, tptr += 3, --left) {
-                            bits32 t_pixel = get24(tptr);
+                            for (; left > 0; dptr += 3, tptr += 3, --left) {
+                                bits32 t_pixel = get24(tptr);
 
-                            vd_pixel(int2fixed((dptr - base) % draster / 3),
-                                     int2fixed((dptr - base) / draster + y), t_pixel);
-                            rop_body_24(const_source, t_pixel);
+                                rop_body_24(const_source, t_pixel);
+                            }
                         }
-                    }
-                    if (memcmp(testbuffer, start, bytelen) != 0) {
-                        emprintf(dev->memory, "Failed!\n");
-                    }
+                        if (memcmp(testbuffer, start, bytelen) != 0) {
+                            emprintf(dev->memory, "Failed!\n");
+                        }
 #else
 /**** 8-bit T & D ****/
 /**** 24-bit T & D ****/
-                    rop_run(&ropper, dptr, left);
-                    dptr += left * bpp;
+                        rop_run(&ropper, dptr, left);
+                        dptr += left * bpp;
 #endif
+                    }
                 }
+                rop_release_run_op(&ropper);
             }
-            rop_release_run_op(&ropper);
         }
     } else {
 /**** Data source & texture ****/
-        if (scolors != NULL | tcolors != NULL) {
+        if (scolors != NULL || tcolors != NULL) {
             uint traster = textures->raster;
             int ty = y + phase_y;
             const byte *srow = sdata;
 
-            rop_get_run_op(&ropper, lop, depth,
-                           ((scolors == NULL ? 0 : rop_s_1bit) |
-                            (tcolors == NULL ? 0 : rop_t_1bit)));
+            if (scolors)
+                rop_set_s_colors(&ropper, scolors);
+            if (tcolors)
+                rop_set_s_colors(&ropper, tcolors);
+            if (rop_get_run_op(&ropper, lop, depth,
+                               ((scolors == NULL ? 0 : rop_s_1bit) |
+                                (tcolors == NULL ? 0 : rop_t_1bit)))) {
+                /* Loop over scan lines. */
+                for (; line_count-- > 0; drow += draster, srow += sraster, ++ty) {  /* Loop over copies of the tile. */
+                    int sx = sourcex;
+                    int dx = x;
+                    int w = width;
+                    int nw;
+                    byte *dptr = drow;
+                    const byte *trow =
+                    textures->data + (ty % textures->size.y) * traster;
+                    int xoff = x_offset(phase_x, ty, textures);
 
-            /* Loop over scan lines. */
-            for (; line_count-- > 0; drow += draster, srow += sraster, ++ty) {  /* Loop over copies of the tile. */
-                int sx = sourcex;
-                int dx = x;
-                int w = width;
-                int nw;
-                byte *dptr = drow;
-                const byte *trow =
-                textures->data + (ty % textures->size.y) * traster;
-                int xoff = x_offset(phase_x, ty, textures);
+                    for (; w > 0; dx += nw, w -= nw) {      /* Loop over individual pixels. */
+                        int tx = (dx + xoff) % textures->rep_width;
+                        int left = nw = min(w, textures->size.x - tx);
+                        const byte *sptr = srow + sx*bpp;
+                        const byte *tptr = trow + tx*bpp;
 
-                for (; w > 0; dx += nw, w -= nw) {      /* Loop over individual pixels. */
-                    int tx = (dx + xoff) % textures->rep_width;
-                    int left = nw = min(w, textures->size.x - tx);
-                    const byte *sptr = srow + sx*bpp;
-                    const byte *tptr = trow + tx*bpp;
-
-                    /*
-                     * For maximum speed, we should split this loop
-                     * into 7 cases depending on source & texture
-                     * depth: (1,1), (1,8), (1,24), (8,1), (8,8),
-                     * (24,1), (24,24).  But since we expect these
-                     * cases to be relatively uncommon, we just
-                     * divide on the destination depth.
-                     */
-                    if (scolors)
-                        rop_set_s_bitmap_subbyte(&ropper, srow, sx);
-                    else
-                        rop_set_s_bitmap(&ropper, sptr);
-                    if (tcolors)
-                        rop_set_t_bitmap_subbyte(&ropper, trow, tx);
-                    else
-                        rop_set_t_bitmap(&ropper, tptr);
+                        /*
+                         * For maximum speed, we should split this loop
+                         * into 7 cases depending on source & texture
+                         * depth: (1,1), (1,8), (1,24), (8,1), (8,8),
+                         * (24,1), (24,24).  But since we expect these
+                         * cases to be relatively uncommon, we just
+                         * divide on the destination depth.
+                         */
+                        if (scolors)
+                            rop_set_s_bitmap_subbyte(&ropper, srow, sx);
+                        else
+                            rop_set_s_bitmap(&ropper, sptr);
+                        if (tcolors)
+                            rop_set_t_bitmap_subbyte(&ropper, trow, tx);
+                        else
+                            rop_set_t_bitmap(&ropper, tptr);
 
 #ifdef COMPARE_AND_CONTRAST
-                    bytelen = left*bpp; start = dptr;
-                    memcpy(testbuffer, dptr, bytelen);
-                    rop_run(&ropper, testbuffer, left);
-                    if (bpp == 1) {
+                        bytelen = left*bpp; start = dptr;
+                        memcpy(testbuffer, dptr, bytelen);
+                        rop_run(&ropper, testbuffer, left);
+                        if (bpp == 1) {
 /**** 8-bit destination ****/
-                        for (; left > 0; ++dptr, ++sptr, ++tptr, ++sx, ++tx, --left) {
-                            byte s_pixel =
-                                (scolors ? cbit8(srow, sx, scolors) : *sptr);
-                            byte t_pixel =
-                                (tcolors ? cbit8(trow, tx, tcolors) : *tptr);
+                            for (; left > 0; ++dptr, ++sptr, ++tptr, ++sx, ++tx, --left) {
+                                byte s_pixel =
+                                    (scolors ? cbit8(srow, sx, scolors) : *sptr);
+                                byte t_pixel =
+                                    (tcolors ? cbit8(trow, tx, tcolors) : *tptr);
 
-                            vd_pixel(int2fixed((dptr - base) % draster),
-                                     int2fixed((dptr - base) / draster + y), t_pixel);
-                            rop_body_8(s_pixel, t_pixel);
-                        }
-                    } else {
+                                rop_body_8(s_pixel, t_pixel);
+                            }
+                        } else {
 /**** 24-bit destination ****/
-                        for (; left > 0; dptr += 3, sptr += 3, tptr += 3, ++sx, ++tx, --left) {
-                            bits32 s_pixel =
-                                (scolors ? cbit24(srow, sx, scolors) :
-                                 get24(sptr));
-                            bits32 t_pixel =
-                                (tcolors ? cbit24(tptr, tx, tcolors) :
-                                 get24(tptr));
+                            for (; left > 0; dptr += 3, sptr += 3, tptr += 3, ++sx, ++tx, --left) {
+                                bits32 s_pixel =
+                                    (scolors ? cbit24(srow, sx, scolors) :
+                                     get24(sptr));
+                                bits32 t_pixel =
+                                    (tcolors ? cbit24(tptr, tx, tcolors) :
+                                     get24(tptr));
 
-                            vd_pixel(int2fixed((dptr - base) % draster / 3),
-                                     int2fixed((dptr - base) / draster + y), t_pixel);
-                            rop_body_24(s_pixel, t_pixel);
+                                rop_body_24(s_pixel, t_pixel);
+                            }
                         }
-                    }
-                    if (memcmp(testbuffer, start, bytelen) != 0) {
-                        emprintf(dev->memory, "Failed!\n");
-                    }
+                        if (memcmp(testbuffer, start, bytelen) != 0) {
+                            emprintf(dev->memory, "Failed!\n");
+                        }
 #else
-                    rop_run(&ropper, dptr, left);
+                        rop_run(&ropper, dptr, left);
+                        dptr += left * bpp;
 #endif
+                    }
                 }
             }
         } else {
@@ -539,53 +540,55 @@ df:         return mem_default_strip_copy_rop(dev,
             const byte *srow = sdata;
 
             /* Loop over scan lines. */
-            rop_get_run_op(&ropper, rop, depth, 0);
-            for (; line_count-- > 0; drow += draster, srow += sraster, ++ty) {  /* Loop over copies of the tile. */
-                int sx = sourcex;
-                int dx = x;
-                int w = width;
-                int nw;
-                byte *dptr = drow;
-                const byte *trow =
-                textures->data + (ty % textures->size.y) * traster;
-                int xoff = x_offset(phase_x, ty, textures);
+            if (rop_get_run_op(&ropper, lop, depth, 0)) {
+                for (; line_count-- > 0; drow += draster, srow += sraster, ++ty) {  /* Loop over copies of the tile. */
+                    int sx = sourcex;
+                    int dx = x;
+                    int w = width;
+                    int nw;
+                    byte *dptr = drow;
+                    const byte *trow =
+                    textures->data + (ty % textures->size.y) * traster;
+                    int xoff = x_offset(phase_x, ty, textures);
 
-                for (; w > 0; dx += nw, w -= nw) {      /* Loop over individual pixels. */
-                    int tx = (dx + xoff) % textures->rep_width;
-                    int left = nw = min(w, textures->size.x - tx);
-                    const byte *tptr = trow + tx * bpp;
-                    const byte *sptr = srow + sx * bpp;
+                    for (; w > 0; sx += nw, dx += nw, w -= nw) {      /* Loop over individual pixels. */
+                        int tx = (dx + xoff) % textures->rep_width;
+                        int left = nw = min(w, textures->size.x - tx);
+                        const byte *tptr = trow + tx * bpp;
+                        const byte *sptr = srow + sx * bpp;
 
-                    rop_set_s_bitmap(&ropper, sptr);
-                    rop_set_t_bitmap(&ropper, tptr);
+                        rop_set_s_bitmap(&ropper, sptr);
+                        rop_set_t_bitmap(&ropper, tptr);
 #ifdef COMPARE_AND_CONTRAST
-                    if (bpp == 1) {
-                        rop_run(&ropper, testbuffer, left);
+                        if (bpp == 1) {
+                            rop_run(&ropper, testbuffer, left);
 /**** 8-bit destination ****/
 
-                        for (; left > 0; ++dptr, ++sptr, ++tptr, ++sx, ++tx, --left) {
-                            rop_body_8(*sptr, *tptr);
-                        }
-                    } else {
+                            for (; left > 0; ++dptr, ++sptr, ++tptr, ++sx, ++tx, --left) {
+                                rop_body_8(*sptr, *tptr);
+                            }
+                        } else {
 /**** 24-bit destination ****/
-                        for (; left > 0; dptr += 3, sptr += 3, tptr += 3, ++sx, ++tx, --left) {
-                            bits32 s_pixel = get24(sptr);
-                            bits32 t_pixel = get24(tptr);
+                            for (; left > 0; dptr += 3, sptr += 3, tptr += 3, ++sx, ++tx, --left) {
+                                bits32 s_pixel = get24(sptr);
+                                bits32 t_pixel = get24(tptr);
 
-                            rop_body_24(s_pixel, t_pixel);
+                                rop_body_24(s_pixel, t_pixel);
+                            }
                         }
-                    }
-                    if (memcmp(testbuffer, start, bytelen) != 0) {
-                        emprintf(dev->memory, "Failed!\n");
-                    }
+                        if (memcmp(testbuffer, start, bytelen) != 0) {
+                            emprintf(dev->memory, "Failed!\n");
+                        }
 #else
 /**** 8-bit destination ****/
 /**** 24-bit destination ****/
-                    rop_run(&ropper, dptr, left);
+                        rop_run(&ropper, dptr, left);
+                        dptr += left * bpp;
 #endif
+                    }
                 }
+                rop_release_run_op(&ropper);
             }
-            rop_release_run_op(&ropper);
         }
     }
 #undef rop_body_8
@@ -600,10 +603,6 @@ df:         return mem_default_strip_copy_rop(dev,
 #define cbit8(base, i, colors)\
   (dbit(base, i) ? (byte)colors[1] : (byte)colors[0])
 #define rop_body_8(s_pixel, t_pixel)\
-  if ( (s_pixel) == strans ||   /* So = 0, s_tr = 1 */\
-       (t_pixel) == ttrans      /* Po = 0, p_tr = 1 */\
-     )\
-    continue;\
   *dptr = (*rop_proc_table[rop])(*dptr, s_pixel, t_pixel)
 /* 24-bit */
 #define get24(ptr)\
@@ -615,10 +614,6 @@ df:         return mem_default_strip_copy_rop(dev,
 #define cbit24(base, i, colors)\
   (dbit(base, i) ? colors[1] : colors[0])
 #define rop_body_24(s_pixel, t_pixel)\
-  if ( (s_pixel) == strans ||   /* So = 0, s_tr = 1 */\
-       (t_pixel) == ttrans      /* Po = 0, p_tr = 1 */\
-     )\
-    continue;\
   { gx_color_index d_pixel = get24(dptr);\
     d_pixel = (*rop_proc_table[rop])(d_pixel, s_pixel, t_pixel);\
     put24(dptr, d_pixel);\
@@ -635,15 +630,11 @@ df:         return mem_default_strip_copy_rop(dev,
                 if (bpp == 1)
 /**** 8-bit destination ****/
                     for (; left > 0; ++dptr, --left) {
-                        vd_pixel(int2fixed((dptr - base) % draster),
-                                 int2fixed((dptr - base) / draster + y), const_texture);
                         rop_body_8((byte)const_source, (byte)const_texture);
                     }
                 else
 /**** 24-bit destination ****/
                     for (; left > 0; dptr += 3, --left) {
-                        vd_pixel(int2fixed((dptr - base) % draster / 3),
-                                 int2fixed((dptr - base) / draster + y), const_texture);
                         rop_body_24(const_source, const_texture);
                     }
             }
@@ -664,8 +655,6 @@ df:         return mem_default_strip_copy_rop(dev,
                         for (; left > 0; ++dptr, ++sx, --left) {
                             byte s_pixel = cbit8(srow, sx, scolors);
 
-                            vd_pixel(int2fixed((dptr - base) % draster),
-                                 int2fixed((dptr - base) / draster + y), const_texture);
                             rop_body_8(s_pixel, (byte)const_texture);
                         }
                     else
@@ -673,8 +662,6 @@ df:         return mem_default_strip_copy_rop(dev,
                         for (; left > 0; dptr += 3, ++sx, --left) {
                             bits32 s_pixel = cbit24(srow, sx, scolors);
 
-                            vd_pixel(int2fixed((dptr - base) % draster / 3),
-                                 int2fixed((dptr - base) / draster + y), const_texture);
                             rop_body_24(s_pixel, const_texture);
                         }
                 } else if (bpp == 1) {
@@ -684,8 +671,6 @@ df:         return mem_default_strip_copy_rop(dev,
                     for (; left > 0; ++dptr, ++sptr, --left) {
                         byte s_pixel = *sptr;
 
-                        vd_pixel(int2fixed((dptr - base) % draster),
-                                 int2fixed((dptr - base) / draster + y), const_texture);
                         rop_body_8(s_pixel, (byte)const_texture);
                     }
                 } else {
@@ -695,8 +680,6 @@ df:         return mem_default_strip_copy_rop(dev,
                     for (; left > 0; dptr += 3, sptr += 3, --left) {
                         bits32 s_pixel = get24(sptr);
 
-                        vd_pixel(int2fixed((dptr - base) % draster / 3),
-                                 int2fixed((dptr - base) / draster + y), const_texture);
                         rop_body_24(s_pixel, const_texture);
                     }
                 }
@@ -726,8 +709,6 @@ df:         return mem_default_strip_copy_rop(dev,
                         for (; left > 0; ++dptr, ++tx, --left) {
                             byte t_pixel = cbit8(tptr, tx, tcolors);
 
-                            vd_pixel(int2fixed((dptr - base) % draster),
-                                 int2fixed((dptr - base) / draster + y), t_pixel);
                             rop_body_8((byte)const_source, t_pixel);
                         }
                     else
@@ -735,8 +716,6 @@ df:         return mem_default_strip_copy_rop(dev,
                         for (; left > 0; dptr += 3, ++tx, --left) {
                             bits32 t_pixel = cbit24(tptr, tx, tcolors);
 
-                            vd_pixel(int2fixed((dptr - base) % draster / 3),
-                                 int2fixed((dptr - base) / draster + y), t_pixel);
                             rop_body_24(const_source, t_pixel);
                         }
                 } else if (bpp == 1) {
@@ -745,8 +724,6 @@ df:         return mem_default_strip_copy_rop(dev,
                     for (; left > 0; ++dptr, ++tptr, --left) {
                         byte t_pixel = *tptr;
 
-                        vd_pixel(int2fixed((dptr - base) % draster),
-                                 int2fixed((dptr - base) / draster + y), t_pixel);
                         rop_body_8((byte)const_source, t_pixel);
                     }
                 } else {
@@ -755,8 +732,6 @@ df:         return mem_default_strip_copy_rop(dev,
                     for (; left > 0; dptr += 3, tptr += 3, --left) {
                         bits32 t_pixel = get24(tptr);
 
-                        vd_pixel(int2fixed((dptr - base) % draster / 3),
-                                 int2fixed((dptr - base) / draster + y), t_pixel);
                         rop_body_24(const_source, t_pixel);
                     }
                 }
@@ -803,8 +778,6 @@ df:         return mem_default_strip_copy_rop(dev,
                         byte t_pixel =
                             (tcolors ? cbit8(tptr, tx, tcolors) : *tptr);
 
-                        vd_pixel(int2fixed((dptr - base) % draster),
-                                 int2fixed((dptr - base) / draster + y), t_pixel);
                         rop_body_8(s_pixel, t_pixel);
                     }
                 } else {
@@ -820,8 +793,6 @@ df:         return mem_default_strip_copy_rop(dev,
                             (tcolors ? cbit24(tptr, tx, tcolors) :
                              get24(tptr));
 
-                        vd_pixel(int2fixed((dptr - base) % draster / 3),
-                                 int2fixed((dptr - base) / draster + y), t_pixel);
                         rop_body_24(s_pixel, t_pixel);
                     }
                 }

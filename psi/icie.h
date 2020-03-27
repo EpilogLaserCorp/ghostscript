@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -18,6 +18,9 @@
 
 #ifndef icie_INCLUDED
 #  define icie_INCLUDED
+
+#include "gscie.h"
+#include "igstate.h"
 
 /*
  * All of the routines below are exported by zcie.c for zcrd.c,
@@ -91,6 +94,6 @@ int cie_prepare_caches_4(i_ctx_t *i_ctx_p, const gs_range * domains,
                        &(c4)[3].floats, pcie, imem, cname)
 
 int cie_cache_joint(i_ctx_t *, const ref_cie_render_procs *,
-                    const gs_cie_common *, gs_state *);
+                    const gs_cie_common *, gs_gstate *);
 
 #endif /* icie_INCLUDED */

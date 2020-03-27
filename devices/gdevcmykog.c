@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2013 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -7,8 +7,8 @@
    This software is distributed under license and may not be copied, modified
    or distributed except as expressly authorized under the terms of that
    license.  Refer to licensing information at http://www.artifex.com/
-   or contact Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134,
-   San Rafael, CA  94903, U.S.A., +1(415)492-9861, for further information.
+   or contact Artifex Software, Inc.,  1305 Grant Avenue - Suite 200,
+   Novato, CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* psdcmykog device.
@@ -93,6 +93,7 @@
 #include "gxgetbit.h"
 #include "gxdevsop.h"
 #include "gdevppla.h"
+#include "gdevpsd.h"
 
 /* And for the SSE code */
 #ifdef USE_SSE4
@@ -123,6 +124,7 @@ typedef struct gx_device_cmykog_s gx_device_cmykog;
 static
 ENUM_PTRS_WITH(cmykog_device_enum_ptrs, gx_device_cmykog *pdev)
 {
+  (void)pdev; /* Silenced unused var warning */
   ENUM_PREFIX(st_gx_devn_prn_device, 0);
   /* Any extra pointers added to our device after the gx_devn_prn_device
    * fields would be enumerated here. */
@@ -132,6 +134,7 @@ ENUM_PTRS_END
 
 static RELOC_PTRS_WITH(cmykog_device_reloc_ptrs, gx_device_cmykog *pdev)
 {
+  (void)pdev; /* Silenced unused var warning */
   RELOC_PREFIX(st_gx_devn_prn_device);
   /* Any extra pointers added to our device after the gx_devn_prn_device
    * fields would be relocated here. */
@@ -162,9 +165,29 @@ static int
 cmykog_open(gx_device * pdev)
 {
   gx_device_cmykog *dev = (gx_device_cmykog *)pdev;
+  unsigned char k;
 
   dev->color_info.separable_and_linear = GX_CINFO_SEP_LIN;
   dev->icc_struct->supports_devn = true;
+
+  /* This device is a DeviceN color based device but unlike psdcmyk and
+     tiffsep it can't change its color characteristics.  It remains as 
+     a 6 color cmykog device.  Postsript files can change the maxseparations 
+     (example Bug 696600 29-07E.PS)  The gdevdevn code will, if it 
+     detects a change occured, close the device and reopen (see
+     devn_printer_put_params) possibly resetting the color info.  tiffsep
+     and psdcmyk, when reopened, will  reset their color characteristics based upon
+     the content of the page, avoiding any issues upon the reopen.  Here we
+     will need to make sure to set the color information to avoid problems. */
+  pdev->color_info.max_components = 6;
+  pdev->color_info.depth = pdev->color_info.num_components * 8;
+
+  /* For the planar device we need to set up the bit depth of each plane.
+   * For other devices this is handled in check_device_separable where
+   * we compute the bit shift for the components etc. */
+  for (k = 0; k < pdev->color_info.num_components; k++) {
+      pdev->color_info.comp_bits[k] = 8;
+  }
 
   /* Here we set the device so that any buffers set up will be aligned to a
    * multiple of 1<<5 = 32. This is so the SSE code can safely load 32 bytes
@@ -202,7 +225,10 @@ cmykog_dev_spec_op(gx_device *dev_, int op, void *data, int datasize)
       if (code != gs_error_undefined)
           return code;
   }
-  return gx_default_dev_spec_op(dev_, op, data, datasize);
+  if (op == gxdso_supports_devn) {
+    return true;
+  }
+  return gdev_prn_dev_spec_op(dev_, op, data, datasize);
 }
 
 /*
@@ -268,7 +294,7 @@ cmykog_put_params(gx_device * pdev, gs_param_list * plist)
  * passed to every process_page function:
  */
 typedef struct cmykog_process_arg_s {
-  FILE *spot_file[GX_DEVICE_COLOR_MAX_COMPONENTS];
+  gp_file *spot_file[GX_DEVICE_COLOR_MAX_COMPONENTS];
   char spot_name[GX_DEVICE_COLOR_MAX_COMPONENTS][gp_file_name_sizeof];
   int dev_raster;
 } cmykog_process_arg_t;
@@ -299,7 +325,7 @@ cmykog_init_buffer(void *arg_, gx_device *dev_, gs_memory_t *memory, int w, int 
   *bufferp = NULL;
   buffer = (cmykog_process_buffer_t *)gs_alloc_bytes(memory, sizeof(*buffer), "cmykog_init_buffer");
   if (buffer == NULL)
-    return gs_error_VMerror;
+    return_error(gs_error_VMerror);
   memset(buffer, 0, sizeof(*buffer));
 
   *bufferp = buffer;
@@ -477,7 +503,8 @@ cmykog_process(void *arg_, gx_device *dev_, gx_device *bdev, const gs_int_rect *
   cmykog_process_arg_t *arg = (cmykog_process_arg_t *)arg_;
   gx_device_cmykog *dev = (gx_device_cmykog *)dev_;
   cmykog_process_buffer_t *buffer = (cmykog_process_buffer_t *)buffer_;
-  int code, ignore_start, i;
+  int code, ignore_start;
+  unsigned char i;
   int w = rect->q.x - rect->p.x;
   int h = rect->q.y - rect->p.y;
   gs_int_rect my_rect;
@@ -524,11 +551,11 @@ cmykog_process(void *arg_, gx_device *dev_, gx_device *bdev, const gs_int_rect *
 }
 
 static void
-write_plane(FILE *file, byte *data, int w, int h, int raster)
+write_plane(gp_file *file, byte *data, int w, int h, int raster)
 {
 #ifndef NO_OUTPUT
   for (; h > 0; h--) {
-      fwrite(data, 1, w, file);
+      gp_fwrite(data, 1, w, file);
       data += raster;
   }
 #endif
@@ -546,7 +573,7 @@ static const char empty[64] = {
 };
 
 static void
-write_empty_plane(FILE *file, int w, int h)
+write_empty_plane(gp_file *file, int w, int h)
 {
 #ifndef NO_OUTPUT
   w *= h;
@@ -554,7 +581,7 @@ write_empty_plane(FILE *file, int w, int h)
     h = w;
     if (h > 64)
         h = 64;
-    fwrite(empty, 1, h, file);
+    gp_fwrite(empty, 1, h, file);
     w -= h;
   }
 #endif
@@ -569,7 +596,7 @@ cmykog_output(void *arg_, gx_device *dev_, void *buffer_)
   cmykog_process_arg_t *arg = (cmykog_process_arg_t *)arg_;
   gx_device_cmykog *dev = (gx_device_cmykog *)dev_;
   cmykog_process_buffer_t *buffer = (cmykog_process_buffer_t *)buffer_;
-  int i;
+  unsigned char i;
   int w = buffer->w;
   int h = buffer->h;
   int raster = arg->dev_raster;
@@ -589,7 +616,7 @@ cmykog_output(void *arg_, gx_device *dev_, void *buffer_)
 /* This, finally is the main entry point that triggers printing for the
  * device. */
 static int
-cmykog_print_page(gx_device_printer * pdev, FILE * prn_stream)
+cmykog_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
   gx_device_cmykog * pdevn = (gx_device_cmykog *) pdev;
   int ncomp = pdevn->color_info.num_components;
@@ -598,89 +625,94 @@ cmykog_print_page(gx_device_printer * pdev, FILE * prn_stream)
   int code, i;
   psd_write_ctx *psd_ctx;
 
-  if ((arg = (cmykog_process_arg_t *)gs_alloc_bytes(pdev->memory,
-                                        sizeof(cmykog_process_arg_t),
-                                        "cmykog_print_page arg")) == NULL)
-      return_error(gs_error_VMerror);
-
-  memset(arg, 0, sizeof(cmykog_process_arg_t));
-  if ((psd_ctx = (psd_write_ctx *)gs_alloc_bytes(pdev->memory,
-                                        sizeof(psd_write_ctx),
-                                        "cmykog_print_page psd_ctx")) == NULL) {
-      gs_free_object(pdev->memory, arg, "cmykog_print_page arg");
-      return_error(gs_error_VMerror);
+  if (!psd_allow_multiple_pages(pdev)) {
+     emprintf(pdev->memory, "Use of the %%d format is required to output more than one page to PSD\nSee doc/Devices.htm#PSD for details\n\n");
+     code = gs_note_error(gs_error_ioerror);
   }
+  else {
+    if ((arg = (cmykog_process_arg_t *)gs_alloc_bytes(pdev->memory,
+                                          sizeof(cmykog_process_arg_t),
+                                          "cmykog_print_page arg")) == NULL)
+        return_error(gs_error_VMerror);
 
-  /* Calculate the raster that will be used for each bands data;
-   * gx_device_raster_plane takes care of any alignment or padding
-   * required. */
-  arg->dev_raster = gx_device_raster_plane((gx_device *)pdev, NULL);
+    memset(arg, 0, sizeof(cmykog_process_arg_t));
+    if ((psd_ctx = (psd_write_ctx *)gs_alloc_bytes(pdev->memory,
+                                          sizeof(psd_write_ctx),
+                                          "cmykog_print_page psd_ctx")) == NULL) {
+        gs_free_object(pdev->memory, arg, "cmykog_print_page arg");
+        return_error(gs_error_VMerror);
+    }
+
+    /* Calculate the raster that will be used for each bands data;
+     * gx_device_raster_plane takes care of any alignment or padding
+     * required. */
+    arg->dev_raster = gx_device_raster_plane((gx_device *)pdev, NULL);
 
 #ifndef NO_OUTPUT
-  /* Output the psd headers */
-  code = psd_setup(psd_ctx, (gx_devn_prn_device *)pdevn,
-                   prn_stream, pdev->width>>1, pdev->height>>1);
-  if (code < 0)
-      return code;
+    /* Output the psd headers */
+    code = psd_setup(psd_ctx, (gx_devn_prn_device *)pdevn,
+                     prn_stream, pdev->width>>1, pdev->height>>1);
+    if (code < 0)
+        return code;
 
-  code = psd_write_header(psd_ctx, (gx_devn_prn_device *)pdevn);
-  if (code < 0)
-      return code;
+    code = psd_write_header(psd_ctx, (gx_devn_prn_device *)pdevn);
+    if (code < 0)
+        return code;
 
-  /* We will output the 0th plane direct to the target file. We open
-   * temporary files here, where the data for planes 1-5 will be put.
-   * We will then copy this data into the target file at the end. */
-  arg->spot_file[0] = prn_stream;
-  for(i = 1; i < ncomp; i++) {
-    arg->spot_file[i] = gp_open_scratch_file(pdev->memory, gp_scratch_file_name_prefix, &(arg->spot_name[i][0]), "w+b");
-    if (arg->spot_file[i] == NULL) {
-      code = gs_error_invalidfileaccess;
-      goto prn_done;
+    /* We will output the 0th plane direct to the target file. We open
+     * temporary files here, where the data for planes 1-5 will be put.
+     * We will then copy this data into the target file at the end. */
+    arg->spot_file[0] = prn_stream;
+    for(i = 1; i < ncomp; i++) {
+      arg->spot_file[i] = gp_open_scratch_file_rm(pdev->memory, gp_scratch_file_name_prefix, &(arg->spot_name[i][0]), "w+b");
+      if (arg->spot_file[i] == NULL) {
+        code = gs_error_invalidfileaccess;
+        goto prn_done;
+      }
     }
-  }
 #endif
 
-  /* Kick off the actual hard work */
-  options.init_buffer_fn = cmykog_init_buffer;
-  options.free_buffer_fn = cmykog_free_buffer;
-  options.process_fn = cmykog_process;
-  options.output_fn = cmykog_output;
-  options.arg = arg;
-  options.options = 0;
-  code = dev_proc(pdev, process_page)((gx_device *)pdev, &options);
+    /* Kick off the actual hard work */
+    options.init_buffer_fn = cmykog_init_buffer;
+    options.free_buffer_fn = cmykog_free_buffer;
+    options.process_fn = cmykog_process;
+    options.output_fn = cmykog_output;
+    options.arg = arg;
+    options.options = 0;
+    code = dev_proc(pdev, process_page)((gx_device *)pdev, &options);
 
 #ifndef NO_OUTPUT
-  /* Now collate the temporary files. */
-  for (i = 1; i < ncomp; i++) {
-    char tmp[4096];
-    int n;
-    fseek(arg->spot_file[i], 0, SEEK_SET);
-    while (!feof(arg->spot_file[i])) {
-      n = fread(tmp, 1, 4096, arg->spot_file[i]);
-      fwrite(tmp, 1, n, prn_stream);
+    /* Now collate the temporary files. */
+    for (i = 1; i < ncomp; i++) {
+      char tmp[4096];
+      int n;
+      gp_fseek(arg->spot_file[i], 0, SEEK_SET);
+      while (!gp_feof(arg->spot_file[i])) {
+        n = gp_fread(tmp, 1, 4096, arg->spot_file[i]);
+        gp_fwrite(tmp, 1, n, prn_stream);
+      }
     }
-  }
-  /* If Ghostscript knows that all 6 planes aren't used, it may
-   * truncate ncomp. Write the extra planes as appropriate. */
-  for (; i < pdev->color_info.max_components; i++) {
-    write_empty_plane(prn_stream, pdev->width>>1, pdev->height>>1);
-  }
+    /* If Ghostscript knows that all 6 planes aren't used, it may
+     * truncate ncomp. Write the extra planes as appropriate. */
+    for (; i < pdev->color_info.max_components; i++) {
+      write_empty_plane(prn_stream, pdev->width>>1, pdev->height>>1);
+    }
 #endif
 
 prn_done:
 
 #ifndef NO_OUTPUT
-  /* Close the temporary files. */
-  for(i = 1; i < ncomp; i++) {
-    if (arg->spot_file[i] != NULL)
-      fclose(arg->spot_file[i]);
-    if(arg->spot_name[i][0])
-      unlink(arg->spot_name[i]);
-  }
+    /* Close the temporary files. */
+    for(i = 1; i < ncomp; i++) {
+      if (arg->spot_file[i] != NULL)
+        gp_fclose(arg->spot_file[i]);
+      if(arg->spot_name[i][0])
+        unlink(arg->spot_name[i]);
+    }
 #endif
-  gs_free_object(pdev->memory, psd_ctx, "cmykog_print_page psd_ctx");
-  gs_free_object(pdev->memory, arg, "cmykog_print_page arg");
-
+    gs_free_object(pdev->memory, psd_ctx, "cmykog_print_page psd_ctx");
+    gs_free_object(pdev->memory, arg, "cmykog_print_page arg");
+  }
   return code;
 }
 

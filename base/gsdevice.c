@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -51,11 +51,11 @@ gx_device_finalize(const gs_memory_t *cmem, void *vptr)
     gx_device * const dev = (gx_device *)vptr;
     (void)cmem; /* unused */
 
+    discard(gs_closedevice(dev));
+
     if (dev->icc_struct != NULL) {
         rc_decrement(dev->icc_struct, "gx_device_finalize(icc_profile)");
     }
-    if (dev->finalize)
-        dev->finalize(dev);
 
     /* Deal with subclassed devices. Ordinarily these should not be a problem, we
      * will never see them, but if ths is a end of job restore we can end up
@@ -66,11 +66,39 @@ gx_device_finalize(const gs_memory_t *cmem, void *vptr)
         dev->child->parent = dev->parent;
     if (dev->parent)
         dev->parent->child = dev->child;
+    if (dev->PageList) {
+        rc_decrement(dev->PageList, "gx_device_finalize(PageList)");
+        dev->PageList = 0;
+    }
 
-    discard(gs_closedevice(dev));
+    if (dev->finalize)
+        dev->finalize(dev);
+
     if (dev->stype_is_dynamic)
         gs_free_const_object(dev->memory->non_gc_memory, dev->stype,
                              "gx_device_finalize");
+
+#ifdef DEBUG
+    /* Slightly ugly hack: because the garbage collector makes no promises
+     * about the order objects can be garbage collected, it is possible for
+     * a forwarding device to remain in existence (awaiting garbage collection
+     * itself) after it's target marked as free memory by the garbage collector.
+     * In such a case, the normal reference counting is fine (since the garbage
+     * collector leaves the object contents alone until is has completed its
+     * sweep), but the reference counting debugging attempts to access the
+     * memory header to output type information - and the header has been
+     * overwritten by the garbage collector, causing a crash.
+     * Setting the rc memory to NULL here should be safe, since the memory
+     * is now in the hands of the garbage collector, and means we can check in
+     * debugging code to ensure we don't try to use values that not longer exist
+     * in the memmory header.
+     * In the non-gc case, finalize is the very last thing to happen before the
+     * memory is actually freed, so the rc.memory pointer is moot.
+     * See rc_object_type_name()
+     */
+    if (gs_debug_c('^'))
+        dev->rc.memory = NULL;
+#endif
 }
 
 /* "Free" a device locally allocated on the stack, by finalizing it. */
@@ -141,7 +169,7 @@ gx_device_set_procs(gx_device * dev)
 
 /* Flush buffered output to the device */
 int
-gs_flushpage(gs_state * pgs)
+gs_flushpage(gs_gstate * pgs)
 {
     gx_device *dev = gs_currentdevice(pgs);
 
@@ -150,27 +178,27 @@ gs_flushpage(gs_state * pgs)
 
 /* Make the device output the accumulated page description */
 int
-gs_copypage(gs_state * pgs)
+gs_copypage(gs_gstate * pgs)
 {
     return gs_output_page(pgs, 1, 0);
 }
 int
-gs_output_page(gs_state * pgs, int num_copies, int flush)
+gs_output_page(gs_gstate * pgs, int num_copies, int flush)
 {
     gx_device *dev = gs_currentdevice(pgs);
     cmm_dev_profile_t *dev_profile;
     int code;
 
-    /* for devices that hook 'fill_path' in order to pick up imager state */
+    /* for devices that hook 'fill_path' in order to pick up gs_gstate */
     /* values such as dev_ht (such as tiffsep1), make a dummy call here   */
     /* to make sure that it has been called at least once		  */
     code = gs_gsave(pgs);
     if (code < 0)
         return code;
-    if (((code = gs_newpath(pgs)) < 0) || 
+    if (((code = gs_newpath(pgs)) < 0) ||
         ((code = gs_moveto(pgs, 0.0, 0.0)) < 0) ||
-	((code = gs_setgray(pgs, 0.0) < 0)) ||
-	((code = gs_fill(pgs)) < 0))
+    ((code = gs_setgray(pgs, 0.0)) < 0) ||
+    ((code = gs_fill(pgs)) < 0))
     {
         gs_grestore(pgs);
 	return code;
@@ -185,9 +213,11 @@ gs_output_page(gs_state * pgs, int num_copies, int flush)
         return code;
 
     code = dev_proc(dev, get_profile)(dev, &(dev_profile));
+    if (code < 0)
+        return code;
     if (dev_profile->graydetection && !dev_profile->pageneutralcolor) {
         dev_profile->pageneutralcolor = true;             /* start detecting again */
-        gsicc_mcm_begin_monitor(pgs->icc_link_cache, dev);
+        code = gsicc_mcm_begin_monitor(pgs->icc_link_cache, dev);
     }
     return code;
 }
@@ -232,7 +262,7 @@ gs_copyscanlines(gx_device * dev, int start_y, byte * data, uint size,
 
 /* Get the current device from the graphics state. */
 gx_device *
-gs_currentdevice(const gs_state * pgs)
+gs_currentdevice(const gs_gstate * pgs)
 {
     return pgs->device;
 }
@@ -319,20 +349,9 @@ static void
 gx_device_make_struct_type(gs_memory_struct_type_t *st,
                            const gx_device *dev)
 {
-    const gx_device_procs *procs = dev->static_procs;
-
-    /*
-     * Try to figure out whether this is a forwarding device.  For printer
-     * devices, we rely on the prototype referencing the correct structure
-     * descriptor; for other devices, we look for a likely forwarding
-     * procedure in the vector.  The algorithm isn't foolproof, but it's the
-     * best we can come up with.
-     */
-    if (procs == 0)
-        procs = &dev->procs;
     if (dev->stype)
         *st = *dev->stype;
-    else if (procs->get_xfont_procs == gx_forward_get_xfont_procs)
+    else if (dev_proc(dev, get_xfont_procs) == gx_forward_get_xfont_procs)
         *st = st_device_forward;
     else
         *st = st_device;
@@ -381,8 +400,10 @@ gs_copydevice2(gx_device ** pnew_dev, const gx_device * dev, bool keep_open,
      */
     new_dev = gs_alloc_struct_immovable(mem, gx_device, new_std,
                                         "gs_copydevice(device)");
-    if (new_dev == 0)
+    if (new_dev == 0) {
+        gs_free_object(mem->non_gc_memory, a_std, "gs_copydevice(stype)");
         return_error(gs_error_VMerror);
+    }
     gx_device_init(new_dev, dev, mem, false);
     gx_device_set_procs(new_dev);
     new_dev->stype = new_std;
@@ -434,36 +455,33 @@ gs_opendevice(gx_device *dev)
     }
 }
 
-/* Set device parameters, updating a graphics state or imager state. */
-int
-gs_imager_putdeviceparams(gs_imager_state *pis, gx_device *dev,
-                          gs_param_list *plist)
-{
-    int code = gs_putdeviceparams(dev, plist);
-
-    if (code >= 0)
-        gx_set_cmap_procs(pis, dev);
-    return code;
-}
 static void
-gs_state_update_device(gs_state *pgs)
+gs_gstate_update_device(gs_gstate *pgs, gx_device *dev)
 {
-    gx_set_cmap_procs((gs_imager_state *)pgs, pgs->device);
-    gx_unset_dev_color(pgs);
+    gx_set_cmap_procs(pgs, dev);
+    gx_unset_both_dev_colors(pgs);
 }
-int
-gs_state_putdeviceparams(gs_state *pgs, gs_param_list *plist)
-{
-    int code = gs_putdeviceparams(pgs->device, plist);
 
+int
+gs_gstate_putdeviceparams(gs_gstate *pgs, gx_device *dev, gs_param_list *plist)
+{
+    int code;
+    gx_device *dev2;
+
+    if (dev)
+       dev2 = dev;
+    else
+       dev2 = pgs->device;
+
+    code = gs_putdeviceparams(dev2, plist);
     if (code >= 0)
-        gs_state_update_device(pgs);
+        gs_gstate_update_device(pgs, dev2);
     return code;
 }
 
 /* Set the device in the graphics state */
 int
-gs_setdevice(gs_state * pgs, gx_device * dev)
+gs_setdevice(gs_gstate * pgs, gx_device * dev)
 {
     int code = gs_setdevice_no_erase(pgs, dev);
 
@@ -472,7 +490,7 @@ gs_setdevice(gs_state * pgs, gx_device * dev)
     return code;
 }
 int
-gs_setdevice_no_erase(gs_state * pgs, gx_device * dev)
+gs_setdevice_no_erase(gs_gstate * pgs, gx_device * dev)
 {
     int open_code = 0, code;
     gs_lib_ctx_t *libctx = gs_lib_ctx_get_interp_instance(pgs->memory);
@@ -482,10 +500,16 @@ gs_setdevice_no_erase(gs_state * pgs, gx_device * dev)
     if (libctx->io_device_table != NULL) {
         cmm_dev_profile_t *dev_profile;
         if (pgs->icc_manager->lab_profile == NULL) {  /* pick one not set externally */
-            gsicc_init_iccmanager(pgs);
+            code = gsicc_init_iccmanager(pgs);
+            if (code < 0)
+                return(code);
         }
         /* Also, if the device profile is not yet set then take care of that
            before we start filling pages, if we can */
+        /* Although device methods should not be NULL, they are not completely filled in until
+         * gx_device_fill_in_procs is called, and its possible for us to get here before this
+         * happens, so we *must* make sure the method is not NULL before we use it.
+         */
         if (dev->procs.get_profile != NULL) {
             code = dev_proc(dev, get_profile)(dev, &dev_profile);
             if (code < 0) {
@@ -497,7 +521,7 @@ gs_setdevice_no_erase(gs_state * pgs, gx_device * dev)
                                                         gsDEFAULTPROFILE)) < 0)
                     return(code);
                 /* set the intent too */
-                if ((code = gsicc_set_device_profile_intent(dev, gsPERCEPTUAL,
+                if ((code = gsicc_set_device_profile_intent(dev, gsRINOTSPECIFIED,
                                                        gsDEFAULTPROFILE)) < 0)
                     return(code);
             }
@@ -515,6 +539,10 @@ gs_setdevice_no_erase(gs_state * pgs, gx_device * dev)
          */
         if (libctx->io_device_table != NULL) {
             cmm_dev_profile_t *dev_profile;
+            /* Although device methods should not be NULL, they are not completely filled in until
+             * gx_device_fill_in_procs is called, and its possible for us to get here before this
+             * happens, so we *must* make sure the method is not NULL before we use it.
+             */
             if (dev->procs.get_profile != NULL) {
                 code = dev_proc(dev, get_profile)(dev, &dev_profile);
                 if (code < 0) {
@@ -554,7 +582,7 @@ gs_setdevice_no_erase(gs_state * pgs, gx_device * dev)
     return open_code;
 }
 int
-gs_setdevice_no_init(gs_state * pgs, gx_device * dev)
+gs_setdevice_no_init(gs_gstate * pgs, gx_device * dev)
 {
     /*
      * Just set the device, possibly changing color space but no other
@@ -576,8 +604,8 @@ gs_setdevice_no_init(gs_state * pgs, gx_device * dev)
             return code;
     }
     rc_assign(pgs->device, dev, "gs_setdevice_no_init");
-    gs_state_update_device(pgs);
-    return pgs->overprint ? gs_do_set_overprint(pgs) : 0;
+    gs_gstate_update_device(pgs, dev);
+    return 0;
 }
 
 /* Initialize a just-allocated device. */
@@ -589,6 +617,7 @@ gx_device_init(gx_device * dev, const gx_device * proto, gs_memory_t * mem,
     dev->memory = mem;
     dev->retained = !internal;
     rc_init(dev, mem, (internal ? 0 : 1));
+    rc_increment(dev->icc_struct);
 }
 
 void
@@ -626,6 +655,17 @@ gs_make_null_device(gx_device_null *dev_null, gx_device *dev,
         set_dev_proc(dn, decode_color, gx_forward_decode_color);
         set_dev_proc(dn, get_profile, gx_forward_get_profile);
         set_dev_proc(dn, set_graphics_type_tag, gx_forward_set_graphics_type_tag);
+        set_dev_proc(dn, begin_transparency_group, gx_default_begin_transparency_group);
+        set_dev_proc(dn, end_transparency_group, gx_default_end_transparency_group);
+        set_dev_proc(dn, begin_transparency_mask, gx_default_begin_transparency_mask);
+        set_dev_proc(dn, end_transparency_mask, gx_default_end_transparency_mask);
+        set_dev_proc(dn, discard_transparency_layer, gx_default_discard_transparency_layer);
+        set_dev_proc(dn, pattern_manage, gx_default_pattern_manage);
+        set_dev_proc(dn, push_transparency_state, gx_default_push_transparency_state);
+        set_dev_proc(dn, pop_transparency_state, gx_default_pop_transparency_state);
+        set_dev_proc(dn, put_image, gx_default_put_image);
+        set_dev_proc(dn, copy_planes, gx_default_copy_planes);
+        set_dev_proc(dn, copy_alpha_hl_color, gx_default_no_copy_alpha_hl_color);
         dn->graphics_type_tag = dev->graphics_type_tag;	/* initialize to same as target */
         gx_device_copy_color_params(dn, dev);
     }
@@ -652,15 +692,20 @@ gx_device_retain(gx_device *dev, bool retained)
 
 /* Select a null device. */
 int
-gs_nulldevice(gs_state * pgs)
+gs_nulldevice(gs_gstate * pgs)
 {
-    if (pgs->device == 0 || !gx_device_is_null(pgs->device)) {
+    int code = 0;
+    gs_gstate *spgs;
+    bool saveLockSafety = false;
+    if (pgs->device == NULL || !gx_device_is_null(pgs->device)) {
         gx_device *ndev;
-        int code = gs_copydevice(&ndev, (const gx_device *)&gs_null_device,
+        code = gs_copydevice(&ndev, (const gx_device *)&gs_null_device,
                                  pgs->memory);
 
         if (code < 0)
             return code;
+        if (gs_currentdevice_inline(pgs) != NULL)
+            saveLockSafety = gs_currentdevice_inline(pgs)->LockSafetyParams;
         /*
          * Internal devices have a reference count of 0, not 1,
          * aside from references from graphics states.
@@ -671,16 +716,31 @@ gs_nulldevice(gs_state * pgs)
            is one */
         rc_init(ndev, pgs->memory, 0);
         if (pgs->device != NULL) {
-            if ((code = dev_proc(pgs->device, get_profile)(pgs->device, 
+            if ((code = dev_proc(pgs->device, get_profile)(pgs->device,
                                                &(ndev->icc_struct))) < 0)
                 return code;
             rc_increment(ndev->icc_struct);
             set_dev_proc(ndev, get_profile, gx_default_get_profile);
-        } 
+        }
 
-        return gs_setdevice_no_erase(pgs, ndev);
+        if (gs_setdevice_no_erase(pgs, ndev) < 0) {
+            gs_free_object(pgs->memory, ndev, "gs_copydevice(device)");
+            /* We are out of options: find the device we installed in
+               the initial graphics state, and put that in place.
+               We just need something so we can end this job cleanly.
+             */
+            spgs = pgs->saved;
+            if (spgs != NULL) {
+                while (spgs->saved) spgs = spgs->saved;
+                gs_currentdevice_inline(pgs) = gs_currentdevice_inline(spgs);
+                rc_increment(gs_currentdevice_inline(pgs));
+            }
+            code = gs_note_error(gs_error_Fatal);
+        }
+        if (gs_currentdevice_inline(pgs) != NULL)
+            gs_currentdevice_inline(pgs)->LockSafetyParams = saveLockSafety;
     }
-    return 0;
+    return code;
 }
 
 /* Close a device.  The client is responsible for ensuring that */
@@ -704,7 +764,7 @@ gs_closedevice(gx_device * dev)
  * (For internal use only.)
  */
 void
-gx_set_device_only(gs_state * pgs, gx_device * dev)
+gx_set_device_only(gs_gstate * pgs, gx_device * dev)
 {
     rc_assign(pgs->device, dev, "gx_set_device_only");
 }
@@ -726,8 +786,6 @@ gx_device_raster(const gx_device * dev, bool pad)
     raster = (uint)((bits + 7) >> 3);
     if (!pad)
         return raster;
-    if (dev->pad > 0)
-        raster += dev->pad;
     l2align = dev->log2_align_mod;
     if (l2align < log2_align_bitmap_mod)
         l2align = log2_align_bitmap_mod;
@@ -744,8 +802,6 @@ gx_device_raster_chunky(const gx_device * dev, bool pad)
     raster = (uint)((bits + 7) >> 3);
     if (!pad)
         return raster;
-    if (dev->pad > 0)
-        raster += dev->pad;
     l2align = dev->log2_align_mod;
     if (l2align < log2_align_bitmap_mod)
         l2align = log2_align_bitmap_mod;
@@ -757,12 +813,8 @@ gx_device_raster_plane(const gx_device * dev, const gx_render_plane_t *render_pl
     ulong bpc = (render_plane && render_plane->index >= 0 ?
         render_plane->depth : dev->color_info.depth/(dev->is_planar ? dev->color_info.num_components : 1));
     ulong bits = (ulong) dev->width * bpc;
-    ulong raster;
     int l2align;
 
-    raster = (uint)((bits + 7) >> 3);
-    if (dev->pad > 0)
-        raster += dev->pad;
     l2align = dev->log2_align_mod;
     if (l2align < log2_align_bitmap_mod)
         l2align = log2_align_bitmap_mod;
@@ -801,8 +853,8 @@ gx_device_set_margins(gx_device * dev, const float *margins /*[4] */ ,
     for (i = 0; i < 4; ++i)
         dev->HWMargins[i] = margins[i] * 72.0;
     if (move_origin) {
-        dev->Margins[0] = -margins[0] * dev->MarginsHWResolution[0];
-        dev->Margins[1] = -margins[3] * dev->MarginsHWResolution[1];
+        dev->Margins[0] = -margins[0] * dev->HWResolution[0];
+        dev->Margins[1] = -margins[3] * dev->HWResolution[1];
     }
 }
 
@@ -935,7 +987,6 @@ gx_device_copy_params(gx_device *dev, const gx_device *target)
         COPY_ARRAY_PARAM(ImagingBBox);
         COPY_PARAM(ImagingBBox_set);
         COPY_ARRAY_PARAM(HWResolution);
-        COPY_ARRAY_PARAM(MarginsHWResolution);
         COPY_ARRAY_PARAM(Margins);
         COPY_ARRAY_PARAM(HWMargins);
         COPY_PARAM(PageCount);
@@ -1101,7 +1152,7 @@ int gx_device_delete_output_file(const gx_device * dev, const char *fname)
         code = gs_note_error(gs_error_VMerror);
 	goto done;
     }
-    
+
     code = gx_parse_output_file_name(&parsed, &fmt, fname, strlen(fname),
                                          dev->memory);
     if (code < 0) {
@@ -1140,20 +1191,26 @@ done:
     return(code);
 }
 
+static int
+noclose(FILE *f)
+{
+    return 0;
+}
+
 /* Open the output file for a device. */
 int
 gx_device_open_output_file(const gx_device * dev, char *fname,
-                           bool binary, bool positionable, FILE ** pfile)
+                           bool binary, bool positionable, gp_file ** pfile)
 {
     gs_parsed_file_name_t parsed;
     const char *fmt;
     char *pfname = (char *)gs_alloc_bytes(dev->memory, gp_file_name_sizeof, "gx_device_open_output_file(pfname)");
     int code;
-    
+
     if (pfname == NULL) {
         code = gs_note_error(gs_error_VMerror);
 	goto done;
-     }
+    }
 
     if (strlen(fname) == 0) {
         code = gs_note_error(gs_error_undefinedfilename);
@@ -1170,9 +1227,14 @@ gx_device_open_output_file(const gx_device * dev, char *fname,
             code = gs_note_error(gs_error_undefinedfilename);
 	    goto done;
 	}
-        *pfile = dev->memory->gs_lib_ctx->fstdout;
+        *pfile = gp_file_FILE_alloc(dev->memory);
+        if (*pfile == NULL) {
+            code = gs_note_error(gs_error_VMerror);
+            goto done;
+        }
+        gp_file_FILE_set(*pfile, dev->memory->gs_lib_ctx->core->fstdout, noclose);
         /* Force stdout to binary. */
-        code = gp_setmode_binary(*pfile, true);
+        code = gp_setmode_binary_impl(dev->memory->gs_lib_ctx->core->fstdout, true);
 	goto done;
     } else if (parsed.iodev && !strcmp(parsed.iodev->dname, "%pipe%")) {
         positionable = false;
@@ -1194,7 +1256,8 @@ gx_device_open_output_file(const gx_device * dev, char *fname,
         parsed.fname = pfname;
         parsed.len = strlen(parsed.fname);
     }
-    if (positionable || (parsed.iodev && parsed.iodev != iodev_default(dev->memory))) {
+    if (parsed.iodev &&
+        (positionable || parsed.iodev != iodev_default(dev->memory))) {
         char fmode[4];
 
         if (!parsed.fname) {
@@ -1205,13 +1268,12 @@ gx_device_open_output_file(const gx_device * dev, char *fname,
         if (positionable)
             strcat(fmode, "+");
         code = parsed.iodev->procs.gp_fopen(parsed.iodev, parsed.fname, fmode,
-                                         pfile, NULL, 0);
+                                            pfile, NULL, 0, dev->memory);
         if (code)
             emprintf1(dev->memory,
                       "**** Could not open the file %s .\n",
                       parsed.fname);
-    }
-    else {
+    } else {
         *pfile = gp_open_printer(dev->memory, (pfname[0] ? pfname : fname), binary);
         if (!(*pfile)) {
             emprintf1(dev->memory, "**** Could not open the file '%s'.\n", (pfname[0] ? pfname : fname));
@@ -1230,7 +1292,7 @@ done:
 /* Close the output file for a device. */
 int
 gx_device_close_output_file(const gx_device * dev, const char *fname,
-                            FILE *file)
+                            gp_file *file)
 {
     gs_parsed_file_name_t parsed;
     const char *fmt;
@@ -1246,6 +1308,41 @@ gx_device_close_output_file(const gx_device * dev, const char *fname,
         if (parsed.iodev != iodev_default(dev->memory))
             return parsed.iodev->procs.fclose(parsed.iodev, file);
     }
-    gp_close_printer(dev->memory, file, (parsed.fname ? parsed.fname : fname));
+    gp_close_printer(file, (parsed.fname ? parsed.fname : fname));
     return 0;
+}
+
+bool gx_color_info_equal(const gx_device_color_info * p1, const gx_device_color_info * p2)
+{
+    if (p1->anti_alias.graphics_bits != p2->anti_alias.graphics_bits)
+        return false;
+    if (p1->anti_alias.text_bits != p2->anti_alias.text_bits)
+        return false;
+    if (p1->black_component != p2->black_component)
+        return false;
+    if (strcmp(p1->cm_name, p2->cm_name) != 0)
+        return false;
+    if (p1->depth != p2->depth)
+        return false;
+    if (p1->dither_colors != p2->dither_colors)
+        return false;
+    if (p1->dither_grays != p2->dither_grays)
+        return false;
+    if (p1->gray_index != p2->gray_index)
+        return false;
+    if (p1->max_color != p2->max_color)
+        return false;
+    if (p1->max_components != p2->max_components)
+        return false;
+    if (p1->opmode != p2->opmode)
+        return false;
+    if (p1->polarity != p2->polarity)
+        return false;
+    if (p1->process_comps != p2->process_comps)
+        return false;
+    if (p1->separable_and_linear != p2->separable_and_linear)
+        return false;
+    if (p1->use_antidropout_downscaler != p2->use_antidropout_downscaler)
+        return false;
+    return true;
 }

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -40,8 +40,8 @@ glyph_show_setup(i_ctx_t *i_ctx_p, gs_glyph *pglyph)
         case ft_CID_user_defined:
         case ft_CID_TrueType:
         case ft_CID_bitmap:
-            check_int_leu(*op, gs_max_glyph - gs_min_cid_glyph);
-            *pglyph = (gs_glyph) op->value.intval + gs_min_cid_glyph;
+            check_int_leu(*op, GS_MAX_GLYPH - GS_MIN_CID_GLYPH);
+            *pglyph = (gs_glyph) op->value.intval + GS_MIN_CID_GLYPH;
             break;
         default:
             check_type(*op, t_name);
@@ -54,34 +54,17 @@ glyph_show_setup(i_ctx_t *i_ctx_p, gs_glyph *pglyph)
 static int
 zglyphshow(i_ctx_t *i_ctx_p)
 {
-    gs_glyph glyph;
+    gs_glyph glyph = GS_NO_GLYPH;
     gs_text_enum_t *penum;
     int code;
 
-    if ((code = glyph_show_setup(i_ctx_p, &glyph)) != 0 ||
-        (code = gs_glyphshow_begin(igs, glyph, imemory_local, &penum)) < 0)
+    if ((code = glyph_show_setup(i_ctx_p, &glyph)) != 0)
+        return code;
+    if ((code = gs_glyphshow_begin(igs, glyph, imemory_local, &penum)) < 0)
         return code;
     *(op_proc_t *)&penum->enum_client_data = zglyphshow;
     if ((code = op_show_finish_setup(i_ctx_p, penum, 1, NULL)) < 0) {
         ifree_object(penum, "zglyphshow");
-        return code;
-    }
-    return op_show_continue_pop(i_ctx_p, 1);
-}
-
-/* <charname> .glyphwidth <wx> <wy> */
-static int
-zglyphwidth(i_ctx_t *i_ctx_p)
-{
-    gs_glyph glyph;
-    gs_text_enum_t *penum;
-    int code;
-
-    if ((code = glyph_show_setup(i_ctx_p, &glyph)) != 0 ||
-        (code = gs_glyphwidth_begin(igs, glyph, imemory, &penum)) < 0)
-        return code;
-    if ((code = op_show_finish_setup(i_ctx_p, penum, 1, finish_stringwidth)) < 0) {
-        ifree_object(penum, "zglyphwidth");
         return code;
     }
     return op_show_continue_pop(i_ctx_p, 1);
@@ -181,7 +164,6 @@ const op_def zcharx_op_defs[] =
 {
     op_def_begin_level2(),
     {"1glyphshow", zglyphshow},
-    {"1.glyphwidth", zglyphwidth},
     {"2xshow", zxshow},
     {"2xyshow", zxyshow},
     {"2yshow", zyshow},

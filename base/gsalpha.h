@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,6 +19,8 @@
 #ifndef gsalpha_INCLUDED
 #  define gsalpha_INCLUDED
 
+#include "gsgstate.h"
+
 /*
  * This tiny little file is separate so that it can be included by
  * gsstate.c for initializing the alpha value, even in configurations
@@ -26,7 +28,7 @@
  */
 
 /* Set/read alpha value. */
-int gs_setalpha(gs_state *, double);
-float gs_currentalpha(const gs_state *);
+int gs_setalpha(gs_gstate *, double);
+float gs_currentalpha(const gs_gstate *);
 
 #endif /* gsalpha_INCLUDED */

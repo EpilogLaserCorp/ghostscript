@@ -71,8 +71,8 @@
 #define GDI_COMP_MODITIFF 6
 #define GDI_COMP_NOSEND   0x7f
 
-#define GDI_MARGINS_A4	        0.167, 0.167, 0.167, 0.167
-#define GDI_MARGINS_LETTER	0.167, 0.167, 0.167, 0.167
+#define GDI_MARGINS_A4	        0.167f, 0.167f, 0.167f, 0.167f
+#define GDI_MARGINS_LETTER	0.167f, 0.167f, 0.167f, 0.167f
 /*#define GDI_MARGINS_A4	0.0, 0.0, 0.0, 0.0*/
 /*#define GDI_MARGINS_LETTER	0.0, 0.0, 0.0, 0.0*/
 
@@ -85,7 +85,7 @@
 
 int GDI_BAND_WIDTH[] = {4768, 4928};
 
-static int gdi_print_page(gx_device_printer *pdev, FILE *prn_stream);
+static int gdi_print_page(gx_device_printer *pdev, gp_file *prn_stream);
 static int gdi_open(gx_device *pdev);
 static int gdi_close(gx_device *pdev);
 
@@ -114,11 +114,11 @@ gx_device_printer far_data gs_samsunggdi_device =
         1,                      /* color bit */
         gdi_print_page);
 
-static FILE *WritePJLHeaderData(gx_device_printer *pdev, FILE *fp);
-static FILE *WriteBandHeader(FILE *fp, unsigned int usBandNo,
+static gp_file *WritePJLHeaderData(gx_device_printer *pdev, gp_file *fp);
+static gp_file *WriteBandHeader(gp_file *fp, unsigned int usBandNo,
                      unsigned char ubCompMode, unsigned int usBandWidth,
                      unsigned int usBandHeight, unsigned long ulBandSize);
-static FILE *WriteTrailerData(FILE *fp);
+static gp_file *WriteTrailerData(gp_file *fp);
 static unsigned long FrameTiffComp(unsigned char *pubDest, unsigned char *pubSrc,
                                unsigned int usTotalLines, unsigned int usBytesPerLine,
                                unsigned char ubMode);
@@ -151,10 +151,13 @@ gdi_open(gx_device *pdev)
 /* gdi_close is only here to eject odd numbered pages in duplex mode. */
 static int
 gdi_close(gx_device *pdev)
-{	if ( ppdev->Duplex_set >= 0 && ppdev->Duplex )
-          {	gdev_prn_open_printer(pdev, 1);
-                fputs("\033&l0H", ppdev->file) ;
-          }
+{
+        if ( ppdev->Duplex_set >= 0 && ppdev->Duplex )
+        {
+              int code = gdev_prn_open_printer(pdev, 1);
+              if (code >= 0)
+                    gp_fputs("\033&l0H", ppdev->file) ;
+        }
         return gdev_prn_close(pdev);
 }
 
@@ -167,7 +170,7 @@ gdi_close(gx_device *pdev)
 /* It too needs its coordinate system translated slightly. */
 
 static int
-gdi_print_page(gx_device_printer *pdev, FILE *prn_stream)
+gdi_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
         int band_width_bytes;
         int band_height;
@@ -175,7 +178,8 @@ gdi_print_page(gx_device_printer *pdev, FILE *prn_stream)
         int dots_per_inch = (int)pdev->y_pixels_per_inch;
         int raster = gx_device_raster((gx_device *)pdev, true);
         int real_line_width;
-        long ul_band_size, ul_comp_size, ul_tiff_size, ul_min_size;
+        long ul_band_size, ul_comp_size;
+        /* long ul_tiff_size, ul_min_size; */
         byte *ibp=NULL, *obp=NULL, *tmp=NULL;
         byte paper_type=0, compression_type;
 
@@ -242,7 +246,7 @@ gdi_print_page(gx_device_printer *pdev, FILE *prn_stream)
             /*ul_tiff_size = FrameTiffComp(obp, ibp, band_height, band_width_bytes, GDI_PRE_COMP);*/
             /*ul_scan_size = (unsigned long)bmp2run(obp, ibp, band_height, band_width_bytes, GDI_PRE_COMP);*/
             /*ul_min_size =  (ul_scan_size > ul_tiff_size) ? ul_tiff_size : ul_scan_size;*/
-            ul_min_size = ul_tiff_size;
+            /* ul_min_size = ul_tiff_size; */
             compression_type = GDI_COMP_MODITIFF;
             /*compression_type =  (ul_scan_size > ul_tiff_size) ? GDI_COMP_MODITIFF : GDI_COMP_SCANLINE;*/
             switch (compression_type) {
@@ -268,7 +272,7 @@ gdi_print_page(gx_device_printer *pdev, FILE *prn_stream)
                                                band_height, band_width_bytes,
                                                GDI_REAL_COMP);
                   if (ul_comp_size > MAXBAND-8) {
-                    int f, g, h;
+                    int f;
                     if (!fudge) {
                       ASSERT(use_band == ibp);
                       use_band = (byte*)gs_malloc(pdev->memory->non_gc_memory, ul_band_size, 1, "gdi_print_page/fudge");
@@ -296,7 +300,6 @@ gdi_print_page(gx_device_printer *pdev, FILE *prn_stream)
                     }
                   }
                 } while (ul_comp_size > MAXBAND-8);
-              oh_well:
                 if (fudge > 1) {
                   ASSERT(use_band != ibp);
                   gs_free(pdev->memory->non_gc_memory, use_band, ul_band_size, 1, "gdi_print_page/fudge");
@@ -317,7 +320,7 @@ gdi_print_page(gx_device_printer *pdev, FILE *prn_stream)
             prn_stream = WriteBandHeader(prn_stream, i, compression_type, (band_width_bytes * 8),
                                          band_height, ul_comp_size);
             /*dprintf2(prn_stream, "[%d] band, size : %d\n", i, ul_tiff_size);*/
-            fwrite(obp, ul_comp_size, 1, prn_stream);
+            gp_fwrite(obp, ul_comp_size, 1, prn_stream);
         }
 
         /* Trailer Output */
@@ -328,10 +331,10 @@ gdi_print_page(gx_device_printer *pdev, FILE *prn_stream)
         return code;
 }
 
-FILE *WritePJLHeaderData(gx_device_printer *pdev, FILE *fp)
+gp_file *WritePJLHeaderData(gx_device_printer *pdev, gp_file *fp)
 {
   unsigned long ulSize;
-  unsigned char buffer[300];
+  char buffer[300];
   int dots_per_inch = (int)pdev->y_pixels_per_inch;
 
   strcpy(buffer, "\033%-12345X");
@@ -375,13 +378,13 @@ FILE *WritePJLHeaderData(gx_device_printer *pdev, FILE *fp)
   strcat(buffer, "$PJL BITMAP START\015\012");
   /* write buffer to file.*/
   ulSize = strlen(buffer);
-  fwrite(buffer, 1, ulSize, fp );
+  gp_fwrite(buffer, 1, ulSize, fp );
   return(fp);
 } /* WritePJLHeaderData()     */
 
-FILE *WriteBandHeader
+gp_file *WriteBandHeader
 (
-FILE *fp,
+gp_file *fp,
 unsigned int  usBandNo,
 unsigned char ubCompMode,
 unsigned int  usBandWidth,
@@ -421,11 +424,11 @@ unsigned long ulBandSize
   buf[i++] = (unsigned char)((usBandWidth >> 8) & 0xff);
   buf[i++] = (unsigned char)(usBandWidth & 0xff);
 
-  fwrite(buf, 1, i, fp);
+  gp_fwrite(buf, 1, i, fp);
   return(fp);
 } /* end of WriteBandHeader()*/
 
-FILE *WriteTrailerData(FILE *fp)
+gp_file *WriteTrailerData(gp_file *fp)
 {
   unsigned long ulSize;
   unsigned long buffer[200];
@@ -439,7 +442,7 @@ FILE *WriteTrailerData(FILE *fp)
   strcat((char*)buffer, "\033%-12345X\015\012");
 
   ulSize = strlen((char*)buffer);
-  fwrite(buffer, 1, ulSize, fp);
+  gp_fwrite(buffer, 1, ulSize, fp);
 
   return(fp);
 } /* WriteTrailerData()*/
@@ -467,10 +470,6 @@ unsigned long FrameTiffComp(unsigned char *pubDest,
     }
     else
     {
-      if(i == 0x253)
-      {
-        i = i;
-      }
       usLineSize = PreTiffComp(SrcPtr, usBytesPerLine);
     }
     SrcPtr += usBytesPerLine;
@@ -485,12 +484,15 @@ unsigned long FrameTiffComp(unsigned char *pubDest,
     case 1:
       *TgtPtr++ = 0x00;
       ulret++;
+      /* Fall through. */
     case 2:
       *TgtPtr++ = 0x00;
       ulret++;
+      /* Fall through. */
     case 3:
       *TgtPtr++ = 0x00;
       ulret++;
+      /* Fall through. */
     default:
       break;
     }
@@ -501,10 +503,13 @@ unsigned long FrameTiffComp(unsigned char *pubDest,
     {
     case 1:
       ulret++;
+      /* Fall through. */
     case 2:
       ulret++;
+      /* Fall through. */
     case 3:
       ulret++;
+      /* Fall through. */
     default:
       break;
     }
@@ -543,11 +548,14 @@ unsigned int FrameTiff_Comp(unsigned char *lpSrcBuf, unsigned char *lpTgtBuf, un
 
     if(ubFirst == ubSecond)  /* case of data match */
     {
+      #if 0
+      /* This code causes coverity problems, and has no affect. */
       usEndCnt = usCount;
       if (usCount > 16384)
       {
         usEndCnt = 16384;
       }
+      #endif
       usEndCnt = usCount - 2;
       while (usEndCnt--)
       {
@@ -584,11 +592,14 @@ unsigned int FrameTiff_Comp(unsigned char *lpSrcBuf, unsigned char *lpTgtBuf, un
       ubMisCnt = 0;
       if (usCount > 2)
       {
+        #if 0
+        /* This code causes coverity problems, and has no affect. */
         usEndCnt = usCount;
         if (usCount > 16384)
         {
           usEndCnt = 16384;
         }
+        #endif
         usEndCnt = usCount - 2;
         /* usEndCnt = usCount - 2; original*/
         /* 19990824 by LSM : for end file while (usEndCnt--)*/
@@ -681,11 +692,14 @@ unsigned int PreTiffComp(unsigned char *lpSrcBuf, unsigned int nSrcBytes)
 
     if(ubFirst == ubSecond)  /* case of data match */
     {
+      #if 0
+      /* This code causes coverity problems, and has no affect. */
       usEndCnt = usCount;
       if (usCount > 16384)
       {
         usEndCnt = 16384;
       }
+      #endif
       usEndCnt = usCount - 2;
       while (usEndCnt--)
       {
@@ -717,12 +731,15 @@ unsigned int PreTiffComp(unsigned char *lpSrcBuf, unsigned int nSrcBytes)
       ubMisCnt = 0;
       if (usCount > 2)
       {
+        #if 0
+        /* This code causes coverity problems, and has no affect. */
         usEndCnt = usCount;
         if (usCount > 16384)
         {
           usEndCnt = 16384;
         }
         /* usEndCnt = usCount - 2;*/
+        #endif
         usEndCnt = usCount - 2;
         /* 19990824 by LSM : for Last file while (usEndCnt--)*/
         while (usEndCnt--)

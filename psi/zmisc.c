@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -194,10 +194,18 @@ zrealtime(i_ctx_t *i_ctx_p)
 static int
 zusertime(i_ctx_t *i_ctx_p)
 {
+    gs_context_state_t *current = (gs_context_state_t *)i_ctx_p;
     os_ptr op = osp;
     long secs_ns[2];
 
     gp_get_usertime(secs_ns);
+    if (!current->usertime_inited) {
+        current->usertime_inited = true;
+        current->usertime_0[0] = secs_ns[0];
+        current->usertime_0[1] = secs_ns[1];
+    }
+    secs_ns[0] -= current->usertime_0[0];
+    secs_ns[1] -= current->usertime_0[1];
     push(1);
     make_int(op, secs_ns[0] * 1000 + secs_ns[1] / 1000000);
     return 0;
@@ -426,84 +434,38 @@ zgetCPSImode(i_ctx_t *i_ctx_p)
     return 0;
 }
 
-/* ------ gs persistent cache operators ------ */
-/* these are for testing only. they're disabled in the normal build
- * to prevent access to the cache by malicious postscript files
- *
- * use something like this:
- *   (value) (key) .pcacheinsert
- *   (key) .pcachequery { (\n) concatstrings print } if
- */
-
-#ifdef DEBUG_CACHE
-
-/* <string> <string> .pcacheinsert */
+/* <int> .setscanconverter - */
 static int
-zpcacheinsert(i_ctx_t *i_ctx_p)
+zsetscanconverter(i_ctx_t *i_ctx_p)
+{
+    int val;
+
+    os_ptr op = osp;
+    if (r_has_type(op, t_boolean))
+        val = (int)op->value.boolval;
+    else if (r_has_type(op, t_integer))
+        val = op->value.intval;
+    else
+        return_op_typecheck(op);
+
+    gs_setscanconverter(igs, val);
+    pop(1);
+    return 0;
+}
+
+/* - .getscanconverter <int> */
+static int
+zgetscanconverter(i_ctx_t *i_ctx_p)
 {
     os_ptr op = osp;
-    char *key, *buffer;
-    int keylen, buflen;
-    int code = 0;
 
-    check_read_type(*op, t_string);
-    keylen = r_size(op);
-    key = op->value.bytes;
-    check_read_type(*(op - 1), t_string);
-    buflen = r_size(op - 1);
-    buffer = (op - 1)->value.bytes;
-
-    code = gp_cache_insert(0, key, keylen, buffer, buflen);
-    if (code < 0)
-                return code;
-
-        pop(2);
-
-    return code;
+    push(1);
+    make_int(op, gs_getscanconverter(imemory));
+    return 0;
 }
-
-/* allocation callback for query result */
-static void *
-pcache_alloc_callback(void *userdata, int bytes)
-{
-    i_ctx_t *i_ctx_p = (i_ctx_t*)userdata;
-    return ialloc_string(bytes, "pcache buffer");
-}
-
-/* <string> .pcachequery <string> true */
-/* <string> .pcachequery false */
-static int
-zpcachequery(i_ctx_t *i_ctx_p)
-{
-        os_ptr op = osp;
-        int len;
-        char *key;
-        byte *string;
-        int code = 0;
-
-        check_read_type(*op, t_string);
-        len = r_size(op);
-        key = op->value.bytes;
-        len = gp_cache_query(GP_CACHE_TYPE_TEST, key, len, (void**)&string, &pcache_alloc_callback, i_ctx_p);
-        if (len < 0) {
-                make_false(op);
-                return 0;
-        }
-        if (string == NULL)
-                return_error(gs_error_VMerror);
-        make_string(op, a_all | icurrent_space, len, string);
-
-        push(1);
-        make_true(op);
-
-        return code;
-}
-
-#endif /* DEBUG_CACHE */
-
 /* ------ Initialization procedure ------ */
 
-const op_def zmisc_op_defs[] =
+const op_def zmisc_a_op_defs[] =
 {
     {"1bind", zbind},
     {"1getenv", zgetenv},
@@ -512,17 +474,19 @@ const op_def zmisc_op_defs[] =
     {"0.oserrno", zoserrno},
     {"1.oserrorstring", zoserrorstring},
     {"0realtime", zrealtime},
-    {"1serialnumber", zserialnumber},
+    {"0serialnumber", zserialnumber},
     {"2.setdebug", zsetdebug},
     {"0.mementolistnewblocks", zmementolistnewblocks},
     {"1.setoserrno", zsetoserrno},
     {"0usertime", zusertime},
+    op_def_end(0)
+};
+
+const op_def zmisc_b_op_defs[] =
+{
     {"1.setCPSImode", zsetCPSImode},
     {"0.getCPSImode", zgetCPSImode},
-#ifdef DEBUG_CACHE
-        /* pcache test */
-    {"2.pcacheinsert", zpcacheinsert},
-    {"1.pcachequery", zpcachequery},
-#endif
+    {"1.setscanconverter", zsetscanconverter},
+    {"0.getscanconverter", zgetscanconverter},
     op_def_end(0)
 };

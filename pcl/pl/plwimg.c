@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -37,6 +37,9 @@
  */
 
 #define STRICT
+/* prevent gp.h redefining sprintf */
+#define sprintf sprintf
+
 #include <windows.h>
 #include "stdio_.h"
 
@@ -395,14 +398,14 @@ image_close(IMAGE * img)
 void
 register_class(void)
 {
-    WNDCLASS wndclass;
+    WNDCLASS wndclass = { 0 };
     HINSTANCE hInstance = GetModuleHandle(NULL);
 
     /* register the window class for graphics */
     wndclass.style = CS_HREDRAW | CS_VREDRAW;
     wndclass.lpfnWndProc = WndImg2Proc;
     wndclass.cbClsExtra = 0;
-    wndclass.cbWndExtra = sizeof(LONG);
+    wndclass.cbWndExtra = sizeof(void*);
     wndclass.hInstance = hInstance;
     wndclass.hIcon =
         LoadIcon(hInstance, (LPSTR) MAKEINTRESOURCE(GSIMAGE_ICON));
@@ -1196,9 +1199,9 @@ WndImg2Proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
          * initializes it here.
          */
         img = (IMAGE *) (((CREATESTRUCT *) lParam)->lpCreateParams);
-        SetWindowLong(hwnd, 0, (LONG) img);
+        SetWindowLongPtr(hwnd, 0, (LONG_PTR) img);
     }
-    img = (IMAGE *) GetWindowLong(hwnd, 0);
+    img = (IMAGE *) GetWindowLongPtr(hwnd, 0);
 
     switch (message) {
         case WM_SYSCOMMAND:
@@ -1531,7 +1534,7 @@ WndImg2Proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
             {                   /* Save the text window size */
                 char winposbuf[64];
 
-                gs_sprintf(winposbuf, "%d %d %d %d", img->x, img->y,
+                sprintf(winposbuf, "%d %d %d %d", img->x, img->y,
                         img->cx, img->cy);
                 win_set_reg_value((img->device != NULL ? "Image" : "Tracer"),
                                   winposbuf);

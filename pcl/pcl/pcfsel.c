@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -46,6 +46,7 @@ typedef enum
     score_location,
     score_orientation,
     score_fontnumber,
+    score_pjl_fontnumber,
     score_limit
 } score_index_t;
 
@@ -63,7 +64,8 @@ static const char *const score_name[] = {
     "typeface",
     "location",
     "orientation",
-    "fontnumber"
+    "fontnumber",
+    "pjlnumber"
 };
 
 static void
@@ -424,12 +426,22 @@ score_match(const pcl_state_t * pcs, const pcl_font_selection_t * pfs,
     else
         score[score_fontnumber] = 0x200000 - fp->params.typeface_family;
 
+    /*
+     * Earlier defined fonts have higher priority than later
+     * (undocumented).  Negate the font number so that smaller numbers
+     * have a higher score.
+     */
+    
+    score[score_pjl_fontnumber] = -fp->params.pjl_font_number;
+
 #ifdef DEBUG
     if (gs_debug_c('='))
         dmprintf_font_scoring(pcs->memory, "candidate", fp, *mapp, score);
 #endif
 
+
 }
+
 
 /* Recompute the current font from the descriptive parameters. */
 /* This is used by both PCL and HP-GL/2. */
@@ -437,7 +449,7 @@ int
 pcl_reselect_font(pcl_font_selection_t * pfs, const pcl_state_t * pcs,
                   bool internal_only)
 {
-    if (pfs->font == 0) {
+    if (pfs->font == 0 || pfs->font->pfont == 0) {
         pl_dict_enum_t dictp;
         gs_const_string key;
         void *value;

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -177,49 +177,48 @@ gx_device_printer far_data gs_lp8000_device =
         1, lp8000_print_page);
 
 static int
-lp8000_print_page(gx_device_printer *pdev, FILE *prn_stream)
+lp8000_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
 
         int line_size = gdev_mem_bytes_per_scan_line((gx_device *)pdev);
         int in_size = line_size;
+        unsigned int report_size;
 
         byte *buf1 = (byte *)gs_malloc(pdev->memory, in_size, 1, "lp8000_print_page(buf1)");
-        byte *buf2 = (byte *)gs_malloc(pdev->memory, in_size, 1, "lp8000_print_page(buf2)");
+
+        /* Worst case for rle compression below is 3 bytes for each 2 bytes of
+        input, with extra final byte. */
+        byte *buf2 = (byte *)gs_malloc(pdev->memory, in_size * 3 / 2 + 2, 1, "lp8000_print_page(buf2)");
         byte *in = buf1;
         byte *out = buf2;
 
         int lnum, top, bottom, left, width;
-        int count, left1, left2, left0;
+        int code = 0, count, left1, left2, left0;
 
 /* Check  memory allocations  */
 
-        if ( buf1 == 0 || buf2 == 0 )
-        {       if ( buf1 )
-                gs_free(pdev->memory, (char *)buf1, in_size, 1, "lp8000_print_page(buf1)");
-
-                if ( buf2 )
-                gs_free(pdev->memory, (char *)buf2, in_size, 1, "lp8000_print_page(buf2)");
-
-          return_error(gs_error_VMerror);
+        if ( buf1 == 0 || buf2 == 0 ) {
+            code = gs_error_VMerror;
+            goto xit;
         }
 
 /* Initialize the printer */
 
-        fwrite("\033\001@EJL \n",1,8,prn_stream);
-        fwrite("@EJL EN LA=ESC/PAGE\n",1,20,prn_stream);
-        fwrite("\035rhE\033\001@EJL \n",1,12,prn_stream);
-        fwrite("@EJL SE LA=ESC/PAGE\n",1,20,prn_stream);
-        fwrite("@EJL SET PU=1 PS=A4 ZO=OFF\n",1,27,prn_stream);
-        fwrite("@EJL EN LA=ESC/PAGE\n",1,20,prn_stream);
-        fwrite("\0350;0.24muE\0352;300;300drE",1,23,prn_stream);
-        fwrite("\0350;300;300drE\0351tsE\0351mmE",1,23,prn_stream);
-        fwrite("\0357isE\0355iaF\0355ipP\03514psE\0350poE",1,26,prn_stream);
-        fwrite("\03560;60loE\0350X\0350Y",1,15,prn_stream);
-        fwrite("\0350;0;2360;3388caE",1,17,prn_stream);
-        fwrite("\0351cmE\0350alfP",1,11,prn_stream);
-        fwrite("\0350affP\0350boP\0350abP",1,16,prn_stream);
-        fwrite("\0354ilG\0350bcI\0350sarG",1,16,prn_stream);
-        fwrite("\0351;0;100spE\0352owE",1,16,prn_stream);
+        gp_fwrite("\033\001@EJL \n",1,8,prn_stream);
+        gp_fwrite("@EJL EN LA=ESC/PAGE\n",1,20,prn_stream);
+        gp_fwrite("\035rhE\033\001@EJL \n",1,12,prn_stream);
+        gp_fwrite("@EJL SE LA=ESC/PAGE\n",1,20,prn_stream);
+        gp_fwrite("@EJL SET PU=1 PS=A4 ZO=OFF\n",1,27,prn_stream);
+        gp_fwrite("@EJL EN LA=ESC/PAGE\n",1,20,prn_stream);
+        gp_fwrite("\0350;0.24muE\0352;300;300drE",1,23,prn_stream);
+        gp_fwrite("\0350;300;300drE\0351tsE\0351mmE",1,23,prn_stream);
+        gp_fwrite("\0357isE\0355iaF\0355ipP\03514psE\0350poE",1,26,prn_stream);
+        gp_fwrite("\03560;60loE\0350X\0350Y",1,15,prn_stream);
+        gp_fwrite("\0350;0;2360;3388caE",1,17,prn_stream);
+        gp_fwrite("\0351cmE\0350alfP",1,11,prn_stream);
+        gp_fwrite("\0350affP\0350boP\0350abP",1,16,prn_stream);
+        gp_fwrite("\0354ilG\0350bcI\0350sarG",1,16,prn_stream);
+        gp_fwrite("\0351;0;100spE\0352owE",1,16,prn_stream);
 
 /* Here the common part of the initialization string ends */
 
@@ -231,12 +230,12 @@ starting X value of the printer line.
         left1 = (left1 >> 3) << 3;
         left0 = left1;
 
-        fwrite("\035",1,1,prn_stream);
-        fprintf(prn_stream,"%d",left1);
-        fwrite("X",1,1,prn_stream);
+        gp_fwrite("\035",1,1,prn_stream);
+        gp_fprintf(prn_stream,"%d",left1);
+        gp_fwrite("X",1,1,prn_stream);
 
         /* Set the compressed data format */
-        fwrite("\0353bcI",1,5,prn_stream);
+        gp_fwrite("\0353bcI",1,5,prn_stream);
 
         top = T_MARGIN * pdev->y_pixels_per_inch;
         bottom = pdev->height - B_MARGIN * pdev->y_pixels_per_inch;
@@ -256,25 +255,30 @@ starting X value of the printer line.
                 byte *in_end;
                 byte *outp;
                 register byte *p, *q;
-                int lcnt;
 
                 /*
                 ** Check buffer for 0 data.
                 */
 
-                gdev_prn_get_bits(pdev, lnum, in, &in_data);
+                code = gdev_prn_get_bits(pdev, lnum, in, &in_data);
+                if (code < 0)
+                    goto xit;
                 while ( in_data[0] == 0 &&
                         !memcmp((char *)in_data, (char *)in_data + 1, line_size - 1) &&
                         lnum < bottom )
                 {
                         lnum++;
-                        gdev_prn_get_bits(pdev, lnum, in, &in_data);
+                        code = gdev_prn_get_bits(pdev, lnum, in, &in_data);
+                        if (code < 0)
+                            goto xit;
                 }
 
                 if(lnum == bottom ) break;
                 /* finished with this page */
 
-                lcnt = gdev_prn_copy_scan_lines(pdev, lnum, in, in_size);
+                code = gdev_prn_copy_scan_lines(pdev, lnum, in, in_size);
+                if (code < 0)
+                    goto xit;
 
                 inp = in  + left;
                 in_end = inp + width;
@@ -310,7 +314,8 @@ starting X value of the printer line.
           }
           else
             {
-            for (count = 2; ( *p == *q ) && (q < in_end); q++, count++);
+                for (count = 2; ( *p == *q ) && (q < in_end); q++, count++)
+                {}
 
                 /*
                 Copy repeated bytes and counts to the output buffer.
@@ -346,22 +351,24 @@ if (p == (in_end - 1)) *outp++ = *p;
 if (left2 != left0)
         {
         left0 = left2;
-        fwrite("\035",1,1,prn_stream);
-        fprintf(prn_stream,"%d",left2);
-        fwrite("X",1,1,prn_stream);
+        gp_fwrite("\035",1,1,prn_stream);
+        gp_fprintf(prn_stream,"%d",left2);
+        gp_fwrite("X",1,1,prn_stream);
         }
 
 /* Output the data string to the printer.
 Y coordinate of the printer equals (lnum - 60)
 */
 
-        fwrite("\035",1,1,prn_stream);
-        fprintf(prn_stream,"%d",lnum-60);
-        fwrite("Y\035",1,2,prn_stream);
-        fprintf(prn_stream,"%d;",(outp - out));
-        fprintf(prn_stream,"%d;",(in_end - inp) << 3);
-        fwrite("1;0bi{I",1,7,prn_stream);
-        fwrite(out,1,(outp - out),prn_stream);
+        gp_fwrite("\035",1,1,prn_stream);
+        gp_fprintf(prn_stream,"%d",lnum-60);
+        gp_fwrite("Y\035",1,2,prn_stream);
+        report_size = outp - out;
+        gp_fprintf(prn_stream,"%d;",report_size);
+        report_size = (in_end - inp) << 3;
+        gp_fprintf(prn_stream,"%d;",report_size);
+        gp_fwrite("1;0bi{I",1,7,prn_stream);
+        gp_fwrite(out,1,(outp - out),prn_stream);
 
         lnum++;
 
@@ -369,29 +376,36 @@ Y coordinate of the printer equals (lnum - 60)
 
 /* Send the termination string */
 
-        fwrite("\0350bcI",1,5,prn_stream);
-        fwrite("\0351coO",1,5,prn_stream);
-        fwrite("\035rhE",1,4,prn_stream);
+        gp_fwrite("\0350bcI",1,5,prn_stream);
+        gp_fwrite("\0351coO",1,5,prn_stream);
+        gp_fwrite("\035rhE",1,4,prn_stream);
 
-        fwrite("\033\001@EJL \n",1,8,prn_stream);
-        fwrite("@EJL SE LA=ESC/PAGE\n",1,20,prn_stream);
-        fwrite("@EJL SET PU=1 PS=A4 ZO=OFF\n",1,27,prn_stream);
-        fwrite("@EJL EN LA=ESC/PAGE\n",1,20,prn_stream);
-        fwrite("\0350;0.24muE\0352;300;300drE",1,23,prn_stream);
-        fwrite("\0350;300;300drE\0351tsE\0351mmE",1,23,prn_stream);
-        fwrite("\0357isE\0355iaF\0355ipP\03514psE\0350poE",1,26,prn_stream);
-        fwrite("\03560;60loE\0350X\0350Y",1,15,prn_stream);
-        fwrite("\0350;0;2360;3388caE",1,17,prn_stream);
-        fwrite("\0351cmE\0350alfP",1,11,prn_stream);
-        fwrite("\0350affP\0350boP\0350abP",1,16,prn_stream);
-        fwrite("\0354ilG\0350bcI\0350sarG",1,16,prn_stream);
-        fwrite("\035rhE",1,4,prn_stream);
-        fwrite("\033\001@EJL \n",1,8,prn_stream);
-        fwrite("\033\001@EJL \n",1,8,prn_stream);
+        gp_fwrite("\033\001@EJL \n",1,8,prn_stream);
+        gp_fwrite("@EJL SE LA=ESC/PAGE\n",1,20,prn_stream);
+        gp_fwrite("@EJL SET PU=1 PS=A4 ZO=OFF\n",1,27,prn_stream);
+        gp_fwrite("@EJL EN LA=ESC/PAGE\n",1,20,prn_stream);
+        gp_fwrite("\0350;0.24muE\0352;300;300drE",1,23,prn_stream);
+        gp_fwrite("\0350;300;300drE\0351tsE\0351mmE",1,23,prn_stream);
+        gp_fwrite("\0357isE\0355iaF\0355ipP\03514psE\0350poE",1,26,prn_stream);
+        gp_fwrite("\03560;60loE\0350X\0350Y",1,15,prn_stream);
+        gp_fwrite("\0350;0;2360;3388caE",1,17,prn_stream);
+        gp_fwrite("\0351cmE\0350alfP",1,11,prn_stream);
+        gp_fwrite("\0350affP\0350boP\0350abP",1,16,prn_stream);
+        gp_fwrite("\0354ilG\0350bcI\0350sarG",1,16,prn_stream);
+        gp_fwrite("\035rhE",1,4,prn_stream);
+        gp_fwrite("\033\001@EJL \n",1,8,prn_stream);
+        gp_fwrite("\033\001@EJL \n",1,8,prn_stream);
 
-        fflush(prn_stream);
+        gp_fflush(prn_stream);
 
-        gs_free(pdev->memory, (char *)buf2, in_size, 1, "lp8000_print_page(buf2)");
-        gs_free(pdev->memory, (char *)buf1, in_size, 1, "lp8000_print_page(buf1)");
-        return 0;
+xit:
+        if ( buf1 )
+           gs_free(pdev->memory, (char *)buf1, in_size, 1, "lp8000_print_page(buf1)");
+        if ( buf2 )
+           gs_free(pdev->memory, (char *)buf2, in_size, 1, "lp8000_print_page(buf2)");
+
+        if (code < 0)
+            return_error(code);
+
+        return code;
 }

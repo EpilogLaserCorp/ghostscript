@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /*
@@ -247,15 +247,24 @@ clj_get_params(gx_device *pdev, gs_param_list *plist)
  * on error.
  */
 static int
-clj_media_size(float mediasize[2], gs_param_list *plist)
+clj_media_size(float mediasize[2], gs_param_list *plist, gx_device *dev)
 {
     gs_param_float_array fres;
     gs_param_float_array fsize;
     gs_param_int_array hwsize;
     int have_pagesize = 0;
+    float res[2];
 
-    if ( (param_read_float_array(plist, "HWResolution", &fres) == 0) &&
-          !is_supported_resolution(fres.data) )
+    if ( param_read_float_array(plist, "HWResolution", &fres) == 0) {
+        res[0] = fres.data[0];
+        res[1] = fres.data[1];
+    }
+    else
+    {
+        res[0] = dev->HWResolution[0];
+        res[1] = dev->HWResolution[1];
+    }
+    if (!is_supported_resolution(res) )
         return_error(gs_error_rangecheck);
 
     if ( (param_read_float_array(plist, "PageSize", &fsize) == 0) ||
@@ -266,8 +275,8 @@ clj_media_size(float mediasize[2], gs_param_list *plist)
     }
 
     if (param_read_int_array(plist, "HWSize", &hwsize) == 0) {
-        mediasize[0] = ((float)hwsize.data[0]) * 72 / fres.data[0];
-        mediasize[1] = ((float)hwsize.data[1]) * 72 / fres.data[1];
+        mediasize[0] = ((float)hwsize.data[0]) * 72 / res[0];
+        mediasize[1] = ((float)hwsize.data[1]) * 72 / res[1];
         have_pagesize = 1;
     }
 
@@ -286,7 +295,7 @@ clj_put_params(
 {
     float		    mediasize[2];
     bool                    rotate = false;
-    int                     have_pagesize = clj_media_size(mediasize, plist);
+    int                     have_pagesize = clj_media_size(mediasize, plist, pdev);
 
     if (have_pagesize < 0)
         return have_pagesize;
@@ -404,7 +413,7 @@ pack_and_compress_scanline(
   static int
 clj_print_page(
     gx_device_printer *     pdev,
-    FILE *                  prn_stream
+    gp_file *               prn_stream
 )
 {
     gs_memory_t *mem = pdev->memory;
@@ -419,6 +428,7 @@ clj_print_page(
     double                  fs_res = pdev->HWResolution[0] / 72.0;
     double                  ss_res = pdev->HWResolution[1] / 72.0;
     int			    imageable_width, imageable_height;
+    int                     code = 0;
 
     /* no paper size at this point is a serious error */
     if (psize == 0)
@@ -451,7 +461,7 @@ clj_print_page(
        offset such that it coincides with the offsets of the imageable
        area.  This calculation should be independant of rotation but
        only the rotated case has been tested with a real device. */
-    fprintf( prn_stream,
+    gp_fprintf( prn_stream,
              "\033E\033&u300D\033&l%da1x%dO\033*p0x0y+50x-100Y\033*t%dR"
 #ifdef USE_FAST_MODE
              "\033*r-3U"
@@ -470,7 +480,9 @@ clj_print_page(
     for (i = 0; i < imageable_height; i++) {
         int     clen[3];
 
-        gdev_prn_copy_scan_lines(pdev, i, data, lsize);
+        code = gdev_prn_copy_scan_lines(pdev, i, data, lsize);
+        if (code < 0)
+            goto xit;
 
         /* The 'lsize' bytes of data have the blank margin area at the end due	*/
         /* to the 'initial_matrix' offsets that are applied.			*/
@@ -479,26 +491,27 @@ clj_print_page(
             ++blank_lines;
         else {
             if (blank_lines != 0) {
-                fprintf(prn_stream, "\033*b%dY", blank_lines);
+                gp_fprintf(prn_stream, "\033*b%dY", blank_lines);
                 blank_lines = 0;
             }
-            fprintf(prn_stream, "\033*b%dV", clen[0]);
-            fwrite(cdata[0], sizeof(byte), clen[0], prn_stream);
-            fprintf(prn_stream, "\033*b%dV", clen[1]);
-            fwrite(cdata[1], sizeof(byte), clen[1], prn_stream);
-            fprintf(prn_stream, "\033*b%dW", clen[2]);
-            fwrite(cdata[2], sizeof(byte), clen[2], prn_stream);
+            gp_fprintf(prn_stream, "\033*b%dV", clen[0]);
+            gp_fwrite(cdata[0], sizeof(byte), clen[0], prn_stream);
+            gp_fprintf(prn_stream, "\033*b%dV", clen[1]);
+            gp_fwrite(cdata[1], sizeof(byte), clen[1], prn_stream);
+            gp_fprintf(prn_stream, "\033*b%dW", clen[2]);
+            gp_fwrite(cdata[2], sizeof(byte), clen[2], prn_stream);
         }
     }
 
     /* PCL will take care of blank lines at the end */
-    fputs("\033*rC\f", prn_stream);
+    gp_fputs("\033*rC\f", prn_stream);
 
+xit:
     /* free the buffers used */
     gs_free_object(mem, cdata[0], "clj_print_page(cdata)");
     gs_free_object(mem, data, "clj_print_page(data)");
 
-    return 0;
+    return code;
 }
 
 /* CLJ device methods */
@@ -623,7 +636,7 @@ clj_pr_put_params(
     float		    mediasize[2];
     int                     code = 0;
     bool                    rotate = false;
-    int                     have_pagesize = clj_media_size(mediasize, plist);
+    int                     have_pagesize = clj_media_size(mediasize, plist, pdev);
 
     if (have_pagesize < 0)
         return have_pagesize;

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -46,7 +46,7 @@ typedef char pjl_envvar_t;
 pjl_parser_state *pjl_process_init(gs_memory_t * mem);
 
 /* Destroy an instance of the the PJL parser and state. */
-void pjl_process_destroy(pjl_parser_state * pst, gs_memory_t * mem);
+void pjl_process_destroy(pjl_parser_state * pst);
 
 /* Process a buffer of PJL commands. */
 /* Return 1 if we are no longer in PJL mode. */
@@ -69,6 +69,8 @@ bool pjl_skip_to_uel(stream_cursor_read * pr);
    Both variables and values are case insensitive.
 */
 pjl_envvar_t *pjl_get_envvar(pjl_parser_state * pst, const char *pjl_var);
+pjl_envvar_t *pjl_set_envvar(pjl_parser_state * pst, const char *pjl_var, const char *data);
+pjl_envvar_t *pjl_set_defvar(pjl_parser_state * pst, const char *pjl_var, const char *data);
 
 /* compare a pjl environment variable to a string values. */
 int pjl_compare(const pjl_envvar_t * s1, const char *s2);

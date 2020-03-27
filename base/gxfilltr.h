@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -22,7 +22,6 @@
  * Configuration macros (template arguments) are :
  *
  *  IS_SPOTAN - is the target device a spot analyzer ("spotan").
- *  PSEUDO_RASTERIZATION - use pseudo-rasterization.
  *  SMART_WINDING - even-odd filling rule for each contour independently.
  *  FILL_ADJUST - fill adjustment is not zero
  *  FILL_DIRECT - See LOOP_FILL_RECTANGLE_DIRECT.
@@ -30,6 +29,8 @@
  *  ADVANCE_WINDING(inside, alp, ll) - a macro for advancing the winding counter.
  *  INSIDE_PATH_P(inside, rule) - a macro for checking the winding rule.
 */
+
+#if defined(TEMPLATE_spot_into_trapezoids) && defined(INCR) && defined(FILL_ADJUST) && defined(LOOP_FILL_RECTANGLE_DIRECT) && defined(COVERING_PIXEL_CENTERS)
 
 /* ---------------- Trapezoid decomposition loop ---------------- */
 
@@ -52,11 +53,9 @@ TEMPLATE_spot_into_trapezoids (line_list *ll, fixed band_mask)
     y = yll->start.y;		/* first Y value */
     ll->x_list = 0;
     ll->x_head.x_current = min_fixed;	/* stop backward scan */
-    ll->margin_set0.y = fixed_pixround(y) - fixed_half;
-    ll->margin_set1.y = fixed_pixround(y) - fixed_1 - fixed_half;
     while (1) {
         fixed y1;
-        active_line *alp, *plp = NULL;
+        active_line *alp;
         bool covering_pixel_centers;
 
         INCR(iter);
@@ -70,27 +69,23 @@ TEMPLATE_spot_into_trapezoids (line_list *ll, fixed band_mask)
             if (ynext != NULL)
                 ynext->prev = NULL;
             if (yll->direction == DIR_HORIZONTAL) {
-                if (!PSEUDO_RASTERIZATION) {
-                    /*
-                     * This is a hack to make sure that isolated horizontal
-                     * lines get stroked.
-                     */
-                    int yi = fixed2int_pixround(y - (!FILL_ADJUST ? 0 : fo.adjust_below));
-                    int xi, wi;
+                /*
+                 * This is a hack to make sure that isolated horizontal
+                 * lines get stroked.
+                 */
+                int yi = fixed2int_pixround(y - (!FILL_ADJUST ? 0 : fo.adjust_below));
+                int xi, wi;
 
-                    if (yll->start.x <= yll->end.x) {
-                        xi = fixed2int_pixround(yll->start.x - (!FILL_ADJUST ? 0 : fo.adjust_left));
-                        wi = fixed2int_pixround(yll->end.x + (!FILL_ADJUST ? 0 : fo.adjust_right)) - xi;
-                    } else {
-                        xi = fixed2int_pixround(yll->end.x - (!FILL_ADJUST ? 0 : fo.adjust_left));
-                        wi = fixed2int_pixround(yll->start.x + (!FILL_ADJUST ? 0 : fo.adjust_right)) - xi;
-                    }
-                    VD_RECT(xi, yi, wi, 1, VD_TRAP_COLOR);
-                    code = LOOP_FILL_RECTANGLE_DIRECT(&fo, xi, yi, wi, 1);
-                    if (code < 0)
-                        return code;
-                } else if (PSEUDO_RASTERIZATION)
-                    insert_h_new(yll, ll);
+                if (yll->start.x <= yll->end.x) {
+                    xi = fixed2int_pixround(yll->start.x - (!FILL_ADJUST ? 0 : fo.adjust_left));
+                    wi = fixed2int_pixround(yll->end.x + (!FILL_ADJUST ? 0 : fo.adjust_right)) - xi;
+                } else {
+                    xi = fixed2int_pixround(yll->end.x - (!FILL_ADJUST ? 0 : fo.adjust_left));
+                    wi = fixed2int_pixround(yll->start.x + (!FILL_ADJUST ? 0 : fo.adjust_right)) - xi;
+                }
+                code = LOOP_FILL_RECTANGLE_DIRECT(&fo, xi, yi, wi, 1);
+                if (code < 0)
+                    return code;
             } else
                 insert_x_new(yll, ll);
             yll = ynext;
@@ -105,10 +100,6 @@ TEMPLATE_spot_into_trapezoids (line_list *ll, fixed band_mask)
             ll->h_list1 = ll->h_list0;
             ll->h_list0 = 0;
             continue;
-        }
-        if (vd_enabled) {
-            vd_circle(0, y, 3, RGB(255, 0, 0));
-            y += 0; /* Just a good place for a debugger breakpoint */
         }
         /* Find the next evaluation point. */
         /* Start by finding the smallest y value */
@@ -158,12 +149,6 @@ TEMPLATE_spot_into_trapezoids (line_list *ll, fixed band_mask)
             covering_pixel_centers = COVERING_PIXEL_CENTERS(y, y1,
                             (!FILL_ADJUST ? 0 : fo.adjust_below),
                             (!FILL_ADJUST ? 0 : fo.adjust_above));
-        }
-        /* Prepare dropout prevention. */
-        if (PSEUDO_RASTERIZATION) {
-            code = start_margin_set(fo.dev, ll, y1);
-            if (code < 0)
-                return code;
         }
         /* Fill a multi-trapezoid band for the active lines. */
         if (covering_pixel_centers || all_bands) {
@@ -215,7 +200,6 @@ TEMPLATE_spot_into_trapezoids (line_list *ll, fixed band_mask)
                 INCR(band_fill);
                 if (FILL_ADJUST && !(flp->end.x == flp->start.x && alp->end.x == alp->start.x) &&
                     (fo.adjust_below | fo.adjust_above) != 0) {
-                    /* Assuming pseudo_rasterization = false. */
                     if (FILL_DIRECT)
                         code = slant_into_trapezoids__fd(ll, flp, alp, y, y1);
                     else
@@ -243,10 +227,10 @@ TEMPLATE_spot_into_trapezoids (line_list *ll, fixed band_mask)
                                 int xi  = fixed2int_var_pixround(alp->end.x + (!FILL_ADJUST ? 0 : fo.adjust_right));
 
 #ifdef FILL_ZERO_WIDTH
-                                if ( (xli == xi) && (PSEUDO_RASTERIZATION ||
-                                    (FILL_ADJUST && (fo.adjust_right | fo.adjust_left) != 0))) {
+                                if ( xli == xi && FILL_ADJUST &&
+                                     (fo.adjust_right | fo.adjust_left) != 0 ) {
 #else
-                                if (PSEUDO_RASTERIZATION && xli == xi) {
+                                if (0) {
 #endif
                                     /*
                                     * The scan is empty but we should paint something
@@ -260,7 +244,6 @@ TEMPLATE_spot_into_trapezoids (line_list *ll, fixed band_mask)
                                     else
                                         --xli;
                                 }
-                                vd_rect(flp->end.x, y, alp->end.x, y1, 1, VD_TRAP_COLOR);
                                 code = LOOP_FILL_RECTANGLE_DIRECT(&fo, xli, yi, xi - xli, hi);
                             } else
                                 code = 0;
@@ -271,77 +254,15 @@ TEMPLATE_spot_into_trapezoids (line_list *ll, fixed band_mask)
                             le.end = flp->end;
                             re.start = alp->start;
                             re.end = alp->end;
-                            vd_quad(flp->x_current, ybot, alp->x_current, ybot, alp->x_next, ytop, flp->x_next, ytop, 1, VD_TRAP_COLOR);
-                            if (PSEUDO_RASTERIZATION) {
-                                int flags = ftf_pseudo_rasterization;
-
-                                if (flp->start.x == alp->start.x && flp->start.y == y && alp->start.y == y)
-                                    flags |= ftf_peak0;
-                                if (flp->end.x == alp->end.x && flp->end.y == y1 && alp->end.y == y1)
-                                    flags |= ftf_peak0;
-                                if (FILL_DIRECT)
-                                    code = gx_fill_trapezoid_cf_fd(fo.dev, &le, &re, ybot, ytop, flags, fo.pdevc, fo.lop);
-                                else
-                                    code = gx_fill_trapezoid_cf_nd(fo.dev, &le, &re, ybot, ytop, flags, fo.pdevc, fo.lop);
-                            } else
-                                code = fo.fill_trap(fo.dev,
-                                        &le, &re, ybot, ytop, false, fo.pdevc, fo.lop);
+                            code = fo.fill_trap(fo.dev,
+                                    &le, &re, ybot, ytop, false, fo.pdevc, fo.lop);
                         } else
                             code = 0;
-                    }
-                    if (PSEUDO_RASTERIZATION) {
-                        if (code < 0)
-                            return code;
-                        code = complete_margin(ll, flp, alp, y, y1);
-                        if (code < 0)
-                            return code;
-                        code = margin_interior(ll, flp, alp, y, y1);
-                        if (code < 0)
-                            return code;
-                        code = add_margin(ll, flp, alp, y, y1);
-                        if (code < 0)
-                            return code;
-                        code = process_h_lists(ll, plp, flp, alp, y, y1);
-                        plp = alp;
                     }
                 }
                 if (code < 0)
                     return code;
             }
-        } else {
-            /* No trapezoids generation needed. */
-            if (PSEUDO_RASTERIZATION) {
-                /* Process dropouts near trapezoids. */
-                active_line *flp = NULL;
-                int inside = 0;
-
-                if (SMART_WINDING)
-                    memset(ll->windings, 0, sizeof(ll->windings[0]) * ll->contour_count);
-                for (alp = ll->x_list; alp != 0; alp = alp->next) {
-                    if (!INSIDE_PATH_P(inside, rule)) {		/* i.e., outside */
-                        ADVANCE_WINDING(inside, alp, ll);
-                        if (INSIDE_PATH_P(inside, rule))	/* about to go in */
-                            flp = alp;
-                        continue;
-                    }
-                    /* We're inside a region being filled. */
-                    ADVANCE_WINDING(inside, alp, ll);
-                    if (INSIDE_PATH_P(inside, rule))	/* not about to go out */
-                        continue;
-                    code = continue_margin(ll, flp, alp, y, y1);
-                    if (code < 0)
-                        return code;
-                    code = process_h_lists(ll, plp, flp, alp, y, y1);
-                    plp = alp;
-                    if (code < 0)
-                        return code;
-                }
-            }
-        }
-        if (PSEUDO_RASTERIZATION && plp != 0) {
-            code = process_h_lists(ll, plp, 0, 0, y, y1);
-            if (code < 0)
-                return code;
         }
         code = move_al_by_y(ll, y1);
         if (code < 0)
@@ -350,14 +271,9 @@ TEMPLATE_spot_into_trapezoids (line_list *ll, fixed band_mask)
         ll->h_list0 = 0;
         y = y1;
     }
-    if (PSEUDO_RASTERIZATION) {
-        code = process_h_lists(ll, 0, 0, 0, y, y + 1 /*stub*/);
-        if (code < 0)
-            return code;
-        code = close_margins(fo.dev, ll, &ll->margin_set1);
-        if (code < 0)
-            return code;
-        return close_margins(fo.dev, ll, &ll->margin_set0);
-    }
     return 0;
 }
+
+#else
+int dummy;
+#endif

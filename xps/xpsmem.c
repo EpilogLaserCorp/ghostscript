@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -35,7 +35,7 @@ xps_tolower(int c)
 }
 
 int
-xps_strcasecmp(char *a, char *b)
+xps_strcasecmp(const char *a, const char *b)
 {
         while (xps_tolower(*a) == xps_tolower(*b))
         {
@@ -55,60 +55,6 @@ xps_strdup_imp(xps_context_t *ctx, const char *str, const char *cname)
     if (cpy)
         strcpy(cpy, str);
     return cpy;
-}
-
-size_t
-xps_strlcpy(char *dst, const char *src, size_t siz)
-{
-    register char *d = dst;
-    register const char *s = src;
-    register int n = siz;
-
-    /* Copy as many bytes as will fit */
-    if (n != 0 && --n != 0) {
-        do {
-            if ((*d++ = *s++) == 0)
-                break;
-        } while (--n != 0);
-    }
-
-    /* Not enough room in dst, add NUL and traverse rest of src */
-    if (n == 0) {
-        if (siz != 0)
-            *d = '\0';          /* NUL-terminate dst */
-            while (*s++)
-                ;
-    }
-
-    return(s - src - 1);    /* count does not include NUL */
-}
-
-size_t
-xps_strlcat(char *dst, const char *src, size_t siz)
-{
-    register char *d = dst;
-    register const char *s = src;
-    register int n = siz;
-    int dlen;
-
-    /* Find the end of dst and adjust bytes left but don't go past end */
-    while (*d != '\0' && n-- != 0)
-        d++;
-    dlen = d - dst;
-    n = siz - dlen;
-
-    if (n == 0)
-        return dlen + strlen(s);
-    while (*s != '\0') {
-        if (n != 1) {
-            *d++ = *s;
-            n--;
-        }
-        s++;
-    }
-    *d = '\0';
-
-    return dlen + (s - src);    /* count does not include NUL */
 }
 
 #define SEP(x)  ((x)=='/' || (x) == 0)
@@ -173,13 +119,13 @@ xps_absolute_path(char *output, char *base_uri, char *path, int output_size)
 {
     if (path[0] == '/')
     {
-        xps_strlcpy(output, path, output_size);
+        gs_strlcpy(output, path, output_size);
     }
     else
     {
-        xps_strlcpy(output, base_uri, output_size);
-        xps_strlcat(output, "/", output_size);
-        xps_strlcat(output, path, output_size);
+        gs_strlcpy(output, base_uri, output_size);
+        gs_strlcat(output, "/", output_size);
+        gs_strlcat(output, path, output_size);
     }
     xps_clean_path(output);
 }

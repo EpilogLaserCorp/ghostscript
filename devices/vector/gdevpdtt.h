@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -18,6 +18,9 @@
 
 #ifndef gdevpdtt_INCLUDED
 #  define gdevpdtt_INCLUDED
+
+#include "gdevpdtf.h"
+#include "gdevpdts.h"
 
 /*
  * This file is only used internally to define the interface between
@@ -62,7 +65,7 @@
 
   The following convert between these spaces:
 
-  - The PostScript CTM (pte->pis->ctm) maps #1 to #2.
+  - The PostScript CTM (pte->pgs->ctm) maps #1 to #2.
 
   - The mapping from #3 to #2 is a scaling by pdev->HWResolution / 72.
 
@@ -82,16 +85,6 @@
 
 /* ---------------- Types and structures ---------------- */
 
-#ifndef pdf_char_glyph_pair_DEFINED
-#  define pdf_char_glyph_pair_DEFINED
-typedef struct pdf_char_glyph_pair_s pdf_char_glyph_pair_t;
-#endif
-
-#ifndef pdf_char_glyph_pairs_DEFINED
-#  define pdf_char_glyph_pairs_DEFINED
-typedef struct pdf_char_glyph_pairs_s pdf_char_glyph_pairs_t;
-#endif
-
 /* Define a structure for a text characters list. */
 /* It must not contain pointers due to variable length. */
 struct pdf_char_glyph_pairs_s {
@@ -105,7 +98,6 @@ struct pdf_char_glyph_pairs_s {
 typedef struct pdf_text_enum_s {
     gs_text_enum_common;
     gs_text_enum_t *pte_default;
-    gs_fixed_point origin;
     bool charproc_accum;
     bool cdevproc_callout;
     double cdevproc_result[10];
@@ -226,7 +218,7 @@ int pdf_make_font3_resource(gx_device_pdf *pdev, gs_font *font,
 
 /*
  * Compute the cached values in the text processing state from the text
- * parameters, pdfont, and pis->ctm.  Return either an error code (< 0) or a
+ * parameters, pdfont, and pgs->ctm.  Return either an error code (< 0) or a
  * mask of operation attributes that the caller must emulate.  Currently the
  * only such attributes are TEXT_ADD_TO_ALL_WIDTHS and
  * TEXT_ADD_TO_SPACE_WIDTH.
@@ -242,7 +234,7 @@ int pdf_update_text_state(pdf_text_process_state_t *ppts,
  * are written later.
  */
 int pdf_set_text_process_state(gx_device_pdf *pdev,
-                               const gs_text_enum_t *pte, /*for pdcolor, pis*/
+                               const gs_text_enum_t *pte, /*for pdcolor, pgs*/
                                pdf_text_process_state_t *ppts);
 
 /*
@@ -326,7 +318,7 @@ int pdf_shift_text_currentpoint(pdf_text_enum_t *penum, gs_point *wpt);
 
 void adjust_first_last_char(pdf_font_resource_t *pdfont, byte *str, int size);
 
-float pdf_calculate_text_size(gs_imager_state *pis, pdf_font_resource_t *pdfont,
+float pdf_calculate_text_size(gs_gstate *pgs, pdf_font_resource_t *pdfont,
                               const gs_matrix *pfmat, gs_matrix *smat, gs_matrix *tmat,
                               gs_font *font, gx_device_pdf *pdev);
 #endif /* gdevpdtt_INCLUDED */

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -27,6 +27,8 @@
 #include "gxcldev.h"
 #include "gxclpath.h"
 #include "gsparams.h"
+
+#include "valgrind.h"
 
 /* ---------------- Statistics ---------------- */
 
@@ -178,8 +180,8 @@ cmd_write_band(gx_device_clist_writer * cldev, int band_min, int band_max,
         cb.band_min = band_min;
         cb.band_max = band_max;
         cb.pos = cldev->page_info.io_procs->ftell(cfile);
-        if_debug3m('l', cldev->memory, "[l]writing for bands (%d,%d) at %ld\n",
-                  band_min, band_max, (long)cb.pos);
+        if_debug3m('l', cldev->memory, "[l]writing for bands (%d,%d) at %"PRId64"\n",
+                  band_min, band_max, cb.pos);
         cldev->page_info.io_procs->fwrite_chars(&cb, sizeof(cb), bfile);
         if (cp != 0) {
             pcl->tail->next = 0;	/* terminate the list */
@@ -189,12 +191,12 @@ cmd_write_band(gx_device_clist_writer * cldev, int band_min, int band_max,
                     (const byte *)cp >= cldev->cend ||
                     cp->size > cldev->cend - (const byte *)cp
                     ) {
-                    mlprintf1(cldev->memory, "cmd_write_band error at 0x%lx\n", (ulong) cp);
+                    mlprintf1(cldev->memory, "cmd_write_band error at "PRI_INTPTR"\n", (intptr_t) cp);
                     return_error(gs_error_Fatal);
                 }
 #endif
-                if_debug2m('L', cldev->memory, "[L]Wrote cmd id=%ld at %ld\n",
-                           cp->id, (long)cldev->page_info.io_procs->ftell(cfile));
+                if_debug2m('L', cldev->memory, "[L]Wrote cmd id=%ld at %"PRId64"\n",
+                           cp->id, cldev->page_info.io_procs->ftell(cfile));
                 cldev->page_info.io_procs->fwrite_chars(cp + 1, cp->size, cfile);
             }
             pcl->head = pcl->tail = 0;
@@ -234,14 +236,14 @@ cmd_write_pseudo_band(gx_device_clist_writer * cldev, unsigned char *pbuf, int d
     cb.band_max = band;
     cb.pos = cldev->page_info.io_procs->ftell(cfile);
 
-    if_debug2m('l', cldev->memory, "[l]writing pseudo band %d cb pos %ld\n",
-                  band, (long)cb.pos);
+    if_debug2m('l', cldev->memory, "[l]writing pseudo band %d cb pos %"PRId64"\n",
+                  band, cb.pos);
 
     cldev->page_info.io_procs->fwrite_chars(&cb, sizeof(cb), bfile);
 
     /* Now store the information in the cfile */
-    if_debug2m('l', cldev->memory, "[l]writing %d bytes into cfile at %ld\n",
-            data_size, (long)cldev->page_info.io_procs->ftell(cfile));
+    if_debug2m('l', cldev->memory, "[l]writing %d bytes into cfile at %"PRId64"\n",
+            data_size, cldev->page_info.io_procs->ftell(cfile));
 
     cldev->page_info.io_procs->fwrite_chars(pbuf, data_size, cfile);
 
@@ -281,6 +283,9 @@ cmd_write_buffer(gx_device_clist_writer * cldev, byte cmd_end)
     for (; band < nbands; band++, pcls++)
         pcls->list.head = pcls->list.tail = 0;
     cldev->cnext = cldev->cbuf;
+#ifdef HAVE_VALGRIND
+    VALGRIND_MAKE_MEM_UNDEFINED(cldev->cbuf, cldev->cend - cldev->cbuf);
+#endif
     cldev->ccl = 0;
 #if defined(DEBUG) && !defined(GS_THREADSAFE)
     if (gs_debug_c('l'))
@@ -300,18 +305,14 @@ cmd_put_list_op(gx_device_clist_writer * cldev, cmd_list * pcl, uint size)
 {
     byte *dp = cldev->cnext;
 
+    CMD_CHECK_LAST_OP_BLOCK_DEFINED(cldev);
+
     if (size + cmd_headroom > cldev->cend - dp) {
         if ((cldev->error_code =
              cmd_write_buffer(cldev, cmd_opv_end_run)) != 0 ||
             (size + cmd_headroom > cldev->cend - cldev->cnext)) {
-            if (cldev->error_code < 0)
-                cldev->error_is_retryable = 0;	/* hard error */
-            else {
-                /* upgrade lo-mem warning into an error */
-                if (!cldev->ignore_lo_mem_warnings)
-                    cldev->error_code = gs_note_error(gs_error_VMerror);
-                cldev->error_is_retryable = 1;
-            }
+            if (cldev->error_code == 0)
+                cldev->error_code = gs_error_VMerror;
             return 0;
         }
         else
@@ -322,7 +323,7 @@ cmd_put_list_op(gx_device_clist_writer * cldev, cmd_list * pcl, uint size)
         cmd_count_add1(stats_cmd.same_band);
 #ifdef DEBUG
         if (pcl->tail->size > dp - (byte *) (pcl->tail + 1)) {
-            lprintf1("cmd_put_list_op error at 0x%lx\n", (ulong) pcl->tail);
+            lprintf1("cmd_put_list_op error at "PRI_INTPTR"\n", (intptr_t)pcl->tail);
         }
 #endif
         if_debug2m('L', cldev->memory, ", to id=%ld , offset=%ld",
@@ -341,8 +342,8 @@ cmd_put_list_op(gx_device_clist_writer * cldev, cmd_list * pcl, uint size)
             if (pcl->tail < pcl->head ||
                 pcl->tail->size > dp - (byte *) (pcl->tail + 1)
                 ) {
-                lprintf1("cmd_put_list_op error at 0x%lx\n",
-                         (ulong) pcl->tail);
+                lprintf1("cmd_put_list_op error at "PRI_INTPTR"\n",
+                         (intptr_t)pcl->tail);
             }
 #endif
             pcl->tail->next = cp;
@@ -365,10 +366,11 @@ cmd_put_list_op(gx_device_clist_writer * cldev, cmd_list * pcl, uint size)
 int
 cmd_get_buffer_space(gx_device_clist_writer * cldev, gx_clist_state * pcls, uint size)
 {
+    CMD_CHECK_LAST_OP_BLOCK_DEFINED(cldev);
+
     if (size + cmd_headroom > cldev->cend - cldev->cnext) {
         cldev->error_code = cmd_write_buffer(cldev, cmd_opv_end_run);
         if (cldev->error_code < 0) {
-            cldev->error_is_retryable = 0;	/* hard error */
             return cldev->error_code;
         }
     }
@@ -391,6 +393,8 @@ byte *
 cmd_put_range_op(gx_device_clist_writer * cldev, int band_min, int band_max,
                  uint size)
 {
+    CMD_CHECK_LAST_OP_BLOCK_DEFINED(cldev);
+
     if_debug4m('L', cldev->memory, "[L]band range(%d,%d): size=%u, left=%u",
                band_min, band_max, size, 0);
     if (cldev->ccl != 0 &&
@@ -399,13 +403,6 @@ cmd_put_range_op(gx_device_clist_writer * cldev, int band_min, int band_max,
          band_max != cldev->band_range_max)
         ) {
         if ((cldev->error_code = cmd_write_buffer(cldev, cmd_opv_end_run)) != 0) {
-            if (cldev->error_code < 0)
-                cldev->error_is_retryable = 0;	/* hard error */
-            else {
-                /* upgrade lo-mem warning into an error */
-                cldev->error_code = gs_error_VMerror;
-                cldev->error_is_retryable = 1;
-            }
             return 0;
         }
         cldev->band_range_min = band_min;
@@ -567,7 +564,7 @@ cmd_put_color(gx_device_clist_writer * cldev, gx_clist_state * pcls,
 
     /* If this is a tile color then send tile color type */
     if (select->tile_color) {
-        code = set_cmd_put_op(dp, cldev, pcls, cmd_opv_set_tile_color, 1);
+        code = set_cmd_put_op(&dp, cldev, pcls, cmd_opv_set_tile_color, 1);
         if (code < 0)
             return code;
     }
@@ -578,7 +575,7 @@ cmd_put_color(gx_device_clist_writer * cldev, gx_clist_state * pcls,
          * We must handle this specially, because it may take more
          * bytes than the color depth.
          */
-        code = set_cmd_put_op(dp, cldev, pcls, op + cmd_no_color_index, 1);
+        code = set_cmd_put_op(&dp, cldev, pcls, op + cmd_no_color_index, 1);
         if (code < 0)
             return code;
     } else {
@@ -611,7 +608,7 @@ cmd_put_color(gx_device_clist_writer * cldev, gx_clist_state * pcls,
         }
         /* Now send one of the two command forms */
         if (use_delta && delta_bytes < (num_bytes - bytes_dropped)) {
-            code = set_cmd_put_op(dp, cldev, pcls,
+            code = set_cmd_put_op(&dp, cldev, pcls,
                                         op_delta, delta_bytes + 1);
             if (code < 0)
                 return code;
@@ -631,7 +628,7 @@ cmd_put_color(gx_device_clist_writer * cldev, gx_clist_state * pcls,
         }
         else {
             num_bytes -= bytes_dropped;
-            code = set_cmd_put_op(dp, cldev, pcls,
+            code = set_cmd_put_op(&dp, cldev, pcls,
                                 (byte)(op + bytes_dropped), num_bytes + 1);
             if (code < 0)
                 return code;
@@ -677,15 +674,15 @@ cmd_set_tile_phase_generic(gx_device_clist_writer * cldev, gx_clist_state * pcls
 
     pcsize = 1 + cmd_size2w(px, py);
     if (all_bands)
-        code = set_cmd_put_all_op(dp, cldev, (byte)cmd_opv_set_tile_phase, pcsize);
+        code = set_cmd_put_all_op(&dp, cldev, (byte)cmd_opv_set_tile_phase, pcsize);
     else
-        code = set_cmd_put_op(dp, cldev, pcls, (byte)cmd_opv_set_tile_phase, pcsize);
+        code = set_cmd_put_op(&dp, cldev, pcls, (byte)cmd_opv_set_tile_phase, pcsize);
     if (code < 0)
         return code;
     ++dp;
     pcls->tile_phase.x = px;
     pcls->tile_phase.y = py;
-    cmd_putxy(pcls->tile_phase, dp);
+    cmd_putxy(pcls->tile_phase, &dp);
     return 0;
 }
 
@@ -702,7 +699,7 @@ cmd_put_enable_lop(gx_device_clist_writer * cldev, gx_clist_state * pcls,
                    int enable)
 {
     byte *dp;
-    int code = set_cmd_put_op(dp, cldev, pcls,
+    int code = set_cmd_put_op(&dp, cldev, pcls,
                               (byte)(enable ? cmd_opv_enable_lop :
                                      cmd_opv_disable_lop),
                               1);
@@ -720,7 +717,7 @@ cmd_put_enable_clip(gx_device_clist_writer * cldev, gx_clist_state * pcls,
                     int enable)
 {
     byte *dp;
-    int code = set_cmd_put_op(dp, cldev, pcls,
+    int code = set_cmd_put_op(&dp, cldev, pcls,
                               (byte)(enable ? cmd_opv_enable_clip :
                                      cmd_opv_disable_clip),
                               1);
@@ -738,7 +735,7 @@ cmd_set_lop(gx_device_clist_writer * cldev, gx_clist_state * pcls,
 {
     byte *dp;
     uint lop_msb = lop >> 6;
-    int code = set_cmd_put_op(dp, cldev, pcls,
+    int code = set_cmd_put_op(&dp, cldev, pcls,
                               cmd_opv_set_misc, 2 + cmd_size_w(lop_msb));
 
     if (code < 0)
@@ -780,7 +777,7 @@ cmd_put_params(gx_device_clist_writer *cldev,
         gs_param_list_serialize(param_list, local_buf, sizeof(local_buf));
     if (param_length > 0) {
         /* Get cmd buffer space for serialized */
-        code = set_cmd_put_all_op(dp, cldev, cmd_opv_extend,
+        code = set_cmd_put_all_op(&dp, cldev, cmd_opv_extend,
                                   2 + sizeof(unsigned) + param_length);
         if (code < 0)
             return code;
@@ -850,15 +847,15 @@ void
 clist_rle_init(stream_RLE_state *ss)
 {
     s_init_state((stream_state *)ss, &s_RLE_template, (gs_memory_t *)0);
-    s_RLE_set_defaults_inline(ss);
-    s_RLE_init_inline(ss);
+    ss->templat->set_defaults((stream_state *)ss);
+    ss->templat->init((stream_state *)ss);
 }
 void
 clist_rld_init(stream_RLD_state *ss)
 {
     s_init_state((stream_state *)ss, &s_RLD_template, (gs_memory_t *)0);
-    s_RLD_set_defaults_inline(ss);
-    s_RLD_init_inline(ss);
+    ss->templat->set_defaults((stream_state *)ss);
+    ss->templat->init((stream_state *)ss);
 }
 
 /* Read a transformation matrix. */

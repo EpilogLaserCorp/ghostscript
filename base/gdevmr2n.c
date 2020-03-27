@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* RasterOp implementation for 2- and 4-bit memory devices */
@@ -81,7 +81,7 @@ mem_gray_strip_copy_rop(gx_device * dev,
     long tdata;
     int depth = dev->color_info.depth;
     int log2_depth = depth >> 1;	/* works for 2, 4 */
-    gx_color_index max_pixel = (1 << depth) - 1;
+    gx_color_index max_pixel = ((gx_color_index)1 << depth) - 1;
     int code;
 
 #ifdef DEBUG
@@ -91,8 +91,8 @@ mem_gray_strip_copy_rop(gx_device * dev,
                        id, scolors, textures, tcolors,
                        x, y, width, height, phase_x, phase_y, lop);
 #endif
+    lop = lop_sanitize(lop);
     if (gx_device_has_color(dev) ||
-        (lop & (lop_S_transparent | lop_T_transparent)) ||
         (scolors &&		/* must be (0,0) or (max,max) */
          ((scolors[0] | scolors[1]) != 0) &&
          ((scolors[0] & scolors[1]) != max_pixel)) ||

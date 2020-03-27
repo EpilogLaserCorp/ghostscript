@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -86,7 +86,7 @@
 /*
  * Define the chunk size for monobit copying operations.
  */
-#if arch_is_big_endian
+#if ARCH_IS_BIG_ENDIAN
 #  define mono_copy_chunk uint
 #  define set_mono_right_mask(var, w)\
         (var = ((w) == chunk_bits ? chunk_all_bits : chunk_hi_bits(w)))

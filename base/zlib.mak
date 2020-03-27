@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2012 Artifex Software, Inc.
+# Copyright (C) 2001-2019 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 # of the license contained in the file LICENSE in this distribution.
 #
 # Refer to licensing information at http://www.artifex.com or contact
-# Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-# CA  94903, U.S.A., +1(415)492-9861, for further information.
+# Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+# CA 94945, U.S.A., +1(415)492-9861, for further information.
 #
 # makefile for zlib library code.
 # Users of this makefile must define the following:
@@ -52,13 +52,13 @@ ZAO_=$(O_)$(ZAUX)
 # We need D_, _D_, and _D because the OpenVMS compiler uses different
 # syntax from other compilers.
 # ZI_ and ZF_ are defined in gs.mak.
-ZCCFLAGS=$(I_)$(ZI_)$(_I) $(ZF_) $(D_)verbose$(_D_)-1$(_D)
+ZCCFLAGS=$(ZLIB_CFLAGS) $(I_)$(ZI_)$(_I) $(ZF_) $(D_)verbose$(_D_)-1$(_D)
 ZCC=$(CC_) $(ZCCFLAGS)
-ZCCAUXFLAGS=$(I_)$(ZI_)$(_I) $(ZF_) $(D_)verbose$(_D_)-1$(_D)
+ZCCAUXFLAGS=$(ZLIB_CFLAGS) $(I_)$(ZI_)$(_I) $(ZF_) $(D_)verbose$(_D_)-1$(_D)
 ZCCAUX=$(CCAUX_) $(ZCCAUXFLAGS)
 
 # Define the name of this makefile.
-ZLIB_MAK=$(GLSRC)zlib.mak
+ZLIB_MAK=$(GLSRC)zlib.mak $(TOP_MAKEFILES)
 
 z.clean : z.config-clean z.clean-not-config-clean
 
@@ -69,7 +69,7 @@ z.clean-not-config-clean :
 z.config-clean :
 	$(RMN_) $(ZGEN)zlib*.dev $(ZGEN)crc32*.dev
 
-ZDEP=$(AK) $(MAKEDIRS)
+ZDEP=$(AK) $(ZLIB_MAK) $(MAKEDIRS)
 
 # Code common to compression and decompression.
 
@@ -82,11 +82,11 @@ $(ZOBJ)zutil.$(OBJ) : $(ZSRC)zutil.c $(ZDEP)
 
 # Encoding (compression) code.
 
-$(ZGEN)zlibe.dev : $(TOP_MAKEFILES) $(ZGEN)zlibe_$(SHARE_ZLIB).dev \
+$(ZGEN)zlibe.dev : $(ZLIB_MAK) $(ZGEN)zlibe_$(SHARE_ZLIB).dev \
  $(MAKEDIRS)
 	$(CP_) $(ZGEN)zlibe_$(SHARE_ZLIB).dev $(ZGEN)zlibe.dev
 
-$(ZGEN)zlibe_1.dev : $(TOP_MAKEFILES) $(ZLIB_MAK) $(ECHOGS_XE) \
+$(ZGEN)zlibe_1.dev : $(ZLIB_MAK) $(ZLIB_MAK) $(ECHOGS_XE) \
  $(MAKEDIRS)
 	$(SETMOD) $(ZGEN)zlibe_1 -lib $(ZLIB_NAME)
 
@@ -113,11 +113,11 @@ $(ZOBJ)trees.$(OBJ) : $(ZSRC)trees.c $(ZDEP)
 # The zlib filters per se don't need crc32, but libpng versions starting
 # with 0.90 do.
 
-$(ZGEN)crc32.dev : $(TOP_MAKEFILES) $(ZGEN)crc32_$(SHARE_ZLIB).dev \
+$(ZGEN)crc32.dev : $(ZLIB_MAK) $(ZGEN)crc32_$(SHARE_ZLIB).dev \
  $(MAKEDIRS)
 	$(CP_) $(ZGEN)crc32_$(SHARE_ZLIB).dev $(ZGEN)crc32.dev
 
-$(ZGEN)crc32_1.dev : $(TOP_MAKEFILES) $(ZLIB_MAK) $(ECHOGS_XE) \
+$(ZGEN)crc32_1.dev : $(ZLIB_MAK) $(ZLIB_MAK) $(ECHOGS_XE) \
  $(MAKEDIRS)
 	$(SETMOD) $(ZGEN)crc32_1 -lib $(ZLIB_NAME)
 
@@ -132,10 +132,10 @@ $(ZOBJ)crc32.$(OBJ) : $(ZSRC)crc32.c $(ZDEP)
 
 # Decoding (decompression) code.
 
-$(ZGEN)zlibd.dev : $(TOP_MAKEFILES) $(ZGEN)zlibd_$(SHARE_ZLIB).dev $(MAKEDIRS)
+$(ZGEN)zlibd.dev : $(ZLIB_MAK) $(ZGEN)zlibd_$(SHARE_ZLIB).dev $(MAKEDIRS)
 	$(CP_) $(ZGEN)zlibd_$(SHARE_ZLIB).dev $(ZGEN)zlibd.dev
 
-$(ZGEN)zlibd_1.dev : $(TOP_MAKEFILES) $(ZLIB_MAK) $(ECHOGS_XE) \
+$(ZGEN)zlibd_1.dev : $(ZLIB_MAK) $(ZLIB_MAK) $(ECHOGS_XE) \
  $(MAKEDIRS)
 	$(SETMOD) $(ZGEN)zlibd_1 -lib $(ZLIB_NAME)
 

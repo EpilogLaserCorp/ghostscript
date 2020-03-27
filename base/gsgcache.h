@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,29 +19,18 @@
 #ifndef gxgcache_INCLUDED
 #  define gxgcache_INCLUDED
 
+#include "stdpre.h"
+#include "scommon.h"
+
 /* Using : */
 
-#ifndef gs_font_type42_DEFINED
-#  define gs_font_type42_DEFINED
 typedef struct gs_font_type42_s gs_font_type42;
-#endif
 
-#ifndef gs_glyph_data_DEFINED
-#   define gs_glyph_data_DEFINED
 typedef struct gs_glyph_data_s gs_glyph_data_t;
-#endif
-
-#ifndef stream_DEFINED
-#  define stream_DEFINED
-typedef struct stream_s stream;
-#endif
 
 /* Data type definition : */
 
-#ifndef gs_glyph_cache_DEFINED
-#  define gs_glyph_cache_DEFINED
 typedef struct gs_glyph_cache_s gs_glyph_cache;
-#endif
 
 typedef int (*get_glyph_data_from_file)(gs_font_type42 *pfont, stream *s, uint glyph_index,
                 gs_glyph_data_t *pgd);

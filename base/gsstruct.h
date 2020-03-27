@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -80,10 +80,7 @@
  */
 
 /* An opaque type for an object header. */
-#ifndef obj_header_DEFINED
-#  define obj_header_DEFINED
 typedef struct obj_header_s obj_header_t;
-#endif
 
 /*
  * Define pointer types, which define how to mark the referent of the
@@ -149,8 +146,8 @@ struct gs_gc_root_s {
 
 /* Print a root debugging message. */
 #define if_debug_root(c, mem, msg, rp)\
-  if_debug4m(c, mem, "%s 0x%lx: 0x%lx -> 0x%lx\n",\
-             msg, (ulong)(rp), (ulong)(rp)->p, (ulong)*(rp)->p)
+  if_debug4m(c, mem, "%s "PRI_INTPTR": "PRI_INTPTR" -> "PRI_INTPTR"\n",\
+             msg, (intptr_t)(rp), (intptr_t)(rp)->p, (intptr_t)*(rp)->p)
 
 /*
  * We don't want to tie the allocator to using a single garbage collector,

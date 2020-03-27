@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,55 +20,12 @@
 #ifndef plmain_INCLUDED
 #  define plmain_INCLUDED
 
-#include "gsargs.h"
-#include "gsgc.h"
+#include "stdpre.h"
+#include "gsmemory.h"
+#include "pltop.h"
+#include "gsgstate.h"
 
-/*
- * Define the parameters for running the interpreter.
- */
-#ifndef gx_device_DEFINED
-#  define gx_device_DEFINED
-typedef struct gx_device_s gx_device;
-#endif
-
-/*
- * Define the parameters for running the interpreter.
- */
-typedef struct pl_main_instance_s
-{
-    /* The following are set at initialization time. */
-    gs_memory_t *memory;
-    gs_memory_t *device_memory;
-    long base_time[2];          /* starting usertime */
-    int error_report;           /* -E# */
-    bool pause;                 /* -dNOPAUSE => false */
-    int first_page;             /* -dFirstPage= */
-    int last_page;              /* -dLastPage= */
-    gx_device *device;
-    vm_spaces spaces;           /* spaces for "ersatz" garbage collector */
-
-    pl_interp_implementation_t const *implementation; /*-L<Language>*/
-    /* The following are updated dynamically. */
-    int page_count;             /* # of pages printed */
-
-    char pcl_personality[6];    /* a character string to set pcl's
-                                   personality - rtl, pcl5c, pcl5e, and
-                                   pcl == default.  NB doesn't belong here. */
-    bool interpolate;
-    bool nocache;
-    bool page_set_on_command_line;
-    bool res_set_on_command_line;
-    bool high_level_device;
-#ifndef OMIT_SAVED_PAGES_TEST
-    bool saved_pages_test_mode;
-#endif
-    /* we have to store these in the main instance until the languages
-       state is sufficiently initialized to set the parameters. */
-    char *piccdir;
-    char *pdefault_gray_icc;
-    char *pdefault_rgb_icc;
-    char *pdefault_cmyk_icc;
-} pl_main_instance_t;
+typedef struct pl_main_instance_s pl_main_instance_t;
 
 /* initialize gs_stdin, gs_stdout, and gs_stderr.  Eventually the gs
    library should provide an interface for doing this */
@@ -78,23 +35,52 @@ void pl_main_init_standard_io(void);
 void pl_main_init(pl_main_instance_t * pmi, gs_memory_t * memory);
 
 /* Allocate and initialize the first graphics state. */
-#ifndef gs_state_DEFINED
-#  define gs_state_DEFINED
-typedef struct gs_state_s gs_state;
-#endif
-int pl_main_make_gstate(pl_main_instance_t * pmi, gs_state ** ppgs);
+int pl_main_make_gstate(pl_main_instance_t * pmi, gs_gstate ** ppgs);
 
-#ifdef DEBUG
 /* Print memory and time usage. */
 void pl_print_usage(const pl_main_instance_t * pmi, const char *msg);
-#endif
 
 /* Finish a page, possibly printing usage statistics and/or pausing. */
-int pl_finish_page(pl_main_instance_t * pmi, gs_state * pgs,
+int pl_finish_page(pl_main_instance_t * pmi, gs_gstate * pgs,
                    int num_copies, int flush);
 
-/* Main instance accessors */
-bool pl_get_nocache(pl_interp_instance_t * instance);
-bool pl_get_interpolation(pl_interp_instance_t * instance);
+/* common routine to set icc parameters usually passed from the command line. */
+int pl_set_icc_params(const gs_memory_t *mem, gs_gstate *pgs);
 
+pl_main_instance_t *pl_main_alloc_instance(gs_memory_t * memory);
+int pl_main_set_display_callback(pl_main_instance_t *inst, void *callback);
+int pl_main_run_file(pl_main_instance_t *minst, const char *filename);
+int pl_main_init_with_args(pl_main_instance_t *inst, int argc, char *argv[]);
+int pl_main_delete_instance(pl_main_instance_t *minst);
+int pl_main_run_string_begin(pl_main_instance_t *minst);
+int pl_main_run_string_continue(pl_main_instance_t *minst, const char *str, unsigned int length);
+int pl_main_run_string_end(pl_main_instance_t *minst);
+int pl_to_exit(gs_memory_t *mem);
+
+int pl_main_set_param(pl_main_instance_t *minst, const char *arg);
+int pl_main_set_string_param(pl_main_instance_t *minst, const char *arg);
+int pl_main_set_typed_param(pl_main_instance_t *minst, pl_set_param_type type, const char *param, const void *value);
+
+/* instance accessors */
+bool pl_main_get_interpolate(const gs_memory_t *mem);
+bool pl_main_get_nocache(const gs_memory_t *mem);
+bool pl_main_get_page_set_on_command_line(const gs_memory_t *mem);
+bool pl_main_get_res_set_on_command_line(const gs_memory_t *mem);
+bool pl_main_get_high_level_device(const gs_memory_t *mem);
+void pl_main_get_forced_geometry(const gs_memory_t *mem, const float **resolutions, const long **dimensions);
+int pl_main_get_scanconverter(const gs_memory_t *mem);
+pl_main_instance_t *pl_main_get_instance(const gs_memory_t *mem);
+
+typedef int pl_main_get_codepoint_t(gp_file *, const char **);
+void pl_main_set_arg_decode(pl_main_instance_t *minst,
+                            pl_main_get_codepoint_t *get_codepoint);
+
+/* retrieve the PJL instance so languages can query PJL. */
+bool pl_main_get_pjl_from_args(const gs_memory_t *mem); /* pjl was passed on the command line */
+
+/* retrieve the PCL instance, used by PXL for pass through mode */
+char *pl_main_get_pcl_personality(const gs_memory_t *mem);
+
+pl_interp_implementation_t *pl_main_get_pcl_instance(const gs_memory_t *mem);
+pl_interp_implementation_t *pl_main_get_pjl_instance(const gs_memory_t *mem);
 #endif /* plmain_INCLUDED */

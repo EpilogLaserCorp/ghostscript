@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -47,7 +47,7 @@
 extern const gs_color_space_type gs_color_space_type_Pattern;
 
 /* Forward references */
-static int zPaintProc(const gs_client_color *, gs_state *);
+static int zPaintProc(const gs_client_color *, gs_gstate *);
 static int pattern_paint_prepare(i_ctx_t *);
 static int pattern_paint_finish(i_ctx_t *);
 
@@ -185,7 +185,7 @@ const op_def zpcolor_l2_op_defs[] =
 /* Render the pattern by calling the PaintProc. */
 static int pattern_paint_cleanup(i_ctx_t *);
 static int
-zPaintProc(const gs_client_color * pcc, gs_state * pgs)
+zPaintProc(const gs_client_color * pcc, gs_gstate * pgs)
 {
     /* Just schedule a call on the real PaintProc. */
     r_ptr(&gs_int_gstate(pgs)->remap_color_info,
@@ -197,12 +197,12 @@ zPaintProc(const gs_client_color * pcc, gs_state * pgs)
 static int
 pattern_paint_prepare(i_ctx_t *i_ctx_p)
 {
-    gs_state *pgs = igs;
+    gs_gstate *pgs = igs;
     gs_pattern1_instance_t *pinst =
         (gs_pattern1_instance_t *)gs_currentcolor(pgs)->pattern;
     ref *pdict = &((int_pattern *) pinst->templat.client_data)->dict;
     gx_device_forward *pdev = NULL;
-    gx_device *cdev = gs_currentdevice_inline(igs);
+    gx_device *cdev = gs_currentdevice_inline(igs), *new_dev = NULL;
     int code;
     ref *ppp;
     bool internal_accum = true;
@@ -227,8 +227,7 @@ pattern_paint_prepare(i_ctx_t *i_ctx_p)
             return code;
         }
     } else {
-        code = gx_pattern_cache_add_dummy_entry((gs_imager_state *)igs,
-                    pinst, cdev->color_info.depth);
+        code = gx_pattern_cache_add_dummy_entry(igs, pinst, cdev->color_info.depth);
         if (code < 0)
             return code;
     }
@@ -245,10 +244,11 @@ pattern_paint_prepare(i_ctx_t *i_ctx_p)
         gs_setdevice_no_init(pgs, (gx_device *)pdev);
         if (pinst->templat.uses_transparency) {
             if_debug0m('v', imemory, "   pushing the pdf14 compositor device into this graphics state\n");
-            if ((code = gs_push_pdf14trans_device(pgs, true)) < 0)
+            if ((code = gs_push_pdf14trans_device(pgs, true, true)) < 0)
                 return code;
         } else { /* not transparent */
-            if (pinst->templat.PaintType == 1 && !(pinst->is_clist))
+            if (pinst->templat.PaintType == 1 && !(pinst->is_clist)
+                && dev_proc(pinst->saved->device, dev_spec_op)(pinst->saved->device, gxdso_pattern_can_accum, NULL, 0) == 0)
                 if ((code = gx_erase_colored_pattern(pgs)) < 0)
                     return code;
         }
@@ -277,12 +277,27 @@ pattern_paint_prepare(i_ctx_t *i_ctx_p)
         {
             pattern_accum_param_s param;
             param.pinst = (void *)pinst;
+            param.interpreter_memory = imemory;
             param.graphics_state = (void *)pgs;
             param.pinst_id = pinst->id;
 
             code = (*dev_proc(pgs->device, dev_spec_op))((gx_device *)pgs->device,
                 gxdso_pattern_start_accum, &param, sizeof(pattern_accum_param_s));
         }
+        /* Previously the code here and in pattern_pain_cleanup() assumed that if the current
+         * device could handle patterns it would do so itself, thus if we get to the cleanup
+         * and the device stored on the exec stack (pdev) was NULL, we assumed that we could
+         * simly tell the current device to finish the pattern. However, if the device handles
+         * patterns by installing a new device, then that won't work. So here, after the
+         * device has processed the pattern, we find the 'current' device. If the device
+         * handles patterns itself then there is effectively no change, that device will be
+         * informed by pattern_pain_cleanup() that the pattern has finished. However, if
+         * the device has changed, then we assume here that the new current device is the
+         * one that handles the pattern, and threfore the onw to inform when the pattern
+         * terminates. We store the pattern o the exec stack, exactly like the pattern
+         * instance etc.
+         */
+        new_dev = gs_currentdevice_inline(igs);
 
         if (code < 0) {
             gs_grestore(pgs);
@@ -290,6 +305,10 @@ pattern_paint_prepare(i_ctx_t *i_ctx_p)
         }
     }
     push_mark_estack(es_other, pattern_paint_cleanup);
+    ++esp;
+    make_istruct(esp, 0, new_dev); /* see comment in pattern_paint_cleanup() */
+    ++esp;
+    make_istruct(esp, 0, pinst); /* see comment in pattern_paint_cleanup() */
     ++esp;
     make_istruct(esp, 0, pdev);
     ++esp;
@@ -310,18 +329,43 @@ pattern_paint_finish(i_ctx_t *i_ctx_p)
     gs_pattern1_instance_t *pinst =
         (gs_pattern1_instance_t *)gs_currentcolor(igs->saved)->pattern;
     gx_device_pattern_accum const *padev = (const gx_device_pattern_accum *) pdev;
+    gs_pattern1_instance_t *pinst2 = r_ptr(esp - 2, gs_pattern1_instance_t);
 
     if (pdev != NULL) {
         gx_color_tile *ctile;
         int code;
-        gs_state *pgs = igs;
+        gs_gstate *pgs = igs;
+        /* If the PaintProc does one or more gsaves, then fails to do an equal numer of
+         * grestores, we can get here with the graphics state stack not how we expect.
+         * Hence we stored a reference to the pattern instance on the exec stack, and that
+         * allows us to roll back the graphics states until we have the one we expect,
+         * and pattern instance we expect
+         */
+        if (pinst != pinst2) {
+            int i;
+            for (i = 0; pgs->saved && pinst != pinst2; i++, pgs = pgs->saved) {
+                pinst = (gs_pattern1_instance_t *)gs_currentcolor(pgs->saved)->pattern;
+            }
+            for (;i > 1; i--) {
+                gs_grestore(igs);
+            }
+            pinst = (gs_pattern1_instance_t *)gs_currentcolor(igs->saved)->pattern;
+            /* If pinst is NULL after all of that then we are not going to recover */
+            if (pinst == NULL) {
+                esp -= 5;
+                return_error(gs_error_unknownerror);
+            }
+        }
+        pgs = igs;
 
         if (pinst->templat.uses_transparency) {
             if (pinst->is_clist) {
                 /* Send the compositor command to close the PDF14 device */
-                code = (gs_pop_pdf14trans_device(pgs, true) < 0);
-                if (code < 0)
+                code = gs_pop_pdf14trans_device(pgs, true);
+                if (code < 0) {
+                    esp -= 5;
                     return code;
+                }
             } else {
                 /* Not a clist, get PDF14 buffer information */
                 code = pdf14_get_buffer_information(pgs->device,
@@ -329,11 +373,13 @@ pattern_paint_finish(i_ctx_t *i_ctx_p)
                                                     true);
                 /* PDF14 device (and buffer) is destroyed when pattern cache
                    entry is removed */
-                if (code < 0)
+                if (code < 0) {
+                    esp -= 5;
                     return code;
+                }
             }
         }
-        code = gx_pattern_cache_add_entry((gs_imager_state *)igs, pdev, &ctile);
+        code = gx_pattern_cache_add_entry(igs, pdev, &ctile, igs);
         if (code < 0)
             return code;
     }
@@ -343,7 +389,7 @@ pattern_paint_finish(i_ctx_t *i_ctx_p)
 #endif
         pop(o_stack_adjust);
     }
-    esp -= 3;
+    esp -= 5;
     pattern_paint_cleanup(i_ctx_p);
     return o_pop_estack;
 }
@@ -353,26 +399,46 @@ static int
 pattern_paint_cleanup(i_ctx_t *i_ctx_p)
 {
     gx_device_pattern_accum *const pdev =
-        r_ptr(esp + 2, gx_device_pattern_accum);
+        r_ptr(esp + 4, gx_device_pattern_accum);
         gs_pattern1_instance_t *pinst = (gs_pattern1_instance_t *)gs_currentcolor(igs->saved)->pattern;
-    int code;
+    gs_pattern1_instance_t *pinst2 = r_ptr(esp + 3, gs_pattern1_instance_t);
+    int code, i, ecode=0;
+    /* If the PaintProc does one or more gsaves, then encounters an error, we can get
+     * here with the graphics state stack not how we expect.
+     * Hence we stored a reference to the pattern instance on the exec stack, and that
+     * allows us to roll back the graphics states until we have the one we expect,
+     * and pattern instance we expect
+     */
+    if (pinst != pinst2) {
+        gs_gstate *pgs = igs;
+        for (i = 0; pgs->saved && pinst != pinst2; i++, pgs = pgs->saved) {
+            pinst = (gs_pattern1_instance_t *)gs_currentcolor(pgs->saved)->pattern;
+        }
+        for (;i > 1; i--) {
+            gs_grestore(igs);
+        }
+        pinst = (gs_pattern1_instance_t *)gs_currentcolor(igs->saved)->pattern;
+    }
 
     if (pdev != NULL) {
         /* grestore will free the device, so close it first. */
         (*dev_proc(pdev, close_device)) ((gx_device *) pdev);
     }
     if (pdev == NULL) {
-        gx_device *cdev = gs_currentdevice_inline(igs);
+        gx_device *cdev = r_ptr(esp + 2, gx_device);
         pattern_accum_param_s param;
 
         param.pinst = (void *)pinst;
         param.graphics_state = (void *)igs;
         param.pinst_id = pinst->id;
 
-        code = dev_proc(cdev, dev_spec_op)(cdev,
+        ecode = dev_proc(cdev, dev_spec_op)(cdev,
                         gxdso_pattern_finish_accum, &param, sizeof(pattern_accum_param_s));
     }
     code = gs_grestore(igs);
     gx_unset_dev_color(igs);	/* dev_color may need updating if GC ran */
+
+    if (ecode < 0)
+        return ecode;
     return code;
 }

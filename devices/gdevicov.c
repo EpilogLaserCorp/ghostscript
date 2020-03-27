@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -35,20 +35,22 @@
 #include "gdevprn.h"
 
 static int
-cov_write_page(gx_device_printer *pdev, FILE *file)
+cov_write_page(gx_device_printer *pdev, gp_file *file)
 {
-    int code = 0;
+    int code = 0, ecode = 0;
     int raster = gdev_prn_raster(pdev);
     int height = pdev->height;
     byte *line = gs_alloc_bytes(pdev->memory, raster, "ink coverage plugin buffer");
     int y;
     uint64_t c_pix = 0, m_pix = 0, y_pix = 0, k_pix = 0, total_pix = 0;
 
+    if (line == NULL)
+        return gs_error_VMerror;
     for (y = 0; y < height; y++) {
         byte *row, *end;
 
-        code = gdev_prn_get_bits(pdev, y, line, &row);
-        if (code < 0)
+        ecode = gdev_prn_get_bits(pdev, y, line, &row);
+        if (ecode < 0)
             break;
         end = row + raster;
 
@@ -61,7 +63,7 @@ cov_write_page(gx_device_printer *pdev, FILE *file)
         }
     }
 
-    if (pdev->width * height != total_pix)
+    if ((uint64_t)pdev->width * height != total_pix || total_pix == 0)
         code = 1;
 
     gs_free_object(pdev->memory, line, "ink coverage plugin buffer");
@@ -76,28 +78,28 @@ cov_write_page(gx_device_printer *pdev, FILE *file)
 	    }
 
         
-        if (IS_LIBCTX_STDOUT(pdev->memory, file)) {
+        if (IS_LIBCTX_STDOUT(pdev->memory, gp_get_file(file))) {
             outprintf(pdev->memory, "%8.5f %8.5f %8.5f %8.5f CMYK %s\n",
                 c, m, y, k, code ? "ERROR" : "OK");
         }
-        else if (IS_LIBCTX_STDERR(pdev->memory, file)) {
+        else if (IS_LIBCTX_STDERR(pdev->memory, gp_get_file(file))) {
             errprintf(pdev->memory, "%8.5f %8.5f %8.5f %8.5f CMYK %s\n",
                 c, m, y, k, code ? "ERROR" : "OK");
         }
         else {
-            fprintf (file, "%8.5f %8.5f %8.5f %8.5f CMYK %s\n",
+            gp_fprintf (file, "%8.5f %8.5f %8.5f %8.5f CMYK %s\n",
                 c, m, y, k, code ? "ERROR" : "OK");
         }
     }
 
-    return 0;
+    return (code > 0) ? ecode : 0;
 }
 
 /*  cov_write_page2 gave ink coverage values not ratecoverage */
 
-static int cov_write_page_ink(gx_device_printer *pdev, FILE *file)
+static int cov_write_page_ink(gx_device_printer *pdev, gp_file *file)
 {
-    int code = 0;
+    int code = 0, ecode = 0;
     int raster = gdev_prn_raster(pdev);
     int height = pdev->height;
 	double dc_pix=0;
@@ -109,11 +111,13 @@ static int cov_write_page_ink(gx_device_printer *pdev, FILE *file)
     int y;
     uint64_t  total_pix = 0;
 
+    if (line == NULL)
+        return gs_error_VMerror;
     for (y = 0; y < height; y++) {
         byte *row, *end;
 
-        code = gdev_prn_get_bits(pdev, y, line, &row);
-        if (code < 0)
+        ecode = gdev_prn_get_bits(pdev, y, line, &row);
+        if (ecode < 0)
             break;
         end = row + raster;
 
@@ -131,7 +135,7 @@ static int cov_write_page_ink(gx_device_printer *pdev, FILE *file)
         }
     }
 
-    if (pdev->width * height != total_pix)
+    if ((uint64_t)pdev->width * height != total_pix || total_pix == 0)
         code = 1;
 
     gs_free_object(pdev->memory, line, "ink coverage plugin buffer");
@@ -145,21 +149,21 @@ static int cov_write_page_ink(gx_device_printer *pdev, FILE *file)
             k = (dk_pix*100) / (total_pix*255);
         }
 
-        if (IS_LIBCTX_STDOUT(pdev->memory, file)) {
+        if (IS_LIBCTX_STDOUT(pdev->memory, gp_get_file(file))) {
             outprintf(pdev->memory, "%8.5f %8.5f %8.5f %8.5f CMYK %s\n",
                 c, m, y, k, code ? "ERROR" : "OK");
         }
-        else if (IS_LIBCTX_STDERR(pdev->memory, file)) {
+        else if (IS_LIBCTX_STDERR(pdev->memory, gp_get_file(file))) {
             errprintf(pdev->memory, "%8.5f %8.5f %8.5f %8.5f CMYK %s\n",
                 c, m, y, k, code ? "ERROR" : "OK");
         }
         else {
-            fprintf (file, "%8.5f %8.5f %8.5f %8.5f CMYK %s\n",
+            gp_fprintf (file, "%8.5f %8.5f %8.5f %8.5f CMYK %s\n",
                 c, m, y, k, code ? "ERROR" : "OK");
         }
     }
 
-    return 0;
+    return (code > 0) ? ecode : 0;
 }
 
 static const gx_device_procs cov_procs =

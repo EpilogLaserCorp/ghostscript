@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Debugging flag definitions */
@@ -21,15 +21,17 @@
  * repeated inclusion.
  */
 
+#if defined(UNUSED) && defined(FLAG)
+
 UNUSED(0) /* Never use 0, as lots of things 'imply' 0. */
 FLAG(icc, 1, 'c', "ICC profile"),
-FLAG(validate_chunks, 2, 0, "Validate chunks during interpretation"),
+FLAG(validate_clumps, 2, 0, "Validate clumps during interpretation"),
 FLAG(gc_disable, 3, 0, "Disable Garbage Collection (completely)"),
-UNUSED(4)
-UNUSED(5)
-UNUSED(6)
-UNUSED(7)
-UNUSED(8)
+FLAG(epo_disable, 4, 0, "Disable Erasepage Optimization (completely)"),
+FLAG(epo_details, 5, 0, "Erasepage Optimization tracing"),
+FLAG(epo_install_only, 6, 0, "Erasepage Optimization install only (for debugging subclass)"),
+FLAG(init_details, 7, 0, "Language initialisation (detail)"),
+FLAG(overprint, 8, 0, "Overprint"),
 UNUSED(9)
 UNUSED(10)
 UNUSED(11)
@@ -75,7 +77,7 @@ FLAG(curve,             '2', 0,   "Curve subdivider/rasterizer"),
 FLAG(curve_detail,      '3', 0,   "Curve subdivider/rasterizer (detail)"),
 FLAG(gc_strings,        '4', 0,   "Garbage collector (strings)"),
 FLAG(gc_strings_detail, '5', 0,   "Garbage collector (strings, detail)"),
-FLAG(gc_chunks,         '6', 0,   "Garbage collector (chunks, roots)"),
+FLAG(gc_clumps,         '6', 0,   "Garbage collector (clumps, roots)"),
 FLAG(gc_objects,        '7', 0,   "Garbage collector (objects)"),
 FLAG(gc_refs,           '8', 0,   "Garbage collector (refs)"),
 FLAG(gc_pointers,       '9', 0,   "Garbage collector (pointers)"),
@@ -148,3 +150,7 @@ UNUSED('{')
 UNUSED('|') /* "Reserved for experimental code" */
 UNUSED('}')
 FLAG(math,              '~', 0,   "Math functions and Functions")
+
+#else
+int dummy;
+#endif

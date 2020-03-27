@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -49,7 +49,7 @@
 
 /* Set the bounding box for the current path. */
 int
-gs_setbbox(gs_state * pgs, double llx, double lly, double urx, double ury)
+gs_setbbox(gs_gstate * pgs, double llx, double lly, double urx, double ury)
 {
     gs_rect ubox, dbox;
     gs_fixed_rect obox, bbox;
@@ -98,7 +98,7 @@ gs_setbbox(gs_state * pgs, double llx, double lly, double urx, double ury)
 
 /* Append a list of rectangles to a path. */
 static int
-gs_rectappend_compat(gs_state * pgs, const gs_rect * pr, uint count, bool clip)
+gs_rectappend_compat(gs_gstate * pgs, const gs_rect * pr, uint count, bool clip)
 {
     bool CPSI_mode = gs_currentcpsimode(pgs->memory);
 
@@ -156,14 +156,14 @@ gs_rectappend_compat(gs_state * pgs, const gs_rect * pr, uint count, bool clip)
     return 0;
 }
 int
-gs_rectappend(gs_state * pgs, const gs_rect * pr, uint count)
+gs_rectappend(gs_gstate * pgs, const gs_rect * pr, uint count)
 {
     return gs_rectappend_compat(pgs, pr, count, false);
 }
 
 /* Clip to a list of rectangles. */
 int
-gs_rectclip(gs_state * pgs, const gs_rect * pr, uint count)
+gs_rectclip(gs_gstate * pgs, const gs_rect * pr, uint count)
 {
     int code;
     gx_path save;
@@ -185,7 +185,7 @@ gs_rectclip(gs_state * pgs, const gs_rect * pr, uint count)
 /* Fill a list of rectangles. */
 /* We take the trouble to do this efficiently in the simple cases. */
 int
-gs_rectfill(gs_state * pgs, const gs_rect * pr, uint count)
+gs_rectfill(gs_gstate * pgs, const gs_rect * pr, uint count)
 {
     const gs_rect *rlist = pr;
     gx_clip_path *pcpath;
@@ -193,15 +193,15 @@ gs_rectfill(gs_state * pgs, const gs_rect * pr, uint count)
     int code;
     gx_device * pdev = pgs->device;
     gx_device_color *pdc = gs_currentdevicecolor_inline(pgs);
-    const gs_imager_state *pis = (const gs_imager_state *)pgs;
-    bool hl_color_available = gx_hld_is_hl_color_available(pis, pdc);
+    const gs_gstate *pgs2 = (const gs_gstate *)pgs;
+    bool hl_color_available = gx_hld_is_hl_color_available(pgs2, pdc);
     bool hl_color = (hl_color_available &&
                 dev_proc(pdev, dev_spec_op)(pdev, gxdso_supports_hlcolor, 
                                   NULL, 0));
     bool center_of_pixel = (pgs->fill_adjust.x == 0 && pgs->fill_adjust.y == 0);
 
     /* Processing a fill object operation */
-    dev_proc(pgs->device, set_graphics_type_tag)(pgs->device, GS_PATH_TAG);
+    ensure_tag_is_set(pgs, pgs->device, GS_PATH_TAG);	/* NB: may unset_dev_color */
 
     code = gx_set_dev_color(pgs);
     if (code != 0)
@@ -214,10 +214,10 @@ gs_rectfill(gs_state * pgs, const gs_rect * pr, uint count)
          pdc->type == gx_dc_type_pure ||
          pdc->type == gx_dc_type_ht_binary ||
          pdc->type == gx_dc_type_ht_colored) &&
-        gs_state_color_load(pgs) >= 0 &&
+        gs_gstate_color_load(pgs) >= 0 &&
         (*dev_proc(pdev, get_alpha_bits)) (pdev, go_graphics)
         <= 1 &&
-        (!pgs->overprint || !pgs->effective_overprint_mode)
+        (!pgs->overprint || !gs_currentcolor_eopm(pgs))
         ) {
         uint i;
         gs_fixed_rect clip_rect;
@@ -251,7 +251,7 @@ gs_rectfill(gs_state * pgs, const gs_rect * pr, uint count)
                 if (draw_rect.p.x <= draw_rect.q.x &&
                     draw_rect.p.y <= draw_rect.q.y) {
                     code = dev_proc(pdev, fill_rectangle_hl_color)(pdev,
-                             &draw_rect, pis, pdc, pcpath);
+                             &draw_rect, pgs2, pdc, pcpath);
                     if (code < 0)
                         return code;
                 }
@@ -300,10 +300,11 @@ gs_rectfill(gs_state * pgs, const gs_rect * pr, uint count)
         if (do_save) {
             if ((code = gs_gsave(pgs)) < 0)
                 return code;
-            gs_newpath(pgs);
+            code = gs_newpath(pgs);
         }
-        if ((code = gs_rectappend(pgs, rlist, rcount)) < 0 ||
-            (code = gs_fill(pgs)) < 0
+        if ((code >= 0) &&
+            (((code = gs_rectappend(pgs, rlist, rcount)) < 0) ||
+            ((code = gs_fill(pgs)) < 0))
             )
             DO_NOTHING;
         if (do_save)
@@ -317,7 +318,7 @@ gs_rectfill(gs_state * pgs, const gs_rect * pr, uint count)
 /* Stroke a list of rectangles. */
 /* (We could do this a lot more efficiently.) */
 int
-gs_rectstroke(gs_state * pgs, const gs_rect * pr, uint count,
+gs_rectstroke(gs_gstate * pgs, const gs_rect * pr, uint count,
               const gs_matrix * pmat)
 {
     bool do_save = pmat != NULL || !gx_path_is_null(pgs->path);

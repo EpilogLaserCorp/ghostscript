@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2012 Artifex Software, Inc.
+# Copyright (C) 2001-2019 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 # of the license contained in the file LICENSE in this distribution.
 #
 # Refer to licensing information at http://www.artifex.com or contact
-# Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-# CA  94903, U.S.A., +1(415)492-9861, for further information.
+# Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+# CA 94945, U.S.A., +1(415)492-9861, for further information.
 #
 
 # makefile for Luratech lwf_jp2 library code.
@@ -29,7 +29,7 @@
 # This partial makefile compiles the lwf_jp2 library for use in
 # Ghostscript.
 
-LWF_JP2_MAK=$(GLSRC)lwf_jp2.mak
+LWF_JP2_MAK=$(GLSRC)lwf_jp2.mak $(TOP_MAKEFILES)
 
 LWF_JP2_SRC=$(JPXSRCDIR)$(D)library$(D)source$(D)
 LWF_JP2_GEN=$(JPXOBJDIR)$(D)
@@ -175,17 +175,17 @@ lwf_jp2_HDRS = \
 	$(LWF_JP2_SRC)lwf_jp2.h
 
 # switch in the selected library .dev
-$(LWF_JP2_GEN)lwf_jp2.dev : $(TOP_MAKEFILES) $(LWF_JP2_GEN)lwf_jp2_$(SHARE_JPX).dev \
- $(MAKEDIRS)
+$(LWF_JP2_GEN)lwf_jp2.dev : $(LWF_JP2_GEN)lwf_jp2_$(SHARE_JPX).dev \
+ $(LWF_JP2_MAK) $(MAKEDIRS)
 	$(CP_) $(LWF_JP2_GEN)lwf_jp2_$(SHARE_JPX).dev $(LWF_JP2_GEN)lwf_jp2.dev
 
 # external link .dev
-$(LWF_JP2_GEN)lwf_jp2_1.dev : $(TOP_MAKEFILES) $(LWF_JP2_MAK) $(ECHOGS_XE) \
+$(LWF_JP2_GEN)lwf_jp2_1.dev : $(LWF_JP2_MAK) $(ECHOGS_XE) \
  $(MAKEDIRS)
 	$(SETMOD) $(LWF_JP2_GEN)lwf_jp2_1 -lib lwf_jp2
 
 # compile our own .dev
-$(LWF_JP2_GEN)lwf_jp2_0.dev : $(TOP_MAKEFILES) $(LWF_JP2_MAK) $(ECHOGS_XE) $(lwf_jp2_OBJS) \
+$(LWF_JP2_GEN)lwf_jp2_0.dev : $(LWF_JP2_MAK) $(ECHOGS_XE) $(lwf_jp2_OBJS) \
  $(MAKEDIRS)
 	$(SETMOD) $(LWF_JP2_GEN)lwf_jp2_0 $(lwf_jp2_OBJS)
 

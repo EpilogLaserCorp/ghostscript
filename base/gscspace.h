@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -22,6 +22,8 @@
 #include "gsmemory.h"
 #include "gsiparam.h"
 #include "gsrefct.h"
+#include "gsgstate.h"
+#include "gsccolor.h"
 
 /*
  * Previous versions had a complicated lifecycle discipline for
@@ -133,30 +135,12 @@
 */
 
 /* Opaque types for a graphics state stuff */
-#ifndef gs_state_DEFINED
-#  define gs_state_DEFINED
-typedef struct gs_state_s gs_state;
-#endif
-
-#ifndef gsicc_link_DEFINED
 typedef struct gsicc_link_s gsicc_link_t;
-#  define gsicc_link_DEFINED
-#endif
-
 
 /* Define ICC profile structure type */
-#ifndef cmm_profile_DEFINED
-#define cmm_profile_DEFINED
 typedef struct cmm_profile_s cmm_profile_t;
-#endif
 
-/*
- * Define the abstract type for color space objects.
- */
-#ifndef gs_color_space_DEFINED
-#  define gs_color_space_DEFINED
-typedef struct gs_color_space_s gs_color_space;
-#endif
+typedef struct cmm_dev_profile_s cmm_dev_profile_t;
 
 /*
  * Define color space type indices.  NOTE: PostScript code (gs_res.ps,
@@ -217,15 +201,8 @@ typedef struct gs_cie_abc_s gs_cie_abc;
 typedef struct gs_cie_def_s gs_cie_def;
 typedef struct gs_cie_defg_s gs_cie_defg;
 
-#ifndef gs_device_n_map_DEFINED
-#  define gs_device_n_map_DEFINED
 typedef struct gs_device_n_map_s gs_device_n_map;
-#endif
-
-#ifndef gs_device_n_attributes_DEFINED
-#  define gs_device_n_attributes_DEFINED
-typedef struct gs_device_n_attributes_s gs_device_n_attributes;
-#endif
+typedef struct gs_device_n_colorant_s gs_device_n_colorant;
 
 /*
  * Non-base direct color spaces: Separation and DeviceN.
@@ -244,22 +221,36 @@ typedef int (gs_callback_func_get_colorname_string)
      (const gs_memory_t *mem, gs_separation_name colorname, unsigned char **ppstr, unsigned int *plen);
 
 typedef enum { SEP_NONE, SEP_ALL, SEP_OTHER } separation_type;
+typedef enum { SEP_ENUM, SEP_MIX, SEP_PURE_RGB, SEP_PURE_CMYK } separation_colors;
 
 typedef struct gs_separation_params_s {
-    gs_separation_name sep_name;
+    gs_memory_t *mem;
+    char *sep_name;
     gs_device_n_map *map;
     separation_type sep_type;
     bool use_alt_cspace;
-    gs_callback_func_get_colorname_string *get_colorname_string;
+    bool named_color_supported;
+    separation_colors color_type;
 } gs_separation_params;
 
+typedef enum {
+    gs_devicen_DeviceN,
+    gs_devicen_NChannel
+} gs_devicen_subtype;
+
 typedef struct gs_device_n_params_s {
-    gs_separation_name *names;
+    gs_memory_t *mem;
     uint num_components;
+    char **names;
     gs_device_n_map *map;
-    gs_device_n_attributes *colorants;
     bool use_alt_cspace;
-    gs_callback_func_get_colorname_string *get_colorname_string;
+    bool named_color_supported;
+    separation_colors color_type;
+    gs_devicen_subtype subtype;
+    gs_device_n_colorant *colorants;
+    gs_color_space       *devn_process_space;
+    uint num_process_names;
+    char **process_names;
 } gs_device_n_params;
 
 /* Define an abstract type for the client color space data */
@@ -346,8 +337,9 @@ struct gs_color_space_s {
 gs_color_space *gs_cspace_new_DeviceGray(gs_memory_t *mem);
 gs_color_space *gs_cspace_new_DeviceRGB(gs_memory_t *mem);
 gs_color_space *gs_cspace_new_DeviceCMYK(gs_memory_t *mem);
-gs_color_space *gs_cspace_new_ICC(gs_memory_t *pmem, gs_state * pgs, 
+gs_color_space *gs_cspace_new_ICC(gs_memory_t *pmem, gs_gstate * pgs, 
                                   int components);
+gs_color_space *gs_cspace_new_scrgb(gs_memory_t *pmem, gs_gstate * pgs);
 
 /* ------ Accessors ------ */
 
@@ -373,11 +365,10 @@ bool gs_color_space_equal(const gs_color_space *pcs1,
                           const gs_color_space *pcs2);
 
 /* Restrict a color to its legal range. */
-#ifndef gs_client_color_DEFINED
-#  define gs_client_color_DEFINED
-typedef struct gs_client_color_s gs_client_color;
-#endif
 void gs_color_space_restrict_color(gs_client_color *, const gs_color_space *);
+
+/* Communicate to overprint compositor that overprint is not to be used */
+int gx_set_no_overprint(gs_gstate* pgs);
 
 /*
  * Get the base space of an Indexed or uncolored Pattern color space, or the
@@ -385,6 +376,8 @@ void gs_color_space_restrict_color(gs_client_color *, const gs_color_space *);
  * color space does not have a base/alternative color space.
  */
 const gs_color_space *gs_cspace_base_space(const gs_color_space * pcspace);
+
+const gs_color_space *gs_cspace_devn_process_space(const gs_color_space * pcspace);
 
 /* Abstract the rc_increment and rc_decrement for color spaces so that we also rc_increment
    the ICC profile if there is one associated with the color space */
@@ -395,7 +388,7 @@ void rc_decrement_cs(gs_color_space *pcs, const char *cname);
 
 void rc_decrement_only_cs(gs_color_space *pcs, const char *cname);
 
-void cs_adjust_counts_icc(gs_state *pgs, int delta);
+void cs_adjust_counts_icc(gs_gstate *pgs, int delta);
 
 /* backwards compatibility */
 #define gs_color_space_indexed_base_space(pcspace)\

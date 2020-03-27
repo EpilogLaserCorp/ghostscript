@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -19,12 +19,12 @@
 #ifndef gsfunc_INCLUDED
 #  define gsfunc_INCLUDED
 
+#include "std.h"
+#include "memento.h" /* Because we use 'free' below */
 #include "gstypes.h"		/* for gs_range_t */
-
-#ifndef stream_DEFINED
-#  define stream_DEFINED
-typedef struct stream_s stream;
-#endif
+#include "scommon.h"
+#include "gsparam.h"
+#include "gsdsrc.h"
 
 /* ---------------- Types and structures ---------------- */
 
@@ -46,24 +46,11 @@ typedef int gs_function_type_t;
     int n;			/* # of outputs */\
     const float *Range		/* 2 x n, optional except for type 0 */
 
-/* Define abstract types. */
-#ifndef gs_data_source_DEFINED
-#  define gs_data_source_DEFINED
-typedef struct gs_data_source_s gs_data_source_t;
-#endif
-#ifndef gs_param_list_DEFINED
-#  define gs_param_list_DEFINED
-typedef struct gs_param_list_s gs_param_list;
-#endif
-
 /* Define a generic function, for use as the target type of pointers. */
 typedef struct gs_function_params_s {
     gs_function_params_common;
 } gs_function_params_t;
-#ifndef gs_function_DEFINED
 typedef struct gs_function_s gs_function_t;
-#  define gs_function_DEFINED
-#endif
 typedef struct gs_function_info_s {
     const gs_data_source_t *DataSource;
     ulong data_size;

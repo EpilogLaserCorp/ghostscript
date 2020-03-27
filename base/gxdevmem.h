@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,6 +20,7 @@
 #ifndef gxdevmem_INCLUDED
 #  define gxdevmem_INCLUDED
 
+#include "gxdevcli.h"
 #include "gxrplane.h"
 
 /*
@@ -73,10 +74,6 @@
  * but not the bits), but the client can change the foreign_* flag(s) after
  * opening the device if this is not the case.
  */
-#ifndef gx_device_memory_DEFINED
-#  define gx_device_memory_DEFINED
-typedef struct gx_device_memory_s gx_device_memory;
-#endif
 
 struct gx_device_memory_s {
     gx_device_forward_common;	/* (see gxdevice.h) */
@@ -289,6 +286,6 @@ bool gs_device_is_memory(const gx_device *);
 bool gs_device_is_abuf(const gx_device *);
 
 /* Check for getting the antialiasing bit depth */
-int alpha_buffer_bits(gs_state * pgs);
+int alpha_buffer_bits(gs_gstate * pgs);
 
 #endif /* gxdevmem_INCLUDED */

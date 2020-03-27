@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,6 +20,7 @@
 #ifndef isave_INCLUDED
 #  define isave_INCLUDED
 
+#include "gsgstate.h"
 #include "idosave.h"
 
 /*
@@ -38,10 +39,13 @@
  * the stack differently in LL2 vs. LL3 (yes, the Genoa LL2 and LL3 tests
  * require this!).  See zvmem.c:restore_check_stack.
  */
-#ifndef alloc_save_t_DEFINED	/* also in inamedef.h */
 typedef struct alloc_save_s alloc_save_t;
-#  define alloc_save_t_DEFINED
-#endif
+
+/* 'Save' structure */
+typedef struct vm_save_s vm_save_t;
+struct vm_save_s {
+    gs_gstate *gsave;          /* old graphics state */
+};
 
 /* Initialize the save machinery. */
 extern void alloc_save_init(gs_dual_memory_t *);
@@ -93,7 +97,7 @@ int alloc_restore_step_in(gs_dual_memory_t *, alloc_save_t *);
 int alloc_forget_save_in(gs_dual_memory_t *, alloc_save_t *);
 
 /* Release all memory -- like doing a restore "past the bottom". */
-int alloc_restore_all(gs_dual_memory_t *);
+int alloc_restore_all(i_ctx_t *i_ctx_p);
 /* Filter save change lists. */
 void alloc_save__filter_changes(gs_ref_memory_t *mem);
 
@@ -121,5 +125,11 @@ int  font_restore(const alloc_save_t * save);
 /* Accessor to get a memory pointer from the saved state for the
    express purpose of getting the library context. */
 gs_memory_t *gs_save_any_memory(const alloc_save_t *save);
+
+int
+restore_check_save(i_ctx_t *i_ctx_p, alloc_save_t **asave);
+
+int
+dorestore(i_ctx_t *i_ctx_p, alloc_save_t *asave);
 
 #endif /* isave_INCLUDED */

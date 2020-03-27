@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -20,6 +20,8 @@
 #ifndef gxhttile_INCLUDED
 #  define gxhttile_INCLUDED
 
+#include "gxbitmap.h"
+
 /*
  * A halftone tile is just an ordinary bitmap tile, plus a couple of other
  * items associated with managing its existence in a tile cache.
@@ -27,11 +29,7 @@
  * clients of gx_device_color can access it.
  */
 
-#ifndef gx_ht_tile_DEFINED
-#  define gx_ht_tile_DEFINED
 typedef struct gx_ht_tile_s gx_ht_tile;
-
-#endif
 
 struct gx_ht_tile_s {
     gx_strip_bitmap tiles;	/* the currently rendered tile */

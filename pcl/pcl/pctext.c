@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -60,57 +60,58 @@ set_gs_font(pcl_state_t * pcs)
 }
 
 bool
-pcl_downloaded_and_bound(pl_font_t * plfont)
+pcl_downloaded_and_bound(const pl_font_t * plfont)
 {
     return (plfont->storage != pcds_internal && pl_font_is_bound(plfont));
 }
 
-/* uncomment the following definition to treat map type 0 as defined
-   in the specification.  The default is to use the behavior we have
-   observed on several HP devices.  Map type 0 is treated as map type
-   1. */
-
-/* #define USE_MAP_TYPE_IN_SPECIFICATION */
-
 /*
  * Check if a character code is considered "printable" by given symbol set.
  */
-static bool
-is_printable(const pcl_state_t * pcs, gs_char chr, bool literal)
+bool
+char_is_printable(const pl_font_t *font, const pl_symbol_map_t *map, gs_char chr, bool is_stick, bool literal)
 {
-    int map_type;
     bool printable = false;
 
-    if (literal)                /* transparent data */
+    if (literal) {              /* transparent data */
         printable = true;
-    else {
-        if (pcs->map == 0 || pcl_downloaded_and_bound(pcs->font)) {
-            /* PCL TRM 11-18 */
-            map_type = pcs->font->font_type;
+    } else {
+        if (is_stick) {
+            printable = (chr >= ' ') && (chr <= 0xff);
         } else {
-            /* PCL TRM 10-7
-             * symbol map type overrides, font map type
-             */
-            map_type = pcs->map->type;
-        }
+            int map_type = 0;
+            if (map == 0 || pcl_downloaded_and_bound(font)) {
+                /* PCL TRM 11-18 */
+                if (font)
+                {
+                    map_type = font->font_type;
+                }
+            } else {
+                /* PCL TRM 10-7
+                 * symbol map type overrides, font map type
+                 */
+                map_type = map->type;
+            }
 
-#ifndef USE_MAP_TYPE_IN_SPECIFICATION
-        if (map_type == 0)
-            map_type = 1;
-#endif /* USE_MAP_TYPE_IN_SPECIFICATION */
+            /* We do not treat map type as defined in the
+            specification. Instead the default is to use the behavior we have
+            observed on several HP devices: Map type 0 is treated as map type
+            1. */
+            if (map_type == 0) {
+                map_type = 1;
+            }
 
-        if (map_type == 0)
-            printable = (chr >= ' ') && (chr <= '\177');
-        else if (map_type == 1) {
-            chr &= 0x7f;
-            printable = (chr >= ' ');   /* 0-31 and 128-159 are not printable */
-        } else if (map_type >= 2) {
-            /* 2 is correct but will force all types above 2 here */
-            if ((chr == 0) || (chr == '\033') ||
-                ((chr >= '\007') && (chr <= '\017')))
-                printable = false;
-            else
-                printable = true;
+            if (map_type == 1) {
+                chr &= 0x7f;
+                printable = (chr >= ' ');   /* 0-31 and 128-159 are not printable */
+            } else if (map_type >= 2) {
+                /* 2 is correct but will force all types above 2 here */
+                if ((chr == 0) || (chr == '\033') ||
+                    ((chr >= '\007') && (chr <= '\017')))
+                    printable = false;
+                else
+                    printable = true;
+            }
         }
     }
     return printable;
@@ -204,6 +205,7 @@ get_next_char(pcl_state_t * pcs,
     int len = *plen;
     pl_font_t *plfont = pcs->font;
     bool substituting = false;
+    int code = 0;
     gs_char chr;
     gs_char mapped_chr;         /* NB wrong type */
     bool db;
@@ -222,7 +224,7 @@ get_next_char(pcl_state_t * pcs,
     *plen = len;
     *porig_char = chr;
     /* check if the code is considered "printable" in the current symbol set */
-    if (!is_printable(pcs, chr, literal)) {
+    if (!char_is_printable(pcs->font, pcs->map, chr, false, literal)) {
         *pis_space = literal;
         *pchr = 0xffff;
         return 0;
@@ -284,7 +286,9 @@ get_next_char(pcl_state_t * pcs,
      */
     if (!substituting && substituting_allowed(pcs, db ? mapped_chr : chr)) {
         pcl_decache_font(pcs, -1, true);
-        pcl_recompute_font(pcs, true);
+        code = pcl_recompute_font(pcs, true);
+        if (code < 0)
+            return code;
         substituting = true;
         *unstyled_substitution = true;
         plfont = pcs->font;
@@ -296,7 +300,9 @@ get_next_char(pcl_state_t * pcs,
        Restore the old font */
     if (substituting) {
         pcl_decache_font(pcs, -1, true);
-        pcl_recompute_font(pcs, false);
+        code = pcl_recompute_font(pcs, false);
+        if (code < 0)
+            return code;
         set_gs_font(pcs);
     }
 
@@ -491,11 +497,10 @@ show_char_foreground(const pcl_state_t * pcs, const gs_char * pbuff)
     text.data.chars = pbuff;
     text.size = 1;
     code = gs_text_begin(pcs->pgs, &text, pcs->memory, &penum);
-    if (code >= 0)
+    if (code >= 0) {
         code = gs_text_process(penum);
-
-    if (code >= 0)
         gs_text_release(penum, "show_char_foreground");
+    }
     return code;
 }
 
@@ -508,7 +513,7 @@ show_char_invisible_foreground(const pcl_state_t * pcs, const gs_char * pbuff)
     gs_param_name ParamName = "PreserveTrMode";
     gs_param_typed_value Param;
     char *data;
-    gs_state *pgs = pcs->pgs;
+    gs_gstate *pgs = pcs->pgs;
     uint saved_mode = gs_currenttextrenderingmode(pgs);
     int code = 0;
 
@@ -594,7 +599,7 @@ show_char_invisible_foreground(const pcl_state_t * pcs, const gs_char * pbuff)
 static int
 show_char_background(pcl_state_t * pcs, const gs_char * pbuff)
 {
-    gs_state *pgs = pcs->pgs;
+    gs_gstate *pgs = pcs->pgs;
     gs_rop3_t rop = (gs_rop3_t) (pcs->logical_op);
     const pl_font_t *plfont = pcs->font;
     gs_font *pfont = plfont->pfont;
@@ -602,15 +607,24 @@ show_char_background(pcl_state_t * pcs, const gs_char * pbuff)
     int code = 0;
 
     /* save the graphic state and set the background raster operation */
-    pcl_gsave(pcs);
-    if (pcs->pattern_transparent)
-        pcl_set_drawing_color(pcs, pcl_pattern_solid_white, 0, false);
-    gs_setrasterop(pgs, (gs_rop3_t) rop3_know_S_1((int)rop));
-    gs_currentpoint(pgs, &pt);
+    code = pcl_gsave(pcs);
+    if (code < 0)
+        return code;
+    if (pcs->pattern_transparent) {
+        code = pcl_set_drawing_color(pcs, pcl_pattern_solid_white, 0, false);
+        if (code < 0) {
+            (void)pcl_grestore(pcs);
+            return code;
+        }
+    }
+    if (((code = gs_setrasterop(pgs, (gs_rop3_t) rop3_know_S_1((int)rop))) < 0) ||
+        ((code = gs_currentpoint(pgs, &pt)) < 0)) {
+        return code;
+    }
 
     if (plfont->scaling_technology == plfst_bitmap) {
         gs_char chr = pbuff[0];
-        gs_glyph glyph = pfont->procs.encode_char(pfont, chr, gs_no_glyph);
+        gs_glyph glyph = pfont->procs.encode_char(pfont, chr, GS_NO_GLYPH);
         const byte *cdata = pl_font_lookup_glyph(plfont, glyph)->data;
         int nbytes;
         uint used;
@@ -619,16 +633,15 @@ show_char_background(pcl_state_t * pcs, const gs_char * pbuff)
 
         /* empty characters have no background */
         if (cdata == 0) {
-            pcl_grestore(pcs);
-            return 0;
+            return pcl_grestore(pcs);
         }
 
         /* allocate the image enumerator */
         pen =
-            gs_image_enum_alloc(gs_state_memory(pgs),
+            gs_image_enum_alloc(gs_gstate_memory(pgs),
                                 "bitmap font background");
         if (pen == 0) {
-            pcl_grestore(pcs);
+            (void)pcl_grestore(pcs);
             return e_Memory;
         }
 
@@ -643,21 +656,24 @@ show_char_background(pcl_state_t * pcs, const gs_char * pbuff)
         mask.Width = pl_get_uint16(cdata + 10);
         mask.Height = pl_get_uint16(cdata + 12);
         nbytes = ((mask.Width + 7) / 8) * mask.Height;
-        gs_image_init(pen, &mask, false, pgs);
+        gs_image_init(pen, &mask, false, false, pgs);
         code = gs_image_next(pen, cdata + 16, nbytes, &used);
 
         /* clean up */
         gs_image_cleanup(pen, pgs);
-        gs_free_object(gs_state_memory(pgs), pen, "bitmap font background");
+        gs_free_object(gs_gstate_memory(pgs), pen, "bitmap font background");
 
     } else {
         gs_text_params_t text;
         gs_rect bbox;
-        gs_text_enum_t *penum;
+        gs_text_enum_t *penum = NULL;
 
         /* clear the path; start the new one from the current point */
-        gs_newpath(pgs);
-        gs_moveto(pgs, pt.x, pt.y);
+        if (((code = gs_newpath(pgs)) < 0) ||
+            ((code = gs_moveto(pgs, pt.x, pt.y)) < 0)) {
+            (void)pcl_grestore(pcs);
+            return code;
+        }
         text.data.chars = pbuff;
         text.size = 1;
         text.operation =
@@ -667,31 +683,44 @@ show_char_background(pcl_state_t * pcs, const gs_char * pbuff)
             code = gs_text_process(penum);
         if (code >= 0) {
             /* append the characters bounding box and use eofill */
-            gs_pathbbox(pgs, &bbox);
-            gs_rectappend(pgs, &bbox, 1);
-            gs_eofill(pgs);
-            gs_text_release(penum, "show_char_background");
+            if ((code = gs_pathbbox(pgs, &bbox)) >= 0 &&
+                (code = gs_rectappend(pgs, &bbox, 1)) >= 0 &&
+                (code = gs_eofill(pgs)) >= 0)
+            {
+                /* fall through */
+            }
+        }
+        gs_text_release(penum, "show_char_background");
+        if (code < 0) {
+            (void)pcl_grestore(pcs);
+            return code;
         }
     }
 
-    pcl_grestore(pcs);
-    return code;
+    return pcl_grestore(pcs);
 }
 
 /*
  * get the advance width.
  */
-static double
+static int
 pcl_get_width(pcl_state_t * pcs, gs_point * advance_vector,
               const gs_point * pscale, gs_char chr, bool is_space,
-              bool print_undefined)
+              bool print_undefined, double *output_width)
 {
+    int code = 0;
     pcl_font_selection_t *pfp = &(pcs->font_selection[pcs->font_selected]);
     double width;
 
     if (chr != 0xffff || print_undefined) {
         if (!pfp->params.proportional_spacing || is_space)
-            width = pcl_hmi(pcs);
+        {
+            code = pcl_update_hmi_cp(pcs);
+            if (code < 0)
+                return code;
+
+            width = pcs->hmi_cp;
+        }
         else {
             if (pcs->font->scaling_technology == plfst_TrueType ||
                 pcs->font->scaling_technology == plfst_MicroType) {
@@ -707,12 +736,17 @@ pcl_get_width(pcl_state_t * pcs, gs_point * advance_vector,
             width += (double) pcs->uom_cp / 2.0;
             width -= fmod(width, (double) pcs->uom_cp);
         }
-    } else if (is_space)
-        width = pcl_hmi(pcs);
+    } else if (is_space) {
+        code = pcl_update_hmi_cp(pcs);
+        if (code < 0)
+            return code;
+        width = pcs->hmi_cp;
+    }
     else
         width = 0.0;
     /* round to nearest integral pcl units */
-    return width;
+    *output_width = width;
+    return code;
 }
 
 /*
@@ -775,7 +809,7 @@ pcl_show_chars_slow(pcl_state_t * pcs,
                     const gs_point * pscale,
                     const byte * str, uint size, bool literal)
 {
-    gs_state *pgs = pcs->pgs;
+    gs_gstate *pgs = pcs->pgs;
     gs_char buff[1];
     double rmargin = pcs->margins.right;
     double page_size = pcs->xfm_state.pd_size.x;
@@ -805,9 +839,11 @@ pcl_show_chars_slow(pcl_state_t * pcs,
         buff[0] = chr;
 
         /* round width to integral pcl current units */
-        width =
+        code =
             (pcl_get_width
-             (pcs, &advance_vector, pscale, chr, is_space, print_undefined));
+             (pcs, &advance_vector, pscale, chr, is_space, print_undefined, &width));
+        if (code < 0)
+            return code;
 
         /*
          * Check for transitions of the left margin; this check is
@@ -838,8 +874,12 @@ pcl_show_chars_slow(pcl_state_t * pcs,
                        function. */
                     pcs->cap.x = (coord) cpt.x;
                     pcs->cap.y = (coord) cpt.y;
-                    pcl_do_CR(pcs);
-                    pcl_do_LF(pcs);
+                    code = pcl_do_CR(pcs);
+                    if (code < 0)
+                        return code;
+                    code = pcl_do_LF(pcs);
+                    if (code < 0)
+                        return code;
                     cpt.x = pcs->cap.x;
                     cpt.y = pcs->cap.y;
                     use_rmargin = true;
@@ -874,10 +914,15 @@ pcl_show_chars_slow(pcl_state_t * pcs,
             else
                 tmp_x += (pcs->last_width - width) / 2;
         }
-        gs_moveto(pgs, tmp_x / pscale->x, cpt.y / pscale->y);
+        code = gs_moveto(pgs, tmp_x / pscale->x, cpt.y / pscale->y);
+        if (code < 0)
+            return code;
 
         if (chr != 0xffff || print_undefined) {
             /* if source is opaque, show and opaque background */
+	    /* retrieve the current cursor position: leftside of character */
+            gs_fixed_point pt;
+            code = gx_path_current_point(gx_current_path(pcs->pgs), &pt);
             if (source_opaque)
                 code = show_char_background(pcs, buff);
             if (code < 0)
@@ -891,7 +936,8 @@ pcl_show_chars_slow(pcl_state_t * pcs,
             if (code < 0)
                 break;
 
-            pcl_mark_page_for_current_pos(pcs);
+            if ((code = pcl_mark_page_for_character(pcs, &pt)) < 0)
+                return code;
         }
 
         /*
@@ -916,7 +962,9 @@ pcl_show_chars_slow(pcl_state_t * pcs,
         }
         if (unstyled_substitution) {
             pcl_decache_font(pcs, -1, true);
-            pcl_recompute_font(pcs, false);
+            code = pcl_recompute_font(pcs, false);
+            if (code < 0)
+                return code;
             set_gs_font(pcs);
         }
     }
@@ -936,8 +984,8 @@ pcl_font_scale(pcl_state_t * pcs, gs_point * pscale)
 {
     /* set up the font transformation */
     if (pcs->font->scaling_technology == plfst_bitmap) {
-        pscale->x = pcl_coord_scale / pcs->font->resolution.x;
-        pscale->y = pcl_coord_scale / pcs->font->resolution.y;
+        pscale->x = (double) pcl_coord_scale / pcs->font->resolution.x;
+        pscale->y = (double) pcl_coord_scale / pcs->font->resolution.y;
     } else {
         /*
          * Outline fonts are 1-point; the font height is given in
@@ -986,7 +1034,7 @@ pcl_font_scale(pcl_state_t * pcs, gs_point * pscale)
 int
 pcl_text(const byte * str, uint size, pcl_state_t * pcs, bool literal)
 {
-    gs_state *pgs = pcs->pgs;
+    gs_gstate *pgs = pcs->pgs;
     gs_matrix user_ctm;
     gs_point scale;
     int code;
@@ -1013,9 +1061,7 @@ pcl_text(const byte * str, uint size, pcl_state_t * pcs, bool literal)
     set_gs_font(pcs);
 
     gs_currentmatrix(pgs, &user_ctm);
-
-    (void)pcl_font_scale(pcs, &scale);
-
+    pcl_font_scale(pcs, &scale);
     gs_scale(pgs, scale.x, scale.y);
 
     /*
@@ -1058,26 +1104,45 @@ pcl_plain_char(pcl_args_t * pargs, pcl_state_t * pcs)
 }
 
 /*
+ * Do any underlining just before a break in motion (vertical motion or
+ * negative horizontal motion)...
+ */
+int pcl_break_underline(pcl_state_t * pcs)
+{
+    int code = 0;
+
+    if (pcs->underline_enabled)
+        code = pcl_do_underline(pcs);
+
+    return code;
+}
+
+/*
  * draw underline up to current point, adjust status
  */
-void
+int
 pcl_do_underline(pcl_state_t * pcs)
 {
-    if (pcs->underline_start.x != pcs->cap.x) {
-        gs_state *pgs = pcs->pgs;
-        float y = pcs->underline_start.y + pcs->underline_position;
-        int code;
+    int code = 0;
 
-        /* save the grapics state */
-        pcl_gsave(pcs);
+    if (pcs->underline_start.x != pcs->cap.x) {
+        gs_gstate *pgs = pcs->pgs;
+        float y = pcs->underline_start.y + pcs->underline_position;
+
+        /* save the graphics state */
+        code = pcl_gsave(pcs);
+        if (code < 0)
+            return code;
 
         code = pcl_set_drawing_color(pcs,
                                      pcs->pattern_type,
                                      pcs->current_pattern_id, false);
         if (code >= 0)
             code = pcl_set_graphics_state(pcs);
-        if (code < 0)
-            return;
+        if (code < 0) {
+            (void)pcl_grestore(pcs);
+            return code;
+        }
 
         /*
          * TRM says (8-34) that underline is 3 dots.  In a victory for
@@ -1085,11 +1150,16 @@ pcl_do_underline(pcl_state_t * pcs)
          * at 300 dpi only)
          */
         gs_setlinewidth(pgs, dots(3));
-        gs_moveto(pgs, pcs->underline_start.x, y);
-        gs_lineto(pgs, pcs->cap.x, y);
-        gs_stroke(pgs);
+        if ((gs_moveto(pgs, pcs->underline_start.x, y) < 0) ||
+            (gs_lineto(pgs, pcs->cap.x, y) < 0) ||
+            (gs_stroke(pgs) < 0)) {
+            (void)pcl_grestore(pcs);
+            return code;
+        }
 
-        pcl_grestore(pcs);
+        code = pcl_grestore(pcs);
+        if (code < 0)
+            return code;
     }
 
     /*
@@ -1098,6 +1168,7 @@ pcl_do_underline(pcl_state_t * pcs)
      */
     pcs->underline_start = pcs->cap;
     pcs->underline_position = pcs->underline_floating ? 0.0 : dots(5);
+    return code;
 }
 
 /* ------ Commands ------ */
@@ -1159,14 +1230,16 @@ pcl_enable_underline(pcl_args_t * pargs, pcl_state_t * pcs)
 static int
 pcl_disable_underline(pcl_args_t * pargs, pcl_state_t * pcs)
 {
+    int code = 0;
+
     /* apparently disabling underlining has the side effect of
        flushing any pending underlines.  This side effect is not
        documented */
     if (pcs->underline_enabled == true) {
-        pcl_do_underline(pcs);
+        code = pcl_do_underline(pcs);
         pcs->underline_enabled = false;
     }
-    return 0;
+    return code;
 }
 
 /* (From PCL5 Comparison Guide, p. 1-56) */
@@ -1274,7 +1347,7 @@ pctext_do_registration(pcl_parser_state_t * pcl_parser_state,
     return 0;
 }
 
-static void
+static int
 pctext_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
 {
     static const uint mask = (pcl_reset_initial
@@ -1287,6 +1360,7 @@ pctext_do_reset(pcl_state_t * pcs, pcl_reset_type_t type)
         pcs->text_parsing_method = tpm_0_SBCS;
         pcs->text_path = 0;
     }
+    return 0;
 }
 
 const pcl_init_t pctext_init = { pctext_do_registration, pctext_do_reset, 0 };

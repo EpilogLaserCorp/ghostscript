@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* JPEG output driver */
@@ -21,6 +21,7 @@
 #include "strimpl.h"
 #include "sdct.h"
 #include "sjpeg.h"
+#include "gxdownscale.h"
 
 /* Structure for the JPEG-writing device. */
 typedef struct gx_device_jpeg_s {
@@ -39,6 +40,7 @@ typedef struct gx_device_jpeg_s {
      */
     gs_point ViewTrans;
 
+    gx_downscaler_params downscale;
 } gx_device_jpeg;
 
 /* The device descriptor */
@@ -93,7 +95,8 @@ const gx_device_jpeg gs_jpeg_device =
  0,				/* JPEGQ: 0 indicates not specified */
  0.0,				/* QFactor: 0 indicates not specified */
  { 1.0, 1.0 },                  /* ViewScale 1 to 1 */
- { 0.0, 0.0 }                   /* translation 0 */
+ { 0.0, 0.0 },                  /* translation 0 */
+ GX_DOWNSCALER_PARAMS_DEFAULTS
 };
 
 /* 8-bit gray */
@@ -132,7 +135,8 @@ const gx_device_jpeg gs_jpeggray_device =
  0,				/* JPEGQ: 0 indicates not specified */
  0.0,				/* QFactor: 0 indicates not specified */
  { 1.0, 1.0 },                  /* ViewScale 1 to 1 */
- { 0.0, 0.0 }                   /* translation 0 */
+ { 0.0, 0.0 },                   /* translation 0 */
+ GX_DOWNSCALER_PARAMS_DEFAULTS
 };
 /* 32-bit CMYK */
 
@@ -167,7 +171,8 @@ const gx_device_jpeg gs_jpegcmyk_device =
  0,				/* JPEGQ: 0 indicates not specified */
  0.0,				/* QFactor: 0 indicates not specified */
  { 1.0, 1.0 },                  /* ViewScale 1 to 1 */
- { 0.0, 0.0 }                   /* translation 0 */
+ { 0.0, 0.0 },                   /* translation 0 */
+ GX_DOWNSCALER_PARAMS_DEFAULTS
 };
 
 /* Apparently Adobe Photoshop and some other applications that	*/
@@ -211,6 +216,9 @@ jpeg_get_params(gx_device * dev, gs_param_list * plist)
     if (code < 0)
         return code;
 
+    ecode = 0;
+    if ((code = gx_downscaler_write_params(plist, &jdev->downscale, 0)) < 0)
+        ecode = code;
     if ((ecode = param_write_int(plist, "JPEGQ", &jdev->JPEGQ)) < 0)
         code = ecode;
     if ((ecode = param_write_float(plist, "QFactor", &jdev->QFactor)) < 0)
@@ -242,6 +250,8 @@ jpeg_put_params(gx_device * dev, gs_param_list * plist)
     int jq = jdev->JPEGQ;
     float qf = jdev->QFactor;
     float fparam;
+
+    ecode = gx_downscaler_read_params(plist, &jdev->downscale, 0);
 
     switch (code = param_read_int(plist, (param_name = "JPEGQ"), &jq)) {
         case 0:
@@ -364,7 +374,7 @@ jpeg_get_initial_matrix(gx_device *dev, gs_matrix *pmat)
 
     /* NB this device has no paper margins */
 
-    switch(pdev->LeadingEdge) {
+    switch(pdev->LeadingEdge & LEADINGEDGE_MASK) {
     case 1:
         pmat->xx = 0;
         pmat->xy = -ss_res;
@@ -404,7 +414,7 @@ jpeg_get_initial_matrix(gx_device *dev, gs_matrix *pmat)
 
 /* Send the page to the file. */
 static int
-jpeg_print_page(gx_device_printer * pdev, FILE * prn_stream)
+jpeg_print_page(gx_device_printer * pdev, gp_file * prn_stream)
 {
     gx_device_jpeg *jdev = (gx_device_jpeg *) pdev;
     gs_memory_t *mem = pdev->memory;
@@ -420,11 +430,20 @@ jpeg_print_page(gx_device_printer * pdev, FILE * prn_stream)
     int code;
     stream_DCT_state state;
     stream fstrm, jstrm;
+    gx_downscaler_t ds;
 
     if (jcdp == 0 || in == 0) {
         code = gs_note_error(gs_error_VMerror);
         goto fail;
     }
+    code = gx_downscaler_init(&ds, (gx_device *)jdev, 8, 8,
+                              jdev->color_info.depth/8, jdev->downscale.downscale_factor, 0, NULL, 0);
+    if (code < 0) {
+        gs_free_object(mem, jcdp, "jpeg_print_page(jpeg_compress_data)");
+        jcdp = NULL;
+        goto fail;
+    }
+
     /* Create the DCT encoder state. */
     jcdp->templat = s_DCTE_template;
     s_init_state((stream_state *)&state, &jcdp->templat, 0);
@@ -449,17 +468,20 @@ jpeg_print_page(gx_device_printer * pdev, FILE * prn_stream)
             !(pdev->icc_struct->usefastcolor)) {
             state.icc_profile = icc_profile;
         }
-    } 
+    }
     /* We need state.memory for gs_jpeg_create_compress().... */
     jcdp->memory = state.jpeg_memory = state.memory = mem;
     if ((code = gs_jpeg_create_compress(&state)) < 0)
+    {
+        gx_downscaler_fin(&ds);
         goto fail;
+    }
     /* ....but we need it to be NULL so we don't try to free
      * the stack based state...
      */
     state.memory = NULL;
-    jcdp->cinfo.image_width = pdev->width;
-    jcdp->cinfo.image_height = pdev->height;
+    jcdp->cinfo.image_width = gx_downscaler_scale(pdev->width, jdev->downscale.downscale_factor);
+    jcdp->cinfo.image_height = gx_downscaler_scale(pdev->height, jdev->downscale.downscale_factor);
     switch (pdev->color_info.depth) {
         case 32:
             jcdp->cinfo.input_components = 4;
@@ -524,27 +546,28 @@ jpeg_print_page(gx_device_printer * pdev, FILE * prn_stream)
         (*state.templat->init) (jstrm.state);
 
     /* Copy the data to the output. */
-    for (lnum = 0; lnum < pdev->height; ++lnum) {
-        byte *data;
+    for (lnum = 0; lnum < jcdp->cinfo.image_height; ++lnum) {
         uint ignore_used;
 
         if (jstrm.end_status) {
             code = gs_note_error(gs_error_ioerror);
             goto done;
         }
-        gdev_prn_get_bits(pdev, lnum, in, &data);
-        sputs(&jstrm, data, state.scan_line_size, &ignore_used);
+        gx_downscaler_getbits(&ds, in, lnum);
+        sputs(&jstrm, in, state.scan_line_size, &ignore_used);
     }
 
     /* Wrap up. */
     sclose(&jstrm);
     sflush(&fstrm);
-    jcdp = 0;
   done:
     gs_free_object(mem, jbuf, "jpeg_print_page(jbuf)");
     gs_free_object(mem, fbuf, "jpeg_print_page(fbuf)");
-    if (jcdp)
-        gs_jpeg_destroy(&state);	/* frees *jcdp */
+    if (jcdp) {
+        gs_jpeg_destroy(&state);
+        gs_free_object(mem, jcdp, "jpeg_print_page(jpeg_compress_data)");
+    }
+    gx_downscaler_fin(&ds);
     gs_free_object(mem, in, "jpeg_print_page(in)");
     return code;
   fail:

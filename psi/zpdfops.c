@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -27,10 +27,38 @@
 #include "malloc_.h"
 #include "string_.h"
 #include "store.h"
+#include "gxgstate.h"
+#include "gxdevsop.h"
 
 #ifdef HAVE_LIBIDN
 #  include <stringprep.h>
 #endif
+
+/* ------ Graphics state ------ */
+
+/* <screen_index> <x> <y> .setscreenphase - */
+static int
+zsetscreenphase(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+    int code;
+    int x, y;
+
+    check_type(op[-2], t_integer);
+    check_type(op[-1], t_integer);
+    check_type(*op, t_integer);
+    x = op[-1].value.intval;
+    y = op->value.intval;
+    if (op[-2].value.intval < -1 ||
+        op[-2].value.intval >= gs_color_select_count
+        )
+        return_error(gs_error_rangecheck);
+    code = gs_setscreenphase(igs, x, y,
+                             (gs_color_select_t) op[-2].value.intval);
+    if (code >= 0)
+        pop(3);
+    return code;
+}
 
 /* Construct a smooth path passing though a number of points  on the stack */
 /* for PDF ink annotations. The program is based on a very simple method of */
@@ -127,6 +155,27 @@ zpdfinkpath(i_ctx_t *i_ctx_p)
     return 0;
 }
 
+static int
+zpdfFormName(i_ctx_t *i_ctx_p)
+{
+    os_ptr op = osp;
+    uint count = ref_stack_count(&o_stack);
+    int code;
+
+    if (count == 0)
+        return_error(gs_error_stackunderflow);
+    check_read_type(*op, t_string);
+
+    code = (*dev_proc(i_ctx_p->pgs->device, dev_spec_op))((gx_device *)i_ctx_p->pgs->device,
+        gxdso_pdf_form_name, (void *)op->value.const_bytes, r_size(op));
+
+    if (code < 0)
+        return code;
+
+    ref_stack_pop(&o_stack, 1);
+    return 0;
+}
+
 #ifdef HAVE_LIBIDN
 /* Given a UTF-8 password string, convert it to the canonical form
  * defined by SASLprep (RFC 4013).  This is a permissive implementation,
@@ -198,6 +247,8 @@ zsaslprep(i_ctx_t *i_ctx_p)
 const op_def zpdfops_op_defs[] =
 {
     {"0.pdfinkpath", zpdfinkpath},
+    {"1.pdfFormName", zpdfFormName},
+    {"3.setscreenphase", zsetscreenphase},
 #ifdef HAVE_LIBIDN
     {"1.saslprep", zsaslprep},
 #endif

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -89,7 +89,9 @@ gx_mask_clip_initialize(gx_device_mask_clip * cdev,
     for (;;) {
         ulong bitmap_size = max_ulong;
 
-        if (buffer_height <= 0) {
+        /* Bug 702124: Allow for the case when size.y == 0 - then
+         * buffer_height will be zero, and it's not a VMerror. */
+        if (bits->size.y > 0 && buffer_height <= 0) {
             /*
              * The tile is too wide to buffer even one scan line.
              * We could do copy_mono in chunks, but for now, we punt.

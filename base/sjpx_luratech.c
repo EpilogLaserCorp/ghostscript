@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -331,7 +331,7 @@ s_jpxd_inbuf(stream_jpxd_state *state, stream_cursor_read * pr)
     /* allocate the input buffer if needed */
     if (state->inbuf == NULL) {
         state->inbuf = s_jpx_alloc(JPX_BUFFER_SIZE, (JP2_Callback_Param)state->memory->non_gc_memory);
-        if (state->inbuf == NULL) return gs_error_VMerror;
+        if (state->inbuf == NULL) return_error(gs_error_VMerror);
         state->inbuf_size = JPX_BUFFER_SIZE;
         state->inbuf_fill = 0;
     }
@@ -348,7 +348,7 @@ s_jpxd_inbuf(stream_jpxd_state *state, stream_cursor_read * pr)
                    new_size);
 
         new = gs_resize_object(state->memory->non_gc_memory, state->inbuf, new_size, "s_jpxd_inbuf");
-        if (new == NULL) return gs_error_VMerror;
+        if (new == NULL) return_error(gs_error_VMerror);
 
         state->inbuf = new;
         state->inbuf_size = new_size;
@@ -397,6 +397,7 @@ s_jpxd_set_defaults(stream_state * ss) {
 
     state->alpha = false;
     state->image_is_indexed = false;
+    state->colorspace = gs_jpx_cs_rgb;
 }
 
 /* write component mapping into 'clut' and return number of used components
@@ -504,6 +505,7 @@ s_jpxd_process(stream_state * ss, stream_cursor_read * pr,
 
             if_debug1m('w', state->memory, "[w]jpxd image has %d components\n", state->ncomp);
 
+            state->bpc = 0;
             {
                 const char *cspace = "unknown";
                 err = JP2_Decompress_GetProp(state->handle,
@@ -541,6 +543,8 @@ s_jpxd_process(stream_state * ss, stream_cursor_read * pr,
                     case cJP2_Colorspace_Palette_RGBa:
                         cspace = "indexed sRGB";
                         state->image_is_indexed = true;
+                        if (state->colorspace != gs_jpx_cs_indexed)
+                            state->bpc = 8;
                         break;
                     case cJP2_Colorspace_Palette_RGB_YCCa:
                         cspace = "indexed sRGB YCrCb";
@@ -570,7 +574,6 @@ s_jpxd_process(stream_state * ss, stream_cursor_read * pr,
                or depth, so we take the maximum of the component values */
             state->width = 0;
             state->height = 0;
-            state->bpc = 0;
             {
                 int comp;
                 int width, height;
@@ -876,7 +879,7 @@ s_jpxe_init(stream_state *ss)
 
 #if defined(JP2_LICENSE_NUM_1) && defined(JP2_LICENSE_NUM_2)
     /* set license keys if appropriate */
-    err = JP2_Decompress_SetLicense(state->handle,
+    err = JP2_Compress_SetLicense(state->handle,
         JP2_LICENSE_NUM_1, JP2_LICENSE_NUM_2);
     if (err != cJP2_Error_OK) {
         dmlprintf1(state->memory, "Luratech JP2 error %d setting license\n", (int)err);
@@ -1071,6 +1074,15 @@ s_jpxe_release(stream_state *ss)
     /* free our own storage */
     gs_free_object(state->memory->non_gc_memory, state->outbuf, "s_jpxe_release(outbuf)");
     gs_free_object(state->memory->non_gc_memory, state->inbuf, "s_jpxe_release(inbuf)");
+}
+
+int sjpxd_create(gs_memory_t *mem)
+{
+    return 0;
+}
+
+void sjpxd_destroy(gs_memory_t *mem)
+{
 }
 
 /* encoder stream template */

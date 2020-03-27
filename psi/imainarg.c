@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -53,7 +53,6 @@
 #include "interp.h"
 #include "iutil.h"
 #include "ivmspace.h"
-#include "vdtrace.h"
 
 /* Import operator procedures */
 extern int zflush(i_ctx_t *);
@@ -96,8 +95,8 @@ static int argproc(gs_main_instance *, const char *);
 static int run_buffered(gs_main_instance *, const char *);
 static int esc_strlen(const char *);
 static void esc_strcat(char *, const char *);
-static int runarg(gs_main_instance *, const char *, const char *, const char *, int);
-static int run_string(gs_main_instance *, const char *, int);
+static int runarg(gs_main_instance *, const char *, const char *, const char *, int, int, int *, ref *);
+static int run_string(gs_main_instance *, const char *, int, int, int *, ref *);
 static int run_finish(gs_main_instance *, int, int, ref *);
 static int try_stdout_redirect(gs_main_instance * minst,
                                 const char *command, const char *filename);
@@ -115,7 +114,7 @@ static void print_help_trailer(const gs_main_instance *);
 /* ------ Main program ------ */
 
 /* Process the command line with a given instance. */
-static FILE *
+static gp_file *
 gs_main_arg_fopen(const char *fname, void *vminst)
 {
     gs_main_set_lib_paths((gs_main_instance *) vminst);
@@ -132,16 +131,20 @@ set_debug_flags(const char *arg, char *flags)
 }
 
 int
-gs_main_init_with_args(gs_main_instance * minst, int argc, char *argv[])
+gs_main_init_with_args01(gs_main_instance * minst, int argc, char *argv[])
 {
     const char *arg;
     arg_list args;
     int code;
+    int have_dumped_args = 0;
 
-    arg_init(&args, (const char **)argv, argc,
-             gs_main_arg_fopen, (void *)minst,
-             minst->get_codepoint,
-             minst->heap);
+    /* Now we actually process them */
+    code = arg_init(&args, (const char **)argv, argc,
+                    gs_main_arg_fopen, (void *)minst,
+                    minst->get_codepoint,
+                    minst->heap);
+    if (code < 0)
+        return code;
     code = gs_main_init0(minst, 0, 0, 0, GS_MAX_LIB_DIRS);
     if (code < 0)
         return code;
@@ -208,16 +211,14 @@ gs_main_init_with_args(gs_main_instance * minst, int argc, char *argv[])
             (char *)gs_alloc_bytes(minst->heap, len, "GS_OPTIONS");
 
             gp_getenv(GS_OPTIONS, opts, &len);  /* can't fail */
-#if defined(GS_NO_UTF8)
-            if (arg_push_memory_string(&args, opts, false, minst->heap))
-                return gs_error_Fatal;
-#else
             if (arg_push_decoded_memory_string(&args, opts, false, true, minst->heap))
                 return gs_error_Fatal;
-#endif
         }
     }
-    while ((arg = arg_next(&args, &code, minst->heap)) != 0) {
+    while ((code = arg_next(&args, (const char **)&arg, minst->heap)) > 0) {
+        code = gs_lib_ctx_stash_sanitized_arg(minst->heap->gs_lib_ctx, arg);
+        if (code < 0)
+            return code;
         switch (*arg) {
             case '-':
                 code = swproc(minst, arg, &args);
@@ -225,13 +226,15 @@ gs_main_init_with_args(gs_main_instance * minst, int argc, char *argv[])
                     return code;
                 if (code > 0)
                     outprintf(minst->heap, "Unknown switch %s - ignoring\n", arg);
-                if (gs_debug[':'] && arg[1] == 'Z') {
+                if (gs_debug[':'] && !have_dumped_args) {
                     int i;
 
-                    dmprintf1(minst->heap, "%% Init started, instance 0x%p, with args: ", minst);
+                    dmprintf1(minst->heap, "%% Args passed to instance "PRI_INTPTR": ",
+                              (intptr_t)minst);
                     for (i=1; i<argc; i++)
                         dmprintf1(minst->heap, "%s ", argv[i]);
                     dmprintf(minst->heap, "\n");
+                    have_dumped_args = 1;
                 }
                 break;
             default:
@@ -241,9 +244,18 @@ gs_main_init_with_args(gs_main_instance * minst, int argc, char *argv[])
                     return code;
                 if (minst->saved_pages_test_mode) {
                     gx_device *pdev;
+                    int ret;
+                    gxdso_device_child_request child_dev_data;
 
-                    /* get the current device */
+                    /* get the real target (printer) device */
                     pdev = gs_currentdevice(minst->i_ctx_p->pgs);
+                    do {
+                        child_dev_data.target = pdev;
+                        ret = dev_proc(pdev, dev_spec_op)(pdev, gxdso_device_child, &child_dev_data,
+                                                          sizeof(child_dev_data));
+                        if (ret > 0)
+                            pdev = child_dev_data.target;
+                    } while ((ret > 0) && (child_dev_data.n != 0));
                     if ((code = gx_saved_pages_param_process((gx_device_printer *)pdev,
                                (byte *)"print normal flush", 18)) < 0)
                         return code;
@@ -253,24 +265,32 @@ gs_main_init_with_args(gs_main_instance * minst, int argc, char *argv[])
                 }
         }
     }
-    if (code < 0)
-        return code;
+
+    return code;
+}
+
+int
+gs_main_init_with_args2(gs_main_instance * minst)
+{
+    int code;
 
     code = gs_main_init2(minst);
     if (code < 0)
         return code;
 
-    if (gs_debug[':']) {
-        int i;
-
-        dmprintf1(minst->heap, "%% Init done, instance 0x%p, with args: ", minst);
-        for (i=1; i<argc; i++)
-            dmprintf1(minst->heap, "%s ", argv[i]);
-        dmprintf(minst->heap, "\n");
-    }
     if (!minst->run_start)
         return gs_error_Quit;
-    return code ;
+    return code;
+}
+
+int
+gs_main_init_with_args(gs_main_instance * minst, int argc, char *argv[])
+{
+    int code = gs_main_init_with_args01(minst, argc, argv);
+
+    if (code < 0)
+        return code;
+    return gs_main_init_with_args2(minst);
 }
 
 /*
@@ -293,8 +313,26 @@ gs_arg_get_codepoint *gs_main_inst_get_arg_decode(gs_main_instance * minst)
 int
 gs_main_run_start(gs_main_instance * minst)
 {
-    return run_string(minst, "systemdict /start get exec", runFlush);
+    return run_string(minst, "systemdict /start get exec", runFlush, minst->user_errors, NULL, NULL);
 }
+
+static int
+do_arg_match(const char **arg, const char *match, size_t match_len)
+{
+    const char *s = *arg;
+    if (strncmp(s, match, match_len) != 0)
+        return 0;
+    s += match_len;
+    if (*s == '=')
+        *arg = ++s;
+    else if (*s != 0)
+        return 0;
+    else
+        *arg = NULL;
+    return 1;
+}
+
+#define arg_match(A, B) do_arg_match(A, B, sizeof(B)-1)
 
 /* Process switches.  Return 0 if processed, 1 for unknown switch, */
 /* <0 if error. */
@@ -304,9 +342,6 @@ swproc(gs_main_instance * minst, const char *arg, arg_list * pal)
     char sw = arg[1];
     ref vtrue;
     int code = 0;
-#undef initial_enter_name
-#define initial_enter_name(nstr, pvalue)\
-  i_initial_enter_name(minst->i_ctx_p, nstr, pvalue)
 
     make_true(&vtrue);
     arg += 2;                   /* skip - and letter */
@@ -315,10 +350,10 @@ swproc(gs_main_instance * minst, const char *arg, arg_list * pal)
             return 1;
         case 0:         /* read stdin as a file char-by-char */
             /* This is a ******HACK****** for Ghostview. */
-            minst->heap->gs_lib_ctx->stdin_is_interactive = true;
+            minst->heap->gs_lib_ctx->core->stdin_is_interactive = true;
             goto run_stdin;
         case '_':       /* read stdin with normal buffering */
-            minst->heap->gs_lib_ctx->stdin_is_interactive = false;
+            minst->heap->gs_lib_ctx->core->stdin_is_interactive = false;
 run_stdin:
             minst->run_start = false;   /* don't run 'start' */
             /* Set NOPAUSE so showpage won't try to read from stdin. */
@@ -329,14 +364,24 @@ run_stdin:
             if (code < 0)
                 return code;
 
-            code = run_string(minst, ".runstdin", runFlush);
+            code = run_string(minst, ".runstdin", runFlush, minst->user_errors, NULL, NULL);
             if (code < 0)
                 return code;
+            /* If in saved_pages_test_mode, print and flush previous job before the next file */
             if (minst->saved_pages_test_mode) {
                 gx_device *pdev;
+                int ret;
+                gxdso_device_child_request child_dev_data;
 
-                /* get the current device */
+                /* get the real target (printer) device */
                 pdev = gs_currentdevice(minst->i_ctx_p->pgs);
+                do {
+                    child_dev_data.target = pdev;
+                    ret = dev_proc(pdev, dev_spec_op)(pdev, gxdso_device_child, &child_dev_data,
+                                                      sizeof(child_dev_data));
+                    if (ret > 0)
+                        pdev = child_dev_data.target;
+                } while ((ret > 0) && (child_dev_data.n != 0));
                 if ((code = gx_saved_pages_param_process((gx_device_printer *)pdev,
                            (byte *)"print normal flush", 18)) < 0)
                     return code;
@@ -353,13 +398,22 @@ run_stdin:
                 break;
             } else if (strncmp(arg, "saved-pages=", 12) == 0) {
                 gx_device *pdev;
-                gx_device_printer *ppdev;
 
                 /* If init2 not yet done, just save the argument for processing then */
                 if (minst->init_done < 2) {
                     if (minst->saved_pages_initial_arg == NULL) {
-                        /* Tuck the parameters away for later when init2 is done */
-                        minst->saved_pages_initial_arg = (char *)arg+12;
+                        /* Tuck the parameters away for later when init2 is done (usually "begin") */
+                        minst->saved_pages_initial_arg = (char *)gs_alloc_bytes(minst->heap,
+                                                                                1+strlen((char *)arg+12),
+                                                                               "GS_OPTIONS");
+                        if (minst->saved_pages_initial_arg != NULL) {
+                            strcpy(minst->saved_pages_initial_arg,(char *)arg+12);
+                        } else {
+                            outprintf(minst->heap,
+                                      "   saved_pages_initial_arg larger than expected\n");
+                            arg_finit(pal);
+                            return gs_error_Fatal;
+                        }
                     } else {
                         outprintf(minst->heap,
                                   "   Only one --saved-pages=... command allowed before processing input\n");
@@ -367,17 +421,29 @@ run_stdin:
                         return gs_error_Fatal;
                     }
                 } else {
+                    int ret;
+                    gxdso_device_child_request child_dev_data;
+
                     /* get the current device */
                     pdev = gs_currentdevice(minst->i_ctx_p->pgs);
-                    if (dev_proc(pdev, dev_spec_op)(pdev, gxdso_supports_saved_pages, NULL, 0) == 0) {
+                    if (dev_proc(pdev, dev_spec_op)(pdev, gxdso_supports_saved_pages, NULL, 0) <= 0) {
                         outprintf(minst->heap,
                                   "   --saved-pages not supported by the '%s' device.\n",
                                   pdev->dname);
                         arg_finit(pal);
                         return gs_error_Fatal;
                     }
-                    ppdev = (gx_device_printer *)pdev;
-                    code = gx_saved_pages_param_process(ppdev, (byte *)arg+12, strlen(arg+12));
+                    /* get the real target (printer) device */
+                    do {
+                        child_dev_data.target = pdev;
+                        ret = dev_proc(pdev, dev_spec_op)(pdev, gxdso_device_child, &child_dev_data,
+                                                          sizeof(child_dev_data));
+                        if (ret > 0)
+                            pdev = child_dev_data.target;
+                    } while ((ret > 0) && (child_dev_data.n != 0));
+                    if ((code = gx_saved_pages_param_process((gx_device_printer *)pdev,
+                                                              (byte *)arg+12, strlen(arg+12))) < 0)
+                        return code;
                     if (code > 0)
                         if ((code = gs_erasepage(minst->i_ctx_p->pgs)) < 0)
                             return code;
@@ -387,6 +453,27 @@ run_stdin:
             } else if (strncmp(arg, "saved-pages-test", 16) == 0) {
                 minst->saved_pages_test_mode = true;
                 break;
+            /* Now handle the explicitly added paths to the file control lists */
+            } else if (arg_match(&arg, "permit-file-read")) {
+                code = gs_add_explicit_control_path(minst->heap, arg, gs_permit_file_reading);
+                if (code < 0) return code;
+                break;
+            } else if (arg_match(&arg, "permit-file-write")) {
+                code = gs_add_explicit_control_path(minst->heap, arg, gs_permit_file_writing);
+                if (code < 0) return code;
+                break;
+            } else if (arg_match(&arg, "permit-file-control")) {
+                code = gs_add_explicit_control_path(minst->heap, arg, gs_permit_file_control);
+                if (code < 0) return code;
+                break;
+            } else if (arg_match(&arg, "permit-file-all")) {
+                code = gs_add_explicit_control_path(minst->heap, arg, gs_permit_file_reading);
+                if (code < 0) return code;
+                code = gs_add_explicit_control_path(minst->heap, arg, gs_permit_file_writing);
+                if (code < 0) return code;
+                code = gs_add_explicit_control_path(minst->heap, arg, gs_permit_file_control);
+                if (code < 0) return code;
+                break;
             }
             /* FALLTHROUGH */
         case '+':
@@ -394,11 +481,14 @@ run_stdin:
             /* FALLTHROUGH */
         case '@':               /* ditto with @-expansion */
             {
-                const char *psarg = arg_next(pal, &code, minst->heap);
+                char *psarg;
+
+                code = arg_next(pal, (const char **)&psarg, minst->heap);
+                /* Don't stash the @ file name */
 
                 if (code < 0)
                     return gs_error_Fatal;
-                if (psarg == 0) {
+                if (psarg == NULL) {
                     outprintf(minst->heap, "Usage: gs ... -%c file.ps arg1 ... argn\n", sw);
                     arg_finit(pal);
                     return gs_error_Fatal;
@@ -409,34 +499,26 @@ run_stdin:
                 else
                     code = gs_main_init2(minst);
                 if (code >= 0)
-                    code = run_string(minst, "userdict/ARGUMENTS[", 0);
+                    code = run_string(minst, "userdict/ARGUMENTS[", 0, minst->user_errors, NULL, NULL);
                 if (code >= 0)
-                    while ((arg = arg_next(pal, &code, minst->heap)) != 0) {
-                        code = runarg(minst, "", arg, "", runInit);
+                    while ((code = arg_next(pal, (const char **)&arg, minst->heap)) > 0) {
+                        code = gs_lib_ctx_stash_sanitized_arg(minst->heap->gs_lib_ctx, arg);
+                        if (code < 0)
+                            break;
+                        code = runarg(minst, "", arg, "", runInit, minst->user_errors, NULL, NULL);
                         if (code < 0)
                             break;
                     }
                 if (code >= 0)
-                    code = runarg(minst, "]put", psarg, ".runfile", runInit | runFlush);
+                    code = run_string(minst, "]put", 0, minst->user_errors, NULL, NULL);
+                if (code >= 0)
+                    code = argproc(minst, psarg);
                 arg_free((char *)psarg, minst->heap);
                 if (code >= 0)
                     code = gs_error_Quit;
-                
+
                 return code;
             }
-        case 'A':               /* trace allocator */
-            switch (*arg) {
-                case 0:
-                    gs_alloc_debug = 1;
-                    break;
-                case '-':
-                    gs_alloc_debug = 0;
-                    break;
-                default:
-                    puts(minst->heap, "-A may only be followed by -");
-                    return gs_error_Fatal;
-            }
-            break;
         case 'B':               /* set run_string buffer size */
             if (*arg == '-')
                 minst->run_buffer_size = 0;
@@ -462,18 +544,21 @@ run_stdin:
                 if (code < 0)
                     return code;
                 pal->expand_ats = false;
-                while ((arg = arg_next(pal, &code, minst->heap)) != 0) {
+                while ((code = arg_next(pal, (const char **)&arg, minst->heap)) > 0) {
                     if (arg[0] == '@' ||
                         (arg[0] == '-' && !isdigit((unsigned char)arg[1]))
                         )
                         break;
-                    code = runarg(minst, "", arg, ".runstring", 0);
+                    code = gs_lib_ctx_stash_sanitized_arg(minst->heap->gs_lib_ctx, "?");
+                    if (code < 0)
+                        return code;
+                    code = runarg(minst, "", arg, ".runstring", 0, minst->user_errors, NULL, NULL);
                     if (code < 0)
                         return code;
                 }
                 if (code < 0)
                     return gs_error_Fatal;
-                if (arg != 0) {
+                if (arg != NULL) {
                     char *p = arg_copy(arg, minst->heap);
                     if (p == NULL)
                         return gs_error_Fatal;
@@ -482,30 +567,26 @@ run_stdin:
                 pal->expand_ats = ats;
                 break;
             }
-        case 'E':               /* log errors */
-            switch (*arg) {
-                case 0:
-                    gs_log_errors = 1;
-                    break;
-                case '-':
-                    gs_log_errors = 0;
-                    break;
-                default:
-                    puts(minst->heap, "-E may only be followed by -");
-                    return gs_error_Fatal;
-            }
-            break;
         case 'f':               /* run file of arbitrary name */
             if (*arg != 0) {
                 code = argproc(minst, arg);
                 if (code < 0)
                     return code;
+                /* If in saved_pages_test_mode, print and flush previous job before the next file */
                 if (minst->saved_pages_test_mode) {
                     gx_device *pdev;
+                    int ret;
+                    gxdso_device_child_request child_dev_data;
 
-                    /* get the current device */
+                    /* get the real target (printer) device */
                     pdev = gs_currentdevice(minst->i_ctx_p->pgs);
-                        return code;
+                    do {
+                        child_dev_data.target = pdev;
+                        ret = dev_proc(pdev, dev_spec_op)(pdev, gxdso_device_child, &child_dev_data,
+                                                          sizeof(child_dev_data));
+                        if (ret > 0)
+                            pdev = child_dev_data.target;
+                    } while ((ret > 0) && (child_dev_data.n != 0));
                     if ((code = gx_saved_pages_param_process((gx_device_printer *)pdev,
                                (byte *)"print normal flush", 18)) < 0)
                         return code;
@@ -527,11 +608,21 @@ run_stdin:
                 minst->run_buffer_size = bsize;
                 if (code < 0)
                     return code;
+                /* If in saved_pages_test_mode, print and flush previous job before the next file */
                 if (minst->saved_pages_test_mode) {
                     gx_device *pdev;
+                    int ret;
+                    gxdso_device_child_request child_dev_data;
 
-                    /* get the current device */
+                    /* get the real target (printer) device */
                     pdev = gs_currentdevice(minst->i_ctx_p->pgs);
+                    do {
+                        child_dev_data.target = pdev;
+                        ret = dev_proc(pdev, dev_spec_op)(pdev, gxdso_device_child, &child_dev_data,
+                                                          sizeof(child_dev_data));
+                        if (ret > 0)
+                            pdev = child_dev_data.target;
+                    } while ((ret > 0) && (child_dev_data.n != 0));
                     if ((code = gx_saved_pages_param_process((gx_device_printer *)pdev,
                                (byte *)"print normal flush", 18)) < 0)
                         return code;
@@ -543,20 +634,15 @@ run_stdin:
             break;
         case 'g':               /* define device geometry */
             {
-                long width, height;
-                ref value;
+                long dimensions[2];
 
                 if ((code = gs_main_init1(minst)) < 0)
                     return code;
-                if (sscanf((const char *)arg, "%ldx%ld", &width, &height) != 2) {
+                if (sscanf((const char *)arg, "%ldx%ld", &dimensions[0], &dimensions[1]) != 2) {
                     puts(minst->heap, "-g must be followed by <width>x<height>");
                     return gs_error_Fatal;
                 }
-                make_int(&value, width);
-                initial_enter_name("DEVICEWIDTH", &value);
-                make_int(&value, height);
-                initial_enter_name("DEVICEHEIGHT", &value);
-                initial_enter_name("FIXEDMEDIA", &vtrue);
+                gs_main_force_dimensions(minst, dimensions);
                 break;
             }
         case 'h':               /* print help */
@@ -568,14 +654,14 @@ run_stdin:
                 const char *path;
 
                 if (arg[0] == 0) {
-                    path = arg_next(pal, &code, minst->heap);
+                    code = arg_next(pal, (const char **)&path, minst->heap);
+                    if (code < 0)
+                        return code;
+                    code = gs_lib_ctx_stash_sanitized_arg(minst->heap->gs_lib_ctx, "?");
                     if (code < 0)
                         return code;
                 } else
                     path = arg;
-                if (path == NULL)
-                    return gs_error_Fatal;
-                path = arg_copy(path, minst->heap);
                 if (path == NULL)
                     return gs_error_Fatal;
                 gs_main_add_lib_path(minst, path);
@@ -586,7 +672,7 @@ run_stdin:
                 long msize = 0;
                 gs_malloc_memory_t *rawheap = gs_malloc_wrapped_contents(minst->heap);
 
-                sscanf((const char *)arg, "%ld", &msize);
+                (void)sscanf((const char *)arg, "%ld", &msize);
                 if (msize <= 0 || msize > max_long >> 10) {
                     outprintf(minst->heap, "-K<numK> must have 1 <= numK <= %ld\n",
                               max_long >> 10);
@@ -599,55 +685,70 @@ run_stdin:
             {
                 unsigned msize = 0;
 
-                sscanf((const char *)arg, "%u", &msize);
-#if ARCH_INTS_ARE_SHORT
-                if (msize <= 0 || msize >= 64) {
-                    puts(minst->heap, "-M must be between 1 and 63");
+                (void)sscanf((const char *)arg, "%u", &msize);
+                if (msize <= 0 || msize >= (max_uint >> 10)) {
+                    outprintf(minst->heap, "-M must be between 1 and %d\n", (int)((max_uint >> 10) - 1));
                     return gs_error_Fatal;
                 }
-#endif
-                minst->memory_chunk_size = msize << 10;
+                minst->memory_clump_size = msize << 10;
             }
             break;
         case 'N':               /* set size of name table */
             {
                 unsigned nsize = 0;
 
-                sscanf((const char *)arg, "%d", &nsize);
-#if ARCH_INTS_ARE_SHORT
-                if (nsize < 2 || nsize > 64) {
-                    puts(minst->heap, "-N must be between 2 and 64");
+                (void)sscanf((const char *)arg, "%d", &nsize);
+                if (nsize < 2 || nsize > (max_uint >> 10)) {
+                    outprintf(minst->heap, "-N must be between 2 and %d\n", (int)(max_uint >> 10));
                     return gs_error_Fatal;
                 }
-#endif
                 minst->name_table_size = (ulong) nsize << 10;
             }
             break;
         case 'o':               /* set output file name and batch mode */
             {
+                i_ctx_t *i_ctx_p;
+                uint space;
                 const char *adef;
-                char *str;
+                byte *str;
                 ref value;
                 int len;
 
+                if ((code = gs_main_init1(minst)) < 0)
+                    return code;
+
+                i_ctx_p = minst->i_ctx_p;
+                space = icurrent_space;
                 if (arg[0] == 0) {
-                    adef = arg_next(pal, &code, minst->heap);
+                    code = arg_next(pal, (const char **)&adef, minst->heap);
+                    if (code < 0)
+                        return code;
+                    if (code == 0)
+                        return gs_error_undefinedfilename;
+                    code = gs_lib_ctx_stash_sanitized_arg(minst->heap->gs_lib_ctx, "?");
                     if (code < 0)
                         return code;
                 } else
                     adef = arg;
                 if ((code = gs_main_init1(minst)) < 0)
                     return code;
+
+                if (strlen(adef) > 0) {
+                    code = gs_add_outputfile_control_path(minst->heap, adef);
+                    if (code < 0) return code;
+                }
+
+                ialloc_set_space(idmemory, avm_system);
                 len = strlen(adef);
-                str = (char *)gs_alloc_bytes(minst->heap, (uint)len, "-o");
+                str = ialloc_string(len, "-o");
                 if (str == NULL)
                     return gs_error_VMerror;
                 memcpy(str, adef, len);
-                make_const_string(&value, a_readonly | avm_foreign,
-                                  len, (const byte *)str);
-                initial_enter_name("OutputFile", &value);
-                initial_enter_name("NOPAUSE", &vtrue);
-                initial_enter_name("BATCH", &vtrue);
+                make_const_string(&value, a_readonly | avm_system, len, str);
+                ialloc_set_space(idmemory, space);
+                i_initial_enter_name(minst->i_ctx_p, "OutputFile", &value);
+                i_initial_enter_name(minst->i_ctx_p, "NOPAUSE", &vtrue);
+                i_initial_enter_name(minst->i_ctx_p, "BATCH", &vtrue);
             }
             break;
         case 'P':               /* choose whether search '.' first */
@@ -663,27 +764,23 @@ run_stdin:
         case 'q':               /* quiet startup */
             if ((code = gs_main_init1(minst)) < 0)
                 return code;
-            initial_enter_name("QUIET", &vtrue);
+            i_initial_enter_name(minst->i_ctx_p, "QUIET", &vtrue);
             break;
         case 'r':               /* define device resolution */
             {
-                float xres, yres;
-                ref value;
+                float res[2];
 
                 if ((code = gs_main_init1(minst)) < 0)
                     return code;
-                switch (sscanf((const char *)arg, "%fx%f", &xres, &yres)) {
+                switch (sscanf((const char *)arg, "%fx%f", &res[0], &res[1])) {
                     default:
                         puts(minst->heap, "-r must be followed by <res> or <xres>x<yres>");
                         return gs_error_Fatal;
                     case 1:     /* -r<res> */
-                        yres = xres;
+                        res[1] = res[0];
+                        /* fall through */
                     case 2:     /* -r<xres>x<yres> */
-                        make_real(&value, xres);
-                        initial_enter_name("DEVICEXRESOLUTION", &value);
-                        make_real(&value, yres);
-                        initial_enter_name("DEVICEYRESOLUTION", &value);
-                        initial_enter_name("FIXEDRESOLUTION", &vtrue);
+                        gs_main_force_resolutions(minst, res);
                 }
                 break;
             }
@@ -705,10 +802,13 @@ run_stdin:
                     eqp = strchr(adef, '#');
                 /* Initialize the object memory, scanner, and */
                 /* name table now if needed. */
-                if ((code = gs_main_init1(minst)) < 0)
+                if ((code = gs_main_init1(minst)) < 0) {
+                    arg_free((char *)adef, minst->heap);
                     return code;
+                }
                 if (eqp == adef) {
                     puts(minst->heap, "Usage: -dNAME, -dNAME=TOKEN, -sNAME=STRING");
+                    arg_free((char *)adef, minst->heap);
                     return gs_error_Fatal;
                 }
                 if (eqp == NULL) {
@@ -722,16 +822,23 @@ run_stdin:
                     uint space = icurrent_space;
 
                     *eqp++ = 0;
+
+                    if (strlen(adef) == 10 && strncmp(adef, "OutputFile", 10) == 0 && strlen(eqp) > 0) {
+                        code = gs_add_outputfile_control_path(minst->heap, eqp);
+                        if (code < 0) return code;
+                    }
+
                     ialloc_set_space(idmemory, avm_system);
                     if (isd) {
-                        int num, i;
+                        int i;
+                        int64_t num;
 
                         /* Check for numbers so we can provide for suffix scalers */
                         /* Note the check for '#' is for PS "radix" numbers such as 16#ff */
                         /* and check for '.' and 'e' or 'E' which are 'real' numbers */
                         if ((strchr(eqp, '#') == NULL) && (strchr(eqp, '.') == NULL) &&
                             (strchr(eqp, 'e') == NULL) && (strchr(eqp, 'E') == NULL) &&
-                            ((i = sscanf((const char *)eqp, "%d", &num)) == 1)) {
+                            ((i = sscanf((const char *)eqp, "%"PRIi64, &num)) == 1)) {
                             char suffix = eqp[strlen(eqp) - 1];
 
                             switch (suffix) {
@@ -752,7 +859,7 @@ run_stdin:
                                 default:
                                     break;   /* not a valid suffix or last char was digit */
                             }
-                            make_int(&value, num);
+                            make_int(&value, (ps_int)num);
                         } else {
                             /* use the PS scanner to capture other valid token types */
                             stream astream;
@@ -765,6 +872,7 @@ run_stdin:
                             code = gs_scan_token(minst->i_ctx_p, &value, &state);
                             if (code) {
                                 outprintf(minst->heap, "Invalid value for option -d%s, -dNAME= must be followed by a valid token\n", arg);
+                                arg_free((char *)adef, minst->heap);
                                 return gs_error_Fatal;
                             }
                             if (r_has_type_attrs(&value, t_name,
@@ -784,36 +892,34 @@ run_stdin:
                                     make_false(&value);
                                 else {
                                     outprintf(minst->heap, "Invalid value for option -d%s, use -sNAME= to define string constants\n", arg);
+                                    arg_free((char *)adef, minst->heap);
                                     return gs_error_Fatal;
                                 }
                             }
                         }
                     } else {
                         int len = strlen(eqp);
-                        char *str =
-                        (char *)gs_alloc_bytes(minst->heap,
-                                               (uint) len, "-s");
+                        byte *body = ialloc_string(len, "-s");
 
-                        if (str == 0) {
+                        if (body == NULL) {
                             lprintf("Out of memory!\n");
+                            arg_free((char *)adef, minst->heap);
                             return gs_error_Fatal;
                         }
-                        memcpy(str, eqp, len);
-                        make_const_string(&value,
-                                          a_readonly | avm_foreign,
-                                          len, (const byte *)str);
-                        if ((code = try_stdout_redirect(minst, adef, eqp)) < 0)
+                        memcpy(body, eqp, len);
+                        make_const_string(&value, a_readonly | avm_system, len, body);
+                        if ((code = try_stdout_redirect(minst, adef, eqp)) < 0) {
+                            arg_free((char *)adef, minst->heap);
                             return code;
+                        }
                     }
                     ialloc_set_space(idmemory, space);
                 }
                 /* Enter the name in systemdict. */
-                initial_enter_name(adef, &value);
+                i_initial_enter_name_copy(minst->i_ctx_p, adef, &value);
+                arg_free((char *)adef, minst->heap);
                 break;
             }
-        case 'T':
-            set_debug_flags(arg, vd_flags);
-            break;
         case 'u':               /* undefine name */
             if (!*arg) {
                 puts(minst->heap, "-u requires a name to undefine.");
@@ -890,22 +996,31 @@ esc_strcat(char *dest, const char *src)
 static int
 argproc(gs_main_instance * minst, const char *arg)
 {
-    int code = gs_main_init1(minst);            /* need i_ctx_p to proceed */
+    int code1, code = gs_main_init1(minst);            /* need i_ctx_p to proceed */
 
     if (code < 0)
         return code;
+
+    code = gs_add_control_path(minst->heap, gs_permit_file_reading, arg);
+    if (code < 0) return code;
+
     if (minst->run_buffer_size) {
         /* Run file with run_string. */
-        return run_buffered(minst, arg);
+        code = run_buffered(minst, arg);
     } else {
         /* Run file directly in the normal way. */
-        return runarg(minst, "", arg, ".runfile", runInit | runFlush);
+        code = runarg(minst, "", arg, ".runfile", runInit | runFlush, minst->user_errors, NULL, NULL);
     }
+
+    code1 = gs_remove_control_path(minst->heap, gs_permit_file_reading, arg);
+    if (code >= 0 && code1 < 0) code = code1;
+
+    return code;
 }
 static int
 run_buffered(gs_main_instance * minst, const char *arg)
 {
-    FILE *in = gp_fopen(arg, gp_fmode_rb);
+    gp_file *in = gp_fopen(minst->heap, arg, gp_fmode_rb);
     int exit_code;
     ref error_object;
     int code;
@@ -916,7 +1031,7 @@ run_buffered(gs_main_instance * minst, const char *arg)
     }
     code = gs_main_init2(minst);
     if (code < 0) {
-        fclose(in);
+        gp_fclose(in);
         return code;
     }
     code = gs_main_run_string_begin(minst, minst->user_errors,
@@ -926,7 +1041,7 @@ run_buffered(gs_main_instance * minst, const char *arg)
         int count;
 
         code = gs_error_NeedInput;
-        while ((count = fread(buf, 1, minst->run_buffer_size, in)) > 0) {
+        while ((count = gp_fread(buf, 1, minst->run_buffer_size, in)) > 0) {
             code = gs_main_run_string_continue(minst, buf, count,
                                                minst->user_errors,
                                                &exit_code, &error_object);
@@ -938,14 +1053,20 @@ run_buffered(gs_main_instance * minst, const char *arg)
                                           &exit_code, &error_object);
         }
     }
-    fclose(in);
+    gp_fclose(in);
     zflush(minst->i_ctx_p);
     zflushpage(minst->i_ctx_p);
     return run_finish(minst, code, exit_code, &error_object);
 }
 static int
-runarg(gs_main_instance * minst, const char *pre, const char *arg,
-       const char *post, int options)
+runarg(gs_main_instance *minst,
+       const char       *pre,
+       const char       *arg,
+       const char       *post,
+       int               options,
+       int               user_errors,
+       int              *pexit_code,
+       ref              *perror_object)
 {
     int len = strlen(pre) + esc_strlen(arg) + strlen(post) + 1;
     int code;
@@ -966,24 +1087,45 @@ runarg(gs_main_instance * minst, const char *pre, const char *arg,
     esc_strcat(line, arg);
     strcat(line, post);
     minst->i_ctx_p->starting_arg_file = true;
-    code = run_string(minst, line, options);
+    code = run_string(minst, line, options, user_errors, pexit_code, perror_object);
     minst->i_ctx_p->starting_arg_file = false;
     gs_free_object(minst->heap, line, "runarg");
     return code;
 }
+int
+gs_main_run_file2(gs_main_instance *minst,
+                  const char       *filename,
+                  int               user_errors,
+                  int              *pexit_code,
+                  ref              *perror_object)
+{
+    return runarg(minst, "", filename, ".runfile", runFlush, user_errors, pexit_code, perror_object);
+}
 static int
-run_string(gs_main_instance * minst, const char *str, int options)
+run_string(gs_main_instance *minst,
+           const char       *str,
+           int               options,
+           int               user_errors,
+           int              *pexit_code,
+           ref              *perror_object)
 {
     int exit_code;
     ref error_object;
-    int code = gs_main_run_string(minst, str, minst->user_errors,
-                                  &exit_code, &error_object);
+    int code;
+
+    if (pexit_code == NULL)
+        pexit_code = &exit_code;
+    if (perror_object == NULL)
+        perror_object = &error_object;
+
+    code = gs_main_run_string(minst, str, user_errors,
+                              pexit_code, perror_object);
 
     if ((options & runFlush) || code != 0) {
         zflush(minst->i_ctx_p);         /* flush stdout */
         zflushpage(minst->i_ctx_p);     /* force display update */
     }
-    return run_finish(minst, code, exit_code, &error_object);
+    return run_finish(minst, code, *pexit_code, perror_object);
 }
 static int
 run_finish(gs_main_instance *minst, int code, int exit_code,
@@ -994,9 +1136,12 @@ run_finish(gs_main_instance *minst, int code, int exit_code,
         case 0:
             break;
         case gs_error_Fatal:
-            emprintf1(minst->heap,
-                      "Unrecoverable error, exit code %d\n",
-                      exit_code);
+            if (exit_code == gs_error_InterpreterExit)
+                code = exit_code;
+            else
+                emprintf1(minst->heap,
+                          "Unrecoverable error, exit code %d\n",
+                          exit_code);
             break;
         default:
             gs_main_dump_stack(minst, code, perror_object);
@@ -1017,28 +1162,30 @@ static int
 try_stdout_redirect(gs_main_instance * minst,
     const char *command, const char *filename)
 {
+    gs_lib_ctx_core_t *core = minst->heap->gs_lib_ctx->core;
     if (strcmp(command, "stdout") == 0) {
-        minst->heap->gs_lib_ctx->stdout_to_stderr = 0;
-        minst->heap->gs_lib_ctx->stdout_is_redirected = 0;
+        core->stdout_to_stderr = 0;
+        core->stdout_is_redirected = 0;
         /* If stdout already being redirected and it is not stdout
          * or stderr, close it
          */
-        if (minst->heap->gs_lib_ctx->fstdout2
-            && (minst->heap->gs_lib_ctx->fstdout2 != minst->heap->gs_lib_ctx->fstdout)
-            && (minst->heap->gs_lib_ctx->fstdout2 != minst->heap->gs_lib_ctx->fstderr)) {
-            fclose(minst->heap->gs_lib_ctx->fstdout2);
-            minst->heap->gs_lib_ctx->fstdout2 = (FILE *)NULL;
+        if (core->fstdout2
+            && (gp_get_file(core->fstdout2) != core->fstdout)
+            && (gp_get_file(core->fstdout2) != core->fstderr)) {
+            gp_fclose(core->fstdout2);
+            core->fstdout2 = NULL;
         }
         /* If stdout is being redirected, set minst->fstdout2 */
         if ( (filename != 0) && strlen(filename) &&
             strcmp(filename, "-") && strcmp(filename, "%stdout") ) {
             if (strcmp(filename, "%stderr") == 0) {
-                minst->heap->gs_lib_ctx->stdout_to_stderr = 1;
+                core->stdout_to_stderr = 1;
+            } else {
+                core->fstdout2 = gp_fopen(minst->heap, filename, "w");
+                if (core->fstdout2 == NULL)
+                    return_error(gs_error_invalidfileaccess);
             }
-            else if ((minst->heap->gs_lib_ctx->fstdout2 =
-                      gp_fopen(filename, "w")) == (FILE *)NULL)
-                return_error(gs_error_invalidfileaccess);
-            minst->heap->gs_lib_ctx->stdout_is_redirected = 1;
+            core->stdout_is_redirected = 1;
         }
         return 0;
     }
@@ -1098,7 +1245,12 @@ print_help(gs_main_instance * minst)
         const char *dname = iodev->dname;
 
         if (dname && strlen(dname) == 5 && !memcmp("%rom%", dname, 5)) {
-            have_rom_device = 1;
+            struct stat pstat;
+            /* gs_error_unregistered means no usable romfs is available */
+            int code = iodev->procs.file_status((gx_io_device *)iodev, dname, &pstat);
+            if (code != gs_error_unregistered){
+                have_rom_device = 1;
+            }
             break;
         }
     }

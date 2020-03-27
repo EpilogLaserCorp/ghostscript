@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /* Canon LBP-8II and LIPS III driver */
@@ -40,7 +40,6 @@ problems
 
 #define X_DPI 300
 #define Y_DPI 300
-#define LINE_SIZE ((X_DPI * 85 / 10 + 7) / 8)	/* bytes per line */
 
 /* The device descriptors */
 static dev_proc_print_page(lbp8_print_page);
@@ -102,25 +101,34 @@ static const char lips3_end[] = {
 
 /* Send the page to the printer.  */
 static int
-can_print_page(gx_device_printer *pdev, FILE *prn_stream,
+can_print_page(gx_device_printer *pdev, gp_file *prn_stream,
   const char *init, int init_size, const char *end, int end_size)
 {
-        char data[LINE_SIZE*2];
+        char *data;
         char *out_data;
         int last_line_nro = 0;
+        int line_size = gdev_mem_bytes_per_scan_line((gx_device *)pdev);
+        int code = 0;
 
-        fwrite(init, init_size, 1, prn_stream);		/* initialize */
+        data = (char *)gs_alloc_bytes(pdev->memory,
+                                      line_size*2,
+                                      "lbp8_line_buffer");
+        if (data == NULL)
+            return_error(gs_error_VMerror);
+
+        gp_fwrite(init, init_size, 1, prn_stream);		/* initialize */
 
         /* Send each scan line in turn */
         {
             int lnum;
-            int line_size = gdev_mem_bytes_per_scan_line((gx_device *)pdev);
             byte rmask = (byte)(0xff << (-pdev->width & 7));
 
             for ( lnum = 0; lnum < pdev->height; lnum++ ) {
-                char *end_data = data + LINE_SIZE;
-                gdev_prn_copy_scan_lines(pdev, lnum,
-                                         (byte *)data, line_size);
+                char *end_data = data + line_size;
+                code = gdev_prn_copy_scan_lines(pdev, lnum,
+                                               (byte *)data, line_size);
+                if (code < 0)
+                    goto xit;
                 /* Mask off 1-bits beyond the line width. */
                 end_data[-1] &= rmask;
                 /* Remove trailing 0s. */
@@ -133,8 +141,8 @@ can_print_page(gx_device_printer *pdev, FILE *prn_stream,
                     out_data = data;
 
                     /* move down */
-                    fprintf(prn_stream, "%c[%de",
-                            ESC, lnum-last_line_nro );
+                    gp_fprintf(prn_stream, "%c[%de",
+                               ESC, lnum-last_line_nro );
                     last_line_nro = lnum;
 
                     while (out_data < end_data) {
@@ -170,15 +178,15 @@ can_print_page(gx_device_printer *pdev, FILE *prn_stream,
                                 break;
 
                         /* move down and across*/
-                        fprintf(prn_stream, "%c[%d`",
-                                ESC, num_cols );
+                        gp_fprintf(prn_stream, "%c[%d`",
+                                   ESC, num_cols );
                         /* transfer raster graphic command */
-                        fprintf(prn_stream, "%c[%d;%d;300;.r",
-                                ESC, out_count, out_count);
+                        gp_fprintf(prn_stream, "%c[%d;%d;300;.r",
+                                   ESC, out_count, out_count);
 
                         /* send the row */
-                        fwrite(out_data, sizeof(char),
-                               out_count, prn_stream);
+                        gp_fwrite(out_data, sizeof(char),
+                                  out_count, prn_stream);
 
                         out_data += out_count+zero_count;
                         num_cols += 8*(out_count+zero_count);
@@ -188,18 +196,21 @@ can_print_page(gx_device_printer *pdev, FILE *prn_stream,
         }
 
         /* eject page */
-        fprintf(prn_stream, "%c=", ESC);
+        gp_fprintf(prn_stream, "%c=", ESC);
 
         /* terminate */
         if (end != NULL)
-            (void)fwrite(end, end_size, 1, prn_stream);
+            (void)gp_fwrite(end, end_size, 1, prn_stream);
 
-        return 0;
+xit:
+        gs_free_object(pdev->memory, data, "lbp8_line_buffer");
+
+        return code;
 }
 
 /* Print an LBP-8 page. */
 static int
-lbp8_print_page(gx_device_printer *pdev, FILE *prn_stream)
+lbp8_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
     return can_print_page(pdev, prn_stream, lbp8_init, sizeof(lbp8_init),
                               NULL, 0);
@@ -208,7 +219,7 @@ lbp8_print_page(gx_device_printer *pdev, FILE *prn_stream)
 #ifdef NOCONTRIB
 /* Print a LIPS III page. */
 static int
-lips3_print_page(gx_device_printer *pdev, FILE *prn_stream)
+lips3_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {	return can_print_page(pdev, prn_stream, lips3_init, sizeof(lips3_init),
                               lips3_end, sizeof(lips3_end));
 }

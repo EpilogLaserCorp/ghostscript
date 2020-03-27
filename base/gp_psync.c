@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,13 +9,14 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
 /* POSIX pthreads threads / semaphore / monitor implementation */
 #include "std.h"
+#include "string_.h"
 #include "malloc_.h"
 #include "unistd_.h" /* for __USE_UNIX98 */
 #include <pthread.h>
@@ -65,12 +66,29 @@ gp_semaphore_open(gp_semaphore * sema)
     pt_semaphore_t * const sem = (pt_semaphore_t *)sema;
     int scode;
 
+#ifdef MEMENTO
+    if (Memento_squeezing()) {
+         /* If squeezing, we nobble all the locking functions to do nothing.
+          * We also ensure we never actually create threads (elsewhere),
+          * so this is still safe. */
+        memset(&sem->mutex, 0, sizeof(sem->mutex));
+        memset(&sem->cond, 0, sizeof(sem->cond));
+        return 0;
+    }
+#endif
+
     if (!sema)
         return -1;		/* semaphores are not movable */
     sem->count = 0;
     scode = pthread_mutex_init(&sem->mutex, NULL);
     if (scode == 0)
+    {
         scode = pthread_cond_init(&sem->cond, NULL);
+        if (scode)
+            pthread_mutex_destroy(&sem->mutex);
+    }
+    if (scode)
+        memset(sem, 0, sizeof(*sem));
     return SEM_ERROR_CODE(scode);
 }
 
@@ -79,6 +97,11 @@ gp_semaphore_close(gp_semaphore * sema)
 {
     pt_semaphore_t * const sem = (pt_semaphore_t *)sema;
     int scode, scode2;
+
+#ifdef MEMENTO
+    if (Memento_squeezing())
+        return 0;
+#endif
 
     scode = pthread_cond_destroy(&sem->cond);
     scode2 = pthread_mutex_destroy(&sem->mutex);
@@ -92,6 +115,15 @@ gp_semaphore_wait(gp_semaphore * sema)
 {
     pt_semaphore_t * const sem = (pt_semaphore_t *)sema;
     int scode, scode2;
+
+#ifdef MEMENTO
+    if (Memento_squeezing()) {
+         /* If squeezing, we nobble all the locking functions to do nothing.
+          * We also ensure we never actually create threads (elsewhere),
+          * so this is still safe. */
+        return 0;
+    }
+#endif
 
     scode = pthread_mutex_lock(&sem->mutex);
     if (scode != 0)
@@ -114,6 +146,11 @@ gp_semaphore_signal(gp_semaphore * sema)
 {
     pt_semaphore_t * const sem = (pt_semaphore_t *)sema;
     int scode, scode2;
+
+#ifdef MEMENTO
+    if (Memento_squeezing())
+        return 0;
+#endif
 
     scode = pthread_mutex_lock(&sem->mutex);
     if (scode != 0)
@@ -162,6 +199,12 @@ gp_monitor_open(gp_monitor * mona)
     if (!mona)
         return -1;		/* monitors are not movable */
 
+#ifdef MEMENTO
+    if (Memento_squeezing()) {
+         memset(mona, 0, sizeof(*mona));
+         return 0;
+    }
+#endif
 
 #ifdef GS_RECURSIVE_MUTEXATTR
     attrp = &attr;
@@ -191,6 +234,11 @@ gp_monitor_close(gp_monitor * mona)
     pthread_mutex_t * const mon = &((gp_pthread_recursive_t *)mona)->mutex;
     int scode;
 
+#ifdef MEMENTO
+    if (Memento_squeezing())
+         return 0;
+#endif
+
     scode = pthread_mutex_destroy(mon);
     return SEM_ERROR_CODE(scode);
 }
@@ -200,6 +248,12 @@ gp_monitor_enter(gp_monitor * mona)
 {
     pthread_mutex_t * const mon = (pthread_mutex_t *)mona;
     int scode;
+
+#ifdef MEMENTO
+    if (Memento_squeezing()) {
+         return 0;
+    }
+#endif
 
 #ifdef GS_RECURSIVE_MUTEXATTR
     scode = pthread_mutex_lock(mon);
@@ -230,6 +284,11 @@ gp_monitor_leave(gp_monitor * mona)
 {
     pthread_mutex_t * const mon = (pthread_mutex_t *)mona;
     int scode = 0;
+
+#ifdef MEMENTO
+    if (Memento_squeezing())
+         return 0;
+#endif
 
 #ifdef GS_RECURSIVE_MUTEXATTR
     scode = pthread_mutex_unlock(mon);
@@ -278,12 +337,20 @@ gp_thread_begin_wrapper(void *thread_data /* gp_thread_creation_closure_t * */)
 int
 gp_create_thread(gp_thread_creation_callback_t proc, void *proc_data)
 {
-    gp_thread_creation_closure_t *closure =
-        (gp_thread_creation_closure_t *)malloc(sizeof(*closure));
+    gp_thread_creation_closure_t *closure;
     pthread_t ignore_thread;
     pthread_attr_t attr;
     int code;
 
+#ifdef MEMENTO
+    if (Memento_squeezing()) {
+        eprintf("Can't create threads when memory squeezing with forks\n");
+        Memento_bt();
+        return_error(gs_error_VMerror);
+    }
+#endif
+
+    closure = (gp_thread_creation_closure_t *)malloc(sizeof(*closure));
     if (!closure)
         return_error(gs_error_VMerror);
     closure->proc = proc;
@@ -331,4 +398,30 @@ void gp_thread_finish(gp_thread_id thread)
     if (thread == NULL)
         return;
     pthread_join((pthread_t)thread, NULL);
+}
+
+void (gp_monitor_label)(gp_monitor * mona, const char *name)
+{
+    pthread_mutex_t * const mon = &((gp_pthread_recursive_t *)mona)->mutex;
+
+    (void)mon;
+    (void)name;
+    Bobbin_label_mutex(mon, name);
+}
+
+void (gp_semaphore_label)(gp_semaphore * sema, const char *name)
+{
+    pt_semaphore_t * const sem = (pt_semaphore_t *)sema;
+
+    (void)sem;
+    (void)name;
+    Bobbin_label_mutex(&sem->mutex, name);
+    Bobbin_label_cond(&sem->cond, name);
+}
+
+void (gp_thread_label)(gp_thread_id thread, const char *name)
+{
+    (void)thread;
+    (void)name;
+    Bobbin_label_thread((pthread_t)thread, name);
 }

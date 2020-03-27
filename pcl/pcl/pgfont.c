@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -149,7 +149,7 @@ hpgl_dl_char_metrics(const pl_font_t * plfont, const void *pgs,
 
 /* Add a symbol to the path. */
 static int
-hpgl_stick_arc_build_char(gs_show_enum * penum, gs_state * pgs,
+hpgl_stick_arc_build_char(gs_show_enum * penum, gs_gstate * pgs,
                           gs_font * pfont, gs_glyph uni_code,
                           hpgl_font_type_t font_type)
 {
@@ -160,10 +160,14 @@ hpgl_stick_arc_build_char(gs_show_enum * penum, gs_state * pgs,
     /* we assert the font is present at this point */
     width = hpgl_stick_arc_width(uni_code, font_type);
 
-    gs_setcharwidth(penum, pgs, width / 1024.0 * 0.667, 0.0);
+    code = gs_setcharwidth(penum, pgs, width / 1024.0 * 0.667, 0.0);
+    if (code < 0)
+        return code;
     gs_currentmatrix(pgs, &save_ctm);
     gs_scale(pgs, 1.0 / 1024.0 * .667, 1.0 / 1024.0 * .667);
-    gs_moveto(pgs, 0.0, 0.0);
+    code = gs_moveto(pgs, 0.0, 0.0);
+    if (code < 0)
+        return code;
     code =
         hpgl_stick_arc_segments(pfont->memory, (void *)pgs, uni_code,
                                 font_type);
@@ -172,28 +176,38 @@ hpgl_stick_arc_build_char(gs_show_enum * penum, gs_state * pgs,
     gs_setdefaultmatrix(pgs, NULL);
     gs_initmatrix(pgs);
     /* Set predictable join and cap styles. */
-    gs_setlinejoin(pgs, gs_join_round);
-    gs_setmiterlimit(pgs, 2.61);        /* start beveling at 45 degrees */
-    gs_setlinecap(pgs, gs_cap_round);
+    code = gs_setlinejoin(pgs, gs_join_round);
+    if (code < 0)
+        return code;
+    code = gs_setmiterlimit(pgs, 2.61);        /* start beveling at 45 degrees */
+    if (code < 0)
+        return code;
+    code = gs_setlinecap(pgs, gs_cap_round);
+    if (code < 0)
+        return code;
     {
         float pattern[1];
 
-        gs_setdash(pgs, pattern, 0, 0);
+        code = gs_setdash(pgs, pattern, 0, 0);
+        if (code < 0)
+            return code;
     }
-    gs_stroke(pgs);
+    code = gs_stroke(pgs);
+    if (code < 0)
+        return code;
     gs_setmatrix(pgs, &save_ctm);
     return 0;
 }
 
 static int
-hpgl_stick_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
+hpgl_stick_build_char(gs_show_enum * penum, gs_gstate * pgs, gs_font * pfont,
                       gs_char ignore_chr, gs_glyph uni_code)
 {
     return hpgl_stick_arc_build_char(penum, pgs, pfont, uni_code,
                                      HPGL_STICK_FONT);
 }
 static int
-hpgl_arc_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
+hpgl_arc_build_char(gs_show_enum * penum, gs_gstate * pgs, gs_font * pfont,
                     gs_char ignore_chr, gs_glyph uni_code)
 {
     return hpgl_stick_arc_build_char(penum, pgs, pfont, uni_code,
@@ -226,7 +240,7 @@ hpgl_fill_in_stick_arc_font(gs_font_base * pfont, long unique_id)
 }
 
 static int
-hpgl_531_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
+hpgl_531_build_char(gs_show_enum * penum, gs_gstate * pgs, gs_font * pfont,
                     gs_char ignore_chr, gs_glyph ccode)
 {
     gs_matrix save_ctm;
@@ -247,28 +261,42 @@ hpgl_531_build_char(gs_show_enum * penum, gs_state * pgs, gs_font * pfont,
         return -1;
 
     /* This certainly is wrong but the advance is always explicit */
-    gs_setcharwidth(penum, pgs, width.x / 1024.0 * 0.667, 0.0);
+    code = gs_setcharwidth(penum, pgs, width.x / 1024.0 * 0.667, 0.0);
+    if (code < 0)
+        return code;
     gs_currentmatrix(pgs, &save_ctm);
 
     /* the DL fonts are defined on a 32x32 grid */
     gs_scale(pgs, 1.0 / 32.0, 1.0 / 32.0);
 
-    gs_moveto(pgs, 0.0, 0.0);
+    code = gs_moveto(pgs, 0.0, 0.0);
+    if (code < 0)
+        return code;
     code = hpgl_531_segments(pfont->memory, (void *)pgs, cdata);
     if (code < 0)
         return code;
     gs_setdefaultmatrix(pgs, NULL);
     gs_initmatrix(pgs);
     /* Set predictable join and cap styles. */
-    gs_setlinejoin(pgs, gs_join_round);
-    gs_setmiterlimit(pgs, 2.61);        /* start beveling at 45 degrees */
-    gs_setlinecap(pgs, gs_cap_round);
+    code = gs_setlinejoin(pgs, gs_join_round);
+    if (code < 0)
+        return code;
+    code = gs_setmiterlimit(pgs, 2.61);        /* start beveling at 45 degrees */
+    if (code < 0)
+        return code;
+    code = gs_setlinecap(pgs, gs_cap_round);
+    if (code < 0)
+        return code;
     {
         float pattern[1];
 
-        gs_setdash(pgs, pattern, 0, 0);
+        code = gs_setdash(pgs, pattern, 0, 0);
+        if (code < 0)
+            return code;
     }
-    gs_stroke(pgs);
+    code = gs_stroke(pgs);
+    if (code < 0)
+        return code;
     gs_setmatrix(pgs, &save_ctm);
     return 0;
 }

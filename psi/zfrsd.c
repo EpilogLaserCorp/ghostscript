@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -49,13 +49,19 @@ zrsdparams(i_ctx_t *i_ctx_p)
     ref *pFilter;
     ref *pDecodeParms;
     int Intent = 0;
-    bool AsyncRead;
+    bool AsyncRead = false;
     ref empty_array, filter1_array, parms1_array;
     uint i;
-    int code;
+    int code = 0;
+
+    check_op(1);
+    if (!r_has_type(op, t_dictionary) && !r_has_type(op, t_null)) {
+        return_error(gs_error_typecheck);
+    }
 
     make_empty_array(&empty_array, a_readonly);
-    if (dict_find_string(op, "Filter", &pFilter) > 0) {
+    if (r_has_type(op, t_dictionary)
+        && dict_find_string(op, "Filter", &pFilter) > 0) {
         if (!r_is_array(pFilter)) {
             if (!r_has_type(pFilter, t_name))
                 return_error(gs_error_typecheck);
@@ -94,12 +100,13 @@ zrsdparams(i_ctx_t *i_ctx_p)
                 return_error(gs_error_typecheck);
         }
     }
-    code = dict_int_param(op, "Intent", 0, 3, 0, &Intent);
+    if (r_has_type(op, t_dictionary))
+        code = dict_int_param(op, "Intent", 0, 3, 0, &Intent);
     if (code < 0 && code != gs_error_rangecheck) /* out-of-range int is ok, use 0 */
         return code;
-    if ((code = dict_bool_param(op, "AsyncRead", false, &AsyncRead)) < 0
-        )
-        return code;
+    if (r_has_type(op, t_dictionary))
+        if ((code = dict_bool_param(op, "AsyncRead", false, &AsyncRead)) < 0)
+            return code;
     push(1);
     op[-1] = *pFilter;
     if (pDecodeParms)
@@ -370,7 +377,7 @@ make_aos(i_ctx_t *i_ctx_p, os_ptr op, int blk_sz, int blk_sz_last, uint file_sz)
     s_std_init(s, buf, aos_buf_size, &s_aos_procs, s_mode_read + s_mode_seek);
     s->state = (stream_state *)ss;
     s->file_offset = 0;
-    s->file_limit = max_long;
+    s->file_limit = S_FILE_LIMIT_MAX;
     s->close_at_eod = false;
     s->read_id = 1;
     make_stream_file(op, s, "r");
@@ -389,16 +396,16 @@ s_aos_available(stream *s, gs_offset_t *pl)
 static int
 s_aos_seek(register stream * s, gs_offset_t pos)
 {
-    uint end = s->srlimit - s->cbuf + 1;
+    uint end = s->cursor.r.limit - s->cbuf + 1;
     long offset = pos - s->position;
 
     if (offset >= 0 && offset <= end) {  /* Staying within the same buffer */
-        s->srptr = s->cbuf + offset - 1;
+        s->cursor.r.ptr = s->cbuf + offset - 1;
         return 0;
     }
     if (pos < 0 || pos > s->file_limit)
         return ERRC;
-    s->srptr = s->srlimit = s->cbuf - 1;
+    s->cursor.r.ptr = s->cursor.r.limit = s->cbuf - 1;
     s->end_status = 0;
     s->position = pos;
     return 0;
@@ -410,7 +417,7 @@ s_aos_reset(stream *s)
     /* PLRM definition of reset operator is strange. */
     /* Rewind the file and discard the buffer. */
     s->position = 0;
-    s->srptr = s->srlimit = s->cbuf - 1;
+    s->cursor.r.ptr = s->cursor.r.limit = s->cbuf - 1;
     s->end_status = 0;
 }
 
@@ -418,7 +425,7 @@ static int
 s_aos_flush(stream *s)
 {
     s->position = ((aos_state_t *)s->state)->file_sz;
-    s->srptr = s->srlimit = s->cbuf - 1;
+    s->cursor.r.ptr = s->cursor.r.limit = s->cbuf - 1;
     return 0;
 }
 

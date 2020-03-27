@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -320,7 +320,7 @@ px_str_to_gschars(px_args_t * par, px_state_t * pxs, gs_char * pchr)
 
 /* startup for the processing text */
 static int
-px_text_setup(gs_state * pgs, const gs_char * str, uint size,
+px_text_setup(gs_gstate * pgs, const gs_char * str, uint size,
               const float *x_widths, const float *y_widths,
               uint widths_size, gs_memory_t * mem, gs_text_enum_t ** ppte,
               bool to_path, bool can_cache)
@@ -334,6 +334,7 @@ px_text_setup(gs_state * pgs, const gs_char * str, uint size,
         text.operation |= TEXT_DO_TRUE_CHARPATH;
     else
         text.operation |= TEXT_DO_DRAW;
+    text.operation |= can_cache ? 0 : TEXT_NO_CACHE;
     text.data.chars = str;
     text.size = size;
     text.x_widths = x_widths;
@@ -343,12 +344,6 @@ px_text_setup(gs_state * pgs, const gs_char * str, uint size,
     if (code < 0)
         return code;
 
-    if (!can_cache) {
-        /* NB breaks API, needs a better solution. */
-        gs_show_enum *penum = (gs_show_enum *) * ppte;
-
-        penum->can_cache = -1;
-    }
     return code;
 }
 
@@ -360,7 +355,7 @@ int
 px_text(px_args_t * par, px_state_t * pxs, bool to_path)
 {
     gs_memory_t *mem = pxs->memory;
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     px_gstate_t *pxgs = pxs->pxgs;
     gs_text_enum_t *penum;
     const px_value_t *pstr = par->pv[0];
@@ -458,7 +453,8 @@ px_text(px_args_t * par, px_state_t * pxs, bool to_path)
 
         code = px_text_setup(pgs, pchr, len, fxvals, fyvals,
                              len, mem, &penum, to_path,
-                             pxgs->char_bold_value == 0);
+                             pxgs->char_bold_value == 0 &&
+                             plfont->allow_vertical_substitutes == 0);
 
         if (code >= 0) {
             code = gs_text_process(penum);
@@ -490,6 +486,8 @@ pxSetFont(px_args_t * par, px_state_t * pxs)
     int code;
 
     if (!par->pv[3]) {
+         if (!par->pv[0] || !par->pv[1] || !par->pv[2])
+             return gs_note_error(errorMissingAttribute);
         pfnv = par->pv[0];
         /* force "find_font" to fail if the symbol set is not
            specified */
@@ -756,7 +754,7 @@ pxReadChar(px_args_t * par, px_state_t * pxs)
                         if (data)
                             memmove(data + bmp_offset, data + 10, bmp_size);
                         else
-                            code = 1;
+                            code = gs_note_error(errorInsufficientMemory);
                     }
                 }
                 break;
@@ -772,7 +770,8 @@ pxReadChar(px_args_t * par, px_state_t * pxs)
                 code = gs_note_error(errorUnsupportedCharacterFormat);
         }
         if (code >= 0) {
-            code = pl_font_add_glyph(pxs->download_font, char_code, (byte *) data);     /* const cast */
+            code = pl_font_add_glyph(pxs->download_font, char_code,
+                                    (byte *) data, pxs->download_bytes.size);     /* const cast */
             if (code < 0)
                 code = gs_note_error(errorInternalOverflow);
         }
@@ -818,6 +817,7 @@ pxRemoveFont(px_args_t * par, px_state_t * pxs)
             default:           /* downloaded */
                 ;
         }
+
     if (error) {                /* Construct a warning message including the font name. */
         char message[px_max_error_line + 1];
 
@@ -825,7 +825,17 @@ pxRemoveFont(px_args_t * par, px_state_t * pxs)
         px_concat_font_name(message, px_max_error_line, pfnv);
         code = px_record_warning(message, false, pxs);
     }
-        /****** WHAT IF THIS IS THE CURRENT FONT? ******/
-    px_dict_undef(&pxs->font_dict, par->pv[0]);
+
+    if (error == NULL && pxfont != NULL) {
+        /*
+         * If we're deleting the current font we have to update the
+         * graphics state.
+         */
+        if (pxfont->pfont == gs_currentfont(pxs->pgs))
+            gs_setfont(pxs->pgs, NULL);
+        
+        px_dict_undef(&pxs->font_dict, par->pv[0]);
+    }
+
     return code;
 }

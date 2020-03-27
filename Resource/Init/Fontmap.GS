@@ -1,4 +1,4 @@
-% Copyright (C) 2001-2012 Artifex Software, Inc.
+% Copyright (C) 2001-2019 Artifex Software, Inc.
 % All Rights Reserved.
 %
 % This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
 % of the license contained in the file LICENSE in this distribution.
 %
 % Refer to licensing information at http://www.artifex.com or contact
-% Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-% CA  94903, U.S.A., +1(415)492-9861, for further information.
+% Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+% CA 94945, U.S.A., +1(415)492-9861, for further information.
 %
 
 % Fontmap - standard font catalog for Ghostscript.
@@ -32,11 +32,9 @@
 %	- Information depending on whether this is a real font or a
 %	font alias:
 %
-%		- For real fonts, the name of the Ghostscript font
-%		file (a Ghostscript string, enclosed in parentheses).
-%		The filename should include the extension, which (by
-%		convention) is `.gsf'.  `.pfa' and `.pfb' files are
-%		also usable as fonts for Ghostscript.
+%		- For real fonts, `PFA', `PFB', 'CFF', 'TTF,
+%               'TTC' (see below) files are usable as fonts for
+%               Ghostscript.
 %
 %		- For font aliases, the name of the font which should
 %		be used when this one is requested, preceded by a
@@ -44,6 +42,30 @@
 %		Note that an alias name cannot be enclosed in parentheses.
 %
 %	- At least one space or tab, and a terminating semicolon.
+
+%
+%
+%	There are three forms of record:
+%		Substitute a font by name:
+%			/FontName	/SubstituteFont ;
+%		Substitute a font with a file:
+%			/FontName	(/path/to/font/file) ;
+%		Substitute a font with a font from a Truetype collection:
+%			/FontName	<< /Path (/path/to/font/file) /SubfontID <ttc-index> >> ;
+%
+%	Substituting a font with a file can either use the full path form, for example:
+%			/CenturySchL-Ital (/usr/share/fonts/type1/gsfonts/c059033l.pfb) ;
+%	Or rely on the Ghostscript font search path:
+%			/CenturySchL-Ital (c059033l.pfb) ;
+%
+%
+%	The dictionary form can be used to substitute a font with an individual font from a Truetype
+%	collection:
+%			/NSimSun	<< /Path (/home/user/fonts/simsun.ttc) /SubfontID 1>> ;
+%	If the target is not a TTC, the SubfontID entry is ignored.
+%
+%	NOTE: The font name (the entry in first column) must match the name of the TTC index. As
+%	in the above example, index 0 in simsun.ttc must be /SimSun and index 1 must be /NSimSin.
 
 % The following table is executed as a PostScript file.
 % If you add new entries, be sure to copy the punctuation accurately;
@@ -81,51 +103,41 @@
 
 % Aliases
 
-/Bookman-Demi			/BookmanURW-DemBol	;
-/Bookman-DemiItalic		/BookmanURW-DemBolIta	;
-/Bookman-Light			/BookmanURW-Lig	;
-/Bookman-LightItalic		/BookmanURW-LigIta	;
-
-/Courier			/NimbusMono-Regular	;
-/Courier-Oblique		/NimbusMono-Oblique	;
-/Courier-Bold			/NimbusMono-Bold	;
-/Courier-BoldOblique		/NimbusMono-BoldOblique	;
-
-/AvantGarde-Book		/URWGothic-Boo	;
-/AvantGarde-BookOblique		/URWGothic-BooObl	;
-/AvantGarde-Demi		/URWGothic-Dem	;
-/AvantGarde-DemiOblique		/URWGothic-DemObl	;
-
-/Helvetica			/NimbusSanL-Reg	;
-/Helvetica-Oblique		/NimbusSanL-RegIta	;
-/Helvetica-Bold			/NimbusSanL-Bol	;
-/Helvetica-BoldOblique		/NimbusSanL-BolIta	;
-
-/Helvetica-Narrow		/NimbusSanNar-Reg	;
-/Helvetica-Narrow-Oblique	/NimbusSanNar-Ita	;
-/Helvetica-Narrow-Bold		/NimbusSanNar-Bol	;
-/Helvetica-Narrow-BoldOblique	/NimbusSanNar-BolIta	;
-
-/Palatino-Roman			/PalladioURW-Rom	;
-/Palatino-Italic		/PalladioURW-Ita	;
-/Palatino-Bold			/PalladioURW-Bol	;
-/Palatino-BoldItalic		/PalladioURW-BolIta	;
-
-/NewCenturySchlbk-Roman		/CenturySchURW-Rom	;
-/NewCenturySchlbk-Italic	/CenturySchURW-Ita	;
-/NewCenturySchlbk-Bold		/CenturySchURW-Bol	;
-/NewCenturySchlbk-BoldItalic	/CenturySchURW-BolIta	;
-
-/Times-Roman			/NimbusRomNo9L-Reg	;
-/Times-Italic			/NimbusRomNo9L-RegIta	;
-/Times-Bold			/NimbusRomNo9L-Med	;
-/Times-BoldItalic		/NimbusRomNo9L-MedIta	;
-
-/Symbol				/StandardSymL	;
-
-/ZapfChancery-MediumItalic	/ChanceryURW-MedIta	;
-
-/ZapfDingbats			/Dingbats	;
+/AvantGarde-BookOblique		/URWGothic-BookOblique    ;
+/AvantGarde-Book		/URWGothic-Book        ;
+/AvantGarde-DemiOblique		/URWGothic-DemiOblique    ;
+/AvantGarde-Demi		/URWGothic-Demi        ;
+/Bookman-DemiItalic		/URWBookman-DemiItalic	;
+/Bookman-Demi			/URWBookman-Demi	;
+/Bookman-LightItalic		/URWBookman-LightItalic	;
+/Bookman-Light			/URWBookman-Light	;
+/Courier-Bold			/NimbusMonoPS-Bold	;
+/Courier-BoldOblique		/NimbusMonoPS-BoldItalic	;
+/Courier			/NimbusMonoPS-Regular	;
+/Courier-Oblique		/NimbusMonoPS-Italic	;
+/Helvetica-Bold			/NimbusSans-Bold ;
+/Helvetica-BoldOblique		/NimbusSans-BoldItalic      ;
+/Helvetica-Narrow-Bold		/NimbusSansNarrow-Bold    ;
+/Helvetica-Narrow-BoldOblique	/NimbusSansNarrow-BoldOblique        ;
+/Helvetica-Narrow		/NimbusSansNarrow-Regular    ;
+/Helvetica-Narrow-Oblique	/NimbusSansNarrow-Oblique        ;
+/Helvetica			/NimbusSans-Regular ;
+/Helvetica-Oblique		/NimbusSans-Italic      ;
+/NewCenturySchlbk-Bold		/C059-Bold	;
+/NewCenturySchlbk-BoldItalic	/C059-BdIta	;
+/NewCenturySchlbk-Italic	/C059-Italic	;
+/NewCenturySchlbk-Roman		/C059-Roman	;
+/Palatino-BoldItalic		/P052-BoldItalic	;
+/Palatino-Bold			/P052-Bold	;
+/Palatino-Italic		/P052-Italic	;
+/Palatino-Roman			/P052-Roman	;
+/Symbol				/StandardSymbolsPS	;
+/Times-BoldItalic		/NimbusRoman-BoldItalic	;
+/Times-Bold			/NimbusRoman-Bold	;
+/Times-Italic			/NimbusRoman-Italic	;
+/Times-Roman			/NimbusRoman-Regular	;
+/ZapfChancery-MediumItalic	/Z003-MediumItalic	;
+/ZapfDingbats			/D050000L	;
 
 % 
 %
@@ -350,4 +362,3 @@
 /TimesNewRoman,Bold			/TimesNewRomanPS-BoldMT		;
 /TimesNewRoman,Italic			/TimesNewRomanPS-ItalicMT	;
 /TimesNewRoman,BoldItalic		/TimesNewRomanPS-BoldItalicMT	;
-

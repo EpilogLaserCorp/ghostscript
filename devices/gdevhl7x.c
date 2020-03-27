@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 /*
@@ -108,7 +108,7 @@ typedef struct {
 
 typedef struct {
   short  previousSize;
-  Byte   previousData[1500]; /* Size bigger than any possible line */
+  Byte*  previousData;
   short  nbBlankLines;
   short  nbLinesSent;
   short  pageWidth;
@@ -139,7 +139,9 @@ static int dumpPage(gx_device_printer * pSource,
                       ByteList          * pCommandList,
                       Summary           * pSummary
                       );
-static void initSummary(Summary * s,short pw, short ph, short resolution);
+static int initSummary(gx_device_printer* pdev, Summary * s,short pw, short ph, short resolution);
+
+static void freeSummary(gx_device_printer* pdev, Summary * s);
 
 static void resetPreviousData(Summary * s);
 
@@ -161,11 +163,11 @@ static Byte * currentPosition(ByteList * list);
 static void addCodedNumber(ByteList * list, short number);
 static int isThereEnoughRoom(ByteList * list, short biggest);
 static short roomLeft(ByteList * list);
-static void dumpToPrinter(ByteList * list,FILE * printStream);
+static void dumpToPrinter(ByteList * list,gp_file * printStream);
 
 /* Real Print function */
 
-static int hl7x0_print_page(gx_device_printer *, FILE *, int, int, ByteList *);
+static int hl7x0_print_page(gx_device_printer *, gp_file *, int, int, ByteList *);
 
 /* Define the default, maximum resolutions. */
 #ifdef X_DPI
@@ -184,6 +186,7 @@ static int hl7x0_print_page(gx_device_printer *, FILE *, int, int, ByteList *);
 #define LETTER_WIDTH 5100
 #define LEFT_MARGIN  30
 /* The following table is not actually used.... */
+#if 0
 static const PaperFormat tableOfFormats[] = {
     /*  0 P LETTER */ { 2550, 3300 },
     /*  1 P LEGAL  */ { 2550, 4200 },
@@ -209,6 +212,7 @@ static const PaperFormat tableOfFormats[] = {
     /* 20 L C5     */ { 2704, 1913 },
     /* 21 L A4Long */ { 4783, 2480 }
 };
+#endif
 
 /* Compute the maximum length of a compressed line */
 static short MaxLineLength(short resolution){
@@ -242,7 +246,6 @@ return (((156 * resolution / 150 ) * 5 )/4) + 8;
 static dev_proc_open_device(hl7x0_open);
 static dev_proc_close_device(hl7x0_close);
 static dev_proc_print_page(hl720_print_page);
-static dev_proc_print_page(hl730_print_page);
 
 /* Since the print_page doesn't alter the device, this device can print in the background */
 static const gx_device_procs prn_hl_procs =
@@ -279,7 +282,7 @@ hl7x0_close(gx_device *pdev)
 
     if (code < 0)
         return code;
-    fputs("@N@N@N@N@X", ppdev->file) ;
+    gp_fputs("@N@N@N@N@X", ppdev->file) ;
     return gdev_prn_close_printer(pdev);
 }
 
@@ -287,7 +290,7 @@ hl7x0_close(gx_device *pdev)
 
 /* The HL 720 can compress*/
 static int
-hl720_print_page(gx_device_printer *pdev, FILE *prn_stream)
+hl720_print_page(gx_device_printer *pdev, gp_file *prn_stream)
 {
         Byte prefix[] ={
    0x1B,'%','-','1','2','3','4','5','X'
@@ -311,18 +314,14 @@ hl720_print_page(gx_device_printer *pdev, FILE *prn_stream)
         return hl7x0_print_page(pdev, prn_stream, HL720, 300,
                &initCommand);
 }
-/* The HL 730 can compress  */
-static int
-hl730_print_page(gx_device_printer *pdev, FILE *prn_stream)
-{	return hl720_print_page(pdev, prn_stream);
-}
 
 /* Send the page to the printer.  For speed, compress each scan line, */
 /* since computer-to-printer communication time is often a bottleneck. */
 static int
-hl7x0_print_page(gx_device_printer *pdev, FILE *printStream, int ptype,
+hl7x0_print_page(gx_device_printer *pdev, gp_file *printStream, int ptype,
   int dots_per_inch, ByteList *initCommand)
 {
+  int code;
         /* UTILE*/
   /* Command for a formFeed (we can't use strings because of the zeroes...)*/
   Byte FormFeed[] = {'@','G',0x00,0x00,0x01,0xFF,'@','F'};
@@ -342,12 +341,17 @@ hl7x0_print_page(gx_device_printer *pdev, FILE *printStream, int ptype,
         /* bool dupset = pdev->Duplex_set >= 0; */
         Summary pageSummary;
         ByteList commandsBuffer;
-        initSummary(&pageSummary,
+        if ( storage == 0 )	/* can't allocate working area */
+                return_error(gs_error_VMerror);
+        code = initSummary(pdev,
+                    &pageSummary,
                     line_size,
                     num_rows,
                     x_dpi);
-        if ( storage == 0 )	/* can't allocate working area */
-                return_error(gs_error_VMerror);
+        if (code < 0) {
+            gs_free(pdev->memory, (char *)storage, storage_size_words, 1, "hl7X0_print_page");
+            return code;
+        }
         initByteList(&commandsBuffer, storage, sizeOfBuffer,0 );
         /* PLUS A MOI */
         if ( pdev->PageCount == 0 )
@@ -362,9 +366,11 @@ hl7x0_print_page(gx_device_printer *pdev, FILE *printStream, int ptype,
                             storage + sizeOfBuffer, /* The line buffer is after the dump buffer */
                             &commandsBuffer,
                             &pageSummary);
+            if (result < 0)
+                goto xit;
           dumpToPrinter(&commandsBuffer,printStream);
 
-        } while (result == DumpContinue);
+        } while (result == DumpContinue);	/* NB: at end  of page, result will be DumpFinished == 0 */
 
         /* end raster graphics and eject page */
         initByteList(&formFeedCommand,
@@ -373,10 +379,12 @@ hl7x0_print_page(gx_device_printer *pdev, FILE *printStream, int ptype,
                      sizeof(FormFeed)); /* First free byte */
         dumpToPrinter(&formFeedCommand, printStream);
 
+xit:
         /* free temporary storage */
+        freeSummary(pdev, &pageSummary);
         gs_free(pdev->memory, (char *)storage, storage_size_words, 1, "hl7X0_print_page");
 
-        return 0; /* If we reach this line, it means there was no error */
+        return result; /* If we reach this line, it means there was no error */
 }
 
 /*
@@ -417,14 +425,23 @@ return (((LETTER_WIDTH * resolution/600 - pixWidth) + pixOffset * 2) + 7) / 8;
 /*
  * First values in a Summary
  */
-static void initSummary(Summary * s,short pw, short ph, short resolution){
+static int initSummary(gx_device_printer* pdev, Summary * s,short pw, short ph, short resolution){
   s->previousSize = -1 ;
+  s->previousData = gs_malloc(pdev->memory, pw, 1, "initSummary");
   s->nbBlankLines = 1;
   s->nbLinesSent = 0;
   s->pageWidth = pw; /* In Bytes */
   s->pageHeight = ph;
   s->horizontalOffset = horizontalOffset( pw * 8,LEFT_MARGIN, resolution) ;
   s->resolution = resolution;
+  if (!s->previousData) {
+    return_error(gs_error_VMerror);
+  }
+  return 0;
+}
+
+static void freeSummary(gx_device_printer* pdev, Summary * s) {
+  gs_free(pdev->memory, s->previousData, s->pageWidth, 1, "freeSummary");
 }
 
 /*
@@ -449,6 +466,8 @@ static int dumpPage(gx_device_printer * pSource,
   short  lineNB;
   short usefulLength;
   short tmpLength;
+  int code = 0;
+
   /* Initializations */
   /* Make room for size of commands buffer */
   pSaveCommandStart = currentPosition(pCommandList);
@@ -458,10 +477,12 @@ static int dumpPage(gx_device_printer * pSource,
   for (lineNB = pSummary->nbLinesSent /*ERROR? + nbBlankLines */ ;
        lineNB < pSummary->pageHeight ; lineNB ++ ) {
     /* Fetch the line and put it into the buffer */
-    gdev_prn_copy_scan_lines(pSource,
+    code = gdev_prn_copy_scan_lines(pSource,
                              lineNB,
                              pLineTmp,
                              pSummary->pageWidth);
+    if (code < 0)
+        return code;
 
     usefulLength =  stripTrailingBlanks(pLineTmp,pSummary->pageWidth);
     if (usefulLength != 0) {
@@ -540,7 +561,7 @@ static int dumpPage(gx_device_printer * pSource,
     short size = pCommandList->current - HL7X0_LENGTH;
     *(pSaveCommandStart++)  = '@';
     *(pSaveCommandStart++)  = 'G';
-    *(pSaveCommandStart++)  = (Byte) (size >> 16);
+    *(pSaveCommandStart++)  = 0;                    /* was: (Byte) (size >> 16) as per hte spec, but shorts cannot exceed 16 bits! */
     *(pSaveCommandStart++)  = (Byte) (size >> 8);
     *(pSaveCommandStart++)  = (Byte) (size);
   }
@@ -1002,13 +1023,13 @@ static short roomLeft(ByteList * list){
  * Dump all commands to the printer and reset the structure
  *
  */
-static void dumpToPrinter(ByteList * list,FILE * printStream){
+static void dumpToPrinter(ByteList * list,gp_file * printStream){
   short loopCounter;
   /* Actual dump */
   /* Please note that current is the first empty byte */
   for (loopCounter = 0; loopCounter < list->current; loopCounter++)
     {
-      fputc(list->data[loopCounter],printStream);
+      gp_fputc(list->data[loopCounter],printStream);
     }
 
   /* Reset of the ByteList */

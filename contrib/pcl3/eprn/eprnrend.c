@@ -44,12 +44,6 @@
 
 ******************************************************************************/
 
-/* Configuration management identification */
-#ifndef lint
-static const char
-  cm_id[] = "@(#)$Id: eprnrend.c,v 1.15 2001/08/01 05:12:56 Martin Rel $";
-#endif
-
 /*****************************************************************************/
 
 #ifndef _XOPEN_SOURCE
@@ -166,7 +160,6 @@ gx_color_index eprn_map_rgb_color_for_RGB(gx_device *device,
   gx_color_value red = cv[0], green = cv[1], blue = cv[2];
   static const gx_color_value half = gx_max_color_value/2;
   gx_color_index value = 0;
-  const eprn_Device *dev = (eprn_Device *)device;
 
 #ifdef EPRN_TRACE
   if_debug3(EPRN_TRACE_CHAR,
@@ -174,7 +167,7 @@ gx_color_index eprn_map_rgb_color_for_RGB(gx_device *device,
     red, green, blue);
 #endif
 
-  assert(dev->eprn.colour_model == eprn_DeviceRGB);
+  assert(((eprn_Device *)device)->eprn.colour_model == eprn_DeviceRGB);
 
   if (red   > half) value |= RED_BIT;
   if (green > half) value |= GREEN_BIT;
@@ -211,10 +204,10 @@ gx_color_index eprn_map_rgb_color_for_CMY_or_K(gx_device *device,
     red, green, blue);
 #endif
 
-  assert(dev->eprn.colour_model == eprn_DeviceGray && red == green &&
-      green == blue && (blue == 0 || blue == gx_max_color_value) ||
-    dev->eprn.colour_model == eprn_DeviceCMY ||
-    dev->eprn.colour_model == eprn_DeviceCMY_plus_K);
+  assert((dev->eprn.colour_model == eprn_DeviceGray && red == green &&
+          green == blue && (blue == 0 || blue == gx_max_color_value)) ||
+         dev->eprn.colour_model == eprn_DeviceCMY ||
+         dev->eprn.colour_model == eprn_DeviceCMY_plus_K);
 
   /* Map to CMY */
   if (red   > half) value &= ~CYAN_BIT;
@@ -247,7 +240,7 @@ gx_color_index eprn_map_rgb_color_for_RGB_flex(gx_device *device,
   gx_color_value red = cv[0], green = cv[1], blue = cv[2];
   gx_color_index value = 0;
   gx_color_value step;
-  unsigned int level;
+  gx_color_index level;
   const eprn_Eprn *eprn = &((eprn_Device *)device)->eprn;
 
 #ifdef EPRN_TRACE
@@ -473,7 +466,7 @@ gx_color_index eprn_map_cmyk_color_flex(gx_device *device,
   gx_color_value cyan = cv[0], magenta = cv[1], yellow = cv[2], black = cv[3];
   gx_color_index value = 0;
   gx_color_value step;
-  unsigned int level;
+  gx_color_index level;
   const eprn_Eprn *eprn = &((eprn_Device *)device)->eprn;
 
 #ifdef EPRN_TRACE
@@ -730,13 +723,13 @@ static void split_line_le8(eprn_Device *dev, const eprn_Octet *line,
        */
       comp = pixel & comp_mask;	/* black */
       for (j = 0; j < black_planes; j++) {
-        *ptr[j] = (*ptr[j] << 1) | comp & 1;
+        *ptr[j] = (*ptr[j] << 1) | (comp & 1);
         comp >>= 1;
       }
       if (non_black_planes > 0) for (l = 1; l < 4; l++) {
         comp = (pixel >> l*dev->eprn.bits_per_colorant) & comp_mask;
         for (m = 0; m < non_black_planes; m++, j++) {
-          *ptr[j] = (*ptr[j] << 1) | comp & 1;
+          *ptr[j] = (*ptr[j] << 1) | (comp & 1);
           comp >>= 1;
         }
       }
@@ -819,13 +812,13 @@ static void split_line_ge8(eprn_Device *dev, const eprn_Octet *line,
     /* Split and distribute over planes */
     comp = pixel & comp_mask;	/* black */
     for (j = 0; j < black_planes; j++) {
-      *ptr[j] = (*ptr[j] << 1) | comp & 1;
+      *ptr[j] = (*ptr[j] << 1) | (comp & 1);
       comp >>= 1;
     }
     for (l = 1; l < 4; l++) {
       comp = (pixel >> l*dev->eprn.bits_per_colorant) & comp_mask;
       for (m = 0; m < non_black_planes; m++, j++) {
-        *ptr[j] = (*ptr[j] << 1) | comp & 1;
+        *ptr[j] = (*ptr[j] << 1) | (comp & 1);
         comp >>= 1;
       }
     }
@@ -953,9 +946,9 @@ static void split_line_4x2(eprn_Device *dev, const eprn_Octet *line,
     pixel = line[k];
 
     /* Split and distribute over planes */
-    *ptr[0] = (*ptr[0] << 1) | pixel & 0x01;
+    *ptr[0] = (*ptr[0] << 1) | (pixel & 0x01);
 #define assign_bit(index) \
-        *ptr[index] = (*ptr[index] << 1) | (pixel >> index) & 0x01
+    *ptr[index] = (*ptr[index] << 1) | ((pixel >> index) & 0x01)
     assign_bit(1);
     assign_bit(2);
     assign_bit(3);

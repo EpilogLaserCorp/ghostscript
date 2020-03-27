@@ -1,5 +1,22 @@
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
+   All Rights Reserved.
+
+   This software is provided AS-IS with no warranty, either express or
+   implied.
+
+   This software is distributed under license and may not be copied,
+   modified or distributed except as expressly authorized under the terms
+   of the license contained in the file LICENSE in this distribution.
+
+   Refer to licensing information at http://www.artifex.com or contact
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
+*/
+
 #ifndef __RAMFS_H__
 #define __RAMFS_H__
+
+#include "stream.h"
 
 #define RAMFS_BLOCKSIZE 1024
 
@@ -29,11 +46,12 @@ typedef struct _ramfs_enum ramfs_enum;
 #define RAMFS_NOSPACE 7
 
 /* Open mode flags */
-#define RAMFS_READ 1
-#define RAMFS_CREATE 2
-#define RAMFS_WRITE 4
-#define RAMFS_TRUNC 8
-#define RAMFS_APPEND 16
+#define RAMFS_READ   s_mode_read      /* 1 */
+#define RAMFS_WRITE  s_mode_write    /* 2 */
+#define RAMFS_SEEK   s_mode_seek      /* 4 */
+#define RAMFS_APPEND s_mode_append  /* 8 */
+#define RAMFS_CREATE 16
+#define RAMFS_TRUNC  32
 
 #define RAMFS_SEEK_SET 0
 #define RAMFS_SEEK_CUR 1

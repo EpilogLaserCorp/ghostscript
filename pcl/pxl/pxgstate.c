@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -124,7 +124,7 @@ px_gstate_client_alloc(gs_memory_t * mem)
 }
 
 static int
-px_gstate_client_copy_for(void *to, void *from, gs_state_copy_reason_t reason)
+px_gstate_client_copy_for(void *to, void *from, gs_gstate_copy_reason_t reason)
 {
 #define pxfrom ((px_gstate_t *)from)
 #define pxto ((px_gstate_t *)to)
@@ -213,7 +213,7 @@ px_gstate_client_free(void *old, gs_memory_t * mem)
     gs_free_object(mem, old, "px_gstate_free");
 }
 
-static const gs_state_client_procs px_gstate_procs = {
+static const gs_gstate_client_procs px_gstate_procs = {
     px_gstate_client_alloc,
     0,                          /* copy -- superseded by copy_for */
     px_gstate_client_free,
@@ -237,7 +237,7 @@ px_gstate_alloc(gs_memory_t * mem)
 
 /* Initialize a px_gstate_t. */
 void
-px_gstate_init(px_gstate_t * pxgs, gs_state * pgs)
+px_gstate_init(px_gstate_t * pxgs, gs_gstate * pgs)
 {
     pxgs->halftone.method = eDeviceBest;
     pxgs->halftone.set = false;
@@ -245,7 +245,7 @@ px_gstate_init(px_gstate_t * pxgs, gs_state * pgs)
     /* halftone.thresholds was initialized at alloc time */
     px_gstate_reset(pxgs);
     if (pgs)
-        gs_state_set_client(pgs, pxgs, &px_gstate_procs, true);
+        gs_gstate_set_client(pgs, pxgs, &px_gstate_procs, true);
 }
 
 /* Initialize the graphics state for a page. */
@@ -253,10 +253,12 @@ px_gstate_init(px_gstate_t * pxgs, gs_state * pgs)
 int
 px_initgraphics(px_state_t * pxs)
 {
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
+    int code;
 
     px_gstate_reset(pxs->pxgs);
-    gs_initgraphics(pgs);
+    code = gs_initgraphics(pgs);
+    if (code < 0) return code;
 
     gs_setfilladjust(pgs, 0.5, 0.5);
 
@@ -273,7 +275,8 @@ px_initgraphics(px_state_t * pxs)
 
         /* We need the H-P interpretation of zero-length lines */
         /* and of using bevel joins for the segments of flattened curves. */
-        gs_setdotlength(pgs, 72.0 / 300, true);
+        code = gs_setdotlength(pgs, 72.0 / 300, true);
+        if (code < 0) return code;
     }
     /* we always clamp coordinates hp does not seem to report
        limit checks in paths */
@@ -324,7 +327,7 @@ px_initclip(px_state_t * pxs)
 }
 
 static bool
-px_is_currentcolor_pattern(const gs_state * pgs)
+px_is_currentcolor_pattern(const gs_gstate * pgs)
 {
     return (gs_color_space_num_components(gs_currentcolorspace(pgs)) < 1);
 }
@@ -333,7 +336,7 @@ px_is_currentcolor_pattern(const gs_state * pgs)
 int
 px_image_color_space(gs_image_t * pim,
                      const px_bitmap_params_t * params,
-                     const gs_string * palette, const gs_state * pgs)
+                     const gs_string * palette, const gs_gstate * pgs)
 {
 
     int depth = params->depth;
@@ -345,12 +348,16 @@ px_image_color_space(gs_image_t * pim,
     switch (params->color_space) {
         case eGray:
             pbase_pcs = gs_cspace_new_DeviceGray(pgs->memory);
+            if (pbase_pcs == NULL)
+                return_error(errorInsufficientMemory);
             pbase_pcs->cmm_icc_profile_data = pgs->icc_manager->default_gray;
             pbase_pcs->type = &gs_color_space_type_ICC;
             rc_increment(pbase_pcs->cmm_icc_profile_data);
             break;
         case eRGB:
             pbase_pcs = gs_cspace_new_DeviceRGB(pgs->memory);
+            if (pbase_pcs == NULL)
+                return_error(errorInsufficientMemory);
             pbase_pcs->cmm_icc_profile_data = pgs->icc_manager->default_rgb;
             pbase_pcs->type = &gs_color_space_type_ICC;
             rc_increment(pbase_pcs->cmm_icc_profile_data);
@@ -358,6 +365,8 @@ px_image_color_space(gs_image_t * pim,
         case eSRGB:
             cie_space = true;
             pbase_pcs = gs_cspace_new_DeviceRGB(pgs->memory);
+            if (pbase_pcs == NULL)
+                return_error(errorInsufficientMemory);
             pbase_pcs->cmm_icc_profile_data = pgs->icc_manager->default_rgb;
             pbase_pcs->type = &gs_color_space_type_ICC;
             rc_increment(pbase_pcs->cmm_icc_profile_data);
@@ -365,8 +374,6 @@ px_image_color_space(gs_image_t * pim,
         default:
             return_error(errorIllegalAttributeValue);
     }
-    if (pbase_pcs == NULL)
-        return_error(errorInsufficientMemory);
 
     if (params->indexed) {
         pcs = gs_cspace_alloc(pgs->memory, &gs_color_space_type_Indexed);
@@ -402,7 +409,7 @@ px_image_color_space(gs_image_t * pim,
         pim->Decode[1] = (float)((1 << depth) - 1);
     /* NB - this needs investigation */
     if (cie_space && !px_is_currentcolor_pattern(pgs)) {
-        code = gs_setrgbcolor((gs_state *) pgs, 0.0, 0.0, 0.0);
+        code = gs_setrgbcolor((gs_gstate *) pgs, 0.0, 0.0, 0.0);
     }
     return code;
 }
@@ -431,7 +438,7 @@ const byte apxPopGS[] = { 0, 0 };
 int
 pxPopGS(px_args_t * par, px_state_t * pxs)
 {
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     px_gstate_t *pxgs = pxs->pxgs;
     int code;
 
@@ -449,7 +456,7 @@ pxPopGS(px_args_t * par, px_state_t * pxs)
     }
     px_purge_pattern_cache(pxs, eTempPattern);
     code = gs_grestore(pgs);
-    pxs->pxgs = gs_state_client_data(pgs);
+    pxs->pxgs = gs_gstate_client_data(pgs);
     return code;
 }
 
@@ -457,13 +464,13 @@ const byte apxPushGS[] = { 0, 0 };
 int
 pxPushGS(px_args_t * par, px_state_t * pxs)
 {
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     int code = gs_gsave(pgs);
     px_gstate_t *pxgs;
 
     if (code < 0)
         return code;
-    pxgs = pxs->pxgs = gs_state_client_data(pgs);
+    pxgs = pxs->pxgs = gs_gstate_client_data(pgs);
     if (pxgs->palette.data)
         pxgs->palette_is_shared = true;
     ++(pxgs->stack_depth);
@@ -612,11 +619,7 @@ int
 pxSetCharAttributes(px_args_t * par, px_state_t * pxs)
 {
     pxeWritingMode_t arg = par->pv[0]->value.i;
-
-    if (arg != pxs->pxgs->writing_mode) {
-        pxs->pxgs->writing_mode = arg;
-        px_purge_character_cache(pxs);
-    }
+    pxs->pxgs->writing_mode = arg;
     return 0;
 }
 
@@ -674,7 +677,7 @@ const byte apxSetClipIntersect[] = {
 int
 pxSetClipIntersect(px_args_t * par, px_state_t * pxs)
 {
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     pxeClipRegion_t clip_region = par->pv[0]->value.i;
     int code;
 
@@ -716,7 +719,7 @@ int
 pxSetClipRectangle(px_args_t * par, px_state_t * pxs)
 {
     px_args_t args;
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
     int code;
 
     check_clip_region(par, pxs);
@@ -778,7 +781,7 @@ int
 pxSetLineDash(px_args_t * par, px_state_t * pxs)
 {
     px_gstate_t *pxgs = pxs->pxgs;
-    gs_state *pgs = pxs->pgs;
+    gs_gstate *pgs = pxs->pgs;
 
     if (par->pv[0]) {
         float pattern[MAX_DASH_ELEMENTS * 2];

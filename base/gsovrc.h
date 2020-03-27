@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -21,6 +21,7 @@
 
 #include "gsstype.h"
 #include "gxcomp.h"
+#include "gxcindex.h"
 
 /*
  * Overprint compositor.
@@ -215,10 +216,13 @@
  *     closing of a device is not itself used as an error indication.
  */
 
-#ifndef gs_overprint_params_t_DEFINED
-#  define gs_overprint_params_t_DEFINED
+typedef enum {
+    OP_STATE_NONE = 0,
+    OP_STATE_FILL,
+    OP_STATE_STROKE,
+} OP_FS_STATE;
+
 typedef struct gs_overprint_params_s    gs_overprint_params_t;
-#endif
 
 struct gs_overprint_params_s {
 
@@ -229,38 +233,12 @@ struct gs_overprint_params_s {
      * are ignored, and the compositor does nothing with respect to rendering
      * (it doesn't even impose a performance penalty).
      *
-     * If this field is true, the retain_spot_comps and potentially the
-     * retained_comps fields should be initialized.
      *
      * Note that this field may be false even if overprint is true. This
      * would be the case if the current color space was a Separation color
      * space with the component "All".
      */
-    bool            retain_any_comps;
-
-    /*
-     * Are spot (non-process) color component values retained?
-     *
-     * If overprint is true, this field will be true for all color spaces
-     * other than Separation/DeviceN color spaces.
-     *
-     * The overprint compositor will itself determine what constitutes a
-     * process color. This is done by using the color space mapping
-     * routines for the target device for all three standard device
-     * color spaces (DeviceGray, DeviceRGB, and DeviceCMYK) and the
-     * set of all possible colors with individual components either 0
-     * or 1. Any color model component which is mapped to 0 for all of
-     * these cases is considered a spot color.
-     *
-     * If this field is true, the drawn_comps field (see below) is ignored.
-     *
-     * NB: This field should not be used if the DeviceCMYK color space
-     *     is being used with a DeviceCMYK color model (which may have
-     *     additional spot colors). Such a color model must explicitly
-     *     list the set of drawn components, so as to support overprint
-     *     mode.
-     */
-    bool            retain_spot_comps;
+    bool  retain_any_comps;
 
     /*
      * Don't we print anything with overprint ?
@@ -276,19 +254,9 @@ struct gs_overprint_params_s {
      * it is to be left unaffected.
      */
     gx_color_index  drawn_comps;
-
-    /* A representation of the K value that is used for simulating CMYK
-       overprinting out to an RGB device.  While CMY map readily to RGB using
-       the simple 255-X color process, we have to know what the K value
-       was if we are overprinting with K so that we can properly reduce 
-       the RGB values with the addition of K.  We will use 8 bits for this.
-     */
-    unsigned short k_value;
-
-    /* This is used when we want to simulate the overprint of spot colors
-       by blending the equivalent CMYK colorant with with what was already
-       drawn */
-    bool blendspot;
+    bool is_fill_color;      /* This tells us what the current color is for our set up */
+    OP_FS_STATE op_state;   /* This sets the state of the device for an upcoming command */
+    bool effective_opm;     /* PDF14 needs this information for its compatible blend mode */
 };
 
 /*

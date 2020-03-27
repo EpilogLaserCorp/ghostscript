@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -26,7 +26,7 @@
 #include "gxtype1.h"
 #include "stream.h"
 #include "gdevpsf.h"
-#include "gxistate.h"
+#include "gxgstate.h"
 
 /* ------ Type 1 Charstring parsing ------ */
 
@@ -211,15 +211,15 @@ type1_next(gs_type1_state *pcis)
             const fixed *p;
 
             for (p = pcis->ostack; p <= csp; ++p)
-                dmprintf1(pcis->pis->memory, " %g", fixed2float(*p));
+                dmprintf1(pcis->pgs->memory, " %g", fixed2float(*p));
             if (c == cx_escape) {
                 crypt_state cstate = state;
                 int cn;
 
                 charstring_next(*cip, cstate, cn, encrypted);
-                dmprintf1(pcis->pis->memory, " [*%d]\n", cn);
+                dmprintf1(pcis->pgs->memory, " [*%d]\n", cn);
             } else
-                dmprintf1(pcis->pis->memory, " [%d]\n", c);
+                dmprintf1(pcis->pgs->memory, " [%d]\n", c);
         }
 #endif
         switch ((char_command) c) {
@@ -474,6 +474,9 @@ psf_convert_type1_to_type2(stream *s, const gs_glyph_data_t *pgd,
     }\
   END
     fixed mx0 = 0, my0 = 0; /* See ce1_setcurrentpoint. */
+
+    /* Really this is to silence Coverity, but it makes sense and we do it a lot so no penatly */
+    memset(active_hints, 0, (max_total_stem_hints + 7) / 8);
 
     /* In case we do not get an sbw or hsbw op */
     cis.lsb.x = cis.lsb.y = cis.width.x = cis.width.y = fixed_0;

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -50,7 +50,7 @@ static void cie_matrix_init(gs_matrix3 *);
 
 /* Allocator structure types */
 private_st_joint_caches();
-extern_st(st_imager_state);
+extern_st(st_gs_gstate);
 
 #define RESTRICTED_INDEX(v, n, itemp)\
   ((uint)(itemp = (int)(v)) >= (n) ?\
@@ -98,8 +98,8 @@ static void
 cache_set_linear(cie_cache_floats *pcf)
 {
         if (pcf->params.is_identity) {
-            if_debug1('c', "[c]is_linear(0x%lx) = true (is_identity)\n",
-                      (ulong)pcf);
+            if_debug1('c', "[c]is_linear("PRI_INTPTR") = true (is_identity)\n",
+                      (intptr_t)pcf);
             pcf->params.linear.is_linear = true;
             pcf->params.linear.origin = 0;
             pcf->params.linear.scale = 1;
@@ -108,14 +108,14 @@ cache_set_linear(cie_cache_floats *pcf)
                 fabs(pcf->params.linear.scale - 1) < 0.00001)
                 pcf->params.is_identity = true;
             if_debug4('c',
-                      "[c]is_linear(0x%lx) = true, origin = %g, scale = %g%s\n",
-                      (ulong)pcf, pcf->params.linear.origin,
+                      "[c]is_linear("PRI_INTPTR") = true, origin = %g, scale = %g%s\n",
+                      (intptr_t)pcf, pcf->params.linear.origin,
                       pcf->params.linear.scale,
                       (pcf->params.is_identity ? " (=> is_identity)" : ""));
         }
 #ifdef DEBUG
         else
-            if_debug1('c', "[c]linear(0x%lx) = false\n", (ulong)pcf);
+            if_debug1('c', "[c]linear("PRI_INTPTR") = false\n", (intptr_t)pcf);
 #endif
 }
 static void
@@ -376,7 +376,7 @@ static bool cie_cache_mult3(gx_cie_vector_cache3_t *,
                              const gs_matrix3 *, double);
 
 int
-gx_install_cie_abc(gs_cie_abc *pcie, gs_state * pgs)
+gx_install_cie_abc(gs_cie_abc *pcie, gs_gstate * pgs)
 {
     if_debug_matrix3("[c]CIE MatrixABC =", &pcie->MatrixABC);
     cie_matrix_init(&pcie->MatrixABC);
@@ -389,7 +389,7 @@ gx_install_cie_abc(gs_cie_abc *pcie, gs_state * pgs)
 }
 
 int
-gx_install_CIEDEFG(gs_color_space * pcs, gs_state * pgs)
+gx_install_CIEDEFG(gs_color_space * pcs, gs_gstate * pgs)
 {
     gs_cie_defg *pcie = pcs->params.defg;
 
@@ -400,7 +400,7 @@ gx_install_CIEDEFG(gs_color_space * pcs, gs_state * pgs)
 }
 
 int
-gx_install_CIEDEF(gs_color_space * pcs, gs_state * pgs)
+gx_install_CIEDEF(gs_color_space * pcs, gs_gstate * pgs)
 {
     gs_cie_def *pcie = pcs->params.def;
 
@@ -411,13 +411,13 @@ gx_install_CIEDEF(gs_color_space * pcs, gs_state * pgs)
 }
 
 int
-gx_install_CIEABC(gs_color_space * pcs, gs_state * pgs)
+gx_install_CIEABC(gs_color_space * pcs, gs_gstate * pgs)
 {
     return gx_install_cie_abc(pcs->params.abc, pgs);
 }
 
 int
-gx_install_CIEA(gs_color_space * pcs, gs_state * pgs)
+gx_install_CIEA(gs_color_space * pcs, gs_gstate * pgs)
 {
     gs_cie_a *pcie = pcs->params.a;
     gs_sample_loop_params_t lp;
@@ -440,7 +440,7 @@ gx_install_CIEA(gs_color_space * pcs, gs_state * pgs)
 /* Load the common caches when installing the color space. */
 /* This routine is exported for the benefit of gsicc.c */
 void
-gx_cie_load_common_cache(gs_cie_common * pcie, gs_state * pgs)
+gx_cie_load_common_cache(gs_cie_common * pcie, gs_gstate * pgs)
 {
     if_debug_matrix3("[c]CIE MatrixLMN =", &pcie->MatrixLMN);
     cie_matrix_init(&pcie->MatrixLMN);
@@ -661,9 +661,65 @@ cie_cache_mult3(gx_cie_vector_cache3_t * pvc, const gs_matrix3 * pmat,
 
 /* ------ Install a rendering dictionary ------ */
 
+bool
+vector_equal(const gs_vector3 *p1, const gs_vector3 *p2)
+{
+    if (p1->u != p2->u)
+        return false;
+    if (p1->v != p2->v)
+        return false;
+    if (p1->w != p2->w)
+        return false;
+    return true;
+}
+
+bool
+matrix_equal(const gs_matrix3 *p1, const gs_matrix3 *p2)
+{
+    if (p1->is_identity != p2->is_identity)
+        return false;
+    if (!vector_equal(&(p1->cu), &(p2->cu)))
+        return false;
+    if (!vector_equal(&(p1->cv), &(p2->cv)))
+        return false;
+    if (!vector_equal(&(p1->cw), &(p2->cw)))
+        return false;
+    return true;
+}
+
+static bool
+transform_equal(const gs_cie_transform_proc3 *p1, const gs_cie_transform_proc3 *p2)
+{
+    if (p1->proc != p2->proc)
+        return false;
+    if (p1->proc_data.size != p2->proc_data.size)
+        return false;
+    if (memcmp(p1->proc_data.data, p2->proc_data.data, p1->proc_data.size) != 0)
+        return false;
+    if (p1->driver_name != p2->driver_name)
+        return false;
+    if (p1->proc_name != p2->proc_name)
+        return false;
+    return true;
+}
+
+bool
+range_equal(const gs_range3 *p1, const gs_range3 *p2)
+{
+    int k;
+
+    for (k = 0; k < 3; k++) {
+        if (p1->ranges[k].rmax != p2->ranges[k].rmax)
+            return false;
+        if (p1->ranges[k].rmin != p2->ranges[k].rmin)
+            return false;
+    }
+    return true;
+}
+
 /* setcolorrendering */
 int
-gs_setcolorrendering(gs_state * pgs, gs_cie_render * pcrd)
+gs_setcolorrendering(gs_gstate * pgs, gs_cie_render * pcrd)
 {
     int code = gs_cie_render_complete(pcrd);
     const gs_cie_render *pcrd_old = pgs->cie_render;
@@ -675,11 +731,11 @@ gs_setcolorrendering(gs_state * pgs, gs_cie_render * pcrd)
         return 0;		/* detect needless reselecting */
     joint_ok =
         pcrd_old != 0 &&
-#define CRD_SAME(elt) !memcmp(&pcrd->elt, &pcrd_old->elt, sizeof(pcrd->elt))
-        CRD_SAME(points.WhitePoint) && CRD_SAME(points.BlackPoint) &&
-        CRD_SAME(MatrixPQR) && CRD_SAME(RangePQR) &&
-        CRD_SAME(TransformPQR);
-#undef CRD_SAME
+        vector_equal(&pcrd->points.WhitePoint, &pcrd_old->points.WhitePoint) &&
+        vector_equal(&pcrd->points.BlackPoint, &pcrd_old->points.BlackPoint) &&
+        matrix_equal(&pcrd->MatrixPQR, &pcrd_old->MatrixPQR) &&
+        range_equal(&pcrd->RangePQR, &pcrd_old->RangePQR) &&
+        transform_equal(&pcrd->TransformPQR, &pcrd_old->TransformPQR);
     rc_assign(pgs->cie_render, pcrd, "gs_setcolorrendering");
     /* Initialize the joint caches if needed. */
     if (!joint_ok)
@@ -690,14 +746,14 @@ gs_setcolorrendering(gs_state * pgs, gs_cie_render * pcrd)
 
 /* currentcolorrendering */
 const gs_cie_render *
-gs_currentcolorrendering(const gs_state * pgs)
+gs_currentcolorrendering(const gs_gstate * pgs)
 {
     return pgs->cie_render;
 }
 
 /* Unshare (allocating if necessary) the joint caches. */
 gx_cie_joint_caches *
-gx_unshare_cie_caches(gs_state * pgs)
+gx_unshare_cie_caches(gs_gstate * pgs)
 {
     gx_cie_joint_caches *pjc = pgs->cie_joint_caches;
 
@@ -713,9 +769,19 @@ gx_unshare_cie_caches(gs_state * pgs)
 }
 
 gx_cie_joint_caches *
-gx_currentciecaches(gs_state * pgs)
+gx_get_cie_caches_ref(gs_gstate * pgs, gs_memory_t * mem)
 {
-    return pgs->cie_joint_caches;
+    gx_cie_joint_caches *pjc = pgs->cie_joint_caches;
+
+    /* Take a reference here, to allow for the one that
+     * rc_unshare_struct might drop if it has to copy it.
+     * Whatever happens we will have taken 1 net new
+     * reference which we return to the caller. */
+    rc_increment(pgs->cie_joint_caches);
+    rc_unshare_struct(pjc, gx_cie_joint_caches,
+                      &st_joint_caches, mem,
+                      return NULL, "gx_unshare_cie_caches");
+    return pjc;
 }
 
 /* Compute the parameters for loading a cache, setting base and factor. */
@@ -805,8 +871,8 @@ gs_cie_cache_init(cie_cache_params * pcache, gs_sample_loop_params_t * pslp,
      * Genoa test file 050-01.ps.
      */
     pcache->factor = (any_abs(delta) < 1e-30 ? 1.0 : N / R);
-    if_debug4('c', "[c]cache %s 0x%lx base=%g, factor=%g\n",
-              (const char *)cname, (ulong) pcache,
+    if_debug4('c', "[c]cache %s "PRI_INTPTR" base=%g, factor=%g\n",
+              (const char *)cname, (intptr_t)pcache,
               pcache->base, pcache->factor);
     pslp->A = A;
     pslp->B = B;
@@ -1104,7 +1170,7 @@ cie_cs_common_abc(const gs_color_space *pcs_orig, const gs_cie_abc **ppabc)
     return 0;
 }
 const gs_cie_common *
-gs_cie_cs_common(const gs_state * pgs)
+gs_cie_cs_common(const gs_gstate * pgs)
 {
     const gs_cie_abc *ignore_pabc;
 
@@ -1117,7 +1183,7 @@ gs_cie_cs_common(const gs_state * pgs)
  * exist now.
  */
 int
-gs_cie_cs_complete(gs_state * pgs, bool init)
+gs_cie_cs_complete(gs_gstate * pgs, bool init)
 {
     gx_cie_joint_caches *pjc = gx_unshare_cie_caches(pgs);
 
@@ -1128,12 +1194,12 @@ gs_cie_cs_complete(gs_state * pgs, bool init)
 }
 /* Actually complete the joint caches. */
 int
-gs_cie_jc_complete(const gs_imager_state *pis, const gs_color_space *pcs)
+gs_cie_jc_complete(const gs_gstate *pgs, const gs_color_space *pcs)
 {
     const gs_cie_abc *pabc;
     const gs_cie_common *common = cie_cs_common_abc(pcs, &pabc);
-    gs_cie_render *pcrd = pis->cie_render;
-    gx_cie_joint_caches *pjc = pis->cie_joint_caches;
+    gs_cie_render *pcrd = pgs->cie_render;
+    gx_cie_joint_caches *pjc = pgs->cie_joint_caches;
 
     if (pjc->cspace_id == pcs->id &&
         pjc->render_id == pcrd->id)
@@ -1353,37 +1419,39 @@ cie_joint_caches_complete(gx_cie_joint_caches * pjc,
 }
 
 /*
- * Initialize (just enough of) an imager state so that "concretizing" colors
- * using this imager state will do only the CIE->XYZ mapping.  This is a
+ * Initialize (just enough of) an gs_gstate so that "concretizing" colors
+ * using this gs_gstate will do only the CIE->XYZ mapping.  This is a
  * semi-hack for the PDF writer.
  */
 int
-gx_cie_to_xyz_alloc(gs_imager_state **ppis, const gs_color_space *pcs,
+gx_cie_to_xyz_alloc(gs_gstate **ppgs, const gs_color_space *pcs,
                     gs_memory_t *mem)
 {
     /*
-     * In addition to the imager state itself, we need the joint caches.
+     * In addition to the gs_gstate itself, we need the joint caches.
      */
-    gs_imager_state *pis =
-        gs_alloc_struct(mem, gs_imager_state, &st_imager_state,
-                        "gx_cie_to_xyz_alloc(imager state)");
+    gs_gstate *pgs =
+        gs_alloc_struct(mem, gs_gstate, &st_gs_gstate,
+                        "gx_cie_to_xyz_alloc(gs_gstate)");
     gx_cie_joint_caches *pjc;
     const gs_cie_abc *pabc;
     const gs_cie_common *pcie = cie_cs_common_abc(pcs, &pabc);
     int j;
 
-    if (pis == 0)
+    if (pgs == 0)
         return_error(gs_error_VMerror);
-    memset(pis, 0, sizeof(*pis));	/* mostly paranoia */
-    pis->memory = mem;
-    gs_imager_state_initialize(pis, mem);
+    memset(pgs, 0, sizeof(*pgs));	/* mostly paranoia */
+    pgs->memory = mem;
+    GS_STATE_INIT_VALUES(pgs, 1.0);
+    gs_gstate_initialize(pgs, mem);
 
     pjc = gs_alloc_struct(mem, gx_cie_joint_caches, &st_joint_caches,
                           "gx_cie_to_xyz_free(joint caches)");
     if (pjc == 0) {
-        gs_free_object(mem, pis, "gx_cie_to_xyz_alloc(imager state)");
+        gs_free_object(mem, pgs, "gx_cie_to_xyz_alloc(gs_gstate)");
         return_error(gs_error_VMerror);
     }
+    rc_init(pjc, mem, 1);
 
     /*
      * Perform an abbreviated version of cie_joint_caches_complete.
@@ -1401,29 +1469,29 @@ gx_cie_to_xyz_alloc(gs_imager_state **ppis, const gs_color_space *pcs,
     pjc->remap_finish = gx_cie_xyz_remap_finish;
     pjc->cspace_id = pcs->id;
     pjc->status = CIE_JC_STATUS_COMPLETED;
-    pis->cie_joint_caches = pjc;
-    pis->cie_to_xyz = true;
-    *ppis = pis;
+    pgs->cie_joint_caches = pjc;
+    pgs->cie_to_xyz = true;
+    *ppgs = pgs;
     return 0;
 }
 void
-gx_cie_to_xyz_free(gs_imager_state *pis)
+gx_cie_to_xyz_free(gs_gstate *pgs)
 {
-    gs_memory_t *mem = pis->memory;
+    gs_memory_t *mem = pgs->memory;
 
-    gs_free_object(mem, pis->cie_joint_caches,
-                   "gx_cie_to_xyz_free(joint caches)");
-    /* Free up the ICC objects if created */
-    if (pis->icc_link_cache != NULL) {
-        rc_decrement(pis->icc_link_cache,"gx_cie_to_xyz_free");
+    rc_decrement(pgs->cie_joint_caches,"gx_cie_to_xyz_free");
+
+    /* Free up the ICC objects if created */		/* FIXME: does this need to be thread safe */
+    if (pgs->icc_link_cache != NULL) {
+        rc_decrement(pgs->icc_link_cache,"gx_cie_to_xyz_free");
     }
-    if (pis->icc_manager != NULL) {
-        rc_decrement(pis->icc_manager,"gx_cie_to_xyz_free");
+    if (pgs->icc_manager != NULL) {
+        rc_decrement(pgs->icc_manager,"gx_cie_to_xyz_free");
     }
-    if (pis->icc_profile_cache != NULL) {
-        rc_decrement(pis->icc_profile_cache,"gx_cie_to_xyz_free");
+    if (pgs->icc_profile_cache != NULL) {
+        rc_decrement(pgs->icc_profile_cache,"gx_cie_to_xyz_free");
     }
-    gs_free_object(mem, pis, "gx_cie_to_xyz_free(imager state)");
+    gs_free_object(mem, pgs, "gx_cie_to_xyz_free(gs_gstate)");
 }
 
 /* ================ Utilities ================ */

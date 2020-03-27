@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 #include "memory_.h"
@@ -115,7 +115,8 @@ pdf_compute_encryption_key_r6(unsigned char *password, int pwlen, unsigned char 
 		(ownerkey ? O : U) + 32,
 		ownerkey ? U : NULL, validationkey);
 	pdf_compute_hardened_hash_r6(password, pwlen,
-		U + 40, NULL, hash);
+        (ownerkey ? O : U) + 40,
+        (ownerkey ? U : NULL), hash);
 
 	memset(iv, 0, sizeof(iv));
     aes_setkey_dec(&aes, hash, 256);
@@ -145,21 +146,36 @@ zcheck_r6_password(i_ctx_t * i_ctx_p)
         return_error(gs_error_typecheck);
     
     code = dict_find_string(CryptDict, "O", &Oref);
-    if (code < 0 || !r_has_type(Oref, t_string)) {
+    if (code < 0)
+        return code;
+    if (code == 0)
+        return_error(gs_error_undefined);
+    if (!r_has_type(Oref, t_string))
       return_error(gs_error_typecheck);
-    }
+
     code = dict_find_string(CryptDict, "OE", &OEref);
-    if (code < 0 || !r_has_type(OEref, t_string)) {
+    if (code < 0)
+        return code;
+    if (code == 0)
+        return_error(gs_error_undefined);
+    if (!r_has_type(OEref, t_string))
       return_error(gs_error_typecheck);
-    }
+
     code = dict_find_string(CryptDict, "U", &Uref);
-    if (code < 0 || !r_has_type(Uref, t_string)) {
+    if (code < 0)
+        return code;
+    if (code == 0)
+        return_error(gs_error_undefined);
+    if (!r_has_type(Uref, t_string))
       return_error(gs_error_typecheck);
-    }
+
     code = dict_find_string(CryptDict, "UE", &UEref);
-    if (code < 0 || !r_has_type(UEref, t_string)) {
+    if (code < 0)
+        return code;
+    if (code == 0)
+        return_error(gs_error_undefined);
+    if (!r_has_type(UEref, t_string))
       return_error(gs_error_typecheck);
-    }
 
     pop(2);
     op = osp;

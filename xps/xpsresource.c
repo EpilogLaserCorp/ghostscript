@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2012 Artifex Software, Inc.
+/* Copyright (C) 2001-2019 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -9,8 +9,8 @@
    of the license contained in the file LICENSE in this distribution.
 
    Refer to licensing information at http://www.artifex.com or contact
-   Artifex Software, Inc.,  7 Mt. Lassen Drive - Suite A-134, San Rafael,
-   CA  94903, U.S.A., +1(415)492-9861, for further information.
+   Artifex Software, Inc.,  1305 Grant Avenue - Suite 200, Novato,
+   CA 94945, U.S.A., +1(415)492-9861, for further information.
 */
 
 
@@ -46,7 +46,7 @@ xps_parse_resource_reference(xps_context_t *ctx, xps_resource_t *dict, char *att
     if (strstr(att, "{StaticResource ") != att)
         return NULL;
 
-    xps_strlcpy(name, att + 16, sizeof name);
+    gs_strlcpy(name, att + 16, sizeof name);
     s = strrchr(name, '}');
     if (s)
         *s = 0;
@@ -102,7 +102,7 @@ xps_parse_remote_resource_dictionary(xps_context_t *ctx, xps_resource_t **dictp,
         return gs_throw1(-1, "expected ResourceDictionary element (found %s)", xps_tag(xml));
     }
 
-    xps_strlcpy(part_uri, part_name, sizeof part_uri);
+    gs_strlcpy(part_uri, part_name, sizeof part_uri);
     s = strrchr(part_uri, '/');
     if (s)
         s[1] = 0;
@@ -208,7 +208,8 @@ xps_debug_resource_dictionary(xps_context_t *ctx, xps_resource_t *dict)
     {
         if (dict->base_uri)
             dmprintf1(ctx->memory, "URI = '%s'\n", dict->base_uri);
-        dmprintf2(ctx->memory, "KEY = '%s' VAL = %p\n", dict->name, dict->data);
+        dmprintf2(ctx->memory, "KEY = '%s' VAL = "PRI_INTPTR"\n",
+                  dict->name, (intptr_t)dict->data);
         if (dict->parent)
         {
             dmputs(ctx->memory, "PARENT = {\n");
