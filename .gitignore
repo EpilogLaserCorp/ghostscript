@@ -33,6 +33,7 @@ windows/*.htm
 windows/*.pdf
 windows/*.svg
 windows/x64
+Windows/.vs/*
 
 # Ignore svg files
 *.svg
