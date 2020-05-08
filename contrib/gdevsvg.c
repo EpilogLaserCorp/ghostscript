@@ -121,7 +121,7 @@ gx_path_type_t peek_path_type(struct path_type_stack_node* root)
 #define SVG_LINESIZE 100
 
 /* default constants */
-#define SVG_DEFAULT_LINEWIDTH	1.0
+#define SVG_DEFAULT_LINEWIDTH	0.0
 #define SVG_DEFAULT_LINECAP	gs_cap_butt
 #define SVG_DEFAULT_LINEJOIN	gs_join_miter
 #define SVG_DEFAULT_MITERLIMIT	4.0
@@ -1185,7 +1185,7 @@ static void svg_write_state_to_svg(gx_device_svg *svg, const bool emptyPen, cons
 		svg_write(svg, "fill='none' ");
 	}
 
-	if (svg->linewidth != 1.0) 
+	if (svg->linewidth != SVG_DEFAULT_LINEWIDTH)
 	{
 		gs_sprintf(line, "stroke-width='%lf' ", svg->linewidth);
 		svg_write(svg, line);
