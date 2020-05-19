@@ -607,7 +607,6 @@ svg_close_device(gx_device *dev)
 	svg_write_sputs(svg, "<!-- svg_close_device -->\n");
 
 	if (svg->header) {
-		svg_write_sputs(svg, "</page>\n");
 		svg_write_sputs(svg, "</pageSet>\n");
 		svg_write_sputs(svg, "</svg>\n");
 		svg->header = 0;
@@ -1301,7 +1300,7 @@ svg_beginpage(gx_device_vector *vdev)
 	gs_sprintf(line, "<rect x='%d' y='%d' width='%d' height='%d' stroke='none' fill='none'/>\n",
 		0, 0, (int)svg->MediaSize[0], (int)svg->MediaSize[1]);
 	svg_write_bytes_sputs(svg, line, strlen(line));
-	svg_write_sputs(line, "</clipPath>\n");
+	svg_write_sputs(svg, "</clipPath>\n");
 
 	/* we may be called from beginpage, so we can't use
 	svg_write() which calls gdev_vector_stream()
