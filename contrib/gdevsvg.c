@@ -1062,29 +1062,29 @@ svg_write_header(gx_device_svg *svg)
 	/* we're called from beginpage, so we can't use
 	   svg_write() which calls gdev_vector_stream()
 	   which calls beginpage! */
-	stream *s = svg->strm;
-	uint used;
 	char line[300];
 
 	if_debug0m('_', svg->memory, "svg_write_header\n");
 
-	/* only write the header once */
 	if (svg->header)
+	{
+		// Only write the header once
 		return 1;
+	}
 
 	/* write the initial boilerplate */
 	gs_sprintf(line, "%s\n", XML_DECL);
 	/* svg_write(svg, line); */
-	sputs(s, (byte *)line, strlen(line), &used);
+	svg_write_bytes_sputs(svg, line, strlen(line));
 
 	gs_sprintf(line, "<svg xmlns='%s' version='%s' xmlns:xlink='http://www.w3.org/1999/xlink'",
 		SVG_XMLNS, SVG_VERSION);
 	/* svg_write(svg, line); */
-	sputs(s, (byte *)line, strlen(line), &used);
+	svg_write_bytes_sputs(svg, line, strlen(line));
 	gs_sprintf(line, "\n\twidth='%.3fin' height='%.3fin' viewBox='0 0 %d %d'>\n",
 		(double)svg->MediaSize[0] / 72.0, (double)svg->MediaSize[1] / 72.0,
 		(int)svg->MediaSize[0], (int)svg->MediaSize[1]);
-	sputs(s, (byte *)line, strlen(line), &used);
+	svg_write_bytes_sputs(svg, line, strlen(line));
 
 	/*
 	* TODO: Add definitions into the defs tag. This has not been done because
@@ -1093,18 +1093,12 @@ svg_write_header(gx_device_svg *svg)
 	* properly formed SVG file.
 	*/
 
-	gs_sprintf(line, "<defs>\n");
-	sputs(s, (byte *)line, strlen(line), &used);
-	gs_sprintf(line, "<!-- Move all clipPaths into here for a properly formatted svg file -->\n");
-	sputs(s, (byte *)line, strlen(line), &used);
-	gs_sprintf(line, "</defs>\n");
-	sputs(s, (byte *)line, strlen(line), &used);
+	svg_write_sputs(svg, "<defs>\n");
+	svg_write_sputs(svg, "<!-- Move all clipPaths into here for a properly formatted svg file -->\n");
+	svg_write_sputs(svg, "</defs>\n");
 
 	/* Enable multipule page output*/
-	gs_sprintf(line, "<pageSet>\n");
-	sputs(s, (byte *)line, strlen(line), &used);
-
-
+	svg_write_sputs(svg, "<pageSet>\n");
 
 	/* mark that we've been called */
 	svg->header = 1;
