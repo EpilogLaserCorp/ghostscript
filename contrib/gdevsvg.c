@@ -566,11 +566,21 @@ svg_output_page(gx_device *dev, int num_copies, int flush)
 	svg->mark++;
 
 	svg_write(svg, "\n<!-- svg_output_page -->\n");
-	if (ferror(svg->file))
+
+	// Note: We previously used ferror instead of gp_ferror here. I'm not sure
+	// what the difference is, but ferror sometimes seems to report a false
+	// error, whereas gp_ferror does not. Also, all other devices seem to use
+	// gp_ferror and gp_fflush.
+	gp_fflush(svg->file);
+	if (gp_ferror(svg->file))
+	{
 		return gs_throw_code(gs_error_ioerror);
+	}
 
 	if ((code = gx_finish_output_page(dev, num_copies, flush)) < 0)
+	{
 		return code;
+	}
 
 	/* Check if we need to change the output file for separate pages */
 	if (gx_outputfile_is_separate_pages(((gx_device_vector *)dev)->fname, dev->memory)) {
@@ -597,8 +607,15 @@ svg_close_device(gx_device *dev)
 		svg->header = 0;
 	}
 
-	if (ferror(svg->file))
+	// Note: We previously used ferror instead of gp_ferror here. I'm not sure
+	// what the difference is, but ferror sometimes seems to report a false
+	// error, whereas gp_ferror does not. Also, all other devices seem to use
+	// gp_ferror and gp_fflush.
+	gp_fflush(svg->file);
+	if (gp_ferror(svg->file))
+	{
 		return gs_throw_code(gs_error_ioerror);
+	}
 
 	return gdev_vector_close_file((gx_device_vector*)dev);
 }
