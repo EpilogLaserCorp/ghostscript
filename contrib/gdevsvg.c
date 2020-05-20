@@ -121,7 +121,7 @@ gx_path_type_t peek_path_type(struct path_type_stack_node* root)
 #define SVG_LINESIZE 100
 
 /* default constants */
-#define SVG_DEFAULT_LINEWIDTH	1.0
+#define SVG_DEFAULT_LINEWIDTH	0.0
 #define SVG_DEFAULT_LINECAP	gs_cap_butt
 #define SVG_DEFAULT_LINEJOIN	gs_join_miter
 #define SVG_DEFAULT_MITERLIMIT	4.0
@@ -476,8 +476,9 @@ static const gx_device_vector_procs svg_vector_procs = {
 
 /* local utility prototypes */
 
-static int svg_write_bytes(gx_device_svg *svg,
-	const char *string, uint length);
+static int svg_write_bytes_sputs(gx_device_svg* svg, const char* string, uint length);
+static int svg_write_bytes(gx_device_svg *svg, const char *string, uint length);
+static int svg_write_sputs(gx_device_svg* svg, const char* string);
 static int svg_write(gx_device_svg *svg, const char *string);
 
 static int svg_write_header(gx_device_svg *svg);
@@ -554,23 +555,27 @@ svg_output_page(gx_device *dev, int num_copies, int flush)
 	svg->page_count++;
 	/* close any open group elements */
 	close_groups(svg, 0);
-	svg_write(svg, "</page>\n");
-	svg_write(svg, "<page clip-path='url(#clip0)'>\n");
-	svg->dirty = true; // Rewrite attributes for new svg items
-	/* Scale drawing so our coordinates are in pixels */
-	gs_sprintf(line, "<g transform='scale(%lf,%lf)'>\n",
-		72.0 / svg->HWResolution[0],
-		72.0 / svg->HWResolution[1]);
-	/* svg_write(svg, line); */
-	svg_write(svg, line);
-	svg->mark++;
 
-	svg_write(svg, "\n<!-- svg_output_page -->\n");
-	if (ferror(svg->file))
+	// Write the end of the page
+	svg_write(svg, "</page>\n");
+	
+	// Rewrite attributes for new svg items later
+	svg->dirty = true;
+	
+	// Note: We previously used ferror instead of gp_ferror here. I'm not sure
+	// what the difference is, but ferror sometimes seems to report a false
+	// error, whereas gp_ferror does not. Also, all other devices seem to use
+	// gp_ferror and gp_fflush.
+	gp_fflush(svg->file);
+	if (gp_ferror(svg->file))
+	{
 		return gs_throw_code(gs_error_ioerror);
+	}
 
 	if ((code = gx_finish_output_page(dev, num_copies, flush)) < 0)
+	{
 		return code;
+	}
 
 	/* Check if we need to change the output file for separate pages */
 	if (gx_outputfile_is_separate_pages(((gx_device_vector *)dev)->fname, dev->memory)) {
@@ -578,6 +583,10 @@ svg_output_page(gx_device *dev, int num_copies, int flush)
 			return code;
 		code = svg_open_device(dev);
 	}
+
+	// Use this to call begin_page again
+	svg->in_page = false;
+
 	return code;
 }
 
@@ -586,19 +595,32 @@ static int
 svg_close_device(gx_device *dev)
 {
 	gx_device_svg *const svg = (gx_device_svg*)dev;
-	/* close any open group elements */
+
+	// Note: If gdev_vector_stream is called, the beginning of the next page will
+	// be written. Therefore, this function cannot be called in svg_close_device.
+	// Note: gdev_vector_stream is called by svg_write and svg_write_bytes.
+
+	// Close any open group elements
 	close_groups(svg, 0);
-	svg_write(svg, "\n<!-- svg_close_device -->\n");
+
+	// Make note that we are closing the device in the svg output
+	svg_write_sputs(svg, "<!-- svg_close_device -->\n");
 
 	if (svg->header) {
-		svg_write(svg, "</page>\n");
-		svg_write(svg, "</pageSet>\n");
-		svg_write(svg, "</svg>\n");
+		svg_write_sputs(svg, "</pageSet>\n");
+		svg_write_sputs(svg, "</svg>\n");
 		svg->header = 0;
 	}
 
-	if (ferror(svg->file))
+	// Note: We previously used ferror instead of gp_ferror here. I'm not sure
+	// what the difference is, but ferror sometimes seems to report a false
+	// error, whereas gp_ferror does not. Also, all other devices seem to use
+	// gp_ferror and gp_fflush.
+	gp_fflush(svg->file);
+	if (gp_ferror(svg->file))
+	{
 		return gs_throw_code(gs_error_ioerror);
+	}
 
 	return gdev_vector_close_file((gx_device_vector*)dev);
 }
@@ -995,6 +1017,19 @@ static int gdev_svg_fill_path(
 
 /* write a length-limited char buffer */
 static int
+svg_write_bytes_sputs(gx_device_svg* svg, const char* string, uint length)
+{
+	/* calling the accessor ensures beginpage is called */
+	stream* s = svg->strm;
+	uint used;
+
+	sputs(s, (const byte*)string, length, &used);
+
+	return !(length == used);
+}
+
+/* write a length-limited char buffer */
+static int
 svg_write_bytes(gx_device_svg *svg, const char *string, uint length)
 {
 	/* calling the accessor ensures beginpage is called */
@@ -1004,6 +1039,13 @@ svg_write_bytes(gx_device_svg *svg, const char *string, uint length)
 	sputs(s, (const byte *)string, length, &used);
 
 	return !(length == used);
+}
+
+/* write a null terminated string */
+static int
+svg_write_sputs(gx_device_svg* svg, const char* string)
+{
+	return svg_write_bytes_sputs(svg, string, strlen(string));
 }
 
 /* write a null terminated string */
@@ -1019,29 +1061,29 @@ svg_write_header(gx_device_svg *svg)
 	/* we're called from beginpage, so we can't use
 	   svg_write() which calls gdev_vector_stream()
 	   which calls beginpage! */
-	stream *s = svg->strm;
-	uint used;
 	char line[300];
 
 	if_debug0m('_', svg->memory, "svg_write_header\n");
 
-	/* only write the header once */
 	if (svg->header)
+	{
+		// Only write the header once
 		return 1;
+	}
 
 	/* write the initial boilerplate */
 	gs_sprintf(line, "%s\n", XML_DECL);
 	/* svg_write(svg, line); */
-	sputs(s, (byte *)line, strlen(line), &used);
+	svg_write_bytes_sputs(svg, line, strlen(line));
 
 	gs_sprintf(line, "<svg xmlns='%s' version='%s' xmlns:xlink='http://www.w3.org/1999/xlink'",
 		SVG_XMLNS, SVG_VERSION);
 	/* svg_write(svg, line); */
-	sputs(s, (byte *)line, strlen(line), &used);
+	svg_write_bytes_sputs(svg, line, strlen(line));
 	gs_sprintf(line, "\n\twidth='%.3fin' height='%.3fin' viewBox='0 0 %d %d'>\n",
 		(double)svg->MediaSize[0] / 72.0, (double)svg->MediaSize[1] / 72.0,
 		(int)svg->MediaSize[0], (int)svg->MediaSize[1]);
-	sputs(s, (byte *)line, strlen(line), &used);
+	svg_write_bytes_sputs(svg, line, strlen(line));
 
 	/*
 	* TODO: Add definitions into the defs tag. This has not been done because
@@ -1050,31 +1092,12 @@ svg_write_header(gx_device_svg *svg)
 	* properly formed SVG file.
 	*/
 
-	gs_sprintf(line, "<defs>\n");
-	sputs(s, (byte *)line, strlen(line), &used);
-
-	gs_sprintf(line, "<clipPath id='clip0'>\n");
-	sputs(s, (byte *)line, strlen(line), &used);
-
-	gs_sprintf(line, "<rect x='%d' y='%d' width='%d' height='%d' stroke='none' fill='none'/>\n",
-		0, 0, (int)svg->MediaSize[0], (int)svg->MediaSize[1]);
-	sputs(s, (byte *)line, strlen(line), &used);
-
-	gs_sprintf(line, "</clipPath>\n");
-	sputs(s, (byte *)line, strlen(line), &used);
-
-
-
-	gs_sprintf(line, "<!-- Move all clipPaths into here for a properly formatted svg file -->\n");
-	sputs(s, (byte *)line, strlen(line), &used);
-	gs_sprintf(line, "</defs>\n");
-	sputs(s, (byte *)line, strlen(line), &used);
+	svg_write_sputs(svg, "<defs>\n");
+	svg_write_sputs(svg, "<!-- Move all clipPaths into here for a properly formatted svg file -->\n");
+	svg_write_sputs(svg, "</defs>\n");
 
 	/* Enable multipule page output*/
-	gs_sprintf(line, "<pageSet>\n");
-	sputs(s, (byte *)line, strlen(line), &used);
-
-
+	svg_write_sputs(svg, "<pageSet>\n");
 
 	/* mark that we've been called */
 	svg->header = 1;
@@ -1168,7 +1191,7 @@ static void svg_write_state_to_svg(gx_device_svg *svg, const bool emptyPen, cons
 		svg_write(svg, "fill='none' ");
 	}
 
-	if (svg->linewidth != 1.0) 
+	if (svg->linewidth != SVG_DEFAULT_LINEWIDTH)
 	{
 		gs_sprintf(line, "stroke-width='%lf' ", svg->linewidth);
 		svg_write(svg, line);
@@ -1265,23 +1288,32 @@ static int
 svg_beginpage(gx_device_vector *vdev)
 {
 	gx_device_svg *svg = (gx_device_svg *)vdev;
-	uint used;
 	char line[300];
 
-	const byte * pg = (byte*)"<page clip-path='url(#clip0)'>\n";
 	if_debug1m('_', svg->memory, "svg_beginpage (page count %d)\n", svg->page_count);
 
 	svg_write_header(svg);
+
+	// Write clip rect for the new page
+	gs_sprintf(line, "<clipPath id='clip%i'>\n", ++svg->highestUsedId);
+	svg_write_bytes_sputs(svg, line, strlen(line));
+	gs_sprintf(line, "<rect x='%d' y='%d' width='%d' height='%d' stroke='none' fill='none'/>\n",
+		0, 0, (int)svg->MediaSize[0], (int)svg->MediaSize[1]);
+	svg_write_bytes_sputs(svg, line, strlen(line));
+	svg_write_sputs(svg, "</clipPath>\n");
+
 	/* we may be called from beginpage, so we can't use
 	svg_write() which calls gdev_vector_stream()
 	which calls beginpage! */
-	sputs(svg->strm, pg, strlen(pg), &used);
+	gs_sprintf(line, "<page clip-path='url(#clip%i)'>\n", svg->highestUsedId);
+	svg_write_bytes_sputs(svg, line, strlen(line));
+
 	/* Scale drawing so our coordinates are in pixels */
 	gs_sprintf(line, "<g transform='scale(%lf,%lf)'>\n",
 		72.0 / svg->HWResolution[0],
 		72.0 / svg->HWResolution[1]);
 	/* svg_write(svg, line); */
-	sputs(svg->strm, (byte *)line, strlen(line), &used);
+	svg_write_bytes_sputs(svg, line, strlen(line));
 	svg->mark++;
 
 	return 0;

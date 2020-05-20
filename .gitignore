@@ -1,6 +1,7 @@
 # Ignore editor backup files
 *~
 *.swp
+*.cache
 
 # Ignore bad merge files
 *.rej
@@ -33,6 +34,7 @@ windows/*.htm
 windows/*.pdf
 windows/*.svg
 windows/x64
+Windows/.vs/*
 
 # Ignore svg files
 *.svg
