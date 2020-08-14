@@ -2583,11 +2583,24 @@ int setup_png(
 		break;
 	case 8:
 		bit_depth = 8;
-		if (gx_device_has_color(pdev)) {
+		
+		// TRS 14 August 2020
+		// Note: If pcs->base_space is NULL, then the program will crash determining the palette.
+		// However, in this scenario, we seem to be ok by not using a palette at all and instead
+		// assuming the image is grayscale. I'v eonly seen this issue with a grayscale image 
+		// provided by a customer, so we if we come across this image with a non-grayscale image 
+		// in the future, we'll need to find a different solution.
+		// Note: With the customer file mentioned above, pdev->color_info.depth was 24 while the 
+		// total plane depth was calculated to be 8. This could be another hint if this issue comes
+		// around again.
+		
+		if (gx_device_has_color(pdev) && (pcs->base_space != NULL))
+		{
 			color_type = PNG_COLOR_TYPE_PALETTE;
 			errdiff = 0;
 		}
-		else {
+		else
+		{
 			color_type = PNG_COLOR_TYPE_GRAY;
 			errdiff = 1;
 		}
@@ -2604,7 +2617,8 @@ int setup_png(
 	}
 
 	/* set the palette if there is one */
-	if (color_type == PNG_COLOR_TYPE_PALETTE) {
+	if (color_type == PNG_COLOR_TYPE_PALETTE)
+	{
 		int i;
 		int num_colors = 1 << depth;
 		gx_color_value rgb[3];
@@ -2623,8 +2637,7 @@ int setup_png(
 		num_palette = num_colors;
 		valid |= PNG_INFO_PLTE;
 		for (i = 0; i < num_colors; i++) {
-			(*dev_proc(pdev, map_color_rgb)) ((gx_device *)pdev,
-				(gx_color_index)i, rgb);
+			(*dev_proc(pdev, map_color_rgb)) ((gx_device *)pdev, (gx_color_index)i, rgb);
 
 			/*
 			This crap kept me busy for 4 days straight. Needed to apply the palette
@@ -2645,7 +2658,7 @@ int setup_png(
 					palettep[i].blue = 255; //  Assume white background
 				}
 			}
-			else if (depth == 8)
+			else if (depth == 8 && (pcs->base_space != NULL))
 			{
 				gs_client_color cc;
 				gs_cspace_indexed_lookup(pcs, i, &cc);
@@ -2716,8 +2729,8 @@ int setup_png(
 	/*width = pdev->width / factor;
 	height = pdev->height / factor;*/
 	/* This makes the image the actual image size */
-	width = pie->width /*setup->width_in*/;
-	height = pie->height /*setup->height_in*/;
+	width = pie->width / factor;
+	height = pie->height / factor;
 
 #if PNG_LIBPNG_VER_MINOR >= 5
 	png_set_pHYs(png_ptr, info_ptr,
