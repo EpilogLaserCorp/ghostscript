@@ -2134,7 +2134,7 @@ static int write_png_start(
 	m3.tx = ctm.tx;
 	m3.ty = ctm.ty;
 
-	gs_sprintf(line, "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>",
+	gs_sprintf(line, "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
 		m3.xx, m3.xy, m3.yx, m3.yy, m3.tx, m3.ty
 		);
 	svg_write(dev, line);
@@ -2188,9 +2188,9 @@ static int write_png_partial(
 static int write_png_end(gx_device* dev)
 {
 	gx_device_svg *svg = (gx_device_svg *)dev;
-	svg_write(dev, "\"/>");
+	svg_write(dev, "\"/>\n");
 	close_clip_groups(svg);
-	svg_write(dev, "</g>");
+	svg_write(dev, "</g>\n");
 
 	return 0;
 }
