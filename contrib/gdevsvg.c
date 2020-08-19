@@ -1106,6 +1106,11 @@ svg_write_header(gx_device_svg *svg)
 }
 static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_color *pdc)
 {
+	if ((svg == NULL) || (pdc == NULL))
+	{
+		return COLOR_UNKNOWN;
+	}
+
 	const gx_device_color *pdevc = (gx_device_color *)pdc;
 	if (gx_dc_is_pure(pdc))
 	{
