@@ -423,7 +423,7 @@ struct png_setup_s{
 };
 
 int setup_png_from_struct(gx_device * pdev, struct png_setup_s* setup);
-int setup_png(gx_device * pdev, svg_image_enum_t  *pie, const gs_color_space *pcs, bool monod);
+int setup_png(gx_device * pdev, svg_image_enum_t  *pie, const gs_color_space *pcs, bool monod, gx_color_index foreground);
 int make_png(gx_device_memory *mdev);
 void my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length);
 void my_png_flush(png_structp png_ptr);
@@ -1106,6 +1106,11 @@ svg_write_header(gx_device_svg *svg)
 }
 static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_color *pdc)
 {
+	if ((svg == NULL) || (pdc == NULL))
+	{
+		return COLOR_UNKNOWN;
+	}
+
 	const gx_device_color *pdevc = (gx_device_color *)pdc;
 	if (gx_dc_is_pure(pdc))
 	{
@@ -2134,7 +2139,7 @@ static int write_png_start(
 	m3.tx = ctm.tx;
 	m3.ty = ctm.ty;
 
-	gs_sprintf(line, "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>",
+	gs_sprintf(line, "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
 		m3.xx, m3.xy, m3.yx, m3.yy, m3.tx, m3.ty
 		);
 	svg_write(dev, line);
@@ -2188,9 +2193,9 @@ static int write_png_partial(
 static int write_png_end(gx_device* dev)
 {
 	gx_device_svg *svg = (gx_device_svg *)dev;
-	svg_write(dev, "\"/>");
+	svg_write(dev, "\"/>\n");
 	close_clip_groups(svg);
-	svg_write(dev, "</g>");
+	svg_write(dev, "</g>\n");
 
 	return 0;
 }
@@ -2335,8 +2340,18 @@ static int svg_begin_typed_image(
 		ppiDecode = ppi->Decode[0];
 	}
 
+	// TRS 08/18/2020
+	// This is a bit of a guess here. It's possible that pdcolor->colors.devn.values
+	// may play a role in invertion (instead of foreground pdcolor->colors.pure),
+	// but I was unable to make sense of those values.
+	gx_color_index foreground = 0xFFFFFF; // White background by default
+	if (svg_get_color_type((gx_device_svg*)dev, pdcolor) == COLOR_PURE)
+	{
+		foreground = pdcolor->colors.pure;
+	}
+
 	png_set_write_fn(pie->png_ptr, &pie->state, my_png_write_data, my_png_flush);
-	code = setup_png(dev, pie, ppi->ColorSpace, (ppiDecode <= 0.5f));
+	code = setup_png(dev, pie, ppi->ColorSpace, (ppiDecode <= 0.5f), foreground);
 
 	if (code) {
 		goto done;
@@ -2463,7 +2478,8 @@ int setup_png(
 	gx_device * pdev, 
 	svg_image_enum_t  *pie,
 	const gs_color_space *pcs,
-	bool monod)
+	bool monod,
+	gx_color_index foreground)
 {
 	gs_memory_t *mem = pdev->memory;
 	//int raster = gdev_prn_raster(pdev);
@@ -2612,7 +2628,11 @@ int setup_png(
 	case 1:
 		bit_depth = 1;
 		color_type = PNG_COLOR_TYPE_GRAY;
-		invert = !monod;
+		// TRS 08/18/2020
+		// This is a bit of a guess here. I know that the value of monod has
+		// inverted images in the past, and I also know that the foreground
+		// value has an effect on whether an image is inverted or not.
+		invert = (!monod) ^ (foreground != 0x00) /* Not a black foreground */;
 		break;
 	}
 
