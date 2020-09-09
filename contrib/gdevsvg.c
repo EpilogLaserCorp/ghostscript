@@ -872,10 +872,12 @@ static int gdev_svg_fill_path(
 		gs_make_identity(&m);
 
 		if (pgs == NULL)
+		{
 			return_error(gs_error_VMerror);
+		}
+
 		dc.ccolor.pattern = (gs_pattern_instance_t *)&pi;
 		pi.saved = pgs;
-		svg_write(svg, "<g class='pathfillimage'>\n");
 
 		// First we need to fill the bounding box with the pattern
 		code = gx_path_bbox(ppath, &bbox);
@@ -898,6 +900,8 @@ static int gdev_svg_fill_path(
 		{
 			return 0;
 		}
+
+		svg_write(svg, "<g class='pathfillimage'>\n");
 
 		/* Translate the paths */
 		gx_path_translate(ppath, -bbox.p.x, -bbox.p.y);
@@ -957,7 +961,6 @@ static int gdev_svg_fill_path(
 				return_error(gs_error_VMerror);
 			dc.ccolor.pattern = (gs_pattern_instance_t *)&pi;
 			pi.saved = pgs;
-			svg_write(svg, "<g class='pathfillimage'>\n");
 
 			// First we need to fill the bounding box with the pattern
 			code = gx_path_bbox(ppath, &bbox);
@@ -969,15 +972,21 @@ static int gdev_svg_fill_path(
 
 			code = gx_dc_pattern2_get_bbox(pdcolor, &bbox1);
 			if (code)
+			{
 				rect_intersect(bbox, bbox1);
-
+			}
 
 			int sx = fixed2int(bbox.p.x);
 			int sy = fixed2int(bbox.p.y);
 			gs_int_point rect_size;
 			rect_size.x = fixed2int(bbox.q.x + fixed_half) - sx;
 			rect_size.y = fixed2int(bbox.q.y + fixed_half) - sy;
-			if (rect_size.x == 0 || rect_size.y == 0) return 0;
+			if (rect_size.x == 0 || rect_size.y == 0)
+			{
+				return 0;
+			}
+
+			svg_write(svg, "<g class='pathfillimage'>\n");
 
 			// Adjust for offset of the mattern
 			m.tx = -pmdev->mapped_x;
@@ -3258,6 +3267,12 @@ static int make_png_from_mdev(
 
 	/* The png structures are set up and ready to use after init_png */
 	code = init_png(mdev->target, &state, &setup);
+
+	if ((mdev->width == 0) || (mdev->height == 0))
+	{
+		return 0;
+	}
+
 	write_png_start(
 		mdev->target,
 		ctm,
