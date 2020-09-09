@@ -878,7 +878,6 @@ static int gdev_svg_fill_path(
 
 		dc.ccolor.pattern = (gs_pattern_instance_t *)&pi;
 		pi.saved = pgs;
-		svg_write(svg, "<g class='pathfillimage'>\n");
 
 		// First we need to fill the bounding box with the pattern
 		code = gx_path_bbox(ppath, &bbox);
@@ -901,6 +900,8 @@ static int gdev_svg_fill_path(
 		{
 			return 0;
 		}
+
+		svg_write(svg, "<g class='pathfillimage'>\n");
 
 		/* Translate the paths */
 		gx_path_translate(ppath, -bbox.p.x, -bbox.p.y);
@@ -960,7 +961,6 @@ static int gdev_svg_fill_path(
 				return_error(gs_error_VMerror);
 			dc.ccolor.pattern = (gs_pattern_instance_t *)&pi;
 			pi.saved = pgs;
-			svg_write(svg, "<g class='pathfillimage'>\n");
 
 			// First we need to fill the bounding box with the pattern
 			code = gx_path_bbox(ppath, &bbox);
@@ -985,6 +985,8 @@ static int gdev_svg_fill_path(
 			{
 				return 0;
 			}
+
+			svg_write(svg, "<g class='pathfillimage'>\n");
 
 			// Adjust for offset of the mattern
 			m.tx = -pmdev->mapped_x;
