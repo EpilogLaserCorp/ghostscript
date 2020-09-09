@@ -872,7 +872,10 @@ static int gdev_svg_fill_path(
 		gs_make_identity(&m);
 
 		if (pgs == NULL)
+		{
 			return_error(gs_error_VMerror);
+		}
+
 		dc.ccolor.pattern = (gs_pattern_instance_t *)&pi;
 		pi.saved = pgs;
 		svg_write(svg, "<g class='pathfillimage'>\n");
@@ -969,15 +972,19 @@ static int gdev_svg_fill_path(
 
 			code = gx_dc_pattern2_get_bbox(pdcolor, &bbox1);
 			if (code)
+			{
 				rect_intersect(bbox, bbox1);
-
+			}
 
 			int sx = fixed2int(bbox.p.x);
 			int sy = fixed2int(bbox.p.y);
 			gs_int_point rect_size;
 			rect_size.x = fixed2int(bbox.q.x + fixed_half) - sx;
 			rect_size.y = fixed2int(bbox.q.y + fixed_half) - sy;
-			if (rect_size.x == 0 || rect_size.y == 0) return 0;
+			if (rect_size.x == 0 || rect_size.y == 0)
+			{
+				return 0;
+			}
 
 			// Adjust for offset of the mattern
 			m.tx = -pmdev->mapped_x;
