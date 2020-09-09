@@ -3267,6 +3267,12 @@ static int make_png_from_mdev(
 
 	/* The png structures are set up and ready to use after init_png */
 	code = init_png(mdev->target, &state, &setup);
+
+	if ((mdev->width == 0) || (mdev->height == 0))
+	{
+		return 0;
+	}
+
 	write_png_start(
 		mdev->target,
 		ctm,
