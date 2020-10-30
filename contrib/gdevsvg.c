@@ -1584,6 +1584,17 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 	}
 	++path_list_size; // Add once for the path contained in pcpath->path
 
+	if (!svg->in_page)
+	{
+		// Note: If we are trying to write a clip path, but we are not yet in a page,
+		// we need to start the page first. Since starting the page writes a clip
+		// path, writing the page second can cause svg->highestUsedId to get out of
+		// order, thus messing up the first clip.
+		// Note: The easy way around this, is to write some data to the svg stream.
+		// This triggers the start-page function.
+		svg_write(svg, "\n");
+	}
+
 	// Increment used ID
 	svg->usedIds = svg->highestUsedId + 1;
 	int original_clip_path_id = svg->usedIds;
