@@ -821,7 +821,7 @@ print_path(const gx_path *path)
 /* Stroke a path. */
 static int gdev_svg_stroke_path(
 	gx_device* dev,
-	const gs_gstate* pis,
+	gs_gstate* pis,
 	gx_path* ppath,
 	const gx_stroke_params* params,
 	const gx_drawing_color* pdcolor,
@@ -836,10 +836,68 @@ static int gdev_svg_stroke_path(
 	switch (svg_get_color_type((gx_device_svg *)dev, pdcolor))
 	{
 	case COLOR_PURE:
+		double scale;
+		int set_ctm;
+		gs_matrix mat;
+		set_ctm = gdev_vector_stroke_scaling(dev, pis, &scale, &mat);
+
+		// Check for non-uniform thickness
+		if (set_ctm)
+		{
+			// Without the code below, strokes are broken into small filled
+			// areas. This happens when the stroke has a non-uniform thickness.
+			// To avoid having the path broken into small bits, we instead just
+			// use a uniform stroke thickness of the average thickness value.
+
+			if (is_xxyy(&pis->ctm))
+			{
+				pis->ctm.xx = (is_fzero(pis->ctm.xx) ? 0 : copysignf(scale, pis->ctm.xx));
+				pis->ctm.yy = (is_fzero(pis->ctm.yy) ? 0 : copysignf(scale, pis->ctm.yy));
+			}
+			else if (is_xyyx(&pis->ctm))
+			{
+				pis->ctm.xy = (is_fzero(pis->ctm.xy) ? 0 : copysignf(scale, pis->ctm.xy));
+				pis->ctm.yx = (is_fzero(pis->ctm.yx) ? 0 : copysignf(scale, pis->ctm.yx));
+			}
+			else
+			{
+				float rot = atan2(pis->ctm.xy, pis->ctm.xx);
+				pis->ctm.xx = scale * cos(rot);
+				pis->ctm.xy = scale * -sin(rot);
+				pis->ctm.yx = scale * sin(rot);
+				pis->ctm.yy = scale * cos(rot);
+			}
+
+			// To get the path to show up with non-uniform thickness, we must
+			// first transform the each point in the path using the inverse of
+			// the mat matrix from the gdev_vector_stroke_scaling function. 
+			// Then we apply the mat matrix transform to the actual svg object.
+
+			char line[SVG_LINESIZE];
+			gs_sprintf(line, "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
+				mat.xx, mat.xy, mat.yx, mat.yy, mat.tx, mat.ty
+			);
+			svg_write(dev, line);
+
+			if (ppath->segments != NULL)
+			{
+				gs_matrix tr;
+				gs_matrix_invert(&mat, &tr);
+
+				transform_path(ppath, tr);
+			}
+		}
+
 		// Record the clip path so that we can clip the shape if necessary
 		svg->current_clip_path = pcpath;
 		code = gdev_vector_stroke_path(dev, pis, ppath, params, pdcolor, pcpath);
 		svg->current_clip_path = NULL;
+
+		if (set_ctm)
+		{
+			svg_write(dev, "</g>\n");
+		}
+
 		return code;
 	default:
 		svg_write(svg, "<g class='pathstrokeimage'>\n");
