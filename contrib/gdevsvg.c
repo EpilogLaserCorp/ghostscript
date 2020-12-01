@@ -734,6 +734,53 @@ static int make_alpha_mdev(gx_device *dev, gx_device_memory **ppmdev, gs_fixed_r
 }
 
 static void
+transform_path(gx_path* ppath, const gs_matrix tr)
+{
+	if ((ppath == NULL) || (ppath->segments == NULL))
+	{
+		return;
+	}
+
+	gs_point fpt;
+
+	for (subpath* sub = ppath->segments->contents.subpath_first; sub != NULL; sub = sub->next)
+	{
+		switch (sub->type)
+		{
+		case s_curve:
+			curve_segment* csub = (curve_segment*)sub;
+
+			gs_point_transform(
+				fixed2float(csub->p1.x),
+				fixed2float(csub->p1.y),
+				&tr,
+				&fpt);
+			csub->p1.x = float2fixed(fpt.x);
+			csub->p1.y = float2fixed(fpt.y);
+
+			gs_point_transform(
+				fixed2float(csub->p2.x),
+				fixed2float(csub->p2.y),
+				&tr,
+				&fpt);
+			csub->p2.x = float2fixed(fpt.x);
+			csub->p2.y = float2fixed(fpt.y);
+
+			/* falls through */
+		default:
+			gs_point_transform(
+				fixed2float(sub->pt.x),
+				fixed2float(sub->pt.y),
+				&tr,
+				&fpt);
+			sub->pt.x = float2fixed(fpt.x);
+			sub->pt.y = float2fixed(fpt.y);
+			break;
+		}
+	}
+}
+
+static void
 print_path(const gx_path *path)
 {
 	gs_path_enum penum;
