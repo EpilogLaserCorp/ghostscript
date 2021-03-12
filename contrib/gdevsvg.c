@@ -2472,7 +2472,7 @@ static int svg_begin_typed_image(
 	gx_color_index foreground = 0xFFFFFF; // White background by default
 	if (svg_get_color_type((gx_device_svg*)dev, pdcolor) == COLOR_PURE)
 	{
-		foreground = pdcolor->colors.pure;
+		foreground = gx_dc_pure_color(pdcolor);
 	}
 
 	png_set_write_fn(pie->png_ptr, &pie->state, my_png_write_data, my_png_flush);
@@ -2753,11 +2753,28 @@ int setup_png(
 	case 1:
 		bit_depth = 1;
 		color_type = PNG_COLOR_TYPE_GRAY;
+		
 		// TRS 08/18/2020
 		// This is a bit of a guess here. I know that the value of monod has
-		// inverted images in the past, and I also know that the foreground
+		// inverted images in the past, and I also think that the foreground
 		// value has an effect on whether an image is inverted or not.
-		invert = (!monod) ^ (foreground != 0x00) /* Not a black foreground */;
+		// The file that revealed this important used white-on-black text in
+		// BarTender. The monod value for both white-on-black and black-on-
+		// white were false.
+
+		// TRS 03/12/2021
+		// An image from PhotoLaser Plus, imported into an Adobe Illustrator
+		// file, has a background value of 0x231F20, which seems to be a random
+		// gray background and yet comes over as inverted under the previous
+		// logic:
+		//     invert = (!monod) ^ (foreground != 0x00);
+		// In this case, monod is set to true
+
+		gs_color_space *tpcs = pcs;
+		//int test1 = gs_cspace_indexed_num_entries(pcs);
+		//int test2 = gs_cspace_indexed_num_entries(pcs->base_space);
+
+		invert = (!monod && (foreground == 0x000000)) /* Has a black foreground */;
 		break;
 	}
 
@@ -2803,7 +2820,7 @@ int setup_png(
 					palettep[i].blue = 255; //  Assume white background
 				}
 			}
-			else if (depth == 8 && (pcs->base_space != NULL))
+			else if (depth == 8 && (pcs->base_space != NULL) && gs_cspace_indexed_num_entries(pcs))
 			{
 				gs_client_color cc;
 				gs_cspace_indexed_lookup(pcs, i, &cc);
