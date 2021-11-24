@@ -842,6 +842,9 @@ static int gdev_svg_stroke_path(
 		set_ctm = gdev_vector_stroke_scaling(dev, pis, &scale, &mat);
 
 		// Check for non-uniform thickness
+		gs_matrix_fixed old_ctm = pis->ctm;
+		gx_path path_copy;
+		gx_path* ppath_ptr = ppath;
 		if (set_ctm)
 		{
 			// Without the code below, strokes are broken into small filled
@@ -879,23 +882,33 @@ static int gdev_svg_stroke_path(
 			);
 			svg_write(dev, line);
 
-			if (ppath->segments != NULL)
+			// Copy ppath, then transform it, but don't change ppath itself.
+			// Note: Honestly, I'm not sure why we use ppath->memory in the
+			// gx_path_init_local function, so it might be wrong, but it seems
+			// to work.
+
+			gx_path_init_local(&path_copy, ppath->memory);
+			ppath_ptr = &path_copy;
+			gx_path_copy(ppath, ppath_ptr);
+
+			if (ppath_ptr->segments != NULL)
 			{
 				gs_matrix tr;
 				gs_matrix_invert(&mat, &tr);
 
-				transform_path(ppath, tr);
+				transform_path(ppath_ptr, tr);
 			}
 		}
 
 		// Record the clip path so that we can clip the shape if necessary
 		svg->current_clip_path = pcpath;
-		code = gdev_vector_stroke_path(dev, pis, ppath, params, pdcolor, pcpath);
+		code = gdev_vector_stroke_path(dev, pis, ppath_ptr, params, pdcolor, pcpath);
 		svg->current_clip_path = NULL;
 
 		if (set_ctm)
 		{
 			svg_write(dev, "</g>\n");
+			pis->ctm = old_ctm; // Restore old ctm
 		}
 
 		return code;
