@@ -1928,7 +1928,7 @@ svg_writeclip_image(gx_device_svg* svg)
 
 /*
 Because svg_writeclip(...) may nest the current item into more groups, we must
-close thos additional groups once the item has been written to the output
+close those additional groups once the item has been written to the output
 stream
 */
 static void close_clip_groups(gx_device_svg *svg)
