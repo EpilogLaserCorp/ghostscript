@@ -215,6 +215,8 @@ typedef struct gx_device_svg_s {
 	bool validClipPath;
 	gx_clip_path *current_clip_path;
 	gx_clip_path *current_image_clip_path;
+	gs_matrix* current_clip_path_transform;
+	gs_matrix* current_image_clip_path_transform;
 	bool writing_clip;
 	struct path_type_stack_node* path_type_stack;
 } gx_device_svg;
@@ -361,6 +363,10 @@ static int svg_setstrokecolor(
 
 static int
 svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix);
+static int
+svg_writeclip_standard(gx_device_svg* svg);
+static int
+svg_writeclip_image(gx_device_svg* svg);
 static void
 close_clip_groups(gx_device_svg *svg);
 static int
@@ -537,6 +543,8 @@ svg_open_device(gx_device *dev)
 	svg->validClipPath = false;
 	svg->current_clip_path = NULL;
 	svg->current_image_clip_path = NULL;
+	svg->current_clip_path_transform = NULL;
+	svg->current_image_clip_path_transform = NULL;
 	svg->writing_clip = false;
 	svg->path_type_stack = NULL;
 
@@ -841,6 +849,10 @@ static int gdev_svg_stroke_path(
 		gs_matrix mat;
 		set_ctm = gdev_vector_stroke_scaling(dev, pis, &scale, &mat);
 
+		gs_matrix mat_clip;
+		gs_make_identity(&mat_clip);
+		svg->current_clip_path_transform = NULL; // Set to &mat_clip later if needed
+
 		// Check for non-uniform thickness
 		gs_matrix_fixed old_ctm = pis->ctm;
 		gx_path path_copy;
@@ -893,10 +905,9 @@ static int gdev_svg_stroke_path(
 
 			if (ppath_ptr->segments != NULL)
 			{
-				gs_matrix tr;
-				gs_matrix_invert(&mat, &tr);
-
-				transform_path(ppath_ptr, tr);
+				gs_matrix_invert(&mat, &mat_clip);
+				transform_path(ppath_ptr, mat_clip);
+				svg->current_clip_path_transform = &mat_clip;
 			}
 		}
 
@@ -904,6 +915,7 @@ static int gdev_svg_stroke_path(
 		svg->current_clip_path = pcpath;
 		code = gdev_vector_stroke_path(dev, pis, ppath_ptr, params, pdcolor, pcpath);
 		svg->current_clip_path = NULL;
+		svg->current_clip_path_transform = NULL;
 
 		if (set_ctm)
 		{
@@ -975,6 +987,7 @@ static int gdev_svg_fill_path(
 		svg->current_clip_path = pcpath;
 		code = gdev_vector_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
 		svg->current_clip_path = NULL;
+		svg->current_clip_path_transform = NULL;
 		return code;
 	case COLOR_PATTERN1:
 	if(true){
@@ -1355,15 +1368,17 @@ static void svg_write_state_to_svg(gx_device_svg *svg, const bool emptyPen, cons
 		case gs_join_bevel:
 			svg_write(svg, "stroke-linejoin='bevel' ");
 			break;
-		case gs_join_miter:
 		default:
-			/* SVG doesn't support any other variants */
+			// No break: SVG doesn't support any other variants, so fall through to miter
+		case gs_join_miter:
 			svg_write(svg, "stroke-linejoin='miter' ");
 			break;
 		}
 	}
 
-	if (svg->miterlimit != SVG_DEFAULT_MITERLIMIT) 
+	if ((svg->miterlimit != SVG_DEFAULT_MITERLIMIT)
+		&& (svg->linejoin != gs_join_round) // Round join does not support miter limit
+		&& (svg->linejoin != gs_join_bevel)) // Bevel join does not support miter limit
 	{
 		gs_sprintf(line, "stroke-miterlimit='%lf' ", svg->miterlimit);
 		svg_write(svg, line);
@@ -1499,7 +1514,16 @@ svg_setlinejoin(gx_device_vector *vdev, gs_line_join join)
 static int
 svg_setmiterlimit(gx_device_vector *vdev, double limit)
 {
+	gx_device_svg* svg = (gx_device_svg*)vdev;
+
+	if (limit < 0.1)
+		return gs_throw_code(gs_error_rangecheck);
+
 	if_debug1m('_', vdev->memory, "svg_setmiterlimit(%lf)\n", limit);
+
+	svg->miterlimit = limit;
+	svg->dirty++;
+
 	return 0;
 }
 static int
@@ -1887,12 +1911,35 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 	}
 
 	return 0;
+}
 
+static int
+svg_writeclip_standard(gx_device_svg* svg)
+{
+	gs_matrix mIdent;
+	gs_make_identity(&mIdent);
+
+	return svg_writeclip(
+		svg,
+		svg->current_clip_path,
+		((svg->current_clip_path_transform == NULL) ? mIdent : *svg->current_clip_path_transform));
+}
+
+static int
+svg_writeclip_image(gx_device_svg* svg)
+{
+	gs_matrix mIdent;
+	gs_make_identity(&mIdent);
+
+	return svg_writeclip(
+		svg,
+		svg->current_image_clip_path,
+		((svg->current_image_clip_path_transform == NULL) ? mIdent : *svg->current_image_clip_path_transform));
 }
 
 /*
 Because svg_writeclip(...) may nest the current item into more groups, we must
-close thos additional groups once the item has been written to the output
+close those additional groups once the item has been written to the output
 stream
 */
 static void close_clip_groups(gx_device_svg *svg)
@@ -1925,9 +1972,7 @@ fixed x1, fixed y1, gx_path_type_t type)
 	{
 		svg->writing_clip = true;
 
-		gs_matrix mIdent;
-		gs_make_identity(&mIdent);
-		svg_writeclip(svg, svg->current_clip_path, mIdent);
+		svg_writeclip_standard(svg);
 
 		char clip_path_id[SVG_LINESIZE];
 		gs_sprintf(clip_path_id, "clip-path='url(#clip%i)' ", svg->usedIds);
@@ -2002,9 +2047,7 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 	{
 		svg->writing_clip = true;
 		
-		gs_matrix mIdent;
-		gs_make_identity(&mIdent);
-		svg_writeclip(svg, svg->current_clip_path, mIdent);
+		svg_writeclip_standard(svg);
 
 		char clip_path_id[SVG_LINESIZE];
 		gs_sprintf(clip_path_id, "clip-path='url(#clip%i)' ", svg->usedIds);
@@ -2290,8 +2333,10 @@ static int write_png_start(
 
 	if (svg->current_image_clip_path != NULL)
 	{
-		svg_writeclip(svg, svg->current_image_clip_path, mInvert);
+		svg->current_image_clip_path_transform = &mInvert;
+		svg_writeclip_image(svg);
 		svg->current_image_clip_path = NULL;
+		svg->current_image_clip_path_transform = NULL;
 	}
 
 	char clip_path_id[SVG_LINESIZE];
