@@ -849,6 +849,10 @@ static int gdev_svg_stroke_path(
 		gs_matrix mat;
 		set_ctm = gdev_vector_stroke_scaling(dev, pis, &scale, &mat);
 
+		gs_matrix mat_clip;
+		gs_make_identity(&mat_clip);
+		svg->current_clip_path_transform = NULL; // Set to &mat_clip later if needed
+
 		// Check for non-uniform thickness
 		gs_matrix_fixed old_ctm = pis->ctm;
 		gx_path path_copy;
@@ -901,10 +905,9 @@ static int gdev_svg_stroke_path(
 
 			if (ppath_ptr->segments != NULL)
 			{
-				gs_matrix tr;
-				gs_matrix_invert(&mat, &tr);
-
-				transform_path(ppath_ptr, tr);
+				gs_matrix_invert(&mat, &mat_clip);
+				transform_path(ppath_ptr, mat_clip);
+				svg->current_clip_path_transform = &mat_clip;
 			}
 		}
 
