@@ -215,6 +215,8 @@ typedef struct gx_device_svg_s {
 	bool validClipPath;
 	gx_clip_path *current_clip_path;
 	gx_clip_path *current_image_clip_path;
+	gs_matrix* current_clip_path_transform;
+	gs_matrix* current_image_clip_path_transform;
 	bool writing_clip;
 	struct path_type_stack_node* path_type_stack;
 } gx_device_svg;
@@ -537,6 +539,8 @@ svg_open_device(gx_device *dev)
 	svg->validClipPath = false;
 	svg->current_clip_path = NULL;
 	svg->current_image_clip_path = NULL;
+	svg->current_clip_path_transform = NULL;
+	svg->current_image_clip_path_transform = NULL;
 	svg->writing_clip = false;
 	svg->path_type_stack = NULL;
 
@@ -904,6 +908,7 @@ static int gdev_svg_stroke_path(
 		svg->current_clip_path = pcpath;
 		code = gdev_vector_stroke_path(dev, pis, ppath_ptr, params, pdcolor, pcpath);
 		svg->current_clip_path = NULL;
+		svg->current_clip_path_transform = NULL;
 
 		if (set_ctm)
 		{
@@ -975,6 +980,7 @@ static int gdev_svg_fill_path(
 		svg->current_clip_path = pcpath;
 		code = gdev_vector_fill_path(dev, pis, ppath, params, pdcolor, pcpath);
 		svg->current_clip_path = NULL;
+		svg->current_clip_path_transform = NULL;
 		return code;
 	case COLOR_PATTERN1:
 	if(true){
@@ -2292,6 +2298,7 @@ static int write_png_start(
 	{
 		svg_writeclip(svg, svg->current_image_clip_path, mInvert);
 		svg->current_image_clip_path = NULL;
+		svg->current_image_clip_path_transform = NULL;
 	}
 
 	char clip_path_id[SVG_LINESIZE];
