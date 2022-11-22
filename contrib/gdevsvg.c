@@ -363,6 +363,10 @@ static int svg_setstrokecolor(
 
 static int
 svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix);
+static int
+svg_writeclip_standard(gx_device_svg* svg);
+static int
+svg_writeclip_image(gx_device_svg* svg);
 static void
 close_clip_groups(gx_device_svg *svg);
 static int
@@ -1893,7 +1897,30 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 	}
 
 	return 0;
+}
 
+static int
+svg_writeclip_standard(gx_device_svg* svg)
+{
+	gs_matrix mIdent;
+	gs_make_identity(&mIdent);
+
+	return svg_writeclip(
+		svg,
+		svg->current_clip_path,
+		((svg->current_clip_path_transform == NULL) ? mIdent : *svg->current_clip_path_transform));
+}
+
+static int
+svg_writeclip_image(gx_device_svg* svg)
+{
+	gs_matrix mIdent;
+	gs_make_identity(&mIdent);
+
+	return svg_writeclip(
+		svg,
+		svg->current_image_clip_path,
+		((svg->current_image_clip_path_transform == NULL) ? mIdent : *svg->current_image_clip_path_transform));
 }
 
 /*
@@ -1931,9 +1958,7 @@ fixed x1, fixed y1, gx_path_type_t type)
 	{
 		svg->writing_clip = true;
 
-		gs_matrix mIdent;
-		gs_make_identity(&mIdent);
-		svg_writeclip(svg, svg->current_clip_path, mIdent);
+		svg_writeclip_standard(svg);
 
 		char clip_path_id[SVG_LINESIZE];
 		gs_sprintf(clip_path_id, "clip-path='url(#clip%i)' ", svg->usedIds);
@@ -2008,9 +2033,7 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 	{
 		svg->writing_clip = true;
 		
-		gs_matrix mIdent;
-		gs_make_identity(&mIdent);
-		svg_writeclip(svg, svg->current_clip_path, mIdent);
+		svg_writeclip_standard(svg);
 
 		char clip_path_id[SVG_LINESIZE];
 		gs_sprintf(clip_path_id, "clip-path='url(#clip%i)' ", svg->usedIds);
@@ -2296,7 +2319,8 @@ static int write_png_start(
 
 	if (svg->current_image_clip_path != NULL)
 	{
-		svg_writeclip(svg, svg->current_image_clip_path, mInvert);
+		svg->current_image_clip_path_transform = &mInvert;
+		svg_writeclip_image(svg);
 		svg->current_image_clip_path = NULL;
 		svg->current_image_clip_path_transform = NULL;
 	}
