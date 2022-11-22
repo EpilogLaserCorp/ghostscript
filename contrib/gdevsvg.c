@@ -1368,15 +1368,17 @@ static void svg_write_state_to_svg(gx_device_svg *svg, const bool emptyPen, cons
 		case gs_join_bevel:
 			svg_write(svg, "stroke-linejoin='bevel' ");
 			break;
-		case gs_join_miter:
 		default:
-			/* SVG doesn't support any other variants */
+			// No break: SVG doesn't support any other variants, so fall through to miter
+		case gs_join_miter:
 			svg_write(svg, "stroke-linejoin='miter' ");
 			break;
 		}
 	}
 
-	if (svg->miterlimit != SVG_DEFAULT_MITERLIMIT) 
+	if ((svg->miterlimit != SVG_DEFAULT_MITERLIMIT)
+		&& (svg->linejoin != gs_join_round) // Round join does not support miter limit
+		&& (svg->linejoin != gs_join_bevel)) // Bevel join does not support miter limit
 	{
 		gs_sprintf(line, "stroke-miterlimit='%lf' ", svg->miterlimit);
 		svg_write(svg, line);
@@ -1512,7 +1514,16 @@ svg_setlinejoin(gx_device_vector *vdev, gs_line_join join)
 static int
 svg_setmiterlimit(gx_device_vector *vdev, double limit)
 {
+	gx_device_svg* svg = (gx_device_svg*)vdev;
+
+	if (limit < 0.1)
+		return gs_throw_code(gs_error_rangecheck);
+
 	if_debug1m('_', vdev->memory, "svg_setmiterlimit(%lf)\n", limit);
+
+	svg->miterlimit = limit;
+	svg->dirty++;
+
 	return 0;
 }
 static int
