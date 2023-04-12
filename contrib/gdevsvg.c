@@ -14,7 +14,7 @@
    */
 
 
-/* SVG (Scalable Vector Graphics) output device */
+   /* SVG (Scalable Vector Graphics) output device */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,13 +44,13 @@ struct path_type_stack_node
 struct path_type_stack_node* new_path_type_node(gx_path_type_t data)
 {
 	struct path_type_stack_node* stackNode =
-		(struct path_type_stack_node*) malloc(sizeof(struct path_type_stack_node));
+		(struct path_type_stack_node*)malloc(sizeof(struct path_type_stack_node));
 	stackNode->data = data;
 	stackNode->next = NULL;
 	return stackNode;
 }
 
-bool path_type_stack_is_empty(struct path_type_stack_node *root)
+bool path_type_stack_is_empty(struct path_type_stack_node* root)
 {
 	return !root;
 }
@@ -129,7 +129,7 @@ gx_path_type_t peek_path_type(struct path_type_stack_node* root)
 extern_st(st_gs_text_enum);
 extern_st(st_gx_image_enum_common);
 
-enum COLOR_TYPE{
+enum COLOR_TYPE {
 	COLOR_NULL,
 	COLOR_PURE,
 	COLOR_DEV,
@@ -149,19 +149,19 @@ static char encoding_table[] = { 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
 'w', 'x', 'y', 'z', '0', '1', '2', '3',
 '4', '5', '6', '7', '8', '9', '+', '/' };
-static char *decoding_table = NULL;
+static char* decoding_table = NULL;
 static int mod_table[] = { 0, 2, 1 };
 
 
-byte *base64_encode(
-	gs_memory_t *memory, 
-	const unsigned char *data,
+byte* base64_encode(
+	gs_memory_t* memory,
+	const unsigned char* data,
 	size_t input_length,
-	size_t *output_length)
+	size_t* output_length)
 {
 	*output_length = 4 * ((input_length + 2) / 3);
 
-	byte *encoded_data = gs_alloc_bytes(memory, *output_length, "base64 buffer");
+	byte* encoded_data = gs_alloc_bytes(memory, *output_length, "base64 buffer");
 	memset(encoded_data, 0, *output_length);
 	if (encoded_data == NULL) return NULL;
 
@@ -213,8 +213,8 @@ typedef struct gx_device_svg_s {
 	int usedIds;
 	int highestUsedId;
 	bool validClipPath;
-	gx_clip_path *current_clip_path;
-	gx_clip_path *current_image_clip_path;
+	gx_clip_path* current_clip_path;
+	gx_clip_path* current_image_clip_path;
 	gs_matrix* current_clip_path_transform;
 	gs_matrix* current_image_clip_path_transform;
 	bool writing_clip;
@@ -244,7 +244,7 @@ static dev_proc_begin_typed_image(svg_begin_typed_image);
 static dev_proc_begin_image(svg_begin_image);
 static dev_proc_fillpage(svg_fillpage);
 
-static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_color *pdc);
+static enum COLOR_TYPE svg_get_color_type(gx_device_svg* svg, const gx_drawing_color* pdc);
 
 //static dev_proc_copy_alpha(svg_copy_alpha);
 #define svg_device_procs \
@@ -332,21 +332,21 @@ const gx_device_svg gs_svgwrite_device = {
 /* Vector device procedures */
 
 static int
-svg_beginpage(gx_device_vector *vdev);
+svg_beginpage(gx_device_vector* vdev);
 static int
-svg_setlinewidth(gx_device_vector *vdev, double width);
+svg_setlinewidth(gx_device_vector* vdev, double width);
 static int
-svg_setlinecap(gx_device_vector *vdev, gs_line_cap cap);
+svg_setlinecap(gx_device_vector* vdev, gs_line_cap cap);
 static int
-svg_setlinejoin(gx_device_vector *vdev, gs_line_join join);
+svg_setlinejoin(gx_device_vector* vdev, gs_line_join join);
 static int
-svg_setmiterlimit(gx_device_vector *vdev, double limit);
+svg_setmiterlimit(gx_device_vector* vdev, double limit);
 static int
-svg_setdash(gx_device_vector *vdev, const float *pattern,
-uint count, double offset);
+svg_setdash(gx_device_vector* vdev, const float* pattern,
+	uint count, double offset);
 static int
-svg_setlogop(gx_device_vector *vdev, gs_logical_operation_t lop,
-gs_logical_operation_t diff);
+svg_setlogop(gx_device_vector* vdev, gs_logical_operation_t lop,
+	gs_logical_operation_t diff);
 
 static int svg_can_handle_hl_color(
 	gx_device_vector* vdev,
@@ -362,34 +362,34 @@ static int svg_setstrokecolor(
 	const gx_drawing_color* pdc);
 
 static int
-svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix);
+svg_writeclip(gx_device_svg* svg, gx_clip_path* pcpath, gs_matrix matrix);
 static int
 svg_writeclip_standard(gx_device_svg* svg);
 static int
 svg_writeclip_image(gx_device_svg* svg);
 static void
-close_clip_groups(gx_device_svg *svg);
+close_clip_groups(gx_device_svg* svg);
 static int
-svg_dorect(gx_device_vector *vdev, fixed x0, fixed y0,
-fixed x1, fixed y1, gx_path_type_t type);
+svg_dorect(gx_device_vector* vdev, fixed x0, fixed y0,
+	fixed x1, fixed y1, gx_path_type_t type);
 static int
-svg_beginpath(gx_device_vector *vdev, gx_path_type_t type);
+svg_beginpath(gx_device_vector* vdev, gx_path_type_t type);
 
 static int
-svg_moveto(gx_device_vector *vdev, double x0, double y0,
-double x, double y, gx_path_type_t type);
+svg_moveto(gx_device_vector* vdev, double x0, double y0,
+	double x, double y, gx_path_type_t type);
 static int
-svg_lineto(gx_device_vector *vdev, double x0, double y0,
-double x, double y, gx_path_type_t type);
+svg_lineto(gx_device_vector* vdev, double x0, double y0,
+	double x, double y, gx_path_type_t type);
 static int
-svg_curveto(gx_device_vector *vdev, double x0, double y0,
-double x1, double y1, double x2, double y2,
-double x3, double y3, gx_path_type_t type);
+svg_curveto(gx_device_vector* vdev, double x0, double y0,
+	double x1, double y1, double x2, double y2,
+	double x3, double y3, gx_path_type_t type);
 static int
-svg_closepath(gx_device_vector *vdev, double x, double y,
-double x_start, double y_start, gx_path_type_t type);
+svg_closepath(gx_device_vector* vdev, double x, double y,
+	double x_start, double y_start, gx_path_type_t type);
 static int
-svg_endpath(gx_device_vector *vdev, gx_path_type_t type);
+svg_endpath(gx_device_vector* vdev, gx_path_type_t type);
 
 
 /* PNG related functions and definitions */
@@ -397,10 +397,10 @@ svg_endpath(gx_device_vector *vdev, gx_path_type_t type);
 /* structure to store PNG image bytes */
 struct mem_encode
 {
-	char *buffer;
+	char* buffer;
 	size_t size;
-	gs_memory_t *memory;
-	gx_device *dev;
+	gs_memory_t* memory;
+	gx_device* dev;
 };
 
 typedef struct svg_image_enum_s {
@@ -409,28 +409,28 @@ typedef struct svg_image_enum_s {
 	int width;
 	int height;
 	bool invert;
-	png_struct *png_ptr;
-	png_info *info_ptr;
+	png_struct* png_ptr;
+	png_info* info_ptr;
 	struct mem_encode state;
 	gs_matrix_fixed ctm;
 	gs_matrix ImageMatrix;
 } svg_image_enum_t;
 
 
-struct png_setup_s{
-	gs_memory_t *memory;
-	png_struct *png_ptr;
-	png_info *info_ptr;
+struct png_setup_s {
+	gs_memory_t* memory;
+	png_struct* png_ptr;
+	png_info* info_ptr;
 	int depth;
-	bool *external_invert;
+	bool* external_invert;
 	float HWResolution[2];
 	uint width_in;
 	uint height_in;
 };
 
-int setup_png_from_struct(gx_device * pdev, struct png_setup_s* setup);
-int setup_png(gx_device * pdev, svg_image_enum_t  *pie, const gs_color_space *pcs, bool monod, gx_color_index foreground);
-int make_png(gx_device_memory *mdev);
+int setup_png_from_struct(gx_device* pdev, struct png_setup_s* setup);
+int setup_png(gx_device* pdev, svg_image_enum_t* pie, const gs_color_space* pcs, bool monod, gx_color_index foreground);
+int make_png(gx_device_memory* mdev);
 void my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length);
 void my_png_flush(png_structp png_ptr);
 static int write_png_start(
@@ -441,14 +441,14 @@ static int write_png_start(
 	uint height);
 static int write_png_data(
 	gx_device* dev,
-	struct mem_encode *state);
+	struct mem_encode* state);
 static int write_png_partial(
 	gx_device* dev,
-	struct mem_encode *state,
+	struct mem_encode* state,
 	int len);
 static int write_png_end(gx_device* dev);
 static int make_png_from_mdev(
-	gx_device_memory *mdev,
+	gx_device_memory* mdev,
 	float tx,
 	float ty);
 
@@ -483,13 +483,13 @@ static const gx_device_vector_procs svg_vector_procs = {
 /* local utility prototypes */
 
 static int svg_write_bytes_sputs(gx_device_svg* svg, const char* string, uint length);
-static int svg_write_bytes(gx_device_svg *svg, const char *string, uint length);
+static int svg_write_bytes(gx_device_svg* svg, const char* string, uint length);
 static int svg_write_sputs(gx_device_svg* svg, const char* string);
-static int svg_write(gx_device_svg *svg, const char *string);
+static int svg_write(gx_device_svg* svg, const char* string);
 
-static int svg_write_header(gx_device_svg *svg);
+static int svg_write_header(gx_device_svg* svg);
 
-static void close_groups(gx_device_svg *svg, const int mark)
+static void close_groups(gx_device_svg* svg, const int mark)
 {
 	while (svg->mark > mark)
 	{
@@ -502,10 +502,10 @@ static void close_groups(gx_device_svg *svg, const int mark)
 
 /* Open the device */
 static int
-svg_open_device(gx_device *dev)
+svg_open_device(gx_device* dev)
 {
-	gx_device_vector *const vdev = (gx_device_vector*)dev;
-	gx_device_svg *const svg = (gx_device_svg*)dev;
+	gx_device_vector* const vdev = (gx_device_vector*)dev;
+	gx_device_svg* const svg = (gx_device_svg*)dev;
 	int code = 0;
 
 	vdev->v_memory = dev->memory;
@@ -553,9 +553,9 @@ svg_open_device(gx_device *dev)
 
 /* Complete a page */
 static int
-svg_output_page(gx_device *dev, int num_copies, int flush)
+svg_output_page(gx_device* dev, int num_copies, int flush)
 {
-	gx_device_svg *const svg = (gx_device_svg*)dev;
+	gx_device_svg* const svg = (gx_device_svg*)dev;
 	int code;
 	uint used;
 	char line[300];
@@ -566,10 +566,10 @@ svg_output_page(gx_device *dev, int num_copies, int flush)
 
 	// Write the end of the page
 	svg_write(svg, "</page>\n");
-	
+
 	// Rewrite attributes for new svg items later
 	svg->dirty = true;
-	
+
 	// Note: We previously used ferror instead of gp_ferror here. I'm not sure
 	// what the difference is, but ferror sometimes seems to report a false
 	// error, whereas gp_ferror does not. Also, all other devices seem to use
@@ -586,7 +586,7 @@ svg_output_page(gx_device *dev, int num_copies, int flush)
 	}
 
 	/* Check if we need to change the output file for separate pages */
-	if (gx_outputfile_is_separate_pages(((gx_device_vector *)dev)->fname, dev->memory)) {
+	if (gx_outputfile_is_separate_pages(((gx_device_vector*)dev)->fname, dev->memory)) {
 		if ((code = svg_close_device(dev)) < 0)
 			return code;
 		code = svg_open_device(dev);
@@ -600,9 +600,9 @@ svg_output_page(gx_device *dev, int num_copies, int flush)
 
 /* Close the device */
 static int
-svg_close_device(gx_device *dev)
+svg_close_device(gx_device* dev)
 {
-	gx_device_svg *const svg = (gx_device_svg*)dev;
+	gx_device_svg* const svg = (gx_device_svg*)dev;
 
 	// Note: If gdev_vector_stream is called, the beginning of the next page will
 	// be written. Therefore, this function cannot be called in svg_close_device.
@@ -635,7 +635,7 @@ svg_close_device(gx_device *dev)
 
 /* Respond to a device parameter query from the client */
 static int
-svg_get_params(gx_device *dev, gs_param_list *plist)
+svg_get_params(gx_device* dev, gs_param_list* plist)
 {
 	int code = 0;
 
@@ -653,7 +653,7 @@ svg_get_params(gx_device *dev, gs_param_list *plist)
 
 /* Read the device parameters passed to us by the client */
 static int
-svg_put_params(gx_device *dev, gs_param_list *plist)
+svg_put_params(gx_device* dev, gs_param_list* plist)
 {
 	int code = 0;
 
@@ -673,7 +673,7 @@ svg_put_params(gx_device *dev, gs_param_list *plist)
 /* RGB mapping for 32-bit RGBA color devices */
 
 static gx_color_index
-svgalpha_encode_color(gx_device * dev, const gx_color_value cv[])
+svgalpha_encode_color(gx_device* dev, const gx_color_value cv[])
 {
 	/* low 7 are alpha, stored inverted to avoid white/opaque
 	* being 0xffffffff which is also gx_no_color_index.
@@ -689,8 +689,8 @@ svgalpha_encode_color(gx_device * dev, const gx_color_value cv[])
 
 /* Map a color index to a r-g-b color. */
 static int
-svgalpha_decode_color(gx_device * dev, gx_color_index color,
-gx_color_value prgb[3])
+svgalpha_decode_color(gx_device* dev, gx_color_index color,
+	gx_color_value prgb[3])
 {
 	prgb[0] = gx_color_value_from_byte((color >> 24) & 0xff);
 	prgb[1] = gx_color_value_from_byte((color >> 16) & 0xff);
@@ -698,12 +698,12 @@ gx_color_value prgb[3])
 	return 0;
 }
 
-static int make_alpha_mdev(gx_device *dev, gx_device_memory **ppmdev, gs_fixed_rect bbox,
+static int make_alpha_mdev(gx_device* dev, gx_device_memory** ppmdev, gs_fixed_rect bbox,
 	int depth)
 {
 	int i;
 	gx_device_memory proto;
-	const gx_device_memory *mdproto = gdev_mem_device_for_bits(depth);
+	const gx_device_memory* mdproto = gdev_mem_device_for_bits(depth);
 	memcpy(&proto, mdproto, sizeof(gx_device_memory));
 	/* Duplicate pngalpha */
 	proto.color_info.max_components = 3;
@@ -789,7 +789,7 @@ transform_path(gx_path* ppath, const gs_matrix tr)
 }
 
 static void
-print_path(const gx_path *path)
+print_path(const gx_path* path)
 {
 	gs_path_enum penum;
 
@@ -835,13 +835,13 @@ static int gdev_svg_stroke_path(
 	const gx_drawing_color* pdcolor,
 	const gx_clip_path* pcpath)
 {
-	gx_device_svg *svg = (gx_device_svg *)dev;
+	gx_device_svg* svg = (gx_device_svg*)dev;
 	gx_drawing_color color;
 	color_unset(&color);
 	int code = 0;
 	int mark = 0;
 	int i;
-	switch (svg_get_color_type((gx_device_svg *)dev, pdcolor))
+	switch (svg_get_color_type((gx_device_svg*)dev, pdcolor))
 	{
 	case COLOR_PURE:
 		double scale;
@@ -935,24 +935,24 @@ static int gdev_svg_stroke_path(
 			svg_write(svg, "<g class='image'>\n");
 			/* Make image from stroked path */
 			gs_fixed_rect bbox;
-			gx_device_memory *pmdev;
+			gx_device_memory* pmdev;
 
 			code = gx_path_bbox(ppath, &bbox);
 			make_alpha_mdev(dev, &pmdev, bbox, 32);
 
 			//pmdev->color_info = dev->color_info;
-			code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
-			code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0, 
+			code = (*dev_proc(pmdev, open_device))((gx_device*)pmdev);
+			code = (*dev_proc(pmdev, fill_rectangle))((gx_device*)pmdev, 0, 0,
 				pmdev->width, pmdev->height, 0xffffffff);
 			/* Translate the paths */
 			gx_path_translate(ppath, -bbox.p.x, -bbox.p.y);
 			gx_path_translate(pcpath, -bbox.p.x, -bbox.p.y);
-			code = (*dev_proc(pmdev, stroke_path))((gx_device *)pmdev, pis, ppath, params, pdcolor, pcpath);
+			code = (*dev_proc(pmdev, stroke_path))((gx_device*)pmdev, pis, ppath, params, pdcolor, pcpath);
 			/* Restore the paths to their original locations. Maybe not needed */
 			gx_path_translate(ppath, bbox.p.x, bbox.p.y);
 			gx_path_translate(pcpath, bbox.p.x, bbox.p.y);
 			make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
-			code = (*dev_proc(pmdev, close_device))((gx_device *)pmdev);
+			code = (*dev_proc(pmdev, close_device))((gx_device*)pmdev);
 			while (svg->mark > mark) {
 				svg_write(svg, "</g>\n");
 				svg->mark--;
@@ -974,12 +974,12 @@ static int gdev_svg_fill_path(
 	const gx_drawing_color* pdcolor,
 	const gx_clip_path* pcpath)
 {
-	gx_device_svg *svg = (gx_device_svg *)dev;
+	gx_device_svg* svg = (gx_device_svg*)dev;
 	gx_drawing_color color;
 	color_unset(&color);
 	int code = 0;
 
-	int ctype = svg_get_color_type((gx_device_svg *)dev, pdcolor);
+	int ctype = svg_get_color_type((gx_device_svg*)dev, pdcolor);
 	switch (ctype)
 	{
 	case COLOR_PURE:
@@ -990,81 +990,81 @@ static int gdev_svg_fill_path(
 		svg->current_clip_path_transform = NULL;
 		return code;
 	case COLOR_PATTERN1:
-	if(true){
+		if (true) {
 
-		gs_fixed_rect bbox;
-		gx_device_memory *pmdev;
-		int mark = svg->mark;
-		gs_matrix m;
-		gx_drawing_color dc = *pdcolor;
-		gs_pattern1_instance_t pi = *(gs_pattern1_instance_t *)dc.ccolor.pattern;
-		gs_gstate *pgs = gs_gstate_copy(pi.saved, gs_gstate_memory(pi.saved));
+			gs_fixed_rect bbox;
+			gx_device_memory* pmdev;
+			int mark = svg->mark;
+			gs_matrix m;
+			gx_drawing_color dc = *pdcolor;
+			gs_pattern1_instance_t pi = *(gs_pattern1_instance_t*)dc.ccolor.pattern;
+			gs_gstate* pgs = gs_gstate_copy(pi.saved, gs_gstate_memory(pi.saved));
 
-		gs_make_identity(&m);
+			gs_make_identity(&m);
 
-		if (pgs == NULL)
-		{
-			return_error(gs_error_VMerror);
+			if (pgs == NULL)
+			{
+				return_error(gs_error_VMerror);
+			}
+
+			dc.ccolor.pattern = (gs_pattern_instance_t*)&pi;
+			pi.saved = pgs;
+
+			// First we need to fill the bounding box with the pattern
+			code = gx_path_bbox(ppath, &bbox);
+
+			make_alpha_mdev(dev, &pmdev, bbox, pdcolor->colors.pattern.p_tile->depth);
+			pmdev->color_info = dev->color_info;
+
+
+			code = (*dev_proc(pmdev, open_device))((gx_device*)pmdev);
+			code = (*dev_proc(pmdev, fill_rectangle))((gx_device*)pmdev, 0, 0,
+				pmdev->width, pmdev->height, 0xffffffff);
+
+
+			int sx = fixed2int(bbox.p.x);
+			int sy = fixed2int(bbox.p.y);
+			gs_int_point rect_size;
+			rect_size.x = fixed2int(bbox.q.x + fixed_half) - sx;
+			rect_size.y = fixed2int(bbox.q.y + fixed_half) - sy;
+			if (rect_size.x == 0 || rect_size.y == 0)
+			{
+				return 0;
+			}
+
+			svg_write(svg, "<g class='pathfillimage'>\n");
+
+			/* Translate the paths */
+			gx_path_translate(ppath, -bbox.p.x, -bbox.p.y);
+
+			/* Translate the pattern as well */
+			dc.mask.m_phase.x += fixed2int(bbox.p.x);
+			dc.mask.m_phase.y += fixed2int(bbox.p.y);
+
+			dc.phase.x = dc.mask.m_phase.x;
+			dc.phase.y = dc.mask.m_phase.y;
+
+			// Give fill_path a null clip path because it will be in the wrong place and because
+			// we will be adding in our own clip path later
+			code = (*dev_proc(pmdev, fill_path))((gx_device*)pmdev,
+				pis, ppath, params, &dc, NULL);
+
+			/* Restore the paths to their original locations. Maybe not needed */
+			gx_path_translate(ppath, bbox.p.x, bbox.p.y);
+
+			svg->current_image_clip_path = pcpath;
+
+			/* Restore the paths to their original locations. Maybe not needed */
+			make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
+			code = (*dev_proc(pmdev, close_device))((gx_device*)pmdev);
+
+			close_clip_groups(svg);
+			svg_write(svg, "</g> <!-- pathfillimage -->\n");
+
+			gs_gstate_free(pgs);
+
+			return code;
 		}
-
-		dc.ccolor.pattern = (gs_pattern_instance_t *)&pi;
-		pi.saved = pgs;
-
-		// First we need to fill the bounding box with the pattern
-		code = gx_path_bbox(ppath, &bbox);
-
-		make_alpha_mdev(dev, &pmdev, bbox, pdcolor->colors.pattern.p_tile->depth);
-		pmdev->color_info = dev->color_info;
-
-
-		code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
-		code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0,
-			pmdev->width, pmdev->height, 0xffffffff);
-
-
-		int sx = fixed2int(bbox.p.x);
-		int sy = fixed2int(bbox.p.y);
-		gs_int_point rect_size;
-		rect_size.x = fixed2int(bbox.q.x + fixed_half) - sx;
-		rect_size.y = fixed2int(bbox.q.y + fixed_half) - sy;
-		if (rect_size.x == 0 || rect_size.y == 0)
-		{
-			return 0;
-		}
-
-		svg_write(svg, "<g class='pathfillimage'>\n");
-
-		/* Translate the paths */
-		gx_path_translate(ppath, -bbox.p.x, -bbox.p.y);
-
-		/* Translate the pattern as well */
-		dc.mask.m_phase.x += fixed2int(bbox.p.x);
-		dc.mask.m_phase.y += fixed2int(bbox.p.y);
-
-		dc.phase.x = dc.mask.m_phase.x;
-		dc.phase.y = dc.mask.m_phase.y;
-
-		// Give fill_path a null clip path because it will be in the wrong place and because
-		// we will be adding in our own clip path later
-		code = (*dev_proc(pmdev, fill_path))((gx_device *)pmdev, 
-			pis, ppath, params, &dc, NULL);
-
-		/* Restore the paths to their original locations. Maybe not needed */
-		gx_path_translate(ppath, bbox.p.x, bbox.p.y);
-		
-		svg->current_image_clip_path = pcpath;
-
-		/* Restore the paths to their original locations. Maybe not needed */
-		make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
-		code = (*dev_proc(pmdev, close_device))((gx_device *)pmdev);
-
-		close_clip_groups(svg);
-		svg_write(svg, "</g> <!-- pathfillimage -->\n");
-
-		gs_gstate_free(pgs);
-
-		return code;
-	}
 	default:
 		if (svg->from_stroke_path || !gx_dc_is_pattern2_color(pdcolor))
 		{
@@ -1073,31 +1073,31 @@ static int gdev_svg_fill_path(
 		else
 		{
 			gs_fixed_rect bbox, bbox1;
-			gx_device_memory *pmdev;
+			gx_device_memory* pmdev;
 			int mark = svg->mark;
 			gs_gstate* pis_noconst = (gs_gstate*)pis; /* Break const. */
 			gs_matrix_fixed oldCTM = pis_noconst->ctm;
 			gs_matrix save_ctm = ctm_only(pis);
 			gs_matrix m;
 			gx_drawing_color dc = *pdcolor;
-			gs_pattern2_instance_t pi = *(gs_pattern2_instance_t *)dc.ccolor.pattern;
+			gs_pattern2_instance_t pi = *(gs_pattern2_instance_t*)dc.ccolor.pattern;
 
 			// Note: Do not use gs_gstate_memory(pi.saved)
 			// This strips the pointer to 32 bits and causes a crash
-			gs_gstate *pgs = gs_gstate_copy(pi.saved, pi.saved->memory /*gs_state_memory(pi.saved)*/);
+			gs_gstate* pgs = gs_gstate_copy(pi.saved, pi.saved->memory /*gs_state_memory(pi.saved)*/);
 
 			gs_make_identity(&m);
 
 			if (pgs == NULL)
 				return_error(gs_error_VMerror);
-			dc.ccolor.pattern = (gs_pattern_instance_t *)&pi;
+			dc.ccolor.pattern = (gs_pattern_instance_t*)&pi;
 			pi.saved = pgs;
 
 			// First we need to fill the bounding box with the pattern
 			code = gx_path_bbox(ppath, &bbox);
 			make_alpha_mdev(dev, &pmdev, bbox, 32);
-			code = (*dev_proc(pmdev, open_device))((gx_device *)pmdev);
-			code = (*dev_proc(pmdev, fill_rectangle))((gx_device *)pmdev, 0, 0, 
+			code = (*dev_proc(pmdev, open_device))((gx_device*)pmdev);
+			code = (*dev_proc(pmdev, fill_rectangle))((gx_device*)pmdev, 0, 0,
 				pmdev->width, pmdev->height, 0xffffffff);
 
 
@@ -1135,7 +1135,7 @@ static int gdev_svg_fill_path(
 				(gx_device*)pmdev,
 				(gs_gstate*)pis,
 				!pi.shfill
-				);
+			);
 
 			pis_noconst->ctm = oldCTM;
 
@@ -1143,7 +1143,7 @@ static int gdev_svg_fill_path(
 
 			/* Restore the paths to their original locations. Maybe not needed */
 			make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
-			code = (*dev_proc(pmdev, close_device))((gx_device *)pmdev);
+			code = (*dev_proc(pmdev, close_device))((gx_device*)pmdev);
 
 			close_clip_groups(svg);
 			svg_write(svg, "</g> <!-- pathfillimage -->\n");
@@ -1170,13 +1170,13 @@ svg_write_bytes_sputs(gx_device_svg* svg, const char* string, uint length)
 
 /* write a length-limited char buffer */
 static int
-svg_write_bytes(gx_device_svg *svg, const char *string, uint length)
+svg_write_bytes(gx_device_svg* svg, const char* string, uint length)
 {
 	/* calling the accessor ensures beginpage is called */
-	stream *s = gdev_vector_stream((gx_device_vector*)svg);
+	stream* s = gdev_vector_stream((gx_device_vector*)svg);
 	uint used;
 
-	sputs(s, (const byte *)string, length, &used);
+	sputs(s, (const byte*)string, length, &used);
 
 	return !(length == used);
 }
@@ -1190,13 +1190,13 @@ svg_write_sputs(gx_device_svg* svg, const char* string)
 
 /* write a null terminated string */
 static int
-svg_write(gx_device_svg *svg, const char *string)
+svg_write(gx_device_svg* svg, const char* string)
 {
 	return svg_write_bytes(svg, string, strlen(string));
 }
 
 static int
-svg_write_header(gx_device_svg *svg)
+svg_write_header(gx_device_svg* svg)
 {
 	/* we're called from beginpage, so we can't use
 	   svg_write() which calls gdev_vector_stream()
@@ -1244,14 +1244,14 @@ svg_write_header(gx_device_svg *svg)
 
 	return 0;
 }
-static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_color *pdc)
+static enum COLOR_TYPE svg_get_color_type(gx_device_svg* svg, const gx_drawing_color* pdc)
 {
 	if ((svg == NULL) || (pdc == NULL))
 	{
 		return COLOR_UNKNOWN;
 	}
 
-	const gx_device_color *pdevc = (gx_device_color *)pdc;
+	const gx_device_color* pdevc = (gx_device_color*)pdc;
 	if (gx_dc_is_pure(pdc))
 	{
 		return COLOR_PURE;
@@ -1290,7 +1290,7 @@ static enum COLOR_TYPE svg_get_color_type(gx_device_svg * svg, const gx_drawing_
 
 }
 static gx_color_index
-svg_get_color(gx_device_svg *svg, const gx_drawing_color *pdc)
+svg_get_color(gx_device_svg* svg, const gx_drawing_color* pdc)
 {
 	gx_color_index color = gx_no_color_index;
 
@@ -1299,19 +1299,19 @@ svg_get_color(gx_device_svg *svg, const gx_drawing_color *pdc)
 	return color;
 }
 
-static bool pen_is_empty(gx_device_svg *svg, const gx_path_type_t type)
+static bool pen_is_empty(gx_device_svg* svg, const gx_path_type_t type)
 {
-	return (!(type & gx_path_type_stroke) && (svg->strokecolor != gx_no_color_index)) 
+	return (!(type & gx_path_type_stroke) && (svg->strokecolor != gx_no_color_index))
 		|| (type & gx_path_type_clip);
 }
 
-static bool fill_is_empty(gx_device_svg *svg, const gx_path_type_t type)
+static bool fill_is_empty(gx_device_svg* svg, const gx_path_type_t type)
 {
-	return (!(type & gx_path_type_fill) && (svg->fillcolor != gx_no_color_index)) 
+	return (!(type & gx_path_type_fill) && (svg->fillcolor != gx_no_color_index))
 		|| (type & gx_path_type_clip);
 }
 
-static void svg_write_state_to_svg(gx_device_svg *svg, const bool emptyPen, const bool emptyFill)
+static void svg_write_state_to_svg(gx_device_svg* svg, const bool emptyPen, const bool emptyFill)
 {
 	char line[SVG_LINESIZE];
 
@@ -1321,7 +1321,7 @@ static void svg_write_state_to_svg(gx_device_svg *svg, const bool emptyPen, cons
 		gs_sprintf(line, "stroke='#%06x' ", (uint)(svg->strokecolor & 0xffffffL));
 		svg_write(svg, line);
 	}
-	else 
+	else
 	{
 		svg_write(svg, "stroke='none' ");
 	}
@@ -1331,7 +1331,7 @@ static void svg_write_state_to_svg(gx_device_svg *svg, const bool emptyPen, cons
 		gs_sprintf(line, "fill='#%06x' ", (uint)(svg->fillcolor & 0xffffffL));
 		svg_write(svg, line);
 	}
-	else 
+	else
 	{
 		svg_write(svg, "fill='none' ");
 	}
@@ -1342,7 +1342,7 @@ static void svg_write_state_to_svg(gx_device_svg *svg, const bool emptyPen, cons
 		svg_write(svg, line);
 	}
 
-	if (svg->linecap != SVG_DEFAULT_LINECAP) 
+	if (svg->linecap != SVG_DEFAULT_LINECAP)
 	{
 		switch (svg->linecap) {
 		case gs_cap_round:
@@ -1359,7 +1359,7 @@ static void svg_write_state_to_svg(gx_device_svg *svg, const bool emptyPen, cons
 		}
 	}
 
-	if (svg->linejoin != SVG_DEFAULT_LINEJOIN) 
+	if (svg->linejoin != SVG_DEFAULT_LINEJOIN)
 	{
 		switch (svg->linejoin) {
 		case gs_join_round:
@@ -1409,7 +1409,7 @@ static void svg_write_state_to_svg(gx_device_svg *svg, const bool emptyPen, cons
 }
 
 static int
-svg_write_state(gx_device_svg *svg)
+svg_write_state(gx_device_svg* svg)
 {
 	/* has anything changed? */
 	if (!svg->dirty)
@@ -1418,7 +1418,7 @@ svg_write_state(gx_device_svg *svg)
 	}
 
 	/* close the current graphics state element, if any */
-	if (svg->mark > 1) 
+	if (svg->mark > 1)
 	{
 		svg_write(svg, "</g>\n");
 		svg->mark--;
@@ -1432,9 +1432,9 @@ svg_write_state(gx_device_svg *svg)
 
 /* Page management */
 static int
-svg_beginpage(gx_device_vector *vdev)
+svg_beginpage(gx_device_vector* vdev)
 {
-	gx_device_svg *svg = (gx_device_svg *)vdev;
+	gx_device_svg* svg = (gx_device_svg*)vdev;
 	char line[300];
 
 	if_debug1m('_', svg->memory, "svg_beginpage (page count %d)\n", svg->page_count);
@@ -1468,9 +1468,9 @@ svg_beginpage(gx_device_vector *vdev)
 
 /* Imager state */
 static int
-svg_setlinewidth(gx_device_vector *vdev, double width)
+svg_setlinewidth(gx_device_vector* vdev, double width)
 {
-	gx_device_svg *svg = (gx_device_svg *)vdev;
+	gx_device_svg* svg = (gx_device_svg*)vdev;
 
 	if_debug1m('_', svg->memory, "svg_setlinewidth(%lf)\n", width);
 
@@ -1480,10 +1480,10 @@ svg_setlinewidth(gx_device_vector *vdev, double width)
 	return 0;
 }
 static int
-svg_setlinecap(gx_device_vector *vdev, gs_line_cap cap)
+svg_setlinecap(gx_device_vector* vdev, gs_line_cap cap)
 {
-	gx_device_svg *svg = (gx_device_svg *)vdev;
-	const char *linecap_names[] = { "butt", "round", "square",
+	gx_device_svg* svg = (gx_device_svg*)vdev;
+	const char* linecap_names[] = { "butt", "round", "square",
 		"triangle", "unknown" };
 
 	if (cap < 0 || cap > gs_cap_unknown)
@@ -1496,10 +1496,10 @@ svg_setlinecap(gx_device_vector *vdev, gs_line_cap cap)
 	return 0;
 }
 static int
-svg_setlinejoin(gx_device_vector *vdev, gs_line_join join)
+svg_setlinejoin(gx_device_vector* vdev, gs_line_join join)
 {
-	gx_device_svg *svg = (gx_device_svg *)vdev;
-	const char *linejoin_names[] = { "miter", "round", "bevel",
+	gx_device_svg* svg = (gx_device_svg*)vdev;
+	const char* linejoin_names[] = { "miter", "round", "bevel",
 		"none", "triangle", "unknown" };
 
 	if (join < 0 || join > gs_join_unknown)
@@ -1512,7 +1512,7 @@ svg_setlinejoin(gx_device_vector *vdev, gs_line_join join)
 	return 0;
 }
 static int
-svg_setmiterlimit(gx_device_vector *vdev, double limit)
+svg_setmiterlimit(gx_device_vector* vdev, double limit)
 {
 	gx_device_svg* svg = (gx_device_svg*)vdev;
 
@@ -1527,12 +1527,12 @@ svg_setmiterlimit(gx_device_vector *vdev, double limit)
 	return 0;
 }
 static int
-svg_setdash(gx_device_vector *vdev, const float *pattern,
-uint count, double offset)
+svg_setdash(gx_device_vector* vdev, const float* pattern,
+	uint count, double offset)
 {
 	if_debug0m('_', vdev->memory, "svg_setdash\n");
 
-	gx_device_svg *svg = (gx_device_svg *)vdev;
+	gx_device_svg* svg = (gx_device_svg*)vdev;
 	for (int i = 0; (i < count) && (i < MAX_PATTERNS); ++i)
 	{
 		svg->dashPattern[i] = pattern[i];
@@ -1544,8 +1544,8 @@ uint count, double offset)
 	return 0;
 }
 static int
-svg_setlogop(gx_device_vector *vdev, gs_logical_operation_t lop,
-gs_logical_operation_t diff)
+svg_setlogop(gx_device_vector* vdev, gs_logical_operation_t lop,
+	gs_logical_operation_t diff)
 {
 	if_debug2m('_', vdev->memory, "svg_setlogop(%u,%u) set logical operation\n",
 		lop, diff);
@@ -1569,8 +1569,8 @@ static int svg_setfillcolor(
 	const gs_gstate* pis,
 	const gx_drawing_color* pdc)
 {
-	gx_device_svg *svg = (gx_device_svg*)vdev;
-	const gx_device_color *pdevc = (gx_device_color *)pdc;
+	gx_device_svg* svg = (gx_device_svg*)vdev;
+	const gx_device_color* pdevc = (gx_device_color*)pdc;
 	gx_color_index color = gx_no_color_index;
 	if (gx_dc_is_pure(pdc))
 		color = gx_dc_pure_color(pdc);
@@ -1630,7 +1630,7 @@ static int svg_setstrokecolor(
 	const gs_gstate* pis,
 	const gx_drawing_color* pdc)
 {
-	gx_device_svg *svg = (gx_device_svg*)vdev;
+	gx_device_svg* svg = (gx_device_svg*)vdev;
 	gx_color_index stroke = svg_get_color(svg, pdc);
 
 	if_debug0m('_', svg->memory, "svg_setstrokecolor\n");
@@ -1649,9 +1649,9 @@ static int svg_setstrokecolor(
 /* Paths */
 /*    gdev_vector_dopath */
 
-static int svg_print_path_type(gx_device_svg *svg, gx_path_type_t type)
+static int svg_print_path_type(gx_device_svg* svg, gx_path_type_t type)
 {
-	const char *path_type_names[] = { "winding number", "fill", "stroke",
+	const char* path_type_names[] = { "winding number", "fill", "stroke",
 		"fill and stroke", "clip" };
 
 	if (type <= 4)
@@ -1662,24 +1662,24 @@ static int svg_print_path_type(gx_device_svg *svg, gx_path_type_t type)
 	return 0;
 }
 
-static int svg_write_clip_start(gx_device_svg *svg, gs_matrix matrix, bool winding_fill)
+static int svg_write_clip_start(gx_device_svg* svg, gs_matrix matrix, bool winding_fill)
 {
 	char clippathStr[200];
 	char path_fill_rule[SVG_LINESIZE];
-	
+
 	gs_sprintf(path_fill_rule, "%s", winding_fill ? "clip-rule='nonzero'" : "clip-rule='evenodd'");
 
 	gs_sprintf(clippathStr, "<clipPath id='clip%i' %s transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
 		++svg->highestUsedId,
 		path_fill_rule,
 		matrix.xx, matrix.xy, matrix.yx, matrix.yy, matrix.tx, matrix.ty
-		);
+	);
 	svg_write(svg, clippathStr);
 
 	return 0;
 }
 
-static int svg_write_clip_end(gx_device_svg *svg)
+static int svg_write_clip_end(gx_device_svg* svg)
 {
 	svg_write(svg, "</clipPath>\n");
 
@@ -1687,12 +1687,12 @@ static int svg_write_clip_end(gx_device_svg *svg)
 }
 
 static int
-svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
+svg_writeclip(gx_device_svg* svg, gx_clip_path* pcpath, gs_matrix matrix)
 {
 	gs_fixed_rect bbox;
 	float bboxArea;
 	int code = 0, mainBboxCode;
-	gx_cpath_path_list *path_list;
+	gx_cpath_path_list* path_list;
 	int clipPathIndex = -1, index = 0;
 
 	bool has_main_clip = false;
@@ -1742,7 +1742,7 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 	int original_clip_path_id = svg->usedIds;
 
 	// Fill in an array of path pointers, with the 1st being the main path
-	gx_path **all_paths = (gx_path**)malloc(path_list_size * sizeof(gx_path*));
+	gx_path** all_paths = (gx_path**)malloc(path_list_size * sizeof(gx_path*));
 	all_paths[0] = &pcpath->path;
 	if (pcpath->path_list != NULL)
 	{
@@ -1754,13 +1754,13 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 			++i;
 		} while ((path_list = path_list->next));
 	}
-	
+
 	// Write each clip path
 	svg->validClipPath = false;
 	int null_path_count = 0;
 	for (int i = 0; i < path_list_size; ++i)
 	{
-		gx_path *path = all_paths[i];
+		gx_path* path = all_paths[i];
 
 		if (path->subpath_count <= 0)
 		{
@@ -1801,7 +1801,7 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 
 		if (pcpath->rect_list->list.count == 1)
 		{
-			gx_clip_rect *rect = &pcpath->rect_list->list.single;
+			gx_clip_rect* rect = &pcpath->rect_list->list.single;
 
 			// Check the bounds
 			if ((rect->xmax == rect->xmin) || (rect->ymax == rect->ymin))
@@ -1827,7 +1827,7 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 					int2fixed(rect->xmax),
 					int2fixed(rect->ymax),
 					clip_path_type
-					);
+				);
 				svg_write_clip_end(svg);
 
 				svg->validClipPath = true;
@@ -1837,7 +1837,7 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 		{
 			svg_write_clip_start(svg, matrix, winding_fill);
 
-			gx_clip_rect *rect = pcpath->rect_list->list.head;
+			gx_clip_rect* rect = pcpath->rect_list->list.head;
 			do
 			{
 				// Check the bounds
@@ -1861,7 +1861,7 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 						int2fixed(rect->xmax),
 						int2fixed(rect->ymax),
 						clip_path_type
-						);
+					);
 				}
 			} while ((rect = rect->next));
 
@@ -1880,12 +1880,12 @@ svg_writeclip(gx_device_svg *svg, gx_clip_path *pcpath, gs_matrix matrix)
 			int2fixed(0),
 			int2fixed(0),
 			clip_path_type
-			);
+		);
 		svg_write_clip_end(svg);
 
 		svg->validClipPath = true;
 	}
-	
+
 	if (!svg->validClipPath && has_main_clip)
 	{
 		svg->start_clip_mark = -1;
@@ -1942,7 +1942,7 @@ Because svg_writeclip(...) may nest the current item into more groups, we must
 close those additional groups once the item has been written to the output
 stream
 */
-static void close_clip_groups(gx_device_svg *svg)
+static void close_clip_groups(gx_device_svg* svg)
 {
 	if (svg->start_clip_mark >= 0)
 	{
@@ -1952,10 +1952,10 @@ static void close_clip_groups(gx_device_svg *svg)
 }
 
 static int
-svg_dorect(gx_device_vector *vdev, fixed x0, fixed y0,
-fixed x1, fixed y1, gx_path_type_t type)
+svg_dorect(gx_device_vector* vdev, fixed x0, fixed y0,
+	fixed x1, fixed y1, gx_path_type_t type)
 {
-	gx_device_svg *svg = (gx_device_svg *)vdev;
+	gx_device_svg* svg = (gx_device_svg*)vdev;
 	char line[300];
 
 	// Check if the pen or brush is empty
@@ -1981,7 +1981,7 @@ fixed x1, fixed y1, gx_path_type_t type)
 
 		svg_write_state_to_svg(svg, emptyPen, emptyBrush);
 
-		gs_sprintf(line, "%sx='%lf' y='%lf' width='%lf' height='%lf'", 
+		gs_sprintf(line, "%sx='%lf' y='%lf' width='%lf' height='%lf'",
 			(svg->validClipPath ? clip_path_id : ""),
 			fixed2float(x0), fixed2float(y0),
 			fixed2float(x1 - x0), fixed2float(y1 - y0));
@@ -1993,7 +1993,7 @@ fixed x1, fixed y1, gx_path_type_t type)
 	{
 		svg_write(svg, "<rect ");
 
-		gs_sprintf(line, "x='%lf' y='%lf' width='%lf' height='%lf'", 
+		gs_sprintf(line, "x='%lf' y='%lf' width='%lf' height='%lf'",
 			fixed2float(x0), fixed2float(y0),
 			fixed2float(x1 - x0), fixed2float(y1 - y0));
 		svg_write(svg, line);
@@ -2019,9 +2019,9 @@ fixed x1, fixed y1, gx_path_type_t type)
 }
 
 static int
-svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
+svg_beginpath(gx_device_vector* vdev, gx_path_type_t type)
 {
-	gx_device_svg *svg = (gx_device_svg *)vdev;
+	gx_device_svg* svg = (gx_device_svg*)vdev;
 
 	push_path_type(&svg->path_type_stack, type);
 
@@ -2039,14 +2039,14 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 
 	char path_fill_rule[SVG_LINESIZE];
 	gx_path_type_t rule = type & gx_path_type_rule;
-	gs_sprintf(path_fill_rule, "%s", 
+	gs_sprintf(path_fill_rule, "%s",
 		rule == gx_path_type_even_odd ?
 		"fill-rule='evenodd' " : "fill-rule='nonzero' ");
 
 	if ((svg->current_clip_path != NULL) && !svg->writing_clip)
 	{
 		svg->writing_clip = true;
-		
+
 		svg_writeclip_standard(svg);
 
 		char clip_path_id[SVG_LINESIZE];
@@ -2078,10 +2078,10 @@ svg_beginpath(gx_device_vector *vdev, gx_path_type_t type)
 }
 
 static int
-svg_moveto(gx_device_vector *vdev, double x0, double y0,
-double x, double y, gx_path_type_t type)
+svg_moveto(gx_device_vector* vdev, double x0, double y0,
+	double x, double y, gx_path_type_t type)
 {
-	gx_device_svg *svg = (gx_device_svg *)vdev;
+	gx_device_svg* svg = (gx_device_svg*)vdev;
 	char line[SVG_LINESIZE];
 
 	/* skip non-drawing paths for now */
@@ -2100,10 +2100,10 @@ double x, double y, gx_path_type_t type)
 }
 
 static int
-svg_lineto(gx_device_vector *vdev, double x0, double y0,
-double x, double y, gx_path_type_t type)
+svg_lineto(gx_device_vector* vdev, double x0, double y0,
+	double x, double y, gx_path_type_t type)
 {
-	gx_device_svg *svg = (gx_device_svg *)vdev;
+	gx_device_svg* svg = (gx_device_svg*)vdev;
 	char line[SVG_LINESIZE];
 
 	/* skip non-drawing paths for now */
@@ -2122,11 +2122,11 @@ double x, double y, gx_path_type_t type)
 }
 
 static int
-svg_curveto(gx_device_vector *vdev, double x0, double y0,
-double x1, double y1, double x2, double y2,
-double x3, double y3, gx_path_type_t type)
+svg_curveto(gx_device_vector* vdev, double x0, double y0,
+	double x1, double y1, double x2, double y2,
+	double x3, double y3, gx_path_type_t type)
 {
-	gx_device_svg *svg = (gx_device_svg *)vdev;
+	gx_device_svg* svg = (gx_device_svg*)vdev;
 	char line[SVG_LINESIZE];
 
 	/* skip non-drawing paths for now */
@@ -2146,10 +2146,10 @@ double x3, double y3, gx_path_type_t type)
 }
 
 static int
-svg_closepath(gx_device_vector *vdev, double x, double y,
-double x_start, double y_start, gx_path_type_t type)
+svg_closepath(gx_device_vector* vdev, double x, double y,
+	double x_start, double y_start, gx_path_type_t type)
 {
-	gx_device_svg *svg = (gx_device_svg *)vdev;
+	gx_device_svg* svg = (gx_device_svg*)vdev;
 
 	/* skip non-drawing paths for now */
 	type = peek_path_type(svg->path_type_stack); // Use the type from the path-type stack
@@ -2166,9 +2166,9 @@ double x_start, double y_start, gx_path_type_t type)
 }
 
 static int
-svg_endpath(gx_device_vector *vdev, gx_path_type_t type)
+svg_endpath(gx_device_vector* vdev, gx_path_type_t type)
 {
-	gx_device_svg *svg = (gx_device_svg *)vdev;
+	gx_device_svg* svg = (gx_device_svg*)vdev;
 
 	pop_path_type(&svg->path_type_stack);
 
@@ -2219,17 +2219,17 @@ gs_private_st_suffix_add0(st_svg_image_enum, svg_image_enum_t,
 	svg_image_enum_reloc_ptrs,
 	st_gx_image_enum_common);
 static int
-svg_plane_data(gx_image_enum_common_t * info,
-const gx_image_plane_t * planes, int height,
-int *rows_used)
+svg_plane_data(gx_image_enum_common_t* info,
+	const gx_image_plane_t* planes, int height,
+	int* rows_used)
 {
-	svg_image_enum_t *pie = (svg_image_enum_t *)info;
+	svg_image_enum_t* pie = (svg_image_enum_t*)info;
 	int i, y, k, raster, ind, bytes;
 	unsigned char rgba[4];
 	unsigned char cmyk[4];
 	double black;
-	byte *row;
-	byte *invRow;
+	byte* row;
+	byte* invRow;
 	raster = (int)ceil(pie->num_planes * pie->plane_widths[0] * pie->plane_depths[0] / 8.0);
 	row = gs_alloc_bytes(pie->memory, raster, "png raster buffer");
 	if (row == 0)
@@ -2247,9 +2247,9 @@ int *rows_used)
 		}
 		else
 		{
-			for (i = 0; i < pie->plane_widths[0]; i++) 
+			for (i = 0; i < pie->plane_widths[0]; i++)
 			{
-				for (k = 0; k < pie->num_planes; ++k) 
+				for (k = 0; k < pie->num_planes; ++k)
 				{
 					if (planes[k].data && (pie->num_planes < 4))
 					{
@@ -2262,14 +2262,14 @@ int *rows_used)
 						if ((pie->num_planes == 1) && (pie->plane_depths[k] == 32))
 						{
 							invRow = &row[ind];
-							
+
 							byte cmyk_c = *(invRow + 0), cmyk_m = *(invRow + 1), cmyk_y = *(invRow + 2), cmyk_k = *(invRow + 3);
 
 							// CMYK to RGBA
 							black = (1.0 - cmyk_k / 255.0);
-							/*R*/ *(invRow + 0) = (unsigned char)(255 * (1.0 - cmyk_c / 255.0)*black);
-							/*G*/ *(invRow + 1) = (unsigned char)(255 * (1.0 - cmyk_m / 255.0)*black);
-							/*B*/ *(invRow + 2) = (unsigned char)(255 * (1.0 - cmyk_y / 255.0)*black);
+							/*R*/ *(invRow + 0) = (unsigned char)(255 * (1.0 - cmyk_c / 255.0) * black);
+							/*G*/ *(invRow + 1) = (unsigned char)(255 * (1.0 - cmyk_m / 255.0) * black);
+							/*B*/ *(invRow + 2) = (unsigned char)(255 * (1.0 - cmyk_y / 255.0) * black);
 							/*A*/ *(invRow + 3) = 0; // Alpha is inverted, 0 -> Full Opacity
 						}
 					}
@@ -2288,9 +2288,9 @@ int *rows_used)
 				{
 					// CMYK to RGBA
 					black = (1.0 - cmyk[3] / 255.0);
-					/*R*/ row[i * 4 + 0] = (unsigned char)(255 * (1.0 - cmyk[0] / 255.0)*black);
-					/*G*/ row[i * 4 + 1] = (unsigned char)(255 * (1.0 - cmyk[1] / 255.0)*black);
-					/*B*/ row[i * 4 + 2] = (unsigned char)(255 * (1.0 - cmyk[2] / 255.0)*black);
+					/*R*/ row[i * 4 + 0] = (unsigned char)(255 * (1.0 - cmyk[0] / 255.0) * black);
+					/*G*/ row[i * 4 + 1] = (unsigned char)(255 * (1.0 - cmyk[1] / 255.0) * black);
+					/*B*/ row[i * 4 + 2] = (unsigned char)(255 * (1.0 - cmyk[2] / 255.0) * black);
 					/*A*/ row[i * 4 + 3] = 0; // Alpha is inverted, 0 -> Full Opacity
 				}
 			}
@@ -2311,7 +2311,7 @@ static int write_png_start(
 	uint height)
 {
 	char line[SVG_LINESIZE];
-	
+
 	gs_matrix m3;
 	m3.xx = ctm.xx / ImageMatrix.xx;
 	m3.xy = ctm.xy / ImageMatrix.xx;
@@ -2322,10 +2322,10 @@ static int write_png_start(
 
 	gs_sprintf(line, "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
 		m3.xx, m3.xy, m3.yx, m3.yy, m3.tx, m3.ty
-		);
+	);
 	svg_write(dev, line);
 
-	gx_device_svg *svg = (gx_device_svg *)dev;
+	gx_device_svg* svg = (gx_device_svg*)dev;
 
 	// Calculate inverse matrix for cliping path
 	gs_matrix mInvert;
@@ -2351,18 +2351,18 @@ static int write_png_start(
 
 static int write_png_data(
 	gx_device* dev,
-	struct mem_encode *state)
+	struct mem_encode* state)
 {
 	return write_png_partial(dev, state, state->size);
 }
 
 static int write_png_partial(
 	gx_device* dev,
-	struct mem_encode *state,
+	struct mem_encode* state,
 	int len)
 {
 	size_t outputSize = 0;
-	byte *buffer = 0;
+	byte* buffer = 0;
 
 	/* Flush the buffer as base 64 */
 	buffer = base64_encode(state->memory, state->buffer, len, &outputSize);
@@ -2375,7 +2375,7 @@ static int write_png_partial(
 
 static int write_png_end(gx_device* dev)
 {
-	gx_device_svg *svg = (gx_device_svg *)dev;
+	gx_device_svg* svg = (gx_device_svg*)dev;
 	svg_write(dev, "\"/>\n");
 	close_clip_groups(svg);
 	svg_write(dev, "</g>\n");
@@ -2384,10 +2384,10 @@ static int write_png_end(gx_device* dev)
 }
 
 static int
-svg_end_image(gx_image_enum_common_t * info, bool draw_last)
+svg_end_image(gx_image_enum_common_t* info, bool draw_last)
 {
-	svg_image_enum_t *pie = (svg_image_enum_t *)info;
-	
+	svg_image_enum_t* pie = (svg_image_enum_t*)info;
+
 	// Finalize the image
 	png_write_end(pie->png_ptr, pie->info_ptr);
 
@@ -2399,10 +2399,10 @@ svg_end_image(gx_image_enum_common_t * info, bool draw_last)
 	write_png_data(
 		info->dev,
 		&pie->state
-		);
+	);
 	write_png_end(
 		info->dev
-		);
+	);
 
 	gs_free_object(pie->memory, pie->state.buffer, "png img buf");
 
@@ -2440,22 +2440,22 @@ static int svg_begin_typed_image(
 	gs_memory_t* memory,
 	gx_image_enum_common_t** pinfo)
 {
-	gx_device_svg *svg = (gx_device_svg *)dev;
-	svg_image_enum_t *pie;
+	gx_device_svg* svg = (gx_device_svg*)dev;
+	svg_image_enum_t* pie;
 
-	const gs_pixel_image_t *ppi = (const gs_pixel_image_t *)pim;
+	const gs_pixel_image_t* ppi = (const gs_pixel_image_t*)pim;
 	int ncomp;
 	int code;			/* return code */
 
 	dmprintf7(dev->memory, "begin_typed_image(type=%d, ImageMatrix=[%g %g %g %g %g %g]\n",
-		pim->type->index, 
+		pim->type->index,
 		pim->ImageMatrix.xx, pim->ImageMatrix.xy,
 		pim->ImageMatrix.yx, pim->ImageMatrix.yy,
 		pim->ImageMatrix.tx, pim->ImageMatrix.ty);
 
 	switch (pim->type->index) {
 	case 1:
-		if (((const gs_image1_t *)ppi)->ImageMask) {
+		if (((const gs_image1_t*)ppi)->ImageMask) {
 			ncomp = 1;
 			break;
 		}
@@ -2477,9 +2477,9 @@ static int svg_begin_typed_image(
 	if (pie == 0)
 		goto dflt;
 	memset(pie, 0, sizeof(*pie)); /* cleanup entirely for GC to work in all cases. */
-	*pinfo = (gx_image_enum_common_t *)pie;
+	*pinfo = (gx_image_enum_common_t*)pie;
 	if (gx_image_enum_common_init(*pinfo,
-		(const gs_data_image_t *)pim,
+		(const gs_data_image_t*)pim,
 		&svg_image_enum_procs, dev, ncomp,
 		ppi->format) < 0
 		)
@@ -2544,7 +2544,7 @@ static int svg_begin_typed_image(
 
 	pie->memory = memory;
 	pie->rows_left = ppi->Height;
-	*pinfo = (gx_image_enum_common_t *)pie;
+	*pinfo = (gx_image_enum_common_t*)pie;
 
 	write_png_start(
 		dev,
@@ -2552,7 +2552,7 @@ static int svg_begin_typed_image(
 		pie->ImageMatrix,
 		pie->width,
 		pie->height
-		);
+	);
 
 	return 0;
 dflt:
@@ -2572,7 +2572,7 @@ static int svg_fillpage(
 	gs_gstate* pis,
 	gx_device_color* pdevc)
 {
-	gx_device_svg *const svg = (gx_device_svg*)dev;
+	gx_device_svg* const svg = (gx_device_svg*)dev;
 
 	if_debug0m('_', svg->memory, "svg_fillpage\n");
 
@@ -2589,7 +2589,7 @@ my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
 	/* with libpng15 next line causes pointer deference error; use libpng12 */
 	struct mem_encode* p = (struct mem_encode*)png_get_io_ptr(png_ptr); /* was png_ptr->io_ptr */
 	size_t nsize = p->size + length;
-	char *buffer = 0;
+	char* buffer = 0;
 
 	/* allocate or grow buffer */
 	if (p->buffer)
@@ -2636,7 +2636,7 @@ my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
 	{
 		int flush_size = p->size / 3 * 3; // Round to nearest incrememnt of 3
 		int flush_remainder = p->size - flush_size;
-		char *temp = 0;
+		char* temp = 0;
 
 		temp = malloc(flush_remainder);
 		memcpy(temp, p->buffer + p->size - flush_remainder, flush_remainder);
@@ -2658,21 +2658,21 @@ my_png_flush(png_structp png_ptr)
 }
 
 int setup_png(
-	gx_device * pdev, 
-	svg_image_enum_t  *pie,
-	const gs_color_space *pcs,
+	gx_device* pdev,
+	svg_image_enum_t* pie,
+	const gs_color_space* pcs,
 	bool monod,
 	gx_color_index foreground)
 {
-	gs_memory_t *mem = pdev->memory;
+	gs_memory_t* mem = pdev->memory;
 	//int raster = gdev_prn_raster(pdev);
 	//gx_downscaler_t ds;
 
 	/* PNG structures */
 	//byte *row = gs_alloc_bytes(mem, raster, "png raster buffer");
-	png_struct *png_ptr = pie->png_ptr;
+	png_struct* png_ptr = pie->png_ptr;
 	//png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-	png_info *info_ptr = pie->info_ptr;
+	png_info* info_ptr = pie->info_ptr;
 	//png_create_info_struct(png_ptr);
 	int depth = pdev->color_info.depth;
 	int planeDepth = 0, i;
@@ -2695,13 +2695,13 @@ int setup_png(
 	png_uint_32 width, height;
 #if PNG_LIBPNG_VER_MINOR >= 5
 	//png_color palette[256];
-	png_color *palette;
+	png_color* palette;
 #endif
-	png_color *palettep;
+	png_color* palettep;
 	png_uint_16 num_palette;
 	png_uint_32 valid = 0;
 
-	palette = (void *)gs_alloc_bytes(mem, 256 * sizeof(png_color), "png palette");
+	palette = (void*)gs_alloc_bytes(mem, 256 * sizeof(png_color), "png palette");
 	if (palette == 0) {
 		return gs_note_error(gs_error_VMerror);
 	}
@@ -2782,7 +2782,7 @@ int setup_png(
 		break;
 	case 8:
 		bit_depth = 8;
-		
+
 		// TRS 14 August 2020
 		// Note: If pcs->base_space is NULL, then the program will crash determining the palette.
 		// However, in this scenario, we seem to be ok by not using a palette at all and instead
@@ -2792,7 +2792,7 @@ int setup_png(
 		// Note: With the customer file mentioned above, pdev->color_info.depth was 24 while the 
 		// total plane depth was calculated to be 8. This could be another hint if this issue comes
 		// around again.
-		
+
 		if (gx_device_has_color(pdev) && (pcs->base_space != NULL))
 		{
 			color_type = PNG_COLOR_TYPE_PALETTE;
@@ -2811,7 +2811,7 @@ int setup_png(
 	case 1:
 		bit_depth = 1;
 		color_type = PNG_COLOR_TYPE_GRAY;
-		
+
 		// TRS 08/18/2020
 		// This is a bit of a guess here. I know that the value of monod has
 		// inverted images in the past, and I also think that the foreground
@@ -2828,7 +2828,7 @@ int setup_png(
 		//     invert = (!monod) ^ (foreground != 0x00);
 		// In this case, monod is set to true
 
-		gs_color_space *tpcs = pcs;
+		gs_color_space* tpcs = pcs;
 		//int test1 = gs_cspace_indexed_num_entries(pcs);
 		//int test2 = gs_cspace_indexed_num_entries(pcs->base_space);
 
@@ -2847,8 +2847,8 @@ int setup_png(
 		palettep = palette;
 #else
 		palettep =
-			(void *)gs_alloc_bytes(mem, 256 * sizeof(png_color),
-			"png palette");
+			(void*)gs_alloc_bytes(mem, 256 * sizeof(png_color),
+				"png palette");
 		if (palettep == 0) {
 			code = gs_note_error(gs_error_VMerror);
 			goto done;
@@ -2857,7 +2857,7 @@ int setup_png(
 		num_palette = num_colors;
 		valid |= PNG_INFO_PLTE;
 		for (i = 0; i < num_colors; i++) {
-			(*dev_proc(pdev, map_color_rgb)) ((gx_device *)pdev, (gx_color_index)i, rgb);
+			(*dev_proc(pdev, map_color_rgb)) ((gx_device*)pdev, (gx_color_index)i, rgb);
 
 			/*
 			This crap kept me busy for 4 days straight. Needed to apply the palette
@@ -2982,7 +2982,7 @@ int setup_png(
 	info_ptr->num_text = 1;
 	/* Set up the ICC information */
 	if (pdev->icc_struct != NULL && pdev->icc_struct->device_profile[0] != NULL) {
-		cmm_profile_t *icc_profile = pdev->icc_struct->device_profile[0];
+		cmm_profile_t* icc_profile = pdev->icc_struct->device_profile[0];
 		/* PNG can only be RGB or gray.  No CIELAB :(  */
 		if (icc_profile->data_cs == gsRGB || icc_profile->data_cs == gsGRAY) {
 			if (icc_profile->num_comps == pdev->color_info.num_components &&
@@ -3391,9 +3391,9 @@ int setup_png(
 //	png_info **info_ptrp,
 //struct mem_encode *state,
 //struct png_setup_s *setup)
-int init_png(gx_device * pdev,
-	struct mem_encode *state,
-	struct png_setup_s *setup)
+int init_png(gx_device* pdev,
+	struct mem_encode* state,
+	struct png_setup_s* setup)
 {
 	int code = 0;
 	state->buffer = 0;
@@ -3401,8 +3401,8 @@ int init_png(gx_device * pdev,
 	state->size = 0;
 	state->dev = pdev;
 
-	png_struct *png_ptr;
-	png_info *info_ptr;
+	png_struct* png_ptr;
+	png_info* info_ptr;
 	/* Initialize PNG structures */
 	png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 	info_ptr = png_create_info_struct(png_ptr);
@@ -3425,7 +3425,7 @@ int init_png(gx_device * pdev,
 }
 
 static int make_png_from_mdev(
-	gx_device_memory *mdev,
+	gx_device_memory* mdev,
 	float tx,
 	float ty)
 {
@@ -3444,7 +3444,7 @@ static int make_png_from_mdev(
 	setup.memory = mdev->memory;
 	setup.width_in = mdev->width;
 	png_bytep row;
-	char *buffer;
+	char* buffer;
 	gs_matrix m;
 	gs_matrix_fixed ctm;
 	gs_make_identity(&m);
@@ -3470,7 +3470,7 @@ static int make_png_from_mdev(
 		m,
 		mdev->width,
 		mdev->height
-		);
+	);
 
 	if (!code)
 	{
@@ -3492,13 +3492,13 @@ static int make_png_from_mdev(
 					//buffer[j + 2] = 0;
 					////buffer[j + 3] = row[k + 0];
 					//buffer[j + 3] = 0x80; // Full opacity
-					
+
 					buffer[j + 0] = row[k + 0];
 					buffer[j + 1] = row[k + 1];
 					buffer[j + 2] = row[k + 2];
 					buffer[j + 3] = row[k + 3];
 					//buffer[j + 3] = 0x00; // Full opacity
-					
+
 					j += 4;
 					//k += 3;
 					k += 4;
@@ -3524,10 +3524,10 @@ static int make_png_from_mdev(
 		write_png_data(
 			mdev->target,
 			&state
-			);
+		);
 		write_png_end(
 			mdev->target
-			);
+		);
 
 		gs_free_object(mdev->memory, state.buffer, "png img buf");
 		png_destroy_write_struct(&setup.png_ptr, &setup.info_ptr);
@@ -3537,17 +3537,17 @@ static int make_png_from_mdev(
 	return code;
 }
 
-int setup_png_from_struct(gx_device * pdev, struct png_setup_s* setup)
+int setup_png_from_struct(gx_device* pdev, struct png_setup_s* setup)
 {
-	gs_memory_t *mem = pdev->memory;
+	gs_memory_t* mem = pdev->memory;
 	//int raster = gdev_prn_raster(pdev);
 	//gx_downscaler_t ds;
 
 	/* PNG structures */
 	//byte *row = gs_alloc_bytes(mem, raster, "png raster buffer");
-	png_struct *png_ptr = setup->png_ptr;
+	png_struct* png_ptr = setup->png_ptr;
 	//png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-	png_info *info_ptr = setup->info_ptr;
+	png_info* info_ptr = setup->info_ptr;
 	//png_create_info_struct(png_ptr);
 	int y;
 	int code;			/* return code */
@@ -3568,13 +3568,13 @@ int setup_png_from_struct(gx_device * pdev, struct png_setup_s* setup)
 	png_uint_32 width, height;
 #if PNG_LIBPNG_VER_MINOR >= 5
 	//png_color palette[256];
-	png_color *palette;
+	png_color* palette;
 #endif
-	png_color *palettep;
+	png_color* palettep;
 	png_uint_16 num_palette;
 	png_uint_32 valid = 0;
 
-	palette = (void *)gs_alloc_bytes(mem, 256 * sizeof(png_color), "png palette");
+	palette = (void*)gs_alloc_bytes(mem, 256 * sizeof(png_color), "png palette");
 	if (palette == 0) {
 		return gs_note_error(gs_error_VMerror);
 	}
@@ -3669,8 +3669,8 @@ int setup_png_from_struct(gx_device * pdev, struct png_setup_s* setup)
 		palettep = palette;
 #else
 		palettep =
-			(void *)gs_alloc_bytes(mem, 256 * sizeof(png_color),
-			"png palette");
+			(void*)gs_alloc_bytes(mem, 256 * sizeof(png_color),
+				"png palette");
 		if (palettep == 0) {
 			code = gs_note_error(gs_error_VMerror);
 			goto done;
@@ -3679,7 +3679,7 @@ int setup_png_from_struct(gx_device * pdev, struct png_setup_s* setup)
 		num_palette = num_colors;
 		valid |= PNG_INFO_PLTE;
 		for (i = 0; i < num_colors; i++) {
-			(*dev_proc(pdev, map_color_rgb)) ((gx_device *)pdev,
+			(*dev_proc(pdev, map_color_rgb)) ((gx_device*)pdev,
 				(gx_color_index)i, rgb);
 
 			/*
@@ -3761,7 +3761,7 @@ int setup_png_from_struct(gx_device * pdev, struct png_setup_s* setup)
 	info_ptr->num_text = 1;
 	/* Set up the ICC information */
 	if (pdev->icc_struct != NULL && pdev->icc_struct->device_profile[0] != NULL) {
-		cmm_profile_t *icc_profile = pdev->icc_struct->device_profile[0];
+		cmm_profile_t* icc_profile = pdev->icc_struct->device_profile[0];
 		/* PNG can only be RGB or gray.  No CIELAB :(  */
 		if (icc_profile->data_cs == gsRGB || icc_profile->data_cs == gsGRAY) {
 			if (icc_profile->num_comps == pdev->color_info.num_components &&
