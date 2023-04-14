@@ -34,6 +34,7 @@
 #include "gxpcolor.h"
 #include "gxcolor2.h"
 #include "gzstate.h"
+#include "gssprintf.h"
 
 struct path_type_stack_node
 {
@@ -221,15 +222,6 @@ typedef struct gx_device_svg_s {
 	struct path_type_stack_node* path_type_stack;
 } gx_device_svg;
 
-#define svg_device_body(dname, depth)\
-	std_device_dci_type_body(gx_device_svg, 0, dname, &st_device_svg, \
-	DEFAULT_WIDTH_10THS * X_DPI / 10, \
-	DEFAULT_HEIGHT_10THS * Y_DPI / 10, \
-	X_DPI, Y_DPI, \
-	(depth > 8 ? 3 : 1), depth, \
-	(depth > 1 ? 255 : 1), (depth > 8 ? 255 : 0), \
-	(depth > 1 ? 256 : 2), (depth > 8 ? 256 : 1))
-
 static dev_proc_open_device(svg_open_device);
 static dev_proc_output_page(svg_output_page);
 static dev_proc_close_device(svg_close_device);
@@ -241,79 +233,65 @@ static dev_proc_fill_path(gdev_svg_fill_path);
 static dev_proc_stroke_path(gdev_svg_stroke_path);
 
 static dev_proc_begin_typed_image(svg_begin_typed_image);
-static dev_proc_begin_image(svg_begin_image);
 static dev_proc_fillpage(svg_fillpage);
 
 static enum COLOR_TYPE svg_get_color_type(gx_device_svg* svg, const gx_drawing_color* pdc);
 
-//static dev_proc_copy_alpha(svg_copy_alpha);
-#define svg_device_procs \
-{ \
-	svg_open_device, \
-	NULL,                   /* get_initial_matrix */\
-	NULL,                   /* sync_output */\
-	svg_output_page, \
-	svg_close_device, \
-	gx_default_rgb_map_rgb_color, \
-	gx_default_rgb_map_color_rgb, \
-	gdev_vector_fill_rectangle, \
-	NULL,                   /* tile_rectangle */\
-	NULL,                   /* copy_mono */\
-	NULL,			        /* copy_color */\
-	NULL,                   /* draw_line */\
-	NULL,                   /* get_bits */\
-	svg_get_params, \
-	svg_put_params, \
-	NULL,                   /* map_cmyk_color */\
-	NULL,                   /* get_xfont_procs */\
-	NULL,                   /* get_xfont_device */\
-	NULL,                   /* map_rgb_alpha_color */\
-	gx_page_device_get_page_device, \
-	NULL,                   /* get_alpha_bits */\
-	NULL,                   /* copy_alpha */\
-	NULL,                   /* get_band */\
-	NULL,                   /* copy_rop */\
-	gdev_svg_fill_path, \
-	gdev_svg_stroke_path, \
-	NULL,			        /* fill_mask */\
-	gdev_vector_fill_trapezoid, \
-	gdev_vector_fill_parallelogram, \
-	gdev_vector_fill_triangle, \
-	NULL,			        /* draw_thin_line */\
-	svg_begin_image,        /* begin_image */\
-	NULL,                   /* image_data */\
-	NULL,                   /* end_image */\
-	NULL,                   /* strip_tile_rectangle */\
-	NULL,					/* strip_copy_rop */\
-	NULL,					/* get_clipping_box */\
-	svg_begin_typed_image,  /* begin_typed_image*/\
-	NULL,					/* get_bits_rectangle */\
-	NULL,					/* map_color_rgb_alpha */\
-	NULL,					/* create_compositor */\
-	NULL,					/* get_hardware_params */\
-	NULL,				    /* text_begin */\
-	NULL,		            /* finish_copydevice */\
-	NULL,				    /* begin_transparency_group - Deprecated */\
-	NULL,		            /* end_transparency_group - Deprecated */\
-	NULL,				    /* begin_transparency_mask - Deprecated */\
-	NULL,					/* end_transparency_mask - Deprecated */\
-	NULL,					/* discard_transparency_layer - Deprecated */\
-	NULL,					/* get_color_mapping_procs */\
-	NULL,					/* get_color_comp_index */\
-	NULL,	                /* encode_color */\
-	NULL,	                /* decode_color */\
-	NULL,					/* pattern_manage */\
-	NULL,					/* fill_rectangle_hl_color */\
-	NULL,					/* include_color_space */\
-	NULL,					/* fill_linear_color_scanline */\
-	NULL,					/* fill_linear_color_trapezoid */\
-	NULL,					/* fill_linear_color_triangle */\
-	NULL,					/* update_spot_equivalent_colors */\
-	NULL,					/* ret_devn_params */\
-	svg_fillpage,			/* fillpage */\
-	NULL,					/* push_transparency_state */\
-	NULL,					/* pop_transparency_state */\
-	NULL					/* put_image */\
+static void
+svg_initialize_device_procs(gx_device* dev)
+{
+	set_dev_proc(dev, open_device, svg_open_device);
+	//set_dev_proc(dev, get_initial_matrix, NULL);
+	//set_dev_proc(dev, sync_output, NULL);
+	set_dev_proc(dev, output_page, svg_output_page);
+	set_dev_proc(dev, close_device, svg_close_device);
+	set_dev_proc(dev, map_rgb_color, gx_default_rgb_map_rgb_color);
+	set_dev_proc(dev, map_color_rgb, gx_default_rgb_map_color_rgb);
+	set_dev_proc(dev, fill_rectangle, gdev_vector_fill_rectangle);
+	//set_dev_proc(dev, copy_mono, NULL);
+	//set_dev_proc(dev, copy_color, NULL);
+	set_dev_proc(dev, get_params, svg_get_params);
+	set_dev_proc(dev, put_params, svg_put_params);
+	//set_dev_proc(dev, map_cmyk_color, NULL);
+	set_dev_proc(dev, get_page_device, gx_page_device_get_page_device);
+	//set_dev_proc(dev, get_alpha_bits, NULL);
+	//set_dev_proc(dev, copy_alpha, NULL);
+	set_dev_proc(dev, fill_path, gdev_svg_fill_path);
+	set_dev_proc(dev, stroke_path, gdev_svg_stroke_path);
+	//set_dev_proc(dev, fill_mask, NULL);
+	set_dev_proc(dev, fill_trapezoid, gdev_vector_fill_trapezoid);
+	set_dev_proc(dev, fill_parallelogram, gdev_vector_fill_parallelogram);
+	set_dev_proc(dev, fill_triangle, gdev_vector_fill_triangle);
+	//set_dev_proc(dev, draw_thin_line, NULL);
+	//set_dev_proc(dev, strip_tile_rectangle, NULL);
+	//set_dev_proc(dev, get_clipping_box, NULL);
+	set_dev_proc(dev, begin_typed_image, svg_begin_typed_image);
+	//set_dev_proc(dev, get_bits_rectangle, NULL);
+	//set_dev_proc(dev, bbox_composite, NULL);
+	//set_dev_proc(dev, get_hardware_params, NULL);
+	//set_dev_proc(dev, text_begin, NULL);
+	//set_dev_proc(dev, begin_transparency_group, NULL); - Deprecated?
+	//set_dev_proc(dev, end_transparency_group, NULL); - Deprecated?
+	//set_dev_proc(dev, begin_transparency_mask, NULL); - Deprecated?
+	//set_dev_proc(dev, end_transparency_mask, NULL); - Deprecated?
+	//set_dev_proc(dev, discard_transparency_layer, NULL); - Deprecated?
+	//set_dev_proc(dev, get_color_mapping_procs, NULL);
+	//set_dev_proc(dev, get_color_comp_index, NULL);
+	//set_dev_proc(dev, encode_color, NULL);
+	//set_dev_proc(dev, decode_color, NULL);
+	//set_dev_proc(dev, fill_rectangle_hl_color, NULL);
+	//set_dev_proc(dev, include_color_space, NULL);
+	//set_dev_proc(dev, fill_linear_color_scanline, NULL);
+	//set_dev_proc(dev, fill_linear_color_trapezoid, NULL);
+	//set_dev_proc(dev, fill_linear_color_triangle, NULL);
+	//set_dev_proc(dev, update_spot_equivalent_colors, NULL);
+	//set_dev_proc(dev, ret_devn_params, NULL);
+	set_dev_proc(dev, fillpage, svg_fillpage);
+	//set_dev_proc(dev, push_transparency_state, NULL);
+	//set_dev_proc(dev, pop_transparency_state, NULL);
+	//set_dev_proc(dev, put_image, NULL);
+	//set_dev_proc(dev, strip_copy_rop2, NULL);
+	//set_dev_proc(dev, strip_tile_rect_devn, NULL);
 }
 
 gs_public_st_suffix_add0_final(st_device_svg, gx_device_svg,
@@ -325,8 +303,22 @@ gs_public_st_suffix_add0_final(st_device_svg, gx_device_svg,
    'svgwrite' device by the build system to avoid conflicts with
    the svg interpreter */
 const gx_device_svg gs_svgwrite_device = {
-	svg_device_body("svg", 24),
-	svg_device_procs
+	std_device_dci_type_body(
+		gx_device_svg, 
+		svg_initialize_device_procs, 
+		"svg", 
+		&st_device_svg, 
+		DEFAULT_WIDTH_10THS * X_DPI / 10, 
+		DEFAULT_HEIGHT_10THS * Y_DPI / 10, 
+		X_DPI,
+		Y_DPI, 
+		3, 
+		24, 
+		255,
+		255, 
+		256,
+		256
+	)
 };
 
 /* Vector device procedures */
@@ -725,9 +717,10 @@ static int make_alpha_mdev(gx_device* dev, gx_device_memory** ppmdev, gs_fixed_r
 		proto.color_info.comp_mask[i] = 0;
 	}
 	proto.color_info.cm_name = "DeviceRGB";
-	proto.color_info.opmode = GX_CINFO_OPMODE_UNKNOWN;
+	proto.color_info.opmsupported = GX_CINFO_OPMSUPPORTED_UNKNOWN;
 	proto.color_info.process_comps = 0;
 	proto.color_info.black_component = 0;
+	proto.color_info.use_antidropout_downscaler = true;
 
 	gs_make_mem_device_with_copydevice(ppmdev, &proto, dev->memory, -1, dev);
 	(*ppmdev)->width = fixed2int(bbox.q.x - bbox.p.x);
@@ -889,7 +882,7 @@ static int gdev_svg_stroke_path(
 			// Then we apply the mat matrix transform to the actual svg object.
 
 			char line[SVG_LINESIZE];
-			gs_sprintf(line, "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
+			gs_snprintf(line, sizeof(line), "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
 				mat.xx, mat.xy, mat.yx, mat.yy, mat.tx, mat.ty
 			);
 			svg_write(dev, line);
@@ -1212,15 +1205,15 @@ svg_write_header(gx_device_svg* svg)
 	}
 
 	/* write the initial boilerplate */
-	gs_sprintf(line, "%s\n", XML_DECL);
+	gs_snprintf(line, sizeof(line), "%s\n", XML_DECL);
 	/* svg_write(svg, line); */
 	svg_write_bytes_sputs(svg, line, strlen(line));
 
-	gs_sprintf(line, "<svg xmlns='%s' version='%s' xmlns:xlink='http://www.w3.org/1999/xlink'",
+	gs_snprintf(line, sizeof(line), "<svg xmlns='%s' version='%s' xmlns:xlink='http://www.w3.org/1999/xlink'",
 		SVG_XMLNS, SVG_VERSION);
 	/* svg_write(svg, line); */
 	svg_write_bytes_sputs(svg, line, strlen(line));
-	gs_sprintf(line, "\n\twidth='%.3fin' height='%.3fin' viewBox='0 0 %d %d'>\n",
+	gs_snprintf(line, sizeof(line), "\n\twidth='%.3fin' height='%.3fin' viewBox='0 0 %d %d'>\n",
 		(double)svg->MediaSize[0] / 72.0, (double)svg->MediaSize[1] / 72.0,
 		(int)svg->MediaSize[0], (int)svg->MediaSize[1]);
 	svg_write_bytes_sputs(svg, line, strlen(line));
@@ -1318,7 +1311,7 @@ static void svg_write_state_to_svg(gx_device_svg* svg, const bool emptyPen, cons
 	/* write out the new current state */
 	if ((svg->strokecolor != gx_no_color_index) && !emptyPen)
 	{
-		gs_sprintf(line, "stroke='#%06x' ", (uint)(svg->strokecolor & 0xffffffL));
+		gs_snprintf(line, sizeof(line), "stroke='#%06x' ", (uint)(svg->strokecolor & 0xffffffL));
 		svg_write(svg, line);
 	}
 	else
@@ -1328,7 +1321,7 @@ static void svg_write_state_to_svg(gx_device_svg* svg, const bool emptyPen, cons
 
 	if ((svg->fillcolor != gx_no_color_index) && !emptyFill)
 	{
-		gs_sprintf(line, "fill='#%06x' ", (uint)(svg->fillcolor & 0xffffffL));
+		gs_snprintf(line, sizeof(line), "fill='#%06x' ", (uint)(svg->fillcolor & 0xffffffL));
 		svg_write(svg, line);
 	}
 	else
@@ -1338,7 +1331,7 @@ static void svg_write_state_to_svg(gx_device_svg* svg, const bool emptyPen, cons
 
 	if (svg->linewidth != SVG_DEFAULT_LINEWIDTH)
 	{
-		gs_sprintf(line, "stroke-width='%lf' ", svg->linewidth);
+		gs_snprintf(line, sizeof(line), "stroke-width='%lf' ", svg->linewidth);
 		svg_write(svg, line);
 	}
 
@@ -1380,30 +1373,30 @@ static void svg_write_state_to_svg(gx_device_svg* svg, const bool emptyPen, cons
 		&& (svg->linejoin != gs_join_round) // Round join does not support miter limit
 		&& (svg->linejoin != gs_join_bevel)) // Bevel join does not support miter limit
 	{
-		gs_sprintf(line, "stroke-miterlimit='%lf' ", svg->miterlimit);
+		gs_snprintf(line, sizeof(line), "stroke-miterlimit='%lf' ", svg->miterlimit);
 		svg_write(svg, line);
 	}
 
 	if (svg->dashPatternCount > 0)
 	{
-		gs_sprintf(line, "stroke-dasharray='");
+		gs_snprintf(line, sizeof(line), "stroke-dasharray='");
 		svg_write(svg, line);
 
 		for (int i = 0; (i < svg->dashPatternCount) && (i < MAX_PATTERNS); ++i)
 		{
 			if (i != 0)
 			{
-				gs_sprintf(line, " ");
+				gs_snprintf(line, sizeof(line), " ");
 				svg_write(svg, line);
 			}
-			gs_sprintf(line, "%f", svg->dashPattern[i]);
+			gs_snprintf(line, sizeof(line), "%f", svg->dashPattern[i]);
 			svg_write(svg, line);
 		}
 
-		gs_sprintf(line, "' ");
+		gs_snprintf(line, sizeof(line), "' ");
 		svg_write(svg, line);
 
-		gs_sprintf(line, "stroke-dashoffset='%f' ", svg->dashPatternOffset);
+		gs_snprintf(line, sizeof(line), "stroke-dashoffset='%f' ", svg->dashPatternOffset);
 		svg_write(svg, line);
 	}
 }
@@ -1442,9 +1435,9 @@ svg_beginpage(gx_device_vector* vdev)
 	svg_write_header(svg);
 
 	// Write clip rect for the new page
-	gs_sprintf(line, "<clipPath id='clip%i'>\n", ++svg->highestUsedId);
+	gs_snprintf(line, sizeof(line), "<clipPath id='clip%i'>\n", ++svg->highestUsedId);
 	svg_write_bytes_sputs(svg, line, strlen(line));
-	gs_sprintf(line, "<rect x='%d' y='%d' width='%d' height='%d' stroke='none' fill='none'/>\n",
+	gs_snprintf(line, sizeof(line), "<rect x='%d' y='%d' width='%d' height='%d' stroke='none' fill='none'/>\n",
 		0, 0, (int)svg->MediaSize[0], (int)svg->MediaSize[1]);
 	svg_write_bytes_sputs(svg, line, strlen(line));
 	svg_write_sputs(svg, "</clipPath>\n");
@@ -1452,11 +1445,11 @@ svg_beginpage(gx_device_vector* vdev)
 	/* we may be called from beginpage, so we can't use
 	svg_write() which calls gdev_vector_stream()
 	which calls beginpage! */
-	gs_sprintf(line, "<page clip-path='url(#clip%i)'>\n", svg->highestUsedId);
+	gs_snprintf(line, sizeof(line), "<page clip-path='url(#clip%i)'>\n", svg->highestUsedId);
 	svg_write_bytes_sputs(svg, line, strlen(line));
 
 	/* Scale drawing so our coordinates are in pixels */
-	gs_sprintf(line, "<g transform='scale(%lf,%lf)'>\n",
+	gs_snprintf(line, sizeof(line), "<g transform='scale(%lf,%lf)'>\n",
 		72.0 / svg->HWResolution[0],
 		72.0 / svg->HWResolution[1]);
 	/* svg_write(svg, line); */
@@ -1667,9 +1660,9 @@ static int svg_write_clip_start(gx_device_svg* svg, gs_matrix matrix, bool windi
 	char clippathStr[200];
 	char path_fill_rule[SVG_LINESIZE];
 
-	gs_sprintf(path_fill_rule, "%s", winding_fill ? "clip-rule='nonzero'" : "clip-rule='evenodd'");
+	gs_snprintf(path_fill_rule, sizeof(path_fill_rule), "%s", winding_fill ? "clip-rule='nonzero'" : "clip-rule='evenodd'");
 
-	gs_sprintf(clippathStr, "<clipPath id='clip%i' %s transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
+	gs_snprintf(clippathStr, sizeof(clippathStr), "<clipPath id='clip%i' %s transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
 		++svg->highestUsedId,
 		path_fill_rule,
 		matrix.xx, matrix.xy, matrix.yx, matrix.yy, matrix.tx, matrix.ty
@@ -1906,7 +1899,7 @@ svg_writeclip(gx_device_svg* svg, gx_clip_path* pcpath, gs_matrix matrix)
 		++svg->mark;
 
 		char line[SVG_LINESIZE];
-		gs_sprintf(line, "<g clip-path='url(#clip%i)'>\n", original_clip_path_id + i);
+		gs_snprintf(line, sizeof(line), "<g clip-path='url(#clip%i)'>\n", original_clip_path_id + i);
 		svg_write(svg, line);
 	}
 
@@ -1975,13 +1968,13 @@ svg_dorect(gx_device_vector* vdev, fixed x0, fixed y0,
 		svg_writeclip_standard(svg);
 
 		char clip_path_id[SVG_LINESIZE];
-		gs_sprintf(clip_path_id, "clip-path='url(#clip%i)' ", svg->usedIds);
+		gs_snprintf(clip_path_id, sizeof(clip_path_id), "clip-path='url(#clip%i)' ", svg->usedIds);
 
 		svg_write(svg, "<rect ");
 
 		svg_write_state_to_svg(svg, emptyPen, emptyBrush);
 
-		gs_sprintf(line, "%sx='%lf' y='%lf' width='%lf' height='%lf'",
+		gs_snprintf(line, sizeof(line), "%sx='%lf' y='%lf' width='%lf' height='%lf'",
 			(svg->validClipPath ? clip_path_id : ""),
 			fixed2float(x0), fixed2float(y0),
 			fixed2float(x1 - x0), fixed2float(y1 - y0));
@@ -1993,7 +1986,7 @@ svg_dorect(gx_device_vector* vdev, fixed x0, fixed y0,
 	{
 		svg_write(svg, "<rect ");
 
-		gs_sprintf(line, "x='%lf' y='%lf' width='%lf' height='%lf'",
+		gs_snprintf(line, sizeof(line), "x='%lf' y='%lf' width='%lf' height='%lf'",
 			fixed2float(x0), fixed2float(y0),
 			fixed2float(x1 - x0), fixed2float(y1 - y0));
 		svg_write(svg, line);
@@ -2039,7 +2032,7 @@ svg_beginpath(gx_device_vector* vdev, gx_path_type_t type)
 
 	char path_fill_rule[SVG_LINESIZE];
 	gx_path_type_t rule = type & gx_path_type_rule;
-	gs_sprintf(path_fill_rule, "%s",
+	gs_snprintf(path_fill_rule, sizeof(path_fill_rule), "%s",
 		rule == gx_path_type_even_odd ?
 		"fill-rule='evenodd' " : "fill-rule='nonzero' ");
 
@@ -2050,7 +2043,7 @@ svg_beginpath(gx_device_vector* vdev, gx_path_type_t type)
 		svg_writeclip_standard(svg);
 
 		char clip_path_id[SVG_LINESIZE];
-		gs_sprintf(clip_path_id, "clip-path='url(#clip%i)' ", svg->usedIds);
+		gs_snprintf(clip_path_id, sizeof(clip_path_id), "clip-path='url(#clip%i)' ", svg->usedIds);
 
 		svg_write(svg, "<path ");
 
@@ -2060,7 +2053,7 @@ svg_beginpath(gx_device_vector* vdev, gx_path_type_t type)
 		svg_write_state_to_svg(svg, emptyPen, emptyBrush);
 
 		char line[SVG_LINESIZE * 2];
-		gs_sprintf(line, "%s%sd='", path_fill_rule, svg->validClipPath ? clip_path_id : "");
+		gs_snprintf(line, sizeof(line), "%s%sd='", path_fill_rule, svg->validClipPath ? clip_path_id : "");
 		svg_write(svg, line);
 
 		svg->writing_clip = false;
@@ -2070,7 +2063,7 @@ svg_beginpath(gx_device_vector* vdev, gx_path_type_t type)
 		svg_write(svg, "<path ");
 
 		char line[SVG_LINESIZE * 2];
-		gs_sprintf(line, "%sd='", path_fill_rule);
+		gs_snprintf(line, sizeof(line), "%sd='", path_fill_rule);
 		svg_write(svg, line);
 	}
 
@@ -2093,7 +2086,7 @@ svg_moveto(gx_device_vector* vdev, double x0, double y0,
 	svg_print_path_type(svg, type);
 	if_debug0m('_', svg->memory, "\n");
 
-	gs_sprintf(line, " M%lf,%lf", x, y);
+	gs_snprintf(line, sizeof(line), " M%lf,%lf", x, y);
 	svg_write(svg, line);
 
 	return 0;
@@ -2115,7 +2108,7 @@ svg_lineto(gx_device_vector* vdev, double x0, double y0,
 	svg_print_path_type(svg, type);
 	if_debug0m('_', svg->memory, "\n");
 
-	gs_sprintf(line, " L%lf,%lf", x, y);
+	gs_snprintf(line, sizeof(line), " L%lf,%lf", x, y);
 	svg_write(svg, line);
 
 	return 0;
@@ -2139,7 +2132,7 @@ svg_curveto(gx_device_vector* vdev, double x0, double y0,
 	svg_print_path_type(svg, type);
 	if_debug0m('_', svg->memory, "\n");
 
-	gs_sprintf(line, " C%lf,%lf %lf,%lf %lf,%lf", x1, y1, x2, y2, x3, y3);
+	gs_snprintf(line, sizeof(line), " C%lf,%lf %lf,%lf %lf,%lf", x1, y1, x2, y2, x3, y3);
 	svg_write(svg, line);
 
 	return 0;
@@ -2320,7 +2313,7 @@ static int write_png_start(
 	m3.tx = ctm.tx;
 	m3.ty = ctm.ty;
 
-	gs_sprintf(line, "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
+	gs_snprintf(line, sizeof(line), "<g transform='matrix(%f,%f,%f,%f,%f,%f)'>\n",
 		m3.xx, m3.xy, m3.yx, m3.yy, m3.tx, m3.ty
 	);
 	svg_write(dev, line);
@@ -2340,9 +2333,9 @@ static int write_png_start(
 	}
 
 	char clip_path_id[SVG_LINESIZE];
-	gs_sprintf(clip_path_id, "clip-path='url(#clip%i)' ", svg->usedIds);
+	gs_snprintf(clip_path_id, sizeof(clip_path_id), "clip-path='url(#clip%i)' ", svg->usedIds);
 
-	gs_sprintf(line, "<image %swidth='%d' height='%d' xlink:href=\"data:image/png;base64,",
+	gs_snprintf(line, sizeof(line), "<image %swidth='%d' height='%d' xlink:href=\"data:image/png;base64,",
 		svg->validClipPath ? clip_path_id : "", width, height);
 	svg_write(dev, line);
 
@@ -2414,20 +2407,6 @@ static const gx_image_enum_procs_t svg_image_enum_procs = {
 	svg_plane_data,
 	svg_end_image
 };
-
-static int svg_begin_image(
-	gx_device* dev,
-	const gs_gstate* pis,
-	const gs_image_t* pim,
-	gs_image_format_t format,
-	const gs_int_rect* prect,
-	const gx_drawing_color* pdcolor,
-	const gx_clip_path* pcpath,
-	gs_memory_t* memory,
-	gx_image_enum_common_t** pinfo)
-{
-	return 0;
-}
 
 static int svg_begin_typed_image(
 	gx_device* dev,
@@ -2931,7 +2910,7 @@ int setup_png(
 	}
 	/* add comment */
 	strncpy(software_key, "Software", sizeof(software_key));
-	gs_sprintf(software_text, "%s %d.%02d", gs_product,
+	gs_snprintf(software_text, sizeof(software_text), "%s %d.%02d", gs_product,
 		(int)(gs_revision / 100), (int)(gs_revision % 100));
 	text_png.compression = -1;	/* uncompressed */
 	text_png.key = software_key;
@@ -3297,7 +3276,7 @@ int setup_png(
 	//	}
 	//	/* add comment */
 	//	strncpy(software_key, "Software", sizeof(software_key));
-	//	gs_sprintf(software_text, "%s %d.%02d", gs_product,
+	//	gs_snprintf(software_text, sizeof(software_text), "%s %d.%02d", gs_product,
 	//		(int)(gs_revision / 100), (int)(gs_revision % 100));
 	//	text_png.compression = -1;	/* uncompressed */
 	//	text_png.key = software_key;
@@ -3712,7 +3691,7 @@ int setup_png_from_struct(gx_device* pdev, struct png_setup_s* setup)
 	}
 	/* add comment */
 	strncpy(software_key, "Software", sizeof(software_key));
-	gs_sprintf(software_text, "%s %d.%02d", gs_product,
+	gs_snprintf(software_text, sizeof(software_text), "%s %d.%02d", gs_product,
 		(int)(gs_revision / 100), (int)(gs_revision % 100));
 	text_png.compression = -1;	/* uncompressed */
 	text_png.key = software_key;
