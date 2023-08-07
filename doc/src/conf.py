@@ -44,15 +44,14 @@ master_doc = "toc"
 
 # General information about the project.
 project = "Ghostscript"
-thisday = datetime.date.today()
-
-copyright = "1988-" + str(thisday.year) + ", Artifex"
+copyright = "1988-2023, Artifex"
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
 # built documents.
 #
 # The full version, including alpha/beta/rc tags.
+<<<<<<< HEAD
 major = None
 minor = None
 patch = None
@@ -72,6 +71,9 @@ with open(_path) as f:
         print(f'{__file__}: setting version from {_path}: {release}')
     else:
         raise Exception(f'Failed to find `Ghostscript version = ...` in {_path}')
+=======
+release = "10.01.0"
+>>>>>>> gs10.01.2
 
 # The short X.Y version
 version = release
