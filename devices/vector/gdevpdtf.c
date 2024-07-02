@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2024 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -841,7 +841,7 @@ pdf_font_embed_status(gx_device_pdf *pdev, gs_font *font, int *pindex,
             memcpy(name, font->font_name.chars, len);
             name[len] = 0;
             emprintf1(pdev->pdf_memory,
-                      "\nWarning: %s cannot be embedded because of licensing restrictions\n",
+                      "\nWarning: Font %s cannot be embedded because of licensing restrictions\n",
                       name);
             return FONT_EMBED_NO;
         }

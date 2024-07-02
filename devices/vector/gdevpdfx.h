@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2024 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -62,6 +62,9 @@
 
 /* Define the maximum size of a destination array string. */
 #define MAX_DEST_STRING 80
+
+/* Define the maximum number of objects stored in an ObjStm */
+#define MAX_OBJSTM_OBJECTS 200
 
 /* ================ Types and structures ================ */
 
@@ -661,6 +664,7 @@ struct gx_device_pdf_s {
     /* Additional graphics state */
     bool fill_overprint, stroke_overprint;
     int rendering_intent;
+    bool user_icc;
     bool remap_fill_color, remap_stroke_color;
     gs_id halftone_id;
     gs_id transfer_ids[4];
@@ -696,11 +700,19 @@ struct gx_device_pdf_s {
      */
     pdf_temp_file_t streams;
     /*
-     * pictures holds graphic objects being accumulated between BP and EP.
-     * The object is moved to streams when the EP is reached: since BP and
-     * EP nest, we delete the object from the pictures file at that time.
+     * ObjStm holds a tream of objects being stored in an ObjStm, up to MAX_OBJSTM_OBJECTS,
+     * We keep a record of the offset of each object within the stream in ObjStmOffsets, so
+     * that later on we can write the offset within the stream for each object into the
+     * beginning of the ObjStm. NumObjStmOffsets is used to keep track of how many we have,
+     * and ObjStm_id is the id of the stream which we'll eventually store in the 'asides'
+     * file, containing the ObjStm.
      */
-    pdf_temp_file_t pictures;
+    pdf_temp_file_t ObjStm;
+    long ObjStm_id;
+    gs_offset_t *ObjStmOffsets;
+    int NumObjStmObjects;
+    bool doubleXref;
+
     /* ................ */
     long next_id;
     /* The following 3 objects, and only these, are allocated */
@@ -959,6 +971,9 @@ struct gx_device_pdf_s {
     bool OmitID;                    /* If true, do not emit a /ID array in the trailer dicionary (must not be true for encrypted files or PDF 2.0) */
     bool ModifiesPageSize;          /* If true, the new PDF interpreter will not preserve *Box values (the media size has been modified, they will be incorrect) */
     bool ModifiesPageOrder;         /* If true, the new PDF interpreter will not preserve Outlines or Dests, because they will refer to the wrong page number */
+    bool WriteXRefStm;              /* If true, (the default) use an XRef stream rather than an xref table */
+    bool WriteObjStms;              /* If true, (the default) store candidate objects in ObjStms rather than plain text in the PDF file. */
+    int64_t PendingOC;
 };
 
 #define is_in_page(pdev)\
@@ -1116,6 +1131,12 @@ int pdf_record_usage_by_parent(gx_device_pdf *const pdev, long resource_id, long
 /* (I.e., an object in the resource file.) */
 long pdf_open_separate(gx_device_pdf * pdev, long id, pdf_resource_type_t type);
 long pdf_begin_separate(gx_device_pdf * pdev, pdf_resource_type_t type);
+
+/* functions used for ObjStm writing */
+int FlushObjStm(gx_device_pdf *pdev);
+int NewObjStm(gx_device_pdf *pdev);
+long pdf_open_separate_noObjStm(gx_device_pdf * pdev, long id, pdf_resource_type_t type);
+int pdf_end_separate_noObjStm(gx_device_pdf * pdev, pdf_resource_type_t type);
 
 /* Reserve object id. */
 void pdf_reserve_object_id(gx_device_pdf * pdev, pdf_resource_t *ppres, long id);
@@ -1587,4 +1608,14 @@ int pdf_from_string_to_text(gx_device_pdf *pdev);
 void pdf_close_text_contents(gx_device_pdf *pdev);
 
 int gdev_pdf_get_param(gx_device *dev, char *Param, void *list);
+
+int pdf_open_temp_file(gx_device_pdf *pdev, pdf_temp_file_t *ptf);
+int pdf_open_temp_stream(gx_device_pdf *pdev, pdf_temp_file_t *ptf);
+int pdf_close_temp_file(gx_device_pdf *pdev, pdf_temp_file_t *ptf, int code);
+
+/* exported by gdevpdfe.c */
+
+int pdf_xmp_write_translated(gx_device_pdf* pdev, stream* s, const byte* data, int data_length,
+    void(*write)(stream* s, const byte* data, int data_length));
+
 #endif /* gdevpdfx_INCLUDED */

@@ -287,6 +287,7 @@ gx_image_enum_begin(gx_device * dev, const gs_gstate * pgs,
     int orthogonal;
     int force_interpolation = 0;
 
+    penum->pcs = NULL;
     penum->clues = NULL;
     penum->icc_setup.has_transfer = false;
     penum->icc_setup.is_lab = false;
@@ -823,6 +824,8 @@ gx_image_enum_begin(gx_device * dev, const gs_gstate * pgs,
          (x_extent.x | y_extent.y) == 0 ? image_landscape :
          image_skewed);
     penum->pgs = pgs;
+    if (pgs != NULL)
+        penum->pgs_level = pgs->level;
     penum->pcs = pcs;
     rc_increment_cs(pcs); /* Grab a ref (will decrement in gx_image1_end_image() */
     penum->memory = mem;
@@ -926,6 +929,12 @@ gx_image_enum_begin(gx_device * dev, const gs_gstate * pgs,
          * row in device space. */
         dda_init(penum->dda.row.x, mtx, col_extent.x, height);
         dda_init(penum->dda.row.y, mty, col_extent.y, height);
+        if (dda_will_overflow(penum->dda.row.x) ||
+            dda_will_overflow(penum->dda.row.y))
+        {
+            code = gs_error_rangecheck;
+            goto fail;
+        }
         if (penum->posture == image_portrait) {
             penum->dst_width = row_extent.x;
             penum->dst_height = col_extent.y;
@@ -950,6 +959,12 @@ gx_image_enum_begin(gx_device * dev, const gs_gstate * pgs,
          * actually rendering. */
         dda_init(penum->dda.strip.x, penum->cur.x, row_extent.x, width);
         dda_init(penum->dda.strip.y, penum->cur.y, row_extent.y, width);
+        if (dda_will_overflow(penum->dda.strip.x) ||
+            dda_will_overflow(penum->dda.strip.y))
+        {
+            code = gs_error_rangecheck;
+            goto fail;
+        }
         if (penum->rect.x) {
             dda_advance(penum->dda.strip.x, penum->rect.x);
             dda_advance(penum->dda.strip.y, penum->rect.x);
@@ -1058,7 +1073,13 @@ gx_image_enum_begin(gx_device * dev, const gs_gstate * pgs,
 fail:
     gs_free_object(mem, buffer, "image buffer");
     gs_free_object(mem, penum->clues, "gx_image_enum_begin");
+    if (penum->clip_dev != NULL) {
+        rc_decrement(penum->clip_dev, "error in gx_begin_image1");
+        penum->clip_dev = NULL;
+    }
     gs_free_object(mem, penum->clip_dev, "image clipper");
+    rc_decrement_cs(penum->pcs, "error in gx_begin_image1");
+    penum->pcs = NULL;
     gs_free_object(mem, penum, "gx_begin_image1");
     return code;
 }

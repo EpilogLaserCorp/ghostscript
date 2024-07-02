@@ -107,6 +107,17 @@ clipper_initialize_device_procs(gx_device *dev)
     set_dev_proc(dev, fill_linear_color_trapezoid, gx_default_fill_linear_color_trapezoid);
     set_dev_proc(dev, fill_linear_color_triangle, gx_default_fill_linear_color_triangle);
 }
+
+void
+gx_device_clip_finalize(const gs_memory_t *cmem, void *vpdev)
+{
+    gx_device_clip *dev = (gx_device_clip *)vpdev;
+    if (dev->rect_list != NULL) {
+        rc_decrement(dev->rect_list, "finalizing clipper device");
+        dev->rect_list = NULL;
+    }
+}
+
 static const gx_device_clip gs_clip_device =
 {std_device_std_body(gx_device_clip,
                      clipper_initialize_device_procs, "clipper",
@@ -120,6 +131,12 @@ gx_make_clip_device_on_stack(gx_device_clip * dev, const gx_clip_path *pcpath, g
     gx_device_init_on_stack((gx_device *)dev, (const gx_device *)&gs_clip_device, target->memory);
     dev->cpath = pcpath;
     dev->list = *gx_cpath_list(pcpath);
+    /* NOTE we do not count up the rect list even though we've taken a reference to it.
+     * this is because we would then need to count it down in gx_destroy_clip_device_on_stack
+     * and I have found at least one place where we do not call that function (!)
+     * We should be safe though, the clip rectangle list should not disappear before we
+     * exit the calling function at which point this device will disappear too.
+     */
     dev->translation.x = 0;
     dev->translation.y = 0;
     dev->HWResolution[0] = target->HWResolution[0];
@@ -128,7 +145,7 @@ gx_make_clip_device_on_stack(gx_device_clip * dev, const gx_clip_path *pcpath, g
     dev->target = target;
     dev->pad = target->pad;
     dev->log2_align_mod = target->log2_align_mod;
-    dev->is_planar = target->is_planar;
+    dev->num_planar_planes = target->num_planar_planes;
     dev->graphics_type_tag = target->graphics_type_tag;	/* initialize to same as target */
     dev->non_strict_bounds = target->non_strict_bounds;
     /* There is no finalization for device on stack so no rc increment */
@@ -173,7 +190,7 @@ gx_make_clip_device_on_stack_if_needed(gx_device_clip * dev, const gx_clip_path 
     dev->target = target;
     dev->pad = target->pad;
     dev->log2_align_mod = target->log2_align_mod;
-    dev->is_planar = target->is_planar;
+    dev->num_planar_planes = target->num_planar_planes;
     dev->graphics_type_tag = target->graphics_type_tag;	/* initialize to same as target */
     dev->non_strict_bounds = target->non_strict_bounds;
     /* There is no finalization for device on stack so no rc increment */
@@ -190,6 +207,13 @@ gx_make_clip_device_in_heap(gx_device_clip *dev,
     (void)gx_device_init((gx_device *)dev,
                          (const gx_device *)&gs_clip_device, mem, true);
     dev->list = *gx_cpath_list(pcpath);
+    dev->rect_list = pcpath->rect_list;
+    /* Bug #706771 we must make sure that the clip rectangle list does not
+     * vanish while we still have a pointer to it. Do that by increasing the
+     * reference count (obviously). We will decrement it in the device's finalize
+     * routine.
+     */
+    rc_increment(dev->rect_list);
     dev->translation.x = 0;
     dev->translation.y = 0;
     dev->HWResolution[0] = target->HWResolution[0];
@@ -197,7 +221,7 @@ gx_make_clip_device_in_heap(gx_device_clip *dev,
     dev->sgr = target->sgr;
     dev->pad = target->pad;
     dev->log2_align_mod = target->log2_align_mod;
-    dev->is_planar = target->is_planar;
+    dev->num_planar_planes = target->num_planar_planes;
     dev->non_strict_bounds = target->non_strict_bounds;
     gx_device_set_target((gx_device_forward *)dev, target);
     gx_device_retain((gx_device *)dev, true); /* will free explicitly */
@@ -264,6 +288,11 @@ clip_enumerate_rest(gx_device_clip * rdev,
      * the list.
      */
     if (y >= rptr->ymax) {
+        /* Bug 706875: The 'stopper' here is a rectangle from (max_int, max_int) to
+         * (max_int, max_int). Hence it doesn't 'stop' cases when y == max_int.
+         * These shouldn't really happen, but let's be sure. */
+        if (y == max_int)
+            return 0;
         if ((rptr = rptr->next) != 0)
             while (INCR_THEN(up, y >= rptr->ymax))
                 rptr = rptr->next;
@@ -917,13 +946,15 @@ clip_copy_mono_t1(gx_device * dev,
         INCR(in_y);
         if (x >= rptr->xmin && xe <= rptr->xmax) {
             INCR(in);
+            /* Untranspose coords here. */
             return dev_proc(tdev, copy_mono)
-                    (tdev, data, sourcex, raster, id, y, x, h, w, color0, color1);
+                    (tdev, data, sourcex, raster, id, y, x, w, h, color0, color1);
         }
     }
     ccdata.tdev = tdev;
     ccdata.data = data, ccdata.sourcex = sourcex, ccdata.raster = raster;
     ccdata.color[0] = color0, ccdata.color[1] = color1;
+    /* Coords are passed in transposed here, but will appear untransposed at the end. */
     return clip_enumerate_rest(rdev, x, y, xe, ye,
                                clip_call_copy_mono, &ccdata);
 }
