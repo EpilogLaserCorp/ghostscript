@@ -389,7 +389,19 @@ svg_endpath(gx_device_vector* vdev, gx_path_type_t type);
 /* structure to store PNG image bytes */
 struct mem_encode
 {
-	char* buffer;
+	// TRS 03 July 2024
+	// Note: The buffer is currently 128KB. This value was chosen becuase 256KB 
+	// crashed Ghostscript and so 128KB was used. No values between 128KB and 
+	// 256KB were tested. Smaller values might work as well, but if we ever 
+	// receieve data with a chunk size greater than this buffer's length in the
+	// my_png_write_data function, we'll crash the program. As such, we want to
+	// use the largest buffer for this as possible.
+	// Note: Originally, buffer was dynamically allocated using gs_alloc_bytes,
+	// grown using gs_resize_object, and freed using gs_free_object. That code 
+	// crashed for reasons I was unable to determine. While the new code has 
+	// the disadvantages described above, it is at least simpler and easier to 
+	// read.
+	char buffer[1024 * 128];
 	size_t size;
 	gs_memory_t* memory;
 	gx_device* dev;
@@ -566,6 +578,7 @@ svg_output_page(gx_device* dev, int num_copies, int flush)
 	// what the difference is, but ferror sometimes seems to report a false
 	// error, whereas gp_ferror does not. Also, all other devices seem to use
 	// gp_ferror and gp_fflush.
+	s_process_write_buf(gdev_vector_stream((gx_device_vector*)svg), false);
 	gp_fflush(svg->file);
 	if (gp_ferror(svg->file))
 	{
@@ -616,6 +629,7 @@ svg_close_device(gx_device* dev)
 	// what the difference is, but ferror sometimes seems to report a false
 	// error, whereas gp_ferror does not. Also, all other devices seem to use
 	// gp_ferror and gp_fflush.
+	s_process_write_buf(gdev_vector_stream((gx_device_vector*)svg), false);
 	gp_fflush(svg->file);
 	if (gp_ferror(svg->file))
 	{
@@ -2397,8 +2411,6 @@ svg_end_image(gx_image_enum_common_t* info, bool draw_last)
 		info->dev
 	);
 
-	gs_free_object(pie->memory, pie->state.buffer, "png img buf");
-
 	gx_image_free_enum(&info);
 	return 0;
 }
@@ -2467,9 +2479,8 @@ static int svg_begin_typed_image(
 		ppi->Width, ppi->Height, ppi->BitsPerComponent, ncomp);
 
 	/* This is where we add in the code to set up the PNG data copying */
-	pie->state.buffer = NULL;
 	pie->state.size = 0;
-	pie->state.memory = /*dev->*/memory;
+	pie->state.memory = memory;
 	pie->state.dev = dev;
 	pie->width = ppi->Width;
 	pie->height = ppi->Height;
@@ -2533,6 +2544,9 @@ static int svg_begin_typed_image(
 		pie->height
 	);
 
+	/* write the file information */
+	png_write_info(pie->png_ptr, pie->info_ptr);
+
 	return 0;
 dflt:
 	dmputs(dev->memory, ") DEFAULTED\n");
@@ -2567,33 +2581,13 @@ my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
 {
 	/* with libpng15 next line causes pointer deference error; use libpng12 */
 	struct mem_encode* p = (struct mem_encode*)png_get_io_ptr(png_ptr); /* was png_ptr->io_ptr */
-	size_t nsize = p->size + length;
-	char* buffer = 0;
 
-	/* allocate or grow buffer */
-	if (p->buffer)
-	{
-		buffer = gs_resize_object(p->memory, p->buffer, nsize, "png img buf");
-	}
-	else
-	{
-		buffer = gs_alloc_bytes(p->memory, nsize, "png img buf");
-	}
-
-	if (!buffer)
-	{
-		gs_free_object(p->memory, p->buffer, "png img buf");
-		png_error(png_ptr, "Write Error");
-	}
-	/* Validated buffer so we can use it */
-	p->buffer = buffer;
 	/* copy new bytes to end of buffer */
 	memcpy(p->buffer + p->size, data, length);
 	p->size += length;
 
-	// Flush the buffer every once in a while to make sure we don't accumulate
-	// too much memory. Doing so prevents the program from crashing when trying to
-	// print an image that is very large.
+	// Flush the buffer as soon as possible to make sure we don't overflow our 
+	// limited buffer.
 	//
 	// Note: To do this, we will only send data in amounts that are divisble by 3
 	// to ensure that the base 64 conversion does not add any zeros in the middle
@@ -2602,16 +2596,11 @@ my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
 	// The data is not divisible by 3, the encoding will have to add some zeros at
 	// the end, just destroying the integrity of the data.
 	//
-	// Note: We've chosen to flush the memory when the image buffer reaches 1MB.
-	// This value is fairly arbitrary, but the job that prompted this code crashed
-	// when it reached about 5MB in size. Doing it too often will slow the program
-	// down, not doing it enough could cause the program to crash.
-	//
-	// Note: This code was necessary because ghostscript was compressing memory.
-	// When it did this, it compressed the svg_image_enum_s object, which in turn
-	// destroyed the values contained in (mem_encode) state.
+	// Note: This code was originally necessary because ghostscript was 
+	// compressing memory. When it did this, it compressed the svg_image_enum_s 
+	// object, which in turn destroyed the values contained in (mem_encode) state.
 
-	if (p->buffer && (p->size >= 1000000))
+	if (p->size >= 3)
 	{
 		int flush_size = p->size / 3 * 3; // Round to nearest incrememnt of 3
 		int flush_remainder = p->size - flush_size;
@@ -2622,10 +2611,10 @@ my_png_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
 
 		write_png_partial(p->dev, p, flush_size);
 
-		p->buffer = gs_resize_object(p->memory, p->buffer, flush_remainder, "png img buf");
 		memcpy(p->buffer, temp, flush_remainder);
-
 		p->size -= flush_size;
+
+		free(temp);
 	}
 }
 
@@ -2988,9 +2977,6 @@ int setup_png(
 		png_set_swap(png_ptr);
 	}
 #endif
-
-	/* write the file information */
-	png_write_info(png_ptr, info_ptr);
 
 
 
@@ -3375,7 +3361,6 @@ int init_png(gx_device* pdev,
 	struct png_setup_s* setup)
 {
 	int code = 0;
-	state->buffer = 0;
 	state->memory = setup->memory;
 	state->size = 0;
 	state->dev = pdev;
@@ -3451,6 +3436,9 @@ static int make_png_from_mdev(
 		mdev->height
 	);
 
+	/* write the file information */
+	png_write_info(setup.png_ptr, setup.info_ptr);
+
 	if (!code)
 	{
 		// The png data should all be ready for dumping
@@ -3508,7 +3496,6 @@ static int make_png_from_mdev(
 			mdev->target
 		);
 
-		gs_free_object(mdev->memory, state.buffer, "png img buf");
 		png_destroy_write_struct(&setup.png_ptr, &setup.info_ptr);
 		code = 0;
 	}
@@ -3767,9 +3754,6 @@ int setup_png_from_struct(gx_device* pdev, struct png_setup_s* setup)
 		png_set_swap(png_ptr);
 	}
 #endif
-
-	/* write the file information */
-	png_write_info(png_ptr, info_ptr);
 
 	return 0;
 }

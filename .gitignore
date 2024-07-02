@@ -12,6 +12,7 @@ bin/x64/*.exp
 bin/x64/*.lib
 bin/x64/gpcl*
 bin/x64/gpdl*
+bin/x64/gpdf*
 bin/x64/gxps*
 bin/x86/*.exp
 bin/x86/*.lib
