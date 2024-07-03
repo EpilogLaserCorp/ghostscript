@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2024 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -3110,12 +3110,17 @@ static int install_charproc_accumulator(gx_device_pdf *pdev, gs_text_enum_t *pte
            Note that BuildChar may change CTM before calling setcachedevice. */
         gs_make_identity(&m);
         if (penum->current_font->FontType == ft_PDF_user_defined) {
-            pdev->width *= 100;
-            pdev->height *= 100;
-            gs_matrix_scale(&m, 100, 100, &m);
-            pdev->Scaled_accumulator = 1;
-        }
-        gs_matrix_fixed_from_matrix(&penum->pgs->ctm, &m);
+            if (!pdev->Scaled_accumulator) {
+                if (pdev->width > max_int / 100 || pdev->height > max_int / 100)
+                    return_error(gs_error_rangecheck);
+                pdev->width *= 100;
+                pdev->height *= 100;
+                gs_matrix_scale(&m, 100, 100, &m);
+                gs_matrix_fixed_from_matrix(&penum->pgs->ctm, &m);
+            }
+            pdev->Scaled_accumulator++;
+        } else
+            gs_matrix_fixed_from_matrix(&penum->pgs->ctm, &m);
 
         /* Choose a character code to use with the charproc. */
         code = pdf_choose_output_char_code(pdev, penum, &penum->output_char_code);
@@ -3185,12 +3190,15 @@ static int complete_charproc(gx_device_pdf *pdev, gs_text_enum_t *pte,
     }
 
     if (was_PS_type3 || pdev->Scaled_accumulator) {
-        /* See below, we scaled the device height and width to prevent
-         * clipping of the CharProc operations, now we need to undo that.
-         */
-        pdev->width /= 100;
-        pdev->height /= 100;
-        pdev->Scaled_accumulator = 0;
+        if (pdev->Scaled_accumulator)
+            pdev->Scaled_accumulator--;
+        if (was_PS_type3 || pdev->Scaled_accumulator == 0) {
+            /* See below, we scaled the device height and width to prevent
+             * clipping of the CharProc operations, now we need to undo that.
+             */
+            pdev->width /= 100;
+            pdev->height /= 100;
+        }
     }
     code = pdf_end_charproc_accum(pdev, penum->current_font, penum->cgp,
                 pte_default->returned.current_glyph, penum->output_char_code, &gnstr);
@@ -3481,11 +3489,14 @@ pdf_text_process(gs_text_enum_t *pte)
                     gs_fixed_point subpix_origin = {0,0};
                     cached_fm_pair *pair;
                     cached_char *cc;
+                    gs_glyph glyph;
 
-                    code = gx_lookup_fm_pair(pfont, &ctm_only(pte->pgs), &log2_scale, false, &pair);
+                    code = gx_lookup_fm_pair(pfont, &char_tm_only(pte->pgs), &log2_scale, false, &pair);
                     if (code < 0)
                         return code;
-                    cc = gx_lookup_cached_char(pfont, pair, pte_default->text.data.chars[pte_default->index], wmode, 1, &subpix_origin);
+                    glyph = (*pte_default->encode_char)(pfont, pte_default->text.data.chars[pte_default->index],
+                                                      GLYPH_SPACE_NAME);
+                    cc = gx_lookup_cached_char(pfont, pair, glyph, wmode, 1, &subpix_origin);
                     if (cc != 0) {
                         gx_purge_selected_cached_chars(pfont->dir, pdf_query_purge_cached_char, (void *)cc);
                     }
@@ -3595,7 +3606,7 @@ pdf_text_process(gs_text_enum_t *pte)
                     /* This code copied from show_cache_setup */
                     gs_memory_t *mem = penum->memory;
                     gx_device_memory *dev =
-                        gs_alloc_struct(mem, gx_device_memory, &st_device_memory,
+                        gs_alloc_struct_immovable(mem, gx_device_memory, &st_device_memory,
                         "show_cache_setup(dev_cache)");
 
                     if (dev == 0) {
