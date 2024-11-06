@@ -332,13 +332,23 @@ pdf_text_release(gs_text_enum_t *pte, client_name_t cname)
      */
     if (!penum->text_clipped && (penum->text.operation & TEXT_DO_DRAW || penum->pgs->text_rendering_mode == 3))
     {
-        gs_matrix tmat;
+        gs_matrix tmat, fmat;
         gs_point p;
         int i;
         gs_font *font = (gs_font *)penum->current_font;
         gs_text_params_t *const text = &pte->text;
 
-        gs_matrix_multiply(&font->FontMatrix, &ctm_only(penum->pgs), &tmat);
+        /* If we have a CIDFont or type 0 font, then the current font will be the actual
+         * marking font from the FDepVector array of dictionaries. We need to multiply
+         * that font's FontMatrix by the FontMatrix of the original type 0 font.
+         */
+        if (font != penum->orig_font) {
+            gs_matrix_multiply(&font->FontMatrix, &penum->orig_font->FontMatrix, &fmat);
+            gs_matrix_multiply(&fmat, &ctm_only(penum->pgs), &tmat);
+        } else {
+            gs_matrix_multiply(&font->FontMatrix, &ctm_only(penum->pgs), &tmat);
+        }
+
         gs_distance_transform(1, 0, &tmat, &p);
         if (p.x > fabs(p.y))
             i = 0;
@@ -507,9 +517,10 @@ pdf_prepare_text_drawing(gx_device_pdf *const pdev, gs_text_enum_t *pte)
          * current colour to work for both operations.
          */
         if (!pdev->ForOPDFRead && font->FontType != ft_user_defined && font->FontType != ft_CID_user_defined
-            && font->FontType != ft_PCL_user_defined && font->FontType != ft_GL2_531 && font->FontType != ft_PDF_user_defined) {
+            && font->FontType != ft_PCL_user_defined && font->FontType != ft_GL2_531 && font->FontType != ft_PDF_user_defined
+            && font->FontType != ft_GL2_stick_user_defined) {
             if (pgs->text_rendering_mode != 3 && pgs->text_rendering_mode != 7) {
-                if (font->PaintType == 2 || font->FontType == ft_GL2_stick_user_defined) {
+                if (font->PaintType == 2) {
                     /* Bit awkward, if the PaintType is 2 (or its the PCL stick font, which is stroked)
                      * then we want to set the current ie 'fill' colour, but as a stroke colour because we
                      * will later change the text rendering mode to 1 (stroke).
@@ -747,7 +758,7 @@ private_st_pdf_font_cache_elem();
 /*
  * Compute id for a font cache element.
  */
-static ulong
+static int64_t
 pdf_font_cache_elem_id(gs_font *font)
 {
     return font->id;
@@ -758,7 +769,7 @@ pdf_locate_font_cache_elem(gx_device_pdf *pdev, gs_font *font)
 {
     pdf_font_cache_elem_t **e = &pdev->font_cache;
     pdf_font_cache_elem_t *prev = NULL;
-    long id = pdf_font_cache_elem_id(font);
+    int64_t id = pdf_font_cache_elem_id(font);
 
     for (; *e != 0; e = &(*e)->next) {
         if ((*e)->font_id == id) {
@@ -1520,6 +1531,7 @@ pdf_make_font_resource(gx_device_pdf *pdev, gs_font *font,
                        pdf_char_glyph_pairs_t *cgp)
 {
     int index = -1;
+    font_type orig_type = ft_undefined;
     int BaseEncoding = ENCODING_INDEX_UNKNOWN;
     pdf_font_embed_t embed;
     pdf_font_descriptor_t *pfd = 0;
@@ -1555,7 +1567,7 @@ pdf_make_font_resource(gx_device_pdf *pdev, gs_font *font,
         if (font->FontType == ft_encrypted2)
             return_error(gs_error_undefined);
     }
-    embed = pdf_font_embed_status(pdev, base_font, &index, cgp->s, cgp->num_all_chars);
+    embed = pdf_font_embed_status(pdev, base_font, &index, cgp->s, cgp->num_all_chars, &orig_type);
     if (pdev->CompatibilityLevel < 1.3)
         if (embed != FONT_EMBED_NO && font->FontType == ft_CID_TrueType)
             return_error(gs_error_rangecheck);
@@ -1730,6 +1742,9 @@ pdf_make_font_resource(gx_device_pdf *pdev, gs_font *font,
             w[0] = widths.Width.w;
             pdfont->used[0] |= 0x80;
         }
+    }
+    if (embed == FONT_EMBED_NO && orig_type != ft_undefined) {
+        pfd->FontType = orig_type;
     }
     *ppdfont = pdfont;
     return 1;

@@ -104,6 +104,7 @@ static int pdfi_trans_set_mask(pdf_context *ctx, pdfi_int_gstate *igs, int color
     gs_transparency_mask_subtype_t subtype = TRANSPARENCY_MASK_Luminosity;
     bool Processed, ProcessedKnown = 0;
     bool save_OverrideICC = gs_currentoverrideicc(ctx->pgs);
+    gs_gstate *saved_gs = NULL;
 
 #if DEBUG_TRANSPARENCY
     dbgmprintf(ctx->memory, "pdfi_trans_set_mask (.execmaskgroup) BEGIN\n");
@@ -142,11 +143,7 @@ static int pdfi_trans_set_mask(pdf_context *ctx, pdfi_int_gstate *igs, int color
         code = pdfi_dict_knownget_type(ctx, SMask, "G", PDF_STREAM, (pdf_obj **)&G_stream);
         if (code <= 0) {
             pdfi_trans_end_smask_notify(ctx);
-            if (ctx->args.pdfstoponerror)
-                code = gs_note_error(gs_error_undefined);
-            else
-                code = 0;
-            pdfi_set_error(ctx, 0, NULL, E_PDF_SMASK_MISSING_G, "pdfi_trans_set_mask", "");
+            code = pdfi_set_error_stop(ctx, code, NULL, E_PDF_SMASK_MISSING_G, "pdfi_trans_set_mask", "");
             goto exit;
         }
 
@@ -266,13 +263,15 @@ static int pdfi_trans_set_mask(pdf_context *ctx, pdfi_int_gstate *igs, int color
         /* If there's a BC, put it in the params */
         if (BC) {
             if (params.ColorSpace == NULL) {
-                pdfi_set_error(ctx, 0, NULL, E_PDF_GROUP_BAD_BC_NO_CS, "pdfi_trans_set_mask", NULL);
+                if ((code = pdfi_set_error_stop(ctx, gs_note_error(gs_error_undefined), NULL, E_PDF_GROUP_BAD_BC_NO_CS, "pdfi_trans_set_mask", NULL)) < 0)
+                    goto exit;
             } else {
                 int i, components = pdfi_array_size(BC);
                 double num;
 
                 if (components > GS_CLIENT_COLOR_MAX_COMPONENTS) {
-                    pdfi_set_error(ctx, 0, NULL, E_PDF_GROUP_BAD_BC_TOO_BIG, "pdfi_trans_set_mask", NULL);
+                    if ((code = pdfi_set_error_stop(ctx, gs_note_error(gs_error_limitcheck), NULL, E_PDF_GROUP_BAD_BC_TOO_BIG, "pdfi_trans_set_mask", NULL)) < 0)
+                        goto exit;
                 } else {
                     if (gs_color_space_num_components(params.ColorSpace) != components) {
                         pdfi_set_warning(ctx, 0, NULL, W_PDF_GROUP_BAD_BC, "pdfi_trans_set_mask", NULL);
@@ -298,15 +297,64 @@ static int pdfi_trans_set_mask(pdf_context *ctx, pdfi_int_gstate *igs, int color
             }
         }
 
-        code = gs_begin_transparency_mask(ctx->pgs, &params, &bbox, false);
-        if (code < 0)
-            goto exit;
+        /* When we call gs_begin_transparency_mask, the pdf14 compisitor will perform
+         * a horrid pass through the graphics state, replacing "default" colorspaces
+         * with "ps" ones. This is required, apparently, to give us proper rendering
+         * of SMasks. Bug 705993 shows a case where the current colorspace differs
+         * from the colorspace that will be used once the igs->GroupGState is swapped
+         * in. Simply proceeding to call gs_begin_transparency_mask here, and then
+         * setting the igs->GroupGState, leaves us with a colorspace where the
+         * "default" -> "ps" change has not taken place, and we get incorrect rendering.
+         *
+         * As the igs->GroupGState can only be applied AFTER the
+         * gs_begin_transparancy_mask call (that is, I couldn't make it work applying
+         * it beforehand!), this means we need to manually swap in the colorspaces
+         * and colors, and be careful to restore them afterwards.
+         *
+         * NOTE: Attempts to gsave/grestore around the gs_begin_transparency_mask/
+         * gs_end_transparency_mask calls fail, showing diffs. My suspicion is that
+         * this actually disables the softmask that we've just rendered!
+         */
+        if (code >= 0) {
+            /* Override the colorspace if specified */
+            saved_gs = gs_gstate_copy(ctx->pgs, ctx->memory);
+            if (saved_gs == NULL)
+                code = gs_note_error(gs_error_VMerror);
+            if (code >= 0)
+                code = pdfi_gs_setcolorspace(ctx, igs->GroupGState->color[0].color_space);
+            if (code >= 0)
+                code = gs_setcolor(ctx->pgs, igs->GroupGState->color[0].ccolor);
+            gs_swapcolors_quick(ctx->pgs);
+            if (code >= 0)
+                code = pdfi_gs_setcolorspace(ctx, igs->GroupGState->color[1].color_space);
+            if (code >= 0)
+                code = gs_setcolor(ctx->pgs, igs->GroupGState->color[1].ccolor);
+            gs_swapcolors_quick(ctx->pgs);
+        }
 
-        code = pdfi_form_execgroup(ctx, ctx->page.CurrentPageDict, G_stream,
-                                   igs->GroupGState, NULL, NULL, &group_Matrix);
-        code1 = gs_end_transparency_mask(ctx->pgs, colorindex);
-        if (code == 0)
-            code = code1;
+        if (code >= 0)
+            code = gs_begin_transparency_mask(ctx->pgs, &params, &bbox, false);
+
+        if (code >= 0) {
+            code = pdfi_form_execgroup(ctx, ctx->page.CurrentPageDict, G_stream,
+                                       igs->GroupGState, NULL, NULL, &group_Matrix);
+            code1 = gs_end_transparency_mask(ctx->pgs, colorindex);
+            if (code == 0)
+                code = code1;
+        }
+
+        if (saved_gs) {
+            code1 = pdfi_gs_setcolorspace(ctx, saved_gs->color[0].color_space);
+            if (code >= 0) code = code1;
+            code1 = gs_setcolor(ctx->pgs, saved_gs->color[0].ccolor);
+            if (code >= 0) code = code1;
+            gs_swapcolors_quick(ctx->pgs);
+            code1 = pdfi_gs_setcolorspace(ctx, saved_gs->color[1].color_space);
+            if (code >= 0) code = code1;
+            code1 = gs_setcolor(ctx->pgs, saved_gs->color[1].ccolor);
+            if (code >= 0) code = code1;
+            gs_swapcolors_quick(ctx->pgs);
+        }
 
         /* Put back the matrix (we couldn't just rely on gsave/grestore for whatever reason,
          * according to PS code anyway...
@@ -326,6 +374,7 @@ static int pdfi_trans_set_mask(pdf_context *ctx, pdfi_int_gstate *igs, int color
     }
 
  exit:
+    gs_gstate_free(saved_gs);
     gs_setoverrideicc(ctx->pgs, save_OverrideICC);
     if (gsfunc)
         pdfi_free_function(ctx, gsfunc);

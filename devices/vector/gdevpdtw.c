@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2024 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -108,7 +108,7 @@ pdf_different_encoding_index(const pdf_font_resource_t *pdfont, int ch0)
 
 /* Check for unknown encode (simple fonts only). */
 static bool
-pdf_simple_font_needs_ToUnicode(const pdf_font_resource_t *pdfont)
+pdf_simple_font_needs_ToUnicode(gx_device_pdf *pdev, const pdf_font_resource_t *pdfont)
 {
     int ch;
     unsigned char mask = (pdfont->FontType == ft_encrypted || pdfont->FontType == ft_encrypted2
@@ -126,31 +126,34 @@ pdf_simple_font_needs_ToUnicode(const pdf_font_resource_t *pdfont)
     if (!pdfont->TwoByteToUnicode)
         return false;
 
-    for (ch = 0; ch < 256; ++ch) {
-        pdf_encoding_element_t *pet = &pdfont->u.simple.Encoding[ch];
-        gs_glyph glyph = pet->glyph;
+    if (!pdev->ToUnicodeForStdEnc) {
+        for (ch = 0; ch < 256; ++ch) {
+            pdf_encoding_element_t *pet = &pdfont->u.simple.Encoding[ch];
+            gs_glyph glyph = pet->glyph;
 
-        if (glyph == GS_NO_GLYPH)
-            continue;
-        if (glyph < gs_c_min_std_encoding_glyph || glyph >= GS_MIN_CID_GLYPH) {
-            if (pet->size == 0)
-                return true;
-            glyph = gs_c_name_glyph(pet->data, pet->size);
             if (glyph == GS_NO_GLYPH)
-                return true;
-        }
-        glyph -= gs_c_min_std_encoding_glyph;
-        if( glyph > GS_C_PDF_MAX_GOOD_GLYPH ||
-           !(gs_c_pdf_glyph_type[glyph >> 2] & (mask << (( glyph & 3 )<<1) )))
-          return true;
+                continue;
+            if (glyph < gs_c_min_std_encoding_glyph || glyph >= GS_MIN_CID_GLYPH) {
+                if (pet->size == 0)
+                    return true;
+                glyph = gs_c_name_glyph(pet->data, pet->size);
+                if (glyph == GS_NO_GLYPH)
+                    return true;
+            }
+            glyph -= gs_c_min_std_encoding_glyph;
+            if( glyph > GS_C_PDF_MAX_GOOD_GLYPH ||
+               !(gs_c_pdf_glyph_type[glyph >> 2] & (mask << (( glyph & 3 )<<1) )))
+              return true;
 
-    }
-    return false;
+        }
+        return false;
+    } else
+        return true;
 }
 
 /* Write Encoding differencrs. */
 int
-pdf_write_encoding(gx_device_pdf *pdev, const pdf_font_resource_t *pdfont, long id, int ch)
+pdf_write_encoding(gx_device_pdf *pdev, const pdf_font_resource_t *pdfont, int64_t id, int ch)
 {
     /* Note : this truncates extended glyph names to original names. */
     stream *s;
@@ -211,7 +214,7 @@ pdf_write_encoding(gx_device_pdf *pdev, const pdf_font_resource_t *pdfont, long 
 /* Write Encoding reference. */
 int
 pdf_write_encoding_ref(gx_device_pdf *pdev,
-          const pdf_font_resource_t *pdfont, long id)
+          const pdf_font_resource_t *pdfont, int64_t id)
 {
     stream *s = pdev->strm;
 
@@ -232,7 +235,7 @@ pdf_write_simple_contents(gx_device_pdf *pdev,
                           const pdf_font_resource_t *pdfont)
 {
     stream *s = pdev->strm;
-    long diff_id = 0;
+    int64_t diff_id = 0;
     int ch = (pdfont->u.simple.Encoding ? 0 : 256);
     int code = 0;
 
@@ -242,8 +245,12 @@ pdf_write_simple_contents(gx_device_pdf *pdev,
     code = pdf_write_encoding_ref(pdev, pdfont, diff_id);
     if (code < 0)
         return code;
-    pprints1(s, "/Subtype/%s>>\n",
+    if (pdfont->FontDescriptor == NULL || pdfont->FontDescriptor->embed)
+        pprints1(s, "/Subtype/%s>>\n",
              (pdfont->FontType == ft_TrueType ? "TrueType" : "Type1"));
+    else
+        pprints1(s, "/Subtype/%s>>\n",
+             (pdfont->FontDescriptor->FontType == ft_TrueType ? "TrueType" : "Type1"));
     pdf_end_separate(pdev, resourceFont);
     if (diff_id) {
         mark_font_descriptor_symbolic(pdfont);
@@ -512,7 +519,7 @@ int
 pdf_write_contents_cid2(gx_device_pdf *pdev, pdf_font_resource_t *pdfont)
 {
     int count = pdfont->count;
-    long map_id = 0;
+    int64_t map_id = 0;
     psf_glyph_enum_t genum;
     gs_glyph glyph;
     int code;
@@ -578,7 +585,7 @@ pdf_write_font_resource(gx_device_pdf *pdev, pdf_font_resource_t *pdfont)
                 pdfont->FontType == ft_TrueType || pdfont->FontType == ft_user_defined ||
                 pdfont->FontType == ft_GL2_stick_user_defined || pdfont->FontType == ft_PCL_user_defined ||
                 pdfont->FontType == ft_MicroType || pdfont->FontType == ft_GL2_531) &&
-                pdf_simple_font_needs_ToUnicode(pdfont))
+                pdf_simple_font_needs_ToUnicode(pdev, pdfont))
            ) {
             pdf_resource_t *prcmap;
             int code = pdf_cmap_alloc(pdev, pdfont->cmap_ToUnicode, &prcmap, -1);
@@ -747,7 +754,7 @@ pdf_write_cid_system_info(gx_device_pdf *pdev,
 }
 
 int
-pdf_write_cid_systemInfo_separate(gx_device_pdf *pdev, const gs_cid_system_info_t *pcidsi, long *id)
+pdf_write_cid_systemInfo_separate(gx_device_pdf *pdev, const gs_cid_system_info_t *pcidsi, int64_t *id)
 {
     int code;
 
@@ -862,7 +869,7 @@ pdf_write_OneByteIdentityH(gx_device_pdf *pdev)
     cos_dict_t *pcd;
     char buf[200];
     static const gs_cid_system_info_t cidsi = {{(const byte *)"Adobe", 5}, {(const byte *)"Identity", 8}, 0};
-    long id;
+    int64_t id;
 
     if (pdev->IdentityCIDSystemInfo_id == gs_no_id) {
         code = pdf_write_cid_systemInfo_separate(pdev, &cidsi, &id);

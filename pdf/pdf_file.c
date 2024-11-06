@@ -830,63 +830,56 @@ static int pdfi_apply_filter(pdf_context *ctx, pdf_dict *dict, pdf_name *n, pdf_
 
     if (pdfi_name_is(n, "AHx")) {
         if (!inline_image) {
-            pdfi_set_warning(ctx, 0, NULL, W_PDF_BAD_INLINEFILTER, "pdfi_apply_filter", NULL);
-            if (ctx->args.pdfstoponwarning)
-                return_error(gs_error_syntaxerror);
+            if ((code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_syntaxerror), NULL, W_PDF_BAD_INLINEFILTER, "pdfi_apply_filter", NULL)) < 0)
+                return code;
         }
         code = pdfi_simple_filter(ctx, &s_AXD_template, source, new_stream);
         return code;
     }
     if (pdfi_name_is(n, "A85")) {
         if (!inline_image) {
-            pdfi_set_warning(ctx, 0, NULL, W_PDF_BAD_INLINEFILTER, "pdfi_apply_filter", NULL);
-            if (ctx->args.pdfstoponwarning)
-                return_error(gs_error_syntaxerror);
+            if ((code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_syntaxerror), NULL, W_PDF_BAD_INLINEFILTER, "pdfi_apply_filter", NULL)) < 0)
+                return code;
         }
         code = pdfi_ASCII85_filter(ctx, decode, source, new_stream);
         return code;
     }
     if (pdfi_name_is(n, "LZW")) {
         if (!inline_image) {
-            pdfi_set_warning(ctx, 0, NULL, W_PDF_BAD_INLINEFILTER, "pdfi_apply_filter", NULL);
-            if (ctx->args.pdfstoponwarning)
-                return_error(gs_error_syntaxerror);
+            if ((code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_syntaxerror), NULL, W_PDF_BAD_INLINEFILTER, "pdfi_apply_filter", NULL)) < 0)
+                return code;
         }
         code = pdfi_LZW_filter(ctx, decode, source, new_stream);
         return code;
     }
     if (pdfi_name_is(n, "CCF")) {
         if (!inline_image) {
-            pdfi_set_warning(ctx, 0, NULL, W_PDF_BAD_INLINEFILTER, "pdfi_apply_filter", NULL);
-            if (ctx->args.pdfstoponwarning)
-                return_error(gs_error_syntaxerror);
+            if ((code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_syntaxerror), NULL, W_PDF_BAD_INLINEFILTER, "pdfi_apply_filter", NULL)) < 0)
+                return code;
         }
         code = pdfi_CCITTFax_filter(ctx, decode, source, new_stream);
         return code;
     }
     if (pdfi_name_is(n, "DCT")) {
         if (!inline_image) {
-            pdfi_set_warning(ctx, 0, NULL, W_PDF_BAD_INLINEFILTER, "pdfi_apply_filter", NULL);
-            if (ctx->args.pdfstoponwarning)
-                return_error(gs_error_syntaxerror);
+            if ((code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_syntaxerror), NULL, W_PDF_BAD_INLINEFILTER, "pdfi_apply_filter", NULL)) < 0)
+                return code;
         }
         code = pdfi_DCT_filter(ctx, dict, decode, source, new_stream);
         return code;
     }
     if (pdfi_name_is(n, "Fl")) {
         if (!inline_image) {
-            pdfi_set_warning(ctx, 0, NULL, W_PDF_BAD_INLINEFILTER, "pdfi_apply_filter", NULL);
-            if (ctx->args.pdfstoponwarning)
-                return_error(gs_error_syntaxerror);
+            if ((code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_syntaxerror), NULL, W_PDF_BAD_INLINEFILTER, "pdfi_apply_filter", NULL)) < 0)
+                return code;
         }
         code = pdfi_Flate_filter(ctx, decode, source, new_stream);
         return code;
     }
     if (pdfi_name_is(n, "RL")) {
         if (!inline_image) {
-            pdfi_set_warning(ctx, 0, NULL, W_PDF_BAD_INLINEFILTER, "pdfi_apply_filter", NULL);
-            if (ctx->args.pdfstoponwarning)
-                return_error(gs_error_syntaxerror);
+            if ((code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_syntaxerror), NULL, W_PDF_BAD_INLINEFILTER, "pdfi_apply_filter", NULL)) < 0)
+                return code;
         }
         code = pdfi_RunLength_filter(ctx, decode, source, new_stream);
         return code;
@@ -981,7 +974,8 @@ int pdfi_filter_no_decryption(pdf_context *ctx, pdf_stream *stream_obj,
             if (pdfi_array_size(DecodeParams) == 0 || pdfi_array_size(DecodeParams) != pdfi_array_size(filter_array)) {
                 pdfi_countdown(DecodeParams);
                 DecodeParams = NULL;
-                pdfi_set_warning(ctx, 0, NULL, W_PDF_STREAM_BAD_DECODEPARMS, "pdfi_filter_no_decryption", NULL);
+                if ((code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_rangecheck), NULL, W_PDF_STREAM_BAD_DECODEPARMS, "pdfi_filter_no_decryption", NULL)) < 0)
+                    goto exit;
             } else {
                 if (pdfi_array_size(DecodeParams) != pdfi_array_size(filter_array)) {
                     code = gs_note_error(gs_error_typecheck);
@@ -1034,7 +1028,8 @@ int pdfi_filter_no_decryption(pdf_context *ctx, pdf_stream *stream_obj,
             if (decode && decode != PDF_NULL_OBJ && pdfi_type_of(decode) != PDF_DICT) {
                 pdfi_countdown(decode);
                 decode = NULL;
-                pdfi_set_warning(ctx, 0, NULL, W_PDF_STREAM_BAD_DECODEPARMS, "pdfi_filter_no_decryption", NULL);
+                if ((code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_typecheck), NULL, W_PDF_STREAM_BAD_DECODEPARMS, "pdfi_filter_no_decryption", NULL)) < 0)
+                    goto error;
             }
             if (decode && decode == PDF_NULL_OBJ) {
                 pdfi_countdown(decode);
@@ -1750,8 +1745,11 @@ retry:
             goto exit;
 
         code = pdfi_filter(ctx, stream_obj, SubFileStream, &stream, false);
-        if (code < 0)
+        if (code < 0) {
+            /* Because we opened the SubFileDecode separately to the filter chain, we need to close it separately too */
+            pdfi_close_file(ctx, SubFileStream);
             goto exit;
+        }
         read = sfread(Buffer, 1, buflen, stream->s);
         pdfi_close_file(ctx, stream);
         /* Because we opened the SubFileDecode separately to the filter chain, we need to close it separately too */
@@ -1891,7 +1889,7 @@ bool pdfi_resource_file_exists(pdf_context *ctx, const char *fname, const int fn
     stream *s = NULL;
     int code = pdfi_open_resource_file_inner(ctx, fname, fnamelen, &s);
     if (s)
-        sclose(s);
+        sfclose(s);
 
     return (code >= 0);
 }
@@ -1981,7 +1979,7 @@ bool pdfi_font_file_exists(pdf_context *ctx, const char *fname, const int fnamel
     stream *s = NULL;
     int code = pdfi_open_font_file_inner(ctx, fname, fnamelen, &s);
     if (s)
-        sclose(s);
+        sfclose(s);
 
     return (code >= 0);
 }

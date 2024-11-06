@@ -533,6 +533,7 @@ int pdfi_read_cidtype2_font(pdf_context *ctx, pdf_dict *font_dict, pdf_dict *str
     cid2->cidata.orig_procs.get_outline = cid2->data.get_outline;
     cid2->data.get_glyph_index = pdfi_cidtype2_get_glyph_index;
 
+    pdfi_font_set_orig_fonttype(ctx, (pdf_font *)font);
     code = gs_definefont(ctx->font_dir, (gs_font *)font->pfont);
     if (code < 0) {
         goto error;
@@ -561,10 +562,10 @@ error:
         memcpy(fname, fobj->data, fobj->length > gp_file_name_sizeof ? gp_file_name_sizeof : fobj->length);
         fname[fobj->length > gp_file_name_sizeof ? gp_file_name_sizeof : fobj->length] = '\0';
 
-        pdfi_set_error_var(ctx, code, NULL, E_PDF_BADSTREAM, "pdfi_read_cidtype2_font", "Error reading CIDType2/TrueType font file %s\n", fname);
+        (void)pdfi_set_error_var(ctx, code, NULL, E_PDF_BADSTREAM, "pdfi_read_cidtype2_font", "Error reading CIDType2/TrueType font file %s\n", fname);
     }
     else {
-        pdfi_set_error_var(ctx, code, NULL, E_PDF_BADSTREAM, "pdfi_read_cidtype2_font", "Error reading embedded CIDType2/TrueType font object %u\n", font_dict->object_num);
+        (void)pdfi_set_error_var(ctx, code, NULL, E_PDF_BADSTREAM, "pdfi_read_cidtype2_font", "Error reading embedded CIDType2/TrueType font object %u\n", font_dict->object_num);
     }
 
     pdfi_countdown(obj);
@@ -590,6 +591,10 @@ int pdfi_free_font_cidtype2(pdf_obj *font)
     pdfi_countdown(pdfcidf->registry);
     pdfi_countdown(pdfcidf->ordering);
     pdfi_countdown(pdfcidf->filename);
+    pdfi_countdown(pdfcidf->copyright);
+    pdfi_countdown(pdfcidf->notice);
+    pdfi_countdown(pdfcidf->fullname);
+    pdfi_countdown(pdfcidf->familyname);
 
     gs_free_object(OBJ_MEMORY(pdfcidf), pdfcidf, "pdfi_free_font_cidtype2(pdfcidf)");
 return 0;

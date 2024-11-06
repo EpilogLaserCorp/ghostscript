@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2024 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -508,6 +508,14 @@ static inline int colors_are_separable_and_linear(gx_device_color_info *info)
                               mg, mc, dg, dc, ta, ga,       \
                               GX_CINFO_UNKNOWN_SEP_LIN,     \
                               dci_std_cm_name(nc) )
+#define dci_alpha_values_add(nc, depth, mg, mc, dg, dc, ta, ga) \
+    dci_extended_alpha_values(nc, nc,			    \
+                              GX_CINFO_POLARITY_ADDITIVE,   \
+                              depth,                        \
+                              dci_std_gray_index(nc),       \
+                              mg, mc, dg, dc, ta, ga,       \
+                              GX_CINFO_UNKNOWN_SEP_LIN,     \
+                              dci_std_cm_name(nc) )
 
 /*
  * Determine the depth corresponding to a color_bits specification.
@@ -585,6 +593,8 @@ static inline int colors_are_separable_and_linear(gx_device_color_info *info)
 
 #define dci_values(nc,depth,mg,mc,dg,dc)\
   dci_alpha_values(nc, depth, mg, mc, dg, dc, 1, 1)
+#define dci_values_add(nc,depth,mg,mc,dg,dc)\
+  dci_alpha_values_add(nc, depth, mg, mc, dg, dc, 1, 1)
 #define dci_black_and_white dci_std_color(1)
 #define dci_black_and_white_() dci_black_and_white
 #define dci_color(depth,maxv,dither)\
@@ -1626,6 +1636,12 @@ static inline bool device_encodes_tags(const gx_device *dev)
     return (dev->graphics_type_tag & GS_DEVICE_ENCODES_TAGS) != 0;
 }
 
+static inline gs_graphics_type_tag_t device_current_tag(const gx_device *dev)
+{
+    gs_graphics_type_tag_t tag = dev->graphics_type_tag;
+    return (tag & GS_DEVICE_ENCODES_TAGS) ? (tag & ~GS_DEVICE_ENCODES_TAGS) : 0;
+}
+
 static inline bool device_is_deep(const gx_device *dev)
 {
     bool has_tags = device_encodes_tags(dev);
@@ -1771,7 +1787,7 @@ gx_cm_opmsupported_t gx_get_opmsupported(gx_device *dev)
     if (dev->color_info.opmsupported != GX_CINFO_OPMSUPPORTED_UNKNOWN)
         return dev->color_info.opmsupported;
 
-    (void)check_cmyk_color_model_comps(dev);
+    check_opmsupported(dev);
 
     return dev->color_info.opmsupported;
 }

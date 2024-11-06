@@ -447,7 +447,7 @@ pdfmark_bind_named_object(gx_device_pdf *pdev, const gs_const_string *objname,
 typedef struct ao_params_s {
     gx_device_pdf *pdev;	/* for pdfmark_make_dest */
     const char *subtype;	/* default Subtype in top-level dictionary */
-    long src_pg;		/* set to SrcPg - 1 if any */
+    int src_pg;		/* set to SrcPg - 1 if any */
 } ao_params_t;
 static int
 pdfmark_put_ao_pairs(gx_device_pdf * pdev, cos_dict_t *pcd,
@@ -475,7 +475,7 @@ pdfmark_put_ao_pairs(gx_device_pdf * pdev, cos_dict_t *pcd,
         Subtype.data = 0;
     for (i = 0; i < count; i += 2) {
         const gs_param_string *pair = &pairs[i];
-        long src_pg;
+        int src_pg;
 
         if (pdf_key_eq(pair, "/SrcPg")){
             unsigned char *buf0 = (unsigned char *)gs_alloc_bytes(pdev->memory, (pair[1].size + 1) * sizeof(unsigned char),
@@ -911,8 +911,8 @@ pdfmark_put_ao_pairs(gx_device_pdf * pdev, cos_dict_t *pcd,
             pdfmark_put_c_pair(pcd, "/Dest", &Dest);
     } else if (for_outline && !Action) {
         /* Make an implicit destination. */
-        char dstr[1 + (sizeof(long) * 8 / 3 + 1) + 25 + 1];
-        long page_id = pdf_page_id(pdev, pdev->next_page + 1);
+        char dstr[1 + (sizeof(int64_t) * 8 / 3 + 1) + 25 + 1];
+        int64_t page_id = pdf_page_id(pdev, pdev->next_page + 1);
 
         gs_snprintf(dstr, MAX_DEST_STRING, "[%ld 0 R /XYZ null null null]", page_id);
         cos_dict_put_c_key_string(pcd, "/Dest", (const unsigned char*) dstr,
@@ -1186,17 +1186,20 @@ pdfmark_annot(gx_device_pdf * pdev, gs_param_string * pairs, uint count,
         return code;
     code = cos_dict_put_c_strings(pcd, "/Type", "/Annot");
     if (code < 0) {
+        (void)pdf_obj_mark_unused(pdev, pcd->id);
         cos_free((cos_object_t *)pcd, "pdfmark_annot");
         return code;
     }
     code = pdfmark_put_ao_pairs(pdev, pcd, pairs, count, pctm, &params, false);
     if (code < 0) {
+        (void)pdf_obj_mark_unused(pdev, pcd->id);
         cos_free((cos_object_t *)pcd, "pdfmark_annot");
         return code;
     }
     if (params.src_pg >= 0)
         page_index = params.src_pg;
     if (pdf_page_id(pdev, page_index + 1) <= 0) {
+        (void)pdf_obj_mark_unused(pdev, pcd->id);
         cos_free((cos_object_t *)pcd, "pdfmark_annot");
         return_error(gs_error_rangecheck);
     }
@@ -1204,6 +1207,7 @@ pdfmark_annot(gx_device_pdf * pdev, gs_param_string * pairs, uint count,
     if (annots == 0) {
         annots = cos_array_alloc(pdev, "pdfmark_annot");
         if (annots == 0) {
+            (void)pdf_obj_mark_unused(pdev, pcd->id);
             cos_free((cos_object_t *)pcd, "pdfmark_annot");
             return_error(gs_error_VMerror);
         }
@@ -1237,7 +1241,7 @@ pdfmark_LNK(gx_device_pdf * pdev, gs_param_string * pairs, uint count,
 /* Write and release one node of the outline tree. */
 static int
 pdfmark_write_outline(gx_device_pdf * pdev, pdf_outline_node_t * pnode,
-                      long next_id)
+                      int64_t next_id)
 {
     stream *s;
     int code = 0;
@@ -1453,7 +1457,7 @@ pdfmark_ARTICLE(gx_device_pdf * pdev, gs_param_string * pairs, uint count,
     gs_param_string title;
     gs_param_string rectstr;
     gs_rect rect;
-    long bead_id;
+    int64_t bead_id;
     pdf_article_t *part;
     int code;
 
@@ -1582,11 +1586,43 @@ pdfmark_EMBED(gx_device_pdf * pdev, gs_param_string * pairs, uint count,
             return_error(gs_error_VMerror);
         pdev->EmbeddedFiles->id = pdf_obj_ref(pdev);
     }
+    if (pdev->PDFA == 3 && !pdev->AF) {
+        pdev->AF = cos_array_alloc(pdev, "pdfmark_EMBED(EmbeddedFiles)");
+        if (pdev->AF == 0)
+            return_error(gs_error_VMerror);
+        pdev->AF->id = pdf_obj_ref(pdev);
+    }
 
     for (i = 0; i < count; i += 2) {
         if (pdf_key_eq(&pairs[i], "/FS")) {
-            return cos_dict_put_string(pdev->EmbeddedFiles, key.data, key.size,
-                               pairs[i+1].data, pairs[i+1].size);
+            uint written;
+            cos_value_t v;
+            cos_object_t *object;
+            int64_t id;
+            int code;
+
+            id = pdf_obj_ref(pdev);
+
+            pdf_open_separate(pdev, id, resourceNone);
+            sputs(pdev->strm, pairs[i+1].data, pairs[i+1].size, &written);
+            if (pairs[i+1].data[pairs[i+1].size] != 0x0d && pdev->PDFA != 0)
+                sputc(pdev->strm, 0x0d);
+            pdf_end_separate(pdev, resourceNone);
+
+            object = cos_reference_alloc(pdev, "embedded file");
+            object->id = id;
+            COS_OBJECT_VALUE(&v, object);
+            code = cos_dict_put(pdev->EmbeddedFiles, key.data, key.size, &v);
+            if (code < 0)
+                return code;
+            if (pdev->PDFA == 3) {
+                object = cos_reference_alloc(pdev, "embedded file");
+                object->id = id;
+                COS_OBJECT_VALUE(&v, object);
+                code = cos_array_add(pdev->AF, &v);
+                if (code < 0)
+                    return code;
+            }
         }
     }
     return 0;
@@ -2295,11 +2331,40 @@ pdfmark_PUTDICT(gx_device_pdf * pdev, gs_param_string * pairs, uint count,
     /* If this is a stream, and we are doing PDF/A output, and the stream
      * is a Metadata stream, then we must not write it compressed. Bizarrely PDF/A
      * excludes this.
+     * Actually, we cna't write Metadata streams at all. Because we don't know how to extend
+     * the XMP Metadata to include them.
      */
     if (cos_type(pco) == cos_type_stream && pdev->PDFA) {
         for (i=0;i<count;i++) {
             if (pairs[i].size == 9 && strncmp((const char *)pairs[i].data, "/Metadata", 9) == 0) {
                 cos_dict_t *pcd = (cos_dict_t *)pco;
+
+                if (pdev->PDFA) {
+                    switch (pdev->PDFACompatibilityPolicy) {
+                        case 0:
+                            emprintf(pdev->memory,
+                                     "Cannot preserve Marked Content in PDF/A, reverting to normal PDF output\n\n");
+                            pdev->AbortPDFAX = true;
+                            pdev->PDFA = 0;
+                            break;
+                        case 1:
+                            emprintf(pdev->memory,
+                                     "Cannot preserve Marked Content in PDF/A, dropping feature to preserve PDF/A compatibility\n");
+                            return 0;
+                            break;
+                        case 2:
+                            emprintf(pdev->memory,
+                                     "Cannot preserve Marked Content in PDF/A, aborting conversion\n");
+                            return_error (gs_error_typecheck);
+                            break;
+                        default:
+                            emprintf(pdev->memory,
+                                     "Cannot preserve Marked Content in PDF/A, unrecognised PDFACompatibilityLevel,\nreverting to normal PDF output\n");
+                            pdev->AbortPDFAX = true;
+                            pdev->PDFA = 0;
+                            break;
+                    }
+                }
 
                 /* Close the compressed stream */
                 gs_free_object(pdev->pdf_memory, pco->input_strm, "free old stream, replacing with new stream");
@@ -2315,10 +2380,10 @@ pdfmark_PUTDICT(gx_device_pdf * pdev, gs_param_string * pairs, uint count,
                  */
                 cos_dict_delete_c_key(pcd, "/Filter");
                 cos_dict_delete_c_key(pcd, "/DecodeParams");
+
             }
         }
     }
-
     return pdfmark_put_pairs((cos_dict_t *)pco, pairs + 1, count - 1);
 }
 
@@ -2335,13 +2400,16 @@ pdfmark_PUTSTREAM(gx_device_pdf * pdev, gs_param_string * pairs, uint count,
         return_error(gs_error_rangecheck);
     if ((code = pdf_get_named(pdev, &pairs[0], cos_type_stream, &pco)) < 0)
         return code;
-    if (!pco->is_open)
-        return_error(gs_error_rangecheck);
+    if (!pco->is_open) {
+        pdev->pdfmark_dup_stream = true;
+        return 0;
+    }
     for (i = 1; i < count; ++i)
         if (sputs(pco->input_strm, pairs[i].data, pairs[i].size, &l) != 0)
             return_error(gs_error_ioerror);
     if (pco->written)
         return_error(gs_error_rangecheck);
+    pdev->pdfmark_dup_stream = false;
     return code;
 }
 
@@ -2397,8 +2465,9 @@ pdfmark_CLOSE(gx_device_pdf * pdev, gs_param_string * pairs, uint count,
         return_error(gs_error_rangecheck);
     if ((code = pdf_get_named(pdev, &pairs[0], cos_type_stream, &pco)) < 0)
         return code;
-    if (!pco->is_open)
+    if (!pco->is_open && !pdev->pdfmark_dup_stream)
         return_error(gs_error_rangecheck);
+    pdev->pdfmark_dup_stream = false;
     /* Currently we don't do anything special when closing a stream. */
     pco->is_open = false;
     return 0;
@@ -2593,6 +2662,42 @@ pdfmark_BDC(gx_device_pdf *pdev, gs_param_string *pairs, uint count,
 
     /* check tag for /Name object syntax */
     if ((pairs[0].data)[0] != '/') return_error(gs_error_rangecheck);
+
+    /* Check for /OC (Optional Content), if it is Optional Content, check the output PDF level is at least 1.5 */
+    if (pairs[0].size == 3 && memcmp(pairs[0].data, "/OC", 3) == 0) {
+        if (pdev->CompatibilityLevel < 1.4999) {
+            if (pdev->PDFA) {
+                switch (pdev->PDFACompatibilityPolicy) {
+                    case 0:
+                        emprintf(pdev->memory,
+                                 "Optional (Marked) Content not valid in this version of PDF, reverting to normal PDF output\n\n");
+                        pdev->AbortPDFAX = true;
+                        pdev->PDFA = 0;
+                        break;
+                    case 1:
+                        emprintf(pdev->memory,
+                                 "Optional (Marked) Content not valid in this version of PDF. Dropping feature to preserve PDF/A compatibility\n");
+                        return 0;
+                        break;
+                    case 2:
+                        emprintf(pdev->memory,
+                                 "Optional (Marked) Content not valid in this version of PDF,  aborting conversion\n");
+                        return_error (gs_error_typecheck);
+                        break;
+                    default:
+                        emprintf(pdev->memory,
+                                 "Optional (Marked) Content not valid in this version of PDF, unrecognised PDFACompatibilityLevel,\nreverting to normal PDF output\n");
+                        pdev->AbortPDFAX = true;
+                        pdev->PDFA = 0;
+                        break;
+                }
+            } else {
+                emprintf(pdev->memory,
+                         "Optional (Marked) Content not valid in this version of PDF. Dropping feature to preserve compatibility\n");
+                return 0;
+            }
+        }
+    }
 
     /* check propdict for {object name} syntax */
     if (pdf_objname_is_valid(pairs[1].data, pairs[1].size))
@@ -2962,14 +3067,45 @@ pdfmark_OCProperties(gx_device_pdf * pdev, gs_param_string * pairs, uint count,
 {
     char *str;
 
-    str = (char *)gs_alloc_bytes(pdev->memory, pairs[0].size + 1, "pdfmark_OCProperties");
-    memset(str, 0x00, pairs[0].size + 1);
-    memcpy(str, pairs[0].data, pairs[0].size);
+    if (pdev->CompatibilityLevel < 1.4999) {
+        if (pdev->PDFA) {
+            switch (pdev->PDFACompatibilityPolicy) {
+                case 0:
+                    emprintf(pdev->memory,
+                             "Optional Content Properties not valid in this version of PDF, reverting to normal PDF output\n\n");
+                    pdev->AbortPDFAX = true;
+                    pdev->PDFA = 0;
+                    break;
+                case 1:
+                    emprintf(pdev->memory,
+                             "Optional Content Properties not valid in this version of PDF. Dropping feature to preserve PDF/A compatibility\n");
+                    break;
+                case 2:
+                    emprintf(pdev->memory,
+                             "Optional Content Properties not valid in this version of PDF,  aborting conversion\n");
+                    return_error (gs_error_typecheck);
+                    break;
+                default:
+                    emprintf(pdev->memory,
+                             "Optional Content Properties not valid in this version of PDF, unrecognised PDFACompatibilityLevel,\nreverting to normal PDF output\n");
+                    pdev->AbortPDFAX = true;
+                    pdev->PDFA = 0;
+                    break;
+            }
+        } else {
+            emprintf(pdev->memory,
+                     "Optional Content Properties not valid in this version of PDF. Dropping feature to preserve compatibility\n");
+        }
+    } else {
+        str = (char *)gs_alloc_bytes(pdev->memory, pairs[0].size + 1, "pdfmark_OCProperties");
+        memset(str, 0x00, pairs[0].size + 1);
+        memcpy(str, pairs[0].data, pairs[0].size);
 
-    (void)cos_dict_put_c_key_string(pdev->Catalog, "/OCProperties",
-                                     (byte *)str, strlen(str));
+        (void)cos_dict_put_c_key_string(pdev->Catalog, "/OCProperties",
+                                         (byte *)str, strlen(str));
 
-    gs_free_object(pdev->memory, str, "pdfmark_OCProperties");
+        gs_free_object(pdev->memory, str, "pdfmark_OCProperties");
+    }
     return 0;
 }
 

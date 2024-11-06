@@ -1355,7 +1355,7 @@ pdf_begin_typed_image(gx_device_pdf *pdev, const gs_gstate * pgs,
     if (pnamed != 0 || pdev->PendingOC) /* Don't in-line the image if it is named. Or has Optional Content */
         in_line = false;
     else {
-        double nbytes = (double)(((ulong) pie->width * pie->bits_per_pixel + 7) >> 3) *
+        int64_t nbytes = (int64_t)(((int64_t) pie->width * pie->bits_per_pixel + 7) >> 3) *
             pie->num_planes * pie->rows_left;
 
         in_line &= (nbytes < pdev->MaxInlineImageSize);
@@ -1412,6 +1412,10 @@ pdf_begin_typed_image(gx_device_pdf *pdev, const gs_gstate * pgs,
 
     /* We don't want to change the colour space of a mask, or an SMask (both of which are Gray) */
     if (!is_mask) {
+#if 1
+        if (image[0].pixel.ColorSpace != NULL && !(context == PDF_IMAGE_TYPE3_MASK))
+           convert_to_process_colors = setup_image_colorspace(pdev, &image[0], pcs, &pcs_orig, names, &cs_value);
+#else
         if (image[0].pixel.ColorSpace != NULL) {
             if (context != PDF_IMAGE_TYPE3_MASK)
                 convert_to_process_colors = setup_image_colorspace(pdev, &image[0], pcs, &pcs_orig, names, &cs_value);
@@ -1428,6 +1432,7 @@ pdf_begin_typed_image(gx_device_pdf *pdev, const gs_gstate * pgs,
                 }
             }
         }
+#endif
 
         if (pim->BitsPerComponent > 8 && convert_to_process_colors) {
             use_fallback = 1;
@@ -3005,10 +3010,41 @@ gdev_pdf_dev_spec_op(gx_device *pdev1, int dev_spec_op, void *data, int size)
         case gxdso_in_smask_construction:
             return pdev->smask_construction;
         case gxdso_pending_optional_content:
+            if (pdev->CompatibilityLevel < 1.4999) {
+                if (pdev->PDFA) {
+                    switch (pdev->PDFACompatibilityPolicy) {
+                        case 0:
+                            emprintf(pdev->memory,
+                                     "Optional Content not valid in this version of PDF, reverting to normal PDF output\n");
+                            pdev->AbortPDFAX = true;
+                            pdev->PDFA = 0;
+                            break;
+                        case 1:
+                            emprintf(pdev->memory,
+                                     "Optional Content not valid in this version of PDF. Dropping feature to preserve PDF/A compatibility\n");
+                            break;
+                        case 2:
+                            emprintf(pdev->memory,
+                                     "Optional Content not valid in this version of PDF,  aborting conversion\n");
+                            return_error (gs_error_typecheck);
+                            break;
+                        default:
+                            emprintf(pdev->memory,
+                                     "Optional Content not valid in this version of PDF, unrecognised PDFACompatibilityLevel,\nreverting to normal PDF output\n");
+                            pdev->AbortPDFAX = true;
+                            pdev->PDFA = 0;
+                            break;
+                    }
+                } else {
+                    emprintf(pdev->memory,
+                             "Optional Content not valid in this version of PDF. Dropping feature to preserve compatibility\n");
+                }
+            } else
             {
                 int64_t *object = data;
                 pdev->PendingOC = *object;
             }
+            return 0;
             break;
         case gxdso_get_dev_param:
             {

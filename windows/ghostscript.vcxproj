@@ -436,7 +436,6 @@
     <NMakeCleanCommandLine>cd .. &amp;&amp; nmake -f psi\msvc32.mak WIN64= DEVSTUDIO= debugclean</NMakeCleanCommandLine>
     <NMakeOutput>$(ProjectDir)\..\debugbin\gswin64c.exe</NMakeOutput>
     <NMakePreprocessorDefinitions>WIN64;_DEBUG;DEBUG=1;TDEBUG=1;$(NMakePreprocessorDefinitions)</NMakePreprocessorDefinitions>
-    <IncludePath>$(ProjectDir)\..\libpng;$(ProjectDir)\..\base;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-contrib|Win32'">
     <OutDir>$(Platform)\$(Configuration)\</OutDir>
@@ -446,7 +445,6 @@
     <NMakeCleanCommandLine>cd .. &amp;&amp; nmake -f psi\msvc32.mak DEVSTUDIO= WITH_CONTRIB=1 clean</NMakeCleanCommandLine>
     <NMakeOutput>$(ProjectDir)\..\bin\$(Platform)\gswin32c.exe</NMakeOutput>
     <NMakePreprocessorDefinitions>WIN32;NDEBUG;HAVE_SSE2=1;$(NMakePreprocessorDefinitions)</NMakePreprocessorDefinitions>
-    <IncludePath>$(ProjectDir)\..\libpng;$(ProjectDir)\..\base;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release-contrib|x64'">
     <OutDir>$(Platform)\$(Configuration)\</OutDir>
@@ -456,7 +454,6 @@
     <NMakeCleanCommandLine>cd .. &amp;&amp; nmake -f psi\msvc32.mak WIN64= WITH_CONTRIB=1 DEVSTUDIO= clean</NMakeCleanCommandLine>
     <NMakeOutput>$(ProjectDir)\..\bin\$(Platform)_build\gswin64c.exe</NMakeOutput>
     <NMakePreprocessorDefinitions>WIN32;NDEBUG;$(NMakePreprocessorDefinitions)</NMakePreprocessorDefinitions>
-    <IncludePath>$(ProjectDir)\..\libpng;$(ProjectDir)\..\base;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup>
   </ItemDefinitionGroup>
@@ -1524,6 +1521,7 @@
     <ClCompile Include="..\devices\gdevplan.c" />
     <ClCompile Include="..\devices\gdevplib.c" />
     <ClCompile Include="..\devices\gdevpng.c" />
+    <ClCompile Include="..\devices\gdevpppm.c" />
     <ClCompile Include="..\devices\gdevprna.c" />
     <ClCompile Include="..\devices\gdevpsd.c" />
     <ClCompile Include="..\devices\gdevpsim.c" />

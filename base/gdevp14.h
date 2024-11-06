@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2024 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -31,7 +31,8 @@ typedef enum {
     PDF14_DeviceRGB = 1,
     PDF14_DeviceCMYK = 2,
     PDF14_DeviceCMYKspot = 3,
-    PDF14_DeviceCustom = 4
+    PDF14_DeviceCustom = 4,
+    PDF14_DeviceRGBspot = 5
 } pdf14_default_colorspace_t;
 
 typedef enum {
@@ -114,11 +115,12 @@ typedef struct pdf14_group_color_s pdf14_group_color_t;
 
 struct pdf14_group_color_s {
     int num_components;
+    int num_std_colorants;
     bool isadditive;
     gx_color_polarity_t polarity;
     byte comp_shift[GX_DEVICE_COLOR_MAX_COMPONENTS]; /* These are needed for the shading code */
     byte comp_bits[GX_DEVICE_COLOR_MAX_COMPONENTS];
-    byte depth;  /* used in clist writer cmd_put_color */
+    ushort depth;  /* used in clist writer cmd_put_color */
     uint max_gray;  /* Used to determine if device halftones */
     uint max_color; /* Causes issues if these are not maintained */
     const gx_color_map_procs *(*get_cmap_procs)(const gs_gstate *,
@@ -162,7 +164,7 @@ struct pdf14_buf_s {
     int rowstride;
     int planestride;
     int n_chan;   /* number of pixel planes including alpha */
-    int n_planes; /* total number of planes including alpha, shape, alpha_g */
+    int n_planes; /* total number of planes including alpha, shape, alpha_g and tags */
     byte *data;
     byte *transfer_fn;
     bool is_ident;
@@ -192,7 +194,6 @@ struct pdf14_ctx_s {
     gs_memory_t *memory;
     gs_int_rect rect;
     bool additive;
-    int n_chan;
     int smask_depth;  /* used to catch smasks embedded in smasks.  bug691803 */
     bool smask_blend;
     bool deep; /* If true, 16 bit data, false, 8 bit data. */

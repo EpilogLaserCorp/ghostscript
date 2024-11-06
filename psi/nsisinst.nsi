@@ -1,4 +1,4 @@
-;  Copyright (C) 2001-2023 Artifex Software, Inc.
+;  Copyright (C) 2001-2024 Artifex Software, Inc.
 ;  All Rights Reserved.
 ;
 ;  This software is provided AS-IS with no warranty, either express or
@@ -160,28 +160,50 @@ Page custom OldVersionsPageCreate
 
 !insertmacro MUI_LANGUAGE "English"
 
-Function RemoveOld
+Function RemoveOldImpl
+  Var /GLOBAL RegKeyProdStr
+  Var /GLOBAL uninstexe
+
+  Pop $RegKeyProdStr
   StrCpy $0 0
   loop:
-    EnumRegKey $1 HKLM "Software\Artifex\GPL Ghostscript" $0
+    EnumRegKey $1 HKLM "Software\Artifex\$RegKeyProdStr" $0
     StrCmp $1 "" done
     IntOp $0 $0 + 1
-    Var /GLOBAL uninstexe
-    ReadRegStr $uninstexe HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\GPL Ghostscript $1" "UninstallString"
+    ReadRegStr $uninstexe HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$RegKeyProdStr $1" "UninstallString"
 
     IfSilent silent noisey
 
     silent:
       ExecWait "$uninstexe /S"
-      Goto loopEnd
+      Goto LoopEnd
 
     noisey:
       MessageBox MB_YESNOCANCEL|MB_ICONQUESTION "Uninstall Ghostscript Version $1?" IDNO loop IDCANCEL done
       ExecWait "$uninstexe"
-      Goto loopEnd
+      Goto LoopEnd
 
     LoopEnd:
       Goto loop
+  done:
+FunctionEnd
+
+Function RemoveOld
+; The following convoluted hoops are so that this instance of the
+; General Public Licence initials don't get replaced by the Artifex Ghostscript
+; release script
+  StrCpy $0 "G"
+  StrCpy $1 "P"
+  StrCpy $2 "L"
+  Push "$0$1$2 Ghostscript"
+  Call RemoveOldImpl
+
+; This instance of the initials DO get replaced.
+  StrCpy $0 "GPL"
+; So we don't needlessly call RemoveOldImpl twice with the same params
+  StrCmp $0 "Artifex" 0 done
+  Push "$0 Ghostscript"
+  Call RemoveOldImpl
   done:
 FunctionEnd
 
@@ -261,14 +283,19 @@ File /oname=${VCREDIST} .\${VCREDIST}
 !endif
 
 WriteRegStr HKEY_LOCAL_MACHINE "Software\GPL Ghostscript\${VERSION}" "GS_DLL" "$INSTDIR\bin\gsdll${WINTYPE}.dll"
+WriteRegStr HKEY_LOCAL_MACHINE "Software\Aladdin Ghostscript\${VERSION}" "GS_DLL" "$INSTDIR\bin\gsdll${WINTYPE}.dll"
 
 !if "${COMPILE_INITS}" == "0"
 WriteRegStr HKEY_LOCAL_MACHINE "Software\GPL Ghostscript\${VERSION}" "GS_LIB" "$INSTDIR\Resource\Init;$INSTDIR\bin;$INSTDIR\lib;$INSTDIR\fonts"
+WriteRegStr HKEY_LOCAL_MACHINE "Software\Aladdin Ghostscript\${VERSION}" "GS_LIB" "$INSTDIR\Resource\Init;$INSTDIR\bin;$INSTDIR\lib;$INSTDIR\fonts"
 !else
 WriteRegStr HKEY_LOCAL_MACHINE "Software\GPL Ghostscript\${VERSION}" "GS_LIB" "$INSTDIR\bin;$INSTDIR\lib;$INSTDIR\fonts"
+WriteRegStr HKEY_LOCAL_MACHINE "Software\Aladdin Ghostscript\${VERSION}" "GS_LIB" "$INSTDIR\bin;$INSTDIR\lib;$INSTDIR\fonts"
 !endif
 
 WriteRegStr HKEY_LOCAL_MACHINE "Software\Artifex\GPL Ghostscript\${VERSION}" "" "$INSTDIR"
+WriteRegStr HKEY_LOCAL_MACHINE "Software\Artifex\Aladdin Ghostscript\${VERSION}" "" "$INSTDIR"
+
 WriteRegStr HKEY_LOCAL_MACHINE "Software\Microsoft\Windows\CurrentVersion\Uninstall\GPL Ghostscript ${VERSION}" "DisplayName" "GPL Ghostscript"
 WriteRegStr HKEY_LOCAL_MACHINE "Software\Microsoft\Windows\CurrentVersion\Uninstall\GPL Ghostscript ${VERSION}" "UninstallString" '"$INSTDIR\uninstgs.exe"'
 WriteRegStr HKEY_LOCAL_MACHINE "Software\Microsoft\Windows\CurrentVersion\Uninstall\GPL Ghostscript ${VERSION}" "Publisher" "Artifex Software Inc."
@@ -364,8 +391,12 @@ Delete   "$INSTDIR\uninstgs.exe"
     SetRegView 64
 !endif
 DeleteRegKey HKEY_LOCAL_MACHINE "Software\Artifex\GPL Ghostscript\${VERSION}"
+DeleteRegKey HKEY_LOCAL_MACHINE "Software\Artifex\Aladdin Ghostscript\${VERSION}"
+
 DeleteRegKey HKEY_LOCAL_MACHINE "Software\Microsoft\Windows\CurrentVersion\Uninstall\GPL Ghostscript ${VERSION}"
+
 DeleteRegKey HKEY_LOCAL_MACHINE "Software\GPL Ghostscript\${VERSION}"
+DeleteRegKey HKEY_LOCAL_MACHINE "Software\Aladdin Ghostscript\${VERSION}"
 RMDir /r "$INSTDIR\doc"
 RMDir /r "$INSTDIR\examples"
 RMDir /r "$INSTDIR\lib"

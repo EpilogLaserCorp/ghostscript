@@ -353,7 +353,7 @@ pdf_clean_standard_fonts(const gx_device_pdf *pdev)
 /* ------ Private ------ */
 
 static int
-pdf_resize_array(gs_memory_t *mem, void **p, int elem_size, int old_size, int new_size)
+pdf_resize_array(gs_memory_t *mem, void **p, int elem_size, uint old_size, uint new_size)
 {
     void *q = gs_alloc_byte_array(mem, new_size, elem_size, "pdf_resize_array");
 
@@ -403,8 +403,6 @@ font_resource_alloc(gx_device_pdf *pdev, pdf_font_resource_t **ppfres,
     code = pdf_alloc_resource(pdev, rtype, rid, (pdf_resource_t **)&pfres, -1L);
     if (code < 0)
         goto fail;
-    memset((byte *)pfres + sizeof(pdf_resource_t), 0,
-           sizeof(*pfres) - sizeof(pdf_resource_t));
     pfres->FontType = ftype;
     pfres->count = chars_count;
     pfres->Widths = widths;
@@ -658,7 +656,7 @@ set_is_MM_instance(pdf_font_resource_t *pdfont, const gs_font_base *pfont)
 
 /* Resize font resource arrays. */
 int
-pdf_resize_resource_arrays(gx_device_pdf *pdev, pdf_font_resource_t *pfres, int chars_count)
+pdf_resize_resource_arrays(gx_device_pdf *pdev, pdf_font_resource_t *pfres, uint chars_count)
 {
     /* This function fixes CID fonts that provide a lesser CIDCount than
        CIDs used in a document. Rather PS requires to print CID=0,
@@ -667,6 +665,10 @@ pdf_resize_resource_arrays(gx_device_pdf *pdev, pdf_font_resource_t *pfres, int 
        viewer application substitutes the font. */
     gs_memory_t *mem = pdev->pdf_memory;
     int code;
+
+    /* Ensure the 'round up' code below doesn't overflow an unsigned int when adding 7 */
+    if (pfres->count >= max_uint - 7 || chars_count > max_uint - 7)
+        return_error(gs_error_rangecheck);
 
     if (chars_count < pfres->count)
         return 0;
@@ -717,7 +719,7 @@ pdf_resize_resource_arrays(gx_device_pdf *pdev, pdf_font_resource_t *pfres, int 
 }
 
 /* Get the object ID of a font resource. */
-long
+int64_t
 pdf_font_id(const pdf_font_resource_t *pdfont)
 {
     return pdf_resource_id((const pdf_resource_t *)pdfont);
@@ -745,8 +747,10 @@ pdf_font_resource_font(const pdf_font_resource_t *pdfont, bool complete)
 static bool
 font_is_symbolic(const gs_font *font)
 {
-    if (font->FontType == ft_composite)
-        return true;		/* arbitrary */
+    if (font->FontType == ft_composite || font->FontType == ft_CID_encrypted ||
+        font->FontType == ft_CID_user_defined || font->FontType == ft_CID_TrueType ||
+        font->FontType == ft_CID_bitmap)
+        return false;		/* arbitrary */
     switch (((const gs_font_base *)font)->nearest_encoding_index) {
     case ENCODING_INDEX_STANDARD:
     case ENCODING_INDEX_ISOLATIN1:
@@ -808,7 +812,7 @@ has_extension_glyphs(gs_font *pfont)
 
 pdf_font_embed_t
 pdf_font_embed_status(gx_device_pdf *pdev, gs_font *font, int *pindex,
-                      pdf_char_glyph_pair_t *pairs, int num_glyphs)
+                      pdf_char_glyph_pair_t *pairs, int num_glyphs, font_type *orig_type)
 {
     const gs_font_name *fn = &font->font_name;
     const byte *chars = fn->chars;
@@ -820,7 +824,7 @@ pdf_font_embed_status(gx_device_pdf *pdev, gs_font *font, int *pindex,
     gs_font_info_t info;
 
     memset(&info, 0x00, sizeof(gs_font_info_t));
-    code = font->procs.font_info(font, NULL, FONT_INFO_EMBEDDING_RIGHTS, &info);
+    code = font->procs.font_info(font, NULL, FONT_INFO_EMBEDDING_RIGHTS | FONT_INFO_EMBEDDED, &info);
     if (code == 0 && (info.members & FONT_INFO_EMBEDDING_RIGHTS)) {
         if (((info.EmbeddingRights == 0x0002) || (info.EmbeddingRights & 0x0200))
             && !IsInWhiteList ((const char *)chars, size)) {
@@ -873,15 +877,25 @@ pdf_font_embed_status(gx_device_pdf *pdev, gs_font *font, int *pindex,
              (embed_as_standard_called = true,
               (do_embed_as_standard = embed_as_standard(pdev, font, index, pairs, num_glyphs)))))
         /* Ignore NeverEmbed for a non-standard font with a standard name */
-        ) {
-        if (pdev->params.EmbedAllFonts || font_is_symbolic(font) ||
-            embed_list_includes(&pdev->params.AlwaysEmbed, chars, size))
-            return FONT_EMBED_YES;
+        )
+    {
+        if (embed_list_includes(&pdev->params.AlwaysEmbed, chars, size))
+                return FONT_EMBED_YES;
+        if (pdev->params.EmbedAllFonts) {
+            if (!(info.members & FONT_INFO_EMBEDDED) || info.FontEmbedded)
+                return FONT_EMBED_YES;
+        } else {
+            if (font_is_symbolic(font))
+                return FONT_EMBED_YES;
+        }
     }
     if (index >= 0 &&
         (embed_as_standard_called ? do_embed_as_standard :
          embed_as_standard(pdev, font, index, pairs, num_glyphs)))
         return FONT_EMBED_STANDARD;
+
+    if (info.members & FONT_INFO_EMBEDDED)
+        *orig_type = info.orig_FontType;
     return FONT_EMBED_NO;
 }
 
