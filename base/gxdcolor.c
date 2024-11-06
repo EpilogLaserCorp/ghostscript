@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2024 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -107,7 +107,7 @@ gx_color_index
 gx_device_black(gx_device *dev)
 {
     if (dev->cached_colors.black == gx_no_color_index) {
-        uchar i, ncomps = dev->color_info.num_components;
+        uchar i, nc, ncomps = dev->color_info.num_components;
         frac cm_comps[GX_DEVICE_COLOR_MAX_COMPONENTS];
         gx_color_value cv[GX_DEVICE_COLOR_MAX_COMPONENTS];
         const gx_device *cmdev;
@@ -117,8 +117,13 @@ gx_device_black(gx_device *dev)
         /* Get color components for black (gray = 0) */
         cmprocs->map_gray(cmdev, frac_0, cm_comps);
 
-        for (i = 0; i < ncomps; i++)
+        nc = ncomps;
+        if (device_encodes_tags(dev))
+            nc--;
+        for (i = 0; i < nc; i++)
             cv[i] = frac2cv(cm_comps[i]);
+        if (i < ncomps)
+            cv[i] = cm_comps[i];
 
         dev->cached_colors.black = dev_proc(dev, encode_color)(dev, cv);
     }
@@ -128,7 +133,7 @@ gx_color_index
 gx_device_white(gx_device *dev)
 {
     if (dev->cached_colors.white == gx_no_color_index) {
-        uchar i, ncomps = dev->color_info.num_components;
+        uchar i, nc, ncomps = dev->color_info.num_components;
         frac cm_comps[GX_DEVICE_COLOR_MAX_COMPONENTS];
         gx_color_value cv[GX_DEVICE_COLOR_MAX_COMPONENTS];
         const gx_device *cmdev;
@@ -138,8 +143,13 @@ gx_device_white(gx_device *dev)
         /* Get color components for white (gray = 1) */
         cmprocs->map_gray(cmdev, frac_1, cm_comps);
 
-        for (i = 0; i < ncomps; i++)
+        nc = ncomps;
+        if (device_encodes_tags(dev))
+            nc--;
+        for (i = 0; i < nc; i++)
             cv[i] = frac2cv(cm_comps[i]);
+        if (i < ncomps)
+            cv[i] = cm_comps[i];
 
         dev->cached_colors.white = dev_proc(dev, encode_color)(dev, cv);
     }
@@ -605,10 +615,7 @@ gx_devn_write_color(
     }
 
     /* Now the tag */
-    if (dev->graphics_type_tag & GS_DEVICE_ENCODES_TAGS)
-        pdata[num_bytes_temp - 1] = (dev->graphics_type_tag & ~GS_DEVICE_ENCODES_TAGS);
-    else
-        pdata[num_bytes_temp - 1] = GS_UNTOUCHED_TAG;
+    pdata[num_bytes_temp - 1] = device_current_tag(dev);
 
     /* Now the data */
     for (i = 0; i < ncomps; i++) {

@@ -189,16 +189,6 @@ gp_file_name_combine_generic(const char *prefix, uint plen, const char *fname, u
     }
     if (!append(&bp, bpe, &ip, rlen))
         return gp_combine_small_buffer;
-    slen = gs_file_name_check_separator(bp, buffer - bp, bp); /* Backward search. */
-    if (rlen != 0 && slen == 0) {
-        /* Patch it against names like "c:dir" on Windows. */
-        const char *sep = gp_file_name_directory_separator();
-
-        slen = strlen(sep);
-        if (!append(&bp, bpe, &sep, slen))
-            return gp_combine_small_buffer;
-        rlen += slen;
-    }
     for (;;) {
         const char *item = ip;
         uint ilen;
@@ -1054,6 +1044,7 @@ gp_validate_path_len(const gs_memory_t *mem,
     /* mem->gs_lib_ctx can be NULL when we're called from mkromfs */
     /* If path == NULL, don't care */
     if (path == NULL || mem->gs_lib_ctx == NULL ||
+        /* Can't use gs_is_path_control_active(mem) here because it fails to build with mkromfs */
         mem->gs_lib_ctx->core->path_control_active == 0)
         return 0;
 
@@ -1092,6 +1083,7 @@ gp_validate_path_len(const gs_memory_t *mem,
     else {
         char *test = (char *)path, *test1;
         uint tlen = len, slen;
+        gp_file_name_combine_result res;
 
         /* Look for any pipe (%pipe% or '|' specifications between path separators
          * Reject any path spec which has a %pipe% or '|' anywhere except at the start.
@@ -1112,15 +1104,27 @@ gp_validate_path_len(const gs_memory_t *mem,
         }
 
         rlen = len+1;
-        bufferfull = (char *)gs_alloc_bytes(mem->thread_safe_memory, rlen + prefix_len, "gp_validate_path");
-        if (bufferfull == NULL)
-            return gs_error_VMerror;
+        /* There is a very, very small chance that gp_file_name_reduce() can return a longer
+           string than simply rlen + prefix_len. The do/while loop is to cope with that.
+         */
+        do {
+            bufferfull = (char *)gs_alloc_bytes(mem->thread_safe_memory, rlen + prefix_len, "gp_validate_path");
+            if (bufferfull == NULL)
+                return gs_error_VMerror;
 
-        buffer = bufferfull + prefix_len;
-        if (gp_file_name_reduce(path, (uint)len, buffer, &rlen) != gp_combine_success) {
-            code = gs_note_error(gs_error_invalidfileaccess);
-            goto exit;
-        }
+            buffer = bufferfull + prefix_len;
+            res = gp_file_name_reduce(path, (uint)len, buffer, &rlen);
+            if (res == gp_combine_small_buffer) {
+                rlen += 1;
+                gs_free_object(mem->thread_safe_memory, bufferfull, "gp_validate_path");
+                rlen += 1;
+                continue;
+            }
+            if (res != gp_combine_success) {
+                code = gs_note_error(gs_error_invalidfileaccess);
+                goto exit;
+            }
+        } while (res != gp_combine_success);
         buffer[rlen] = 0;
     }
     while (1) {

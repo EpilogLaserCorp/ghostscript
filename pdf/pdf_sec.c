@@ -183,8 +183,8 @@ static int apply_sasl(pdf_context *ctx, char *Password, int Len, char **NewPassw
          * this easy: the errors we want to ignore are the ones with
          * codes less than 100. */
         if ((int)err < 100) {
-            NewPassword = Password;
-            NewLen = Len;
+            *NewPassword = Password;
+            *NewLen = Len;
             return 0;
         }
 
@@ -1392,7 +1392,8 @@ int pdfi_initialise_Decryption(pdf_context *ctx)
             }
             /* Revision 2 is always 40-bit RC4 */
             if (KeyLen != 0 && KeyLen != 40)
-                pdfi_set_error(ctx, 0, NULL, E_PDF_INVALID_DECRYPT_LEN, "pdfi_initialise_Decryption", NULL);
+                if ((code = pdfi_set_error_stop(ctx, gs_note_error(gs_error_undefined), NULL, E_PDF_INVALID_DECRYPT_LEN, "pdfi_initialise_Decryption", NULL)) < 0)
+                    goto done;
             KeyLen = 40;
             if (ctx->encryption.StmF == CRYPT_NONE)
                 ctx->encryption.StmF = CRYPT_V1;

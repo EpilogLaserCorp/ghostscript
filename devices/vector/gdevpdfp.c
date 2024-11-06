@@ -119,6 +119,7 @@ static const gs_param_item_t pdf_param_items[] = {
     pi("DetectDuplicateImages", gs_param_type_bool, DetectDuplicateImages),
     pi("AllowIncrementalCFF", gs_param_type_bool, AllowIncrementalCFF),
     pi("WantsToUnicode", gs_param_type_bool, WantsToUnicode),
+    pi("WantsOptionalContent", gs_param_type_bool, WantsOptionalContent),
     pi("PdfmarkCapable", gs_param_type_bool, PdfmarkCapable),
     pi("AllowPSRepeatFunctions", gs_param_type_bool, AllowPSRepeatFunctions),
     pi("IsDistiller", gs_param_type_bool, IsDistiller),
@@ -136,6 +137,7 @@ static const gs_param_item_t pdf_param_items[] = {
     pi("ModifiesPageOrder", gs_param_type_bool, ModifiesPageOrder),
     pi("WriteObjStms", gs_param_type_bool, WriteObjStms),
     pi("WriteXRefStm", gs_param_type_bool, WriteXRefStm),
+    pi("ToUnicodeForStdEnc", gs_param_type_bool, ToUnicodeForStdEnc),
 #undef pi
     gs_param_item_end
 };
@@ -395,6 +397,7 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
     gx_device_pdf *pdev = (gx_device_pdf *) dev;
     float cl = (float)pdev->CompatibilityLevel;
     bool locked = pdev->params.LockDistillerParams, ForOPDFRead;
+    bool XRefStm_set = false, ObjStms_set = false;
     gs_param_name param_name;
 
     pdev->pdf_memory = gs_memory_stable(pdev->memory);
@@ -472,7 +475,7 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
         gs_param_string langstr;
         switch (code = param_read_string(plist, (param_name = "OCRLanguage"), &langstr)) {
             case 0:
-                if (pdev->memory->gs_lib_ctx->core->path_control_active
+                if (gs_is_path_control_active(pdev->memory)
                 && (strlen(pdev->ocr_language) != langstr.size || memcmp(pdev->ocr_language, langstr.data, langstr.size) != 0)) {
                     return_error(gs_error_invalidaccess);
                 }
@@ -615,6 +618,18 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
         case 1:
             break;
     }
+
+    ecode = param_read_bool(plist, (param_name = "WriteXRefStm"), &pdev->WriteXRefStm);
+    if (ecode < 0)
+        param_signal_error(plist, param_name, ecode);
+    if (ecode == 0)
+        XRefStm_set = true;
+    ecode = param_read_bool(plist, (param_name = "WriteObjStms"), &pdev->WriteObjStms);
+    if (ecode < 0)
+        param_signal_error(plist, param_name, ecode);
+    if (ecode == 0)
+        ObjStms_set = true;
+
     {
         code = gs_param_read_items(plist, pdev, pdf_param_items, pdev->pdf_memory);
         if (code < 0 || (code = param_read_bool(plist, "ForOPDFRead", &ForOPDFRead)) < 0)
@@ -631,7 +646,7 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
          * has just been opened and nothing has been written,
          * or if we are setting it to the same value.
          */
-        long fon = pdev->FirstObjectNumber;
+        int64_t fon = pdev->FirstObjectNumber;
 
         if (fon != save_dev->FirstObjectNumber) {
             if (fon <= 0 || fon > 0x7fff0000 ||
@@ -722,8 +737,38 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
     if (pdev->PDFA == 1 || pdev->PDFX || pdev->CompatibilityLevel < 1.4) {
          pdev->HaveTransparency = false;
          pdev->PreserveSMask = false;
+         pdev->WantsOptionalContent = false;
     }
 
+    /* We cannot guarantee that all page objects have a Group with a /CS (ColorSpace) entry
+     * which is a requirement for PDF/A-2+ when objects are defined in Device Independent Colour.
+     * Try and warn the user.
+     */
+    if (pdev->PDFA > 1 && pdev->params.ColorConversionStrategy == ccs_UseDeviceIndependentColor) {
+        switch (pdev->PDFACompatibilityPolicy) {
+            case 0:
+                emprintf(pdev->memory,
+                 "\n\tpdfwrite cannot guarantee creating a conformant PDF/A-2 file with device-independent colour.\n\tWe recommend converting to a device colour space.\n\tReverting to normal output.\n");
+                pdev->AbortPDFAX = true;
+                pdev->PDFX = 0;
+                break;
+            case 1:
+                emprintf(pdev->memory,
+                 "\n\tpdfwrite cannot guarantee creating a conformant PDF/A-2 file with device-independent colour.\n\tWe recommend converting to a device colour space.\n\tWe cannot ignore this request, reverting to normal output.\n");
+                break;
+            case 2:
+                emprintf(pdev->memory,
+                 "\n\tpdfwrite cannot guarantee creating a conformant PDF/A-2 file with device-independent colour.\n\tWe recommend converting to a device colour space.\n\tAborting.\n");
+                return_error(gs_error_unknownerror);
+                break;
+            default:
+                emprintf(pdev->memory,
+                 "\n\tpdfwrite cannot guarantee creating a conformant PDF/A-2 file with device-independent colour.\n\tWe recommend converting to a device colour space.\n\tReverting to normal output.\n");
+                pdev->AbortPDFAX = true;
+                pdev->PDFX = 0;
+                break;
+        }
+    }
     /*
      * We have to set version to the new value, because the set of
      * legal parameter values for psdf_put_params varies according to
@@ -731,11 +776,21 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
      */
     if (pdev->PDFX) {
         cl = (float)1.3; /* Instead pdev->CompatibilityLevel = 1.2; - see below. */
+        if (pdev->WriteObjStms && ObjStms_set)
+            emprintf(pdev->memory, "Can't use ObjStm before PDF 1.5, PDF/X does not support PDF 1.5, ignoring WriteObjStms directive\n");
+        if (pdev->WriteXRefStm && XRefStm_set)
+            emprintf(pdev->memory, "Can't use an XRef stream before PDF 1.5, PDF/X does not support PDF 1.5, ignoring WriteXRefStm directive\n");
+
         pdev->WriteObjStms = false;
         pdev->WriteXRefStm = false;
     }
     if (pdev->PDFA == 1 && cl != 1.4) {
         cl = (float)1.4;
+
+        if (pdev->WriteObjStms && ObjStms_set)
+            emprintf(pdev->memory, "Can't use ObjStm before PDF 1.5, PDF/A-1 does not support PDF 1.5, ignoring WriteObjStms directive\n");
+        if (pdev->WriteXRefStm && XRefStm_set)
+            emprintf(pdev->memory, "Can't use an XRef stream before PDF 1.5, PDF/A-1 does not support PDF 1.5, ignoring WriteXRefStm directive\n");
         pdev->WriteObjStms = false;
         pdev->WriteXRefStm = false;
     }
@@ -761,6 +816,8 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
     if (cl < 1.2) {
         pdev->HaveCFF = false;
     }
+    if (cl < 1.5)
+        pdev->WantsOptionalContent = false;
 
     ecode = param_read_float(plist, "UserUnit", &pdev->UserUnit);
     if (ecode < 0)
@@ -918,19 +975,28 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
         pdev->WriteObjStms = false;
         pdev->WriteXRefStm = false;
     } else {
-        if (pdev->Linearise)
+        if (pdev->Linearise) {
+            if (XRefStm_set)
+                emprintf(pdev->memory, "We don't support XRefStm with FastWebView (Linearized PDF), ignoring WriteXRefStm directive\n");
+            pdev->WriteXRefStm = false;
+            if (ObjStms_set)
+                emprintf(pdev->memory, "We don't support ObjStms with FastWebView (Linearized PDF), ignoring WriteObjStms directive\n");
             pdev->WriteObjStms = false;
+        }
     }
     if (pdev->WriteObjStms && pdev->CompatibilityLevel < 1.5) {
-        emprintf(pdev->memory, "Can't use Object streams before PDF 1.5, ignoring WriteObjStms directive\n");
+        if (ObjStms_set)
+            emprintf(pdev->memory, "Can't use Object streams before PDF 1.5, ignoring WriteObjStms directive\n");
         pdev->WriteObjStms = false;
     }
     if (pdev->WriteXRefStm && pdev->CompatibilityLevel < 1.5) {
-        emprintf(pdev->memory, "Can't use an XRef stream before PDF 1.5, ignoring WriteXRefStm directive\n");
+        if (XRefStm_set)
+            emprintf(pdev->memory, "Can't use an XRef stream before PDF 1.5, ignoring WriteXRefStm directive\n");
         pdev->WriteXRefStm = false;
     }
     if (pdev->WriteObjStms && !pdev->WriteXRefStm) {
-        emprintf(pdev->memory, "Can't use Object streams without XRef stream, ignoring WriteObjStms directive\n");
+        if (ObjStms_set)
+            emprintf(pdev->memory, "Can't use Object streams without XRef stream, ignoring WriteObjStms directive\n");
         pdev->WriteObjStms = false;
     }
     if (pdev->WriteObjStms) {

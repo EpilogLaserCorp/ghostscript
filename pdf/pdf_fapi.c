@@ -1,4 +1,4 @@
-/* Copyright (C) 2019-2023 Artifex Software, Inc.
+/* Copyright (C) 2019-2024 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -1049,7 +1049,7 @@ pdfi_fapi_get_glyphname_or_cid(gs_text_enum_t *penum, gs_font_base * pbfont, gs_
                     /* Not to spec, but... if we get a "uni..." formatted name, use
                        the hex value from that.
                      */
-                    if (GlyphName->length > 5 && !strncmp((char *)GlyphName->data, "uni", 3)) {
+                    if (GlyphName->length == 7 && !strncmp((char *)GlyphName->data, "uni", 3)) {
                         char gnbuf[64];
                         int l = (GlyphName->length - 3) > 63 ? 63 : GlyphName->length - 3;
 
@@ -1526,6 +1526,14 @@ pdfi_fapi_passfont(pdf_font *font, int subfont, char *fapi_request,
         }
         else if (plat == 3 && enc == 10) { /* Currently shouldn't arise */
             ttfont->cmap = pdfi_truetype_cmap_310;
+        }
+        /* Officially only 3,1 in PDF, but 0,x is Unicode, too */
+        else if (plat == 0) {
+            ttfont->cmap = pdfi_truetype_cmap_31;
+            code = pdfi_set_warning_stop(OBJ_CTX(font), gs_note_error(gs_error_invalidfont), NULL, W_PDF_INVALID_TTF_CMAP, "pdfi_fapi_passfont", NULL);
+        }
+        else {
+            code = pdfi_set_warning_stop(OBJ_CTX(font), gs_note_error(gs_error_invalidfont), NULL, W_PDF_INVALID_TTF_CMAP, "pdfi_fapi_passfont", NULL);
         }
     }
 

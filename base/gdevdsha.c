@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2024 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -111,11 +111,7 @@ gx_hl_fill_linear_color_scanline(gx_device *dev, const gs_fill_attributes *fa,
                 for (k = 0; k < n; k++) {
                     devc.colors.devn.values[k] = frac312cv(curr[k]);
                 }
-                if (device_encodes_tags(dev)) {
-                    devc.tag = (dev->graphics_type_tag & ~GS_DEVICE_ENCODES_TAGS);
-                } else {
-                    devc.tag = 0;
-                }
+                devc.tag = device_current_tag(dev);
                 code = dev_proc(dev, fill_rectangle_hl_color) (dev, &rect, NULL, &devc, NULL);
                 if (code < 0)
                     return code;
@@ -179,11 +175,7 @@ gx_hl_fill_linear_color_scanline(gx_device *dev, const gs_fill_attributes *fa,
         for (k = 0; k < n; k++) {
             devc.colors.devn.values[k] = frac312cv(curr[k]);
         }
-        if (device_encodes_tags(dev)) {
-            devc.tag = (dev->graphics_type_tag & ~GS_DEVICE_ENCODES_TAGS);
-        } else {
-            devc.tag = 0;
-        }
+        devc.tag = device_current_tag(dev);
         return dev_proc(dev, fill_rectangle_hl_color) (dev, &rect, NULL, &devc, NULL);
     }
     return 0;
@@ -209,11 +201,6 @@ gx_default_fill_linear_color_scanline(gx_device *dev, const gs_fill_attributes *
     const gx_device_color_info *cinfo = &dev->color_info;
     int n = cinfo->num_components;
     int si, ei, di, code;
-    /* If the device encodes tags, we expect the comp_shift[num_components] to be valid */
-    /* for the tag part of the color (usually the high order bits of the color_index).  */
-    gx_color_index tag = device_encodes_tags(dev) ?
-                         (gx_color_index)(dev->graphics_type_tag & ~GS_DEVICE_ENCODES_TAGS) << cinfo->comp_shift[n]
-                         : 0;
 
     /* Todo: set this up to vector earlier */
     if (devn)  /* Note, PDF14 could be additive and doing devn */
@@ -277,7 +264,6 @@ gx_default_fill_linear_color_scanline(gx_device *dev, const gs_fill_attributes *
             si = max(bi, fixed2int(fa->clip->p.x));	    /* Must be compatible to the clipping logic. */
             ei = min(i, fixed2int_ceiling(fa->clip->q.x));  /* Must be compatible to the clipping logic. */
             if (si < ei) {
-                ci0 |= tag;		/* set tag (may be 0 if the device doesn't use tags) */
                 if (fa->swap_axes) {
                     code = dev_proc(dev, fill_rectangle)(dev, j, si, 1, ei - si, ci0);
                 } else {
@@ -329,7 +315,6 @@ gx_default_fill_linear_color_scanline(gx_device *dev, const gs_fill_attributes *
     si = max(bi, fixed2int(fa->clip->p.x));	    /* Must be compatible to the clipping logic. */
     ei = min(i, fixed2int_ceiling(fa->clip->q.x));  /* Must be compatible to the clipping logic. */
     if (si < ei) {
-        ci0 |= tag;		/* set tag (may be 0 if the device doesn't use tags) */
         if (fa->swap_axes) {
             return dev_proc(dev, fill_rectangle)(dev, j, si, 1, ei - si, ci0);
         } else {

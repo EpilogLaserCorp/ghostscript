@@ -200,6 +200,10 @@ int pdfi_free_font_type3(pdf_obj *font)
     pdfi_countdown(t3font->Encoding);
     pdfi_countdown(t3font->ToUnicode);
     pdfi_countdown(t3font->filename); /* Should never exist, but just in case */
+    pdfi_countdown(t3font->copyright);
+    pdfi_countdown(t3font->notice);
+    pdfi_countdown(t3font->fullname);
+    pdfi_countdown(t3font->familyname);
 
     gs_free_object(OBJ_MEMORY(font), font, "Free type 3 font");
     return 0;
@@ -304,6 +308,7 @@ int pdfi_read_type3_font(pdf_context *ctx, pdf_dict *font_dict, pdf_dict *stream
     if (code < 0)
         goto font3_error;
 
+    pdfi_font_set_orig_fonttype(ctx, (pdf_font *)font);
     code = gs_definefont(ctx->font_dir, (gs_font *)font->pfont);
     if (code < 0)
         goto font3_error;

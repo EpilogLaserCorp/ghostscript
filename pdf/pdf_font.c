@@ -297,13 +297,10 @@ pdfi_open_CIDFont_substitute_file(pdf_context *ctx, pdf_dict *font_dict, pdf_dic
                     memcpy(fontfname, fsprefix, fsprefixlen);
                 }
                 else {
-                    if (ctx->args.cidfsubstpath.size + 1 > gp_file_name_sizeof) {
+                    if (ctx->args.cidfsubstpath.size > gp_file_name_sizeof - 1) {
                         code = gs_note_error(gs_error_rangecheck);
-                        pdfi_set_warning(ctx, code, NULL, W_PDF_BAD_CONFIG, "pdfi_open_CIDFont_substitute_file", "CIDFSubstPath parameter too long");
-                        if (ctx->args.pdfstoponwarning != 0) {
+                        if ((code = pdfi_set_warning_stop(ctx, code, NULL, W_PDF_BAD_CONFIG, "pdfi_open_CIDFont_substitute_file", "CIDFSubstPath parameter too long")) < 0)
                             goto exit;
-                        }
-                        code = 0;
                         memcpy(fontfname, fsprefix, fsprefixlen);
                     }
                     else {
@@ -317,38 +314,72 @@ pdfi_open_CIDFont_substitute_file(pdf_context *ctx, pdf_dict *font_dict, pdf_dic
                     if (gp_getenv("CIDFSUBSTFONT", (char *)0, &len) < 0) {
                         if (len + fsprefixlen + 1 > gp_file_name_sizeof) {
                             code = gs_note_error(gs_error_rangecheck);
-                            pdfi_set_warning(ctx, code, NULL, W_PDF_BAD_CONFIG, "pdfi_open_CIDFont_substitute_file", "CIDFSUBSTFONT environment variable too long");
-                            if (ctx->args.pdfstoponwarning != 0) {
+                            if ((code = pdfi_set_warning_stop(ctx, code, NULL, W_PDF_BAD_CONFIG, "pdfi_open_CIDFont_substitute_file", "CIDFSUBSTFONT environment variable too long")) < 0)
                                 goto exit;
-                            }
-                            code = 0;
-                            memcpy(fontfname + fsprefixlen, defcidfallack, defcidfallacklen);
+
+                            if (defcidfallacklen + fsprefixlen > gp_file_name_sizeof - 1) {
+                                pdfi_set_warning(ctx, code, NULL, W_PDF_BAD_CONFIG, "pdfi_open_CIDFont_substitute_file", "CIDFSubstPath parameter too long");
+                                memcpy(fontfname, defcidfallack, defcidfallacklen);
+                                fsprefixlen = 0;
+                            } else
+                                memcpy(fontfname + fsprefixlen, defcidfallack, defcidfallacklen);
                         }
                         else {
                             (void)gp_getenv("CIDFSUBSTFONT", (char *)(fontfname + fsprefixlen), &defcidfallacklen);
                         }
                     }
                     else {
-                        memcpy(fontfname + fsprefixlen, defcidfallack, defcidfallacklen);
+                        if (fsprefixlen + defcidfallacklen > gp_file_name_sizeof - 1) {
+                            code = gs_note_error(gs_error_rangecheck);
+                            if ((code = pdfi_set_warning_stop(ctx, code, NULL, W_PDF_BAD_CONFIG, "pdfi_open_CIDFont_substitute_file", "CIDFSUBSTFONT environment variable too long")) < 0)
+                                goto exit;
+
+                            memcpy(fontfname, defcidfallack, defcidfallacklen);
+                            /* cidfsubstfont should either be a font name we find in the search path(s)
+                               or an absolute path.
+                             */
+                            fsprefixlen = 0;
+                        }
+                        else {
+                            memcpy(fontfname + fsprefixlen, defcidfallack, defcidfallacklen);
+                        }
                     }
                 }
                 else {
-                    if (ctx->args.cidfsubstfont.size > gp_file_name_sizeof - 1) {
+                    if (ctx->args.cidfsubstfont.size + fsprefixlen > gp_file_name_sizeof - 1) {
                         code = gs_note_error(gs_error_rangecheck);
-                        pdfi_set_warning(ctx, code, NULL, W_PDF_BAD_CONFIG, "pdfi_open_CIDFont_substitute_file", "CIDFSubstFont parameter too long");
-                        if (ctx->args.pdfstoponwarning != 0) {
+                        if ((code = pdfi_set_warning_stop(ctx, code, NULL, W_PDF_BAD_CONFIG, "pdfi_open_CIDFont_substitute_file", "CIDFSubstFont parameter too long")) < 0)
                             goto exit;
+
+                        if (fsprefixlen + defcidfallacklen > gp_file_name_sizeof - 1) {
+                            pdfi_set_warning(ctx, code, NULL, W_PDF_BAD_CONFIG, "pdfi_open_CIDFont_substitute_file", "CIDFSubstPath parameter too long");
+                            memcpy(fontfname, defcidfallack, defcidfallacklen);
+                            fsprefixlen = 0;
                         }
-                        code = 0;
-                        memcpy(fontfname + fsprefixlen, defcidfallack, defcidfallacklen);
+                        else
+                            memcpy(fontfname + fsprefixlen, defcidfallack, defcidfallacklen);
                     }
                     else {
-                        memcpy(fontfname, ctx->args.cidfsubstfont.data, ctx->args.cidfsubstfont.size);
-                        defcidfallacklen = ctx->args.cidfsubstfont.size;
-                        /* cidfsubstfont should either be a font name we find in the search path(s)
-                           or an absolute path.
-                         */
-                        fsprefixlen = 0;
+                        if (ctx->args.cidfsubstfont.size > gp_file_name_sizeof - 1) {
+                            code = gs_note_error(gs_error_rangecheck);
+                            if ((code = pdfi_set_warning_stop(ctx, code, NULL, W_PDF_BAD_CONFIG, "pdfi_open_CIDFont_substitute_file", "CIDFSubstFont parameter too long")) < 0)
+                                goto exit;
+
+                            memcpy(fontfname, defcidfallack, defcidfallacklen);
+                            defcidfallacklen = ctx->args.cidfsubstfont.size;
+                            /* cidfsubstfont should either be a font name we find in the search path(s)
+                               or an absolute path.
+                             */
+                            fsprefixlen = 0;
+                        }
+                        else {
+                            memcpy(fontfname, ctx->args.cidfsubstfont.data, ctx->args.cidfsubstfont.size);
+                            defcidfallacklen = ctx->args.cidfsubstfont.size;
+                            /* cidfsubstfont should either be a font name we find in the search path(s)
+                               or an absolute path.
+                             */
+                            fsprefixlen = 0;
+                        }
                     }
                 }
                 fontfname[fsprefixlen + defcidfallacklen] = '\0';
@@ -958,7 +989,8 @@ int pdfi_load_font(pdf_context *ctx, pdf_dict *stream_dict, pdf_dict *page_dict,
 
     code = pdfi_dict_get_type(ctx, font_dict, "Type", PDF_NAME, (pdf_obj **)&Type);
     if (code < 0) {
-        pdfi_set_error(ctx, 0, NULL, E_PDF_MISSINGTYPE, "pdfi_load_font", NULL);
+        if ((code = pdfi_set_error_stop(ctx, code, NULL, E_PDF_MISSINGTYPE, "pdfi_load_font", NULL)) < 0)
+            goto exit;
     }
     else {
         if (!pdfi_name_is(Type, "Font")){
@@ -968,11 +1000,12 @@ int pdfi_load_font(pdf_context *ctx, pdf_dict *stream_dict, pdf_dict *page_dict,
     }
     code = pdfi_dict_get_type(ctx, font_dict, "Subtype", PDF_NAME, (pdf_obj **)&Subtype);
     if (code < 0) {
-        pdfi_set_error(ctx, 0, NULL, E_PDF_NO_SUBTYPE, "pdfi_load_font", NULL);
+        if ((code = pdfi_set_error_stop(ctx, code, NULL, E_PDF_NO_SUBTYPE, "pdfi_load_font", NULL)) < 0)
+            goto exit;
     }
 
     /* Beyond Type 0 and Type 3, there is no point trusting the Subtype key */
-    if (code >= 0 && pdfi_name_is(Subtype, "Type0")) {
+    if (Subtype != NULL && pdfi_name_is(Subtype, "Type0")) {
         if (cidfont == true) {
             code = gs_note_error(gs_error_invalidfont);
         }
@@ -980,15 +1013,19 @@ int pdfi_load_font(pdf_context *ctx, pdf_dict *stream_dict, pdf_dict *page_dict,
             code = pdfi_read_type0_font(ctx, (pdf_dict *)font_dict, stream_dict, page_dict, &ppdffont);
         }
     }
-    else if (code >= 0 && pdfi_name_is(Subtype, "Type3")) {
+    else if (Subtype != NULL && pdfi_name_is(Subtype, "Type3")) {
         code = pdfi_read_type3_font(ctx, (pdf_dict *)font_dict, stream_dict, page_dict, &ppdffont);
         if (code < 0)
             goto exit;
     }
     else {
         if (Subtype != NULL && !pdfi_name_is(Subtype, "Type1") && !pdfi_name_is(Subtype, "TrueType") && !pdfi_name_is(Subtype, "CIDFont")
-            && !pdfi_name_is(Subtype, "CIDFontType2") && !pdfi_name_is(Subtype, "CIDFontType0") && !pdfi_name_is(Subtype, "MMType1"))
-            pdfi_set_error(ctx, 0, NULL, E_PDF_BAD_SUBTYPE, "pdfi_load_font", NULL);
+            && !pdfi_name_is(Subtype, "CIDFontType2") && !pdfi_name_is(Subtype, "CIDFontType0") && !pdfi_name_is(Subtype, "MMType1")) {
+
+            if ((code = pdfi_set_error_stop(ctx, gs_note_error(gs_error_typecheck), NULL, E_PDF_BAD_SUBTYPE, "pdfi_load_font", NULL)) < 0) {
+                goto exit;
+            }
+        }
         /* We should always have a font descriptor here, but we have to carry on
            even if we don't
          */
@@ -1047,7 +1084,7 @@ int pdfi_load_font(pdf_context *ctx, pdf_dict *stream_dict, pdf_dict *page_dict,
             if (fontfile != NULL) {
                 code = pdfi_stream_to_buffer(ctx, (pdf_stream *) fontfile, &fbuf, &fbuflen);
                 pdfi_countdown(fontfile);
-                if (fbuflen == 0) {
+                if (code < 0 || fbuflen == 0) {
                     char obj[129];
                     pdfi_print_cstring(ctx, "**** Warning: cannot process embedded stream for font object ");
                     gs_snprintf(obj, 128, "%d %d\n", (int)font_dict->object_num, (int)font_dict->generation_num);
@@ -1065,15 +1102,15 @@ int pdfi_load_font(pdf_context *ctx, pdf_dict *stream_dict, pdf_dict *page_dict,
                     code = pdfi_load_font_buffer(ctx, fbuf, fbuflen, fftype, Subtype, findex, stream_dict, page_dict, font_dict, &ppdffont, cidfont);
 
                     if (code < 0 && substitute == font_embedded) {
-                        if (ctx->args.pdfstoponerror == true) {
+                        char msg[129];
+
+                        gs_snprintf(msg, 128, "Cannot process embedded stream for font object %d %d. Attempting to load a substitute font.\n", (int)font_dict->object_num, (int)font_dict->generation_num);
+
+                        if ((code = pdfi_set_error_stop(ctx, gs_note_error(gs_error_invalidfont), NULL, E_PDF_BAD_EMBEDDED_FONT, "pdfi_load_font", msg)) < 0) {
                             goto exit;
                         }
                         else {
-                            char obj[129];
-                            pdfi_print_cstring(ctx, "**** Warning: cannot process embedded stream for font object ");
-                            gs_snprintf(obj, 128, "%d %d\n", (int)font_dict->object_num, (int)font_dict->generation_num);
-                            pdfi_print_cstring(ctx, obj);
-                            pdfi_print_cstring(ctx, "**** Attempting to load a substitute font.\n");
+                            code = gs_error_invalidfont;
                         }
                     }
                 }
@@ -2211,11 +2248,25 @@ int pdfi_map_glyph_name_via_agl(pdf_dict *cstrings, pdf_name *gname, pdf_string 
     return code;
 }
 
+
 int pdfi_init_font_directory(pdf_context *ctx)
 {
-    ctx->font_dir = gs_font_dir_alloc2(ctx->memory, ctx->memory);
-    if (ctx->font_dir == NULL) {
-        return_error(gs_error_VMerror);
+    gs_font_dir *pfdir = ctx->memory->gs_lib_ctx->font_dir;
+    if (pfdir) {
+        ctx->font_dir = gs_font_dir_alloc2_limits(ctx->memory, ctx->memory,
+                   pfdir->smax, pfdir->ccache.bmax, pfdir->fmcache.mmax,
+                   pfdir->ccache.cmax, pfdir->ccache.upper);
+        if (ctx->font_dir == NULL) {
+            return_error(gs_error_VMerror);
+        }
+        ctx->font_dir->align_to_pixels = pfdir->align_to_pixels;
+        ctx->font_dir->grid_fit_tt = pfdir->grid_fit_tt;
+    }
+    else {
+        ctx->font_dir = gs_font_dir_alloc2(ctx->memory, ctx->memory);
+        if (ctx->font_dir == NULL) {
+            return_error(gs_error_VMerror);
+        }
     }
     ctx->font_dir->global_glyph_code = pdfi_global_glyph_code;
     return 0;
@@ -2369,6 +2420,35 @@ void pdfi_font_set_first_last_char(pdf_context *ctx, pdf_dict *fontdict, pdf_fon
     }
 }
 
+void pdfi_font_set_orig_fonttype(pdf_context *ctx, pdf_font *font)
+{
+    pdf_name *ftype;
+    pdf_dict *fontdict = font->PDF_font;
+    int code;
+
+    code = pdfi_dict_get_type(ctx, fontdict, "Subtype", PDF_NAME, (pdf_obj**)&ftype);
+    if (code < 0) {
+        font->orig_FontType = ft_undefined;
+    }
+    else {
+        if (pdfi_name_is(ftype, "Type1") || pdfi_name_is(ftype, "MMType1"))
+            font->orig_FontType = ft_encrypted;
+        else if (pdfi_name_is(ftype, "Type1C"))
+            font->orig_FontType = ft_encrypted2;
+        else if (pdfi_name_is(ftype, "TrueType"))
+            font->orig_FontType = ft_TrueType;
+        else if (pdfi_name_is(ftype, "Type3"))
+            font->orig_FontType = ft_user_defined;
+        else if (pdfi_name_is(ftype, "CIDFontType0"))
+            font->orig_FontType = ft_CID_encrypted;
+        else if (pdfi_name_is(ftype, "CIDFontType2"))
+            font->orig_FontType = ft_CID_TrueType;
+        else
+            font->orig_FontType = ft_undefined;
+    }
+    pdfi_countdown(ftype);
+}
+
 /* Patch or create a new XUID based on the existing UID/XUID, a simple hash
    of the input file name and the font dictionary object number.
    This allows improved glyph cache efficiency, also ensures pdfwrite understands
@@ -2428,6 +2508,7 @@ int pdfi_default_font_info(gs_font *font, const gs_point *pscale, int members, g
     if (code < 0)
         return code;
     if ((members & FONT_INFO_EMBEDDED) != 0) {
+        info->orig_FontType = pdff->orig_FontType;
         if (pdff->pdfi_font_type == e_pdf_font_type3) {
             info->FontEmbedded = (int)(true);
             info->members |= FONT_INFO_EMBEDDED;
@@ -2435,6 +2516,28 @@ int pdfi_default_font_info(gs_font *font, const gs_point *pscale, int members, g
         else {
             info->FontEmbedded = (int)(pdff->substitute == font_embedded);
             info->members |= FONT_INFO_EMBEDDED;
+        }
+    }
+    if (pdff->pdfi_font_type != e_pdf_font_truetype && pdff->pdfi_font_type != e_pdf_cidfont_type2) {
+        if (((members & FONT_INFO_COPYRIGHT) != 0) && pdff->copyright != NULL) {
+            info->Copyright.data = pdff->copyright->data;
+            info->Copyright.size = pdff->copyright->length;
+            info->members |= FONT_INFO_COPYRIGHT;
+        }
+        if (((members & FONT_INFO_NOTICE) != 0) && pdff->notice != NULL) {
+            info->Notice.data = pdff->notice->data;
+            info->Notice.size = pdff->notice->length;
+            info->members |= FONT_INFO_NOTICE;
+        }
+        if (((members & FONT_INFO_FAMILY_NAME) != 0) && pdff->familyname != NULL) {
+            info->FamilyName.data = pdff->familyname->data;
+            info->FamilyName.size = pdff->familyname->length;
+            info->members |= FONT_INFO_FAMILY_NAME;
+        }
+        if (((members & FONT_INFO_FULL_NAME) != 0) && pdff->fullname != NULL) {
+            info->FullName.data = pdff->fullname->data;
+            info->FullName.size = pdff->fullname->length;
+            info->members |= FONT_INFO_FULL_NAME;
         }
     }
     return 0;
