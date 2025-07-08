@@ -422,14 +422,14 @@ pdf_begin_image_data(gx_device_pdf * pdev, pdf_image_writer * piw,
         gs_param_string param;
         cos_object_t *pco = NULL;
 
-        gs_snprintf(str, sizeof(str), "{Obj%dG0}", pdev->PendingOC);
-        param.data = (const byte *)str;
-        param.size = strlen(str);
+        param.data = (const byte *)pdev->PendingOC;
+        param.size = strlen(pdev->PendingOC);
         code = pdf_refer_named(pdev, &param, &pco);
+        gs_free_object(pdev->memory, pdev->PendingOC, "");
         if(code < 0)
             return code;
 
-        gs_snprintf(str, sizeof(str), "%ld 0 R", pco->id);
+        gs_snprintf(str, sizeof(str), "%"PRId64" 0 R", pco->id);
         if (piw->pres != NULL && piw->pres->object != NULL)
             code = cos_dict_put_string_copy((cos_dict_t *)piw->pres->object, "/OC", str);
 

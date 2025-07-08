@@ -2028,7 +2028,7 @@ pdf14_pop_transparency_mask(pdf14_ctx *ctx, gs_gstate *pgs, gx_device *dev)
             /* Dump the current buffer to see what we have. */
             dump_raw_buffer(ctx->memory,
                             tos->rect.q.y-tos->rect.p.y,
-                            tos->rowstride>>tos->deep, tos->n_planes,
+                            tos->rowstride>>tos->deep, 1,
                             tos->planestride, tos->rowstride,
                             "SMask_Pop_Alpha(Mask_Plane1)",tos->data,
                             tos->deep);
@@ -2063,7 +2063,7 @@ pdf14_pop_transparency_mask(pdf14_ctx *ctx, gs_gstate *pgs, gx_device *dev)
                 /* Dump the current buffer to see what we have. */
                 dump_raw_buffer(ctx->memory,
                                 tos->rect.q.y-tos->rect.p.y,
-                                tos->rowstride>>tos->deep, tos->n_planes,
+                                tos->rowstride>>tos->deep, 1,
                                 tos->planestride, tos->rowstride,
                                 "SMask_Pop_Lum_Post_Blend",tos->data,
                                 tos->deep);
@@ -2217,8 +2217,7 @@ pdf14_open(gx_device *dev)
     /* If we are reenabling the device dont create a new ctx. Bug 697456 */
     if (pdev->ctx == NULL) {
         bool has_tags = device_encodes_tags(dev);
-        int bits_per_comp = ((dev->color_info.depth - has_tags*8) /
-                             dev->color_info.num_components);
+        int bits_per_comp = (dev->color_info.depth / dev->color_info.num_components);
         pdev->ctx = pdf14_ctx_new(dev, bits_per_comp > 8);
         if (pdev->ctx == NULL)
             return_error(gs_error_VMerror);
@@ -3357,6 +3356,26 @@ pdf14_put_blended_image_cmykspot(gx_device* dev, gx_device* target,
             }
         }
 
+        if (deep && has_tags)
+        {
+            /* We still need to convert the tags from Native to BE */
+#if ARCH_IS_BIG_ENDIAN
+#else
+            uint16_t *tags = (uint16_t *)&buf_ptr[tag_offset * planestride];
+            int i, j;
+            for (j = 0; j < height; j++)
+            {
+                for (i = 0; i < width; i++)
+                {
+                    uint16_t tag = *tags++;
+                    ((byte *)tags)[-2] = tag >> 8;
+                    ((byte *)tags)[-1] = tag;
+                }
+                tags += (buf->rowstride>>1) - width;
+            }
+#endif
+        }
+
 #if RAW_DUMP
         dump_raw_buffer_be(target->memory, height, width, buf->n_planes, planestride, rowstride,
             "post_put_image_blend_image", buf_ptr, deep);
@@ -3466,6 +3485,46 @@ pdf14_put_blended_image_cmykspot(gx_device* dev, gx_device* target,
     /* pcs takes a reference to the profile data it just retrieved. */
     gsicc_adjust_profile_rc(pcs->cmm_icc_profile_data, 1, "pdf14_put_blended_image_cmykspot");
     gsicc_set_icc_range(&(pcs->cmm_icc_profile_data));
+
+    /* If we have more components to write out than are in the des_profile,
+     * then just using a PCS based on des_profile, will result in us dropping
+     * the spot colors.
+     * So, if our target supports devn colors, we instead construct a
+     * DevN device space with colors names taken from the devn_params, and
+     * use that instead. */
+    if (des_profile->num_comps != target->color_info.num_components &&
+        dev_proc(target, dev_spec_op)(target, gxdso_supports_devn, NULL, 0))
+    {
+        int num_std;
+        gs_devn_params *devn_params =  dev_proc(target, ret_devn_params)(target);
+        gs_color_space *pcs2 = pcs;
+        code = gs_cspace_new_DeviceN(&pcs, target->color_info.num_components,
+                                     pcs2, pgs->memory->non_gc_memory);
+        if (code < 0)
+            return code;
+        /* set up a usable DeviceN space with info from the tdev->devn_params */
+        pcs->params.device_n.use_alt_cspace = false;
+        num_std = devn_params->num_std_colorant_names;
+        for (i = 0; i < num_std; i++) {
+            const char *name = devn_params->std_colorant_names[i];
+            size_t len = strlen(name);
+            pcs->params.device_n.names[i] = (char *)gs_alloc_bytes(pgs->memory->non_gc_memory, len + 1, "mem_planar_put_image_very_slow");
+            strcpy(pcs->params.device_n.names[i], name);
+        }
+        for (; i < devn_params->separations.num_separations; i++) {
+            devn_separation_name *name = &devn_params->separations.names[i - num_std];
+            pcs->params.device_n.names[i] = (char *)gs_alloc_bytes(pgs->memory->non_gc_memory, name->size + 1, "mem_planar_put_image_very_slow");
+            memcpy(pcs->params.device_n.names[i], devn_params->separations.names[i - num_std].data, name->size);
+            pcs->params.device_n.names[i][name->size] = 0;
+        }
+        if ((code = pcs->type->install_cspace(pcs, pgs)) < 0) {
+            return code;
+        }
+        /* One last thing -- we need to fudge the pgs->color_component_map */
+        for (i=0; i < dev->color_info.num_components; i++)
+            pgs->color_component_map.color_map[i] = i;	/* enable all components in normal order */
+    }
+
     gs_image_t_init_adjust(&image, pcs, false);
     image.ImageMatrix.xx = (float)width;
     image.ImageMatrix.yy = (float)height;
@@ -7005,6 +7064,15 @@ pdf14_compute_group_device_int_rect(const gs_matrix *ctm,
     rect->p.y = (int)floor(dev_bbox.p.y);
     rect->q.x = (int)ceil(dev_bbox.q.x);
     rect->q.y = (int)ceil(dev_bbox.q.y);
+    /* Sanity check rect for insane ctms */
+    if (rect->p.x < 0)
+        rect->p.x = 0;
+    if (rect->q.x < rect->p.x)
+        rect->q.x = rect->p.x;
+    if (rect->p.y < 0)
+        rect->p.y = 0;
+    if (rect->q.y < rect->p.y)
+        rect->q.y = rect->p.y;
     return 0;
 }
 
@@ -12290,6 +12358,7 @@ c_pdf14trans_clist_read_update(gs_composite_t *	pcte, gx_device	* cdev,
             pclist_devn_params = dev_proc(cdev, ret_devn_params)(cdev);
             if (pclist_devn_params != NULL && pclist_devn_params->page_spot_colors > 0) {
                 int num_comp = p14dev->color_info.num_components;
+                int has_tags = device_encodes_tags((gx_device *)p14dev);
                 /*
                  * The number of components for the PDF14 device is the sum
                  * of the process components and the number of spot colors
@@ -12314,7 +12383,7 @@ c_pdf14trans_clist_read_update(gs_composite_t *	pcte, gx_device	* cdev,
                         /* if page_spot_colors < 0, this will be wrong, so don't update num_components */
                         if (p14dev->devn_params.page_spot_colors >= 0) {
                             int n = p14dev->num_std_colorants +
-                                    p14dev->devn_params.page_spot_colors;
+                                    p14dev->devn_params.page_spot_colors + has_tags;
                             if (p14dev->num_planar_planes > 0)
                                 p14dev->num_planar_planes += n - p14dev->color_info.num_components;
                             p14dev->color_info.num_components = n;
@@ -12322,8 +12391,8 @@ c_pdf14trans_clist_read_update(gs_composite_t *	pcte, gx_device	* cdev,
                     }
                 }
                 /* limit the num_components to the max. */
-                if (p14dev->color_info.num_components > p14dev->color_info.max_components + device_encodes_tags((gx_device *)p14dev))
-                    p14dev->color_info.num_components = p14dev->color_info.max_components + device_encodes_tags((gx_device *)p14dev);
+                if (p14dev->color_info.num_components > p14dev->color_info.max_components + has_tags)
+                    p14dev->color_info.num_components = p14dev->color_info.max_components + has_tags;
                 /* Transfer the data for the spot color names
                    But we have to free what may be there before we do this */
                 devn_free_params((gx_device*) p14dev);

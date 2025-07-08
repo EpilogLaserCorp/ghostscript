@@ -510,6 +510,16 @@ pdf_prepare_text_drawing(gx_device_pdf *const pdev, gs_text_enum_t *pte)
             code = pdf_put_clip_path(pdev, pcpath);
             if (code < 0)
                 return code;
+
+            /* If we have text in a clipping mode we need to update the saved 'bottom'
+             * of the saved gstate stack. This is the point we will use for potentially
+             * writing out any additional clip path, or clips used by images. We *don't*
+             * update the 'saved bottom' (saved_vgstack_depth_for_textclip) because that's
+             * what we restore back to after we grestore back to a time when the text
+             * rendering mode didn't involve clip.
+             */
+            if (pdev->clipped_text_pending)
+                pdev->vgstack_bottom = pdev->vgstack_depth;
         }
 
         /* For ps2write output, and for any 'type 3' font we need to write both the stroke and fill colours
@@ -1662,6 +1672,8 @@ pdf_make_font_resource(gx_device_pdf *pdev, gs_font *font,
 
     pdfont->XUID = XUID;
     pdf_do_subset_font(pdev, pfd->base_font, -1);
+    if (!embed)
+        pfd->base_font->do_subset = false;
 
     /* If we have a TrueType font to embed, and we're producing an (E)PS output
      * file, and we are subsetting the font, then the font we produce will *NOT*
@@ -1680,7 +1692,7 @@ pdf_make_font_resource(gx_device_pdf *pdev, gs_font *font,
                 ((const gs_font_base *)base_font)->nearest_encoding_index, false);
     }
     if (font->FontType == ft_encrypted || font->FontType == ft_encrypted2
-        || (font->FontType == ft_TrueType && ((const gs_font_base *)base_font)->nearest_encoding_index != ENCODING_INDEX_UNKNOWN && pfd->base_font->do_subset == DO_SUBSET_NO)) {
+        || (font->FontType == ft_TrueType && (((((const gs_font_base *)base_font)->nearest_encoding_index != ENCODING_INDEX_UNKNOWN && pfd->base_font->do_subset == DO_SUBSET_NO)) || embed != FONT_EMBED_YES))) {
         /* Yet more crazy heuristics. If we embed a TrueType font and don't subset it, then
          * we preserve the CMAP subtable(s) rather than generatng new ones. The problem is
          * that if we ake the font symbolic, Acrobat uses the 1,0 CMAP, whereas if we don't
@@ -3299,12 +3311,14 @@ static int ProcessTextForOCR(gs_text_enum_t *pte)
 
     if (pdev->OCRStage == OCR_Rendering) {
         penum->pte_default->can_cache = 0;
+        pdev->OCR_enum = (gs_text_enum_t *)penum;
         code = gs_text_process(penum->pte_default);
-        pdev->OCR_char_code = penum->pte_default->returned.current_char;
-        pdev->OCR_glyph = penum->pte_default->returned.current_glyph;
         gs_text_enum_copy_dynamic(pte, penum->pte_default, true);
-        if (code == TEXT_PROCESS_RENDER)
+        if (code == TEXT_PROCESS_RENDER) {
+            pdev->OCR_char_code = penum->pte_default->returned.current_char;
+            pdev->OCR_glyph = penum->pte_default->returned.current_glyph;
             return code;
+        }
         if (code != 0) {
             gs_free_object(pdev->memory, pdev->OCRSaved,"saved enumerator for OCR");
             pdev->OCRSaved = NULL;
@@ -3313,6 +3327,7 @@ static int ProcessTextForOCR(gs_text_enum_t *pte)
             penum->pte_default = NULL;
             return code;
         }
+        pdev->OCR_enum = NULL;
         gs_grestore(pte->pgs);
         *pte = *(pdev->OCRSaved);
         gs_text_enum_copy_dynamic(pte, pdev->OCRSaved, true);
@@ -3814,12 +3829,12 @@ pdf_text_process(gs_text_enum_t *pte)
     if (size <= sizeof(buf)) {
         code = process(pte, buf.bytes, size);
     } else {
-        byte *buf = gs_alloc_string(pte->memory, size, "pdf_text_process");
+        byte *dbuf = gs_alloc_bytes(pte->memory, size, "pdf_text_process");
 
-        if (buf == 0)
+        if (dbuf == 0)
             return_error(gs_error_VMerror);
-        code = process(pte, buf, size);
-        gs_free_string(pte->memory, buf, size, "pdf_text_process");
+        code = process(pte, dbuf, size);
+        gs_free_object(pte->memory, dbuf, "pdf_text_process");
     }
  skip:
     if (code < 0 ||
