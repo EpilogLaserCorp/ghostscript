@@ -161,6 +161,9 @@ const gx_device_pdf PDF_DEVICE_IDENT =
  0,				/* font_cache */
  {0, 0},			/* char_width */
  0,				/* clip_path */
+ 0,             /* clipped_text_pending */
+ 0,             /* saved_vgstack_depth_for_textclip */
+ 0,             /* saved_vgstack_bottom_for_textclip */
  0,                             /* PageLabels */
  -1,                            /* PageLabels_current_page */
  0,                             /* PageLabels_current_label */
@@ -244,6 +247,7 @@ const gx_device_pdf PDF_DEVICE_IDENT =
  NULL,                  /* OCRUnicode */
  0,                     /* OCR_char_code */
  0,                     /* OCR_glyph */
+ NULL,                  /* OCE_penum */
  NULL,                  /* ocr_glyphs */
  0,                     /* initial_pattern_state */
  false,                 /* OmitInfoDate */
@@ -253,8 +257,9 @@ const gx_device_pdf PDF_DEVICE_IDENT =
  false,                 /* ModifiesPageOrder */
  true,                  /* WriteXRefStm */
  true,                  /* WriteObjStms */
- 0,                     /* PendingOC */
- true                   /* ToUnicodeForStdEnc */
+ NULL,                     /* PendingOC */
+ true,                  /* ToUnicodeForStdEnc */
+ true                   /* EmbedSubstituteFonts */
 };
 
 #else

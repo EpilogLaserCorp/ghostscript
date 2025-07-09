@@ -515,7 +515,7 @@ pdf_compute_font_descriptor(gx_device_pdf *pdev, pdf_font_descriptor_t *pfd)
         /* gs_c_decode always fails to find .notdef, its always present so
          * don't worry about it
          */
-        if(strncmp(".notdef", (const char *)gname.data, gname.size)) {
+        if(pfd->embed == FONT_EMBED_YES && strncmp(".notdef", (const char *)gname.data, gname.size)) {
             position = gs_c_decode(glyph_known_enc, 0);
             if (position == GS_NO_CHAR) {
                 desc.Flags |= FONT_IS_SYMBOLIC;
@@ -713,7 +713,7 @@ pdf_write_FontDescriptor(gx_device_pdf *pdev, pdf_resource_t *pres)
         return code;
     s = pdev->strm;
     if (cidset_id != 0)
-        pprintld1(s, "/CIDSet %ld 0 R\n", cidset_id);
+        pprinti64d1(s, "/CIDSet %"PRId64" 0 R\n", cidset_id);
     else if (pdf_do_subset_font(pdev, pfd->base_font, pfd->common.rid) &&
              (ftype == ft_encrypted || ftype == ft_encrypted2) &&
              pdev->CompatibilityLevel <= 1.7

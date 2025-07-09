@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2025 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -631,7 +631,7 @@ struct gx_device_pdf_s {
     bool HaveTransparency;
     bool PatternImagemask; /* The target viewer|printer handles imagemask
                               with pattern color. */
-    bool PDFX;                   /* Generate PDF/X */
+    int PDFX;                   /* Generate PDF/X */
     int PDFA;                   /* Generate PDF/A 0 = don't produce, otherwise level of PDF/A */
     bool AbortPDFAX;            /* Abort generation of PDFA or X, produce regular PDF */
     int64_t MaxClipPathSize;  /* The maximal number of elements of a clipping path
@@ -792,6 +792,11 @@ struct gx_device_pdf_s {
      * redundant clipping paths when PS document generates such ones.
      */
     gx_path *clip_path;
+
+    /* Used for preserving text rendering modes with clip. */
+    bool clipped_text_pending;
+    int saved_vgstack_bottom_for_textclip;
+    int saved_vgstack_depth_for_textclip;
 
     /*
      * Page labels.
@@ -973,6 +978,7 @@ struct gx_device_pdf_s {
     int *OCRUnicode;                /* Used to pass back the Unicode value from the OCR engine to the text processing */
     gs_char OCR_char_code;          /* Passes the current character code from text processing to the image processing code when rendering glyph bitmaps for OCR */
     gs_glyph OCR_glyph;             /* Passes the current glyph code from text processing to the image processing code when rendering glyph bitmaps for OCR */
+    gs_text_enum_t *OCR_enum;       /* We need this to update the OCR char_code and glyph in gdev_pdf_fill_mask() when rendering a glyph for OCR, when using PDF input */
     ocr_glyph_t *ocr_glyphs;        /* Records bitmaps and other data from text processing when doing OCR */
     gs_gstate **initial_pattern_states;
     bool OmitInfoDate;              /* If true, do not emit CreationDate and ModDate in the Info dictionary and XMP Metadata (must not be true for PDF/X support) */
@@ -982,8 +988,9 @@ struct gx_device_pdf_s {
     bool ModifiesPageOrder;         /* If true, the new PDF interpreter will not preserve Outlines or Dests, because they will refer to the wrong page number */
     bool WriteXRefStm;              /* If true, (the default) use an XRef stream rather than an xref table */
     bool WriteObjStms;              /* If true, (the default) store candidate objects in ObjStms rather than plain text in the PDF file. */
-    int64_t PendingOC;              /* An OptionalContent object is pending */
+    char *PendingOC;                /* An OptionalContent object is pending, the string is the name of the (already defined) object  */
     bool ToUnicodeForStdEnc;        /* Should we emit ToUnicode CMaps when a simple font has only standard glyph names. Defaults to true */
+    bool EmbedSubstituteFonts;      /* When we use a substitute font to replace a missing font, should we embed it in the output */
 };
 
 #define is_in_page(pdev)\

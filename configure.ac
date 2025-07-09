@@ -394,7 +394,7 @@ if test x"$with_arch_h" = x""; then
             ARCH_CONF_HEADER="\$(GLSRCDIR)/../arch/windows-x86-msvc.h"
           ;;
           *-darwin*)
-            ARCH_CONF_HEADER="\$(GLSRCDIR)/../arch/osx-x86-x86_64-ppc-gcc.h"
+            ARCH_CONF_HEADER="\$(GLSRCDIR)/../arch/osx-x86-x86_64-ppc_arm64-gcc.h"
           ;;
           *)
             ARCH_CONF_HEADER=
@@ -563,7 +563,10 @@ dnl Check for headers
 dnl --------------------------------------------------
 
 AC_HEADER_DIRENT
-AC_CHECK_HEADERS([errno.h fcntl.h limits.h malloc.h memory.h stdlib.h string.h strings.h sys/ioctl.h sys/param.h sys/time.h sys/times.h syslog.h unistd.h dirent.h ndir.h sys/dir.h sys/ndir.h inttypes.h])
+AC_CHECK_HEADERS([errno.h fcntl.h malloc.h memory.h stdlib.h strings.h sys/ioctl.h sys/param.h sys/time.h sys/times.h syslog.h unistd.h dirent.h ndir.h sys/dir.h sys/ndir.h inttypes.h])
+
+AC_CHECK_HEADER([limits.h], [CFLAGS="$CFLAGS -DHAVE_LIMITS_H=1"])
+AC_CHECK_HEADER([string.h], [CFLAGS="$CFLAGS -DHAVE_STRING_H=1"])
 
 dnl --------------------------------------------------
 dnl Sun, BSD possibly other makes don't have quite the
@@ -1015,27 +1018,31 @@ if test x$with_tesseract != xno; then
             AC_MSG_RESULT(no)
           fi
 
-          AC_MSG_CHECKING([neon support])
-          CXXFLAGS="$save_cxxflags"
-          LDFLAGS="$save_ldflags -mfpu=neon -mcpu=cortex-a53"
-
-          TESS_NEON=""
-          AC_LINK_IFELSE(
-           [AC_LANG_PROGRAM([#include "arm_neon.h"],
-                            [int32x4_t round = vdupq_n_s32(10);
-                             return(0);])],
-           [TESS_NEON="-D__ARM_NEON__"],
-           [TESS_NEON=""])
-
-          if test "x$TESS_NEON" != x && test "x$enable_neon" != xno; then
-            AC_MSG_RESULT(yes)
-            TESS_CXXFLAGS="$TESS_CXXFLAGS -DHAVE_NEON"
-            LDFLAGS="$save_ldflags -mfpu=neon -mcpu=cortex-a53"
-          else
-            AC_MSG_RESULT(no)
-            TESS_NEON=""
-            LDFLAGS="$save_ldflags"
-          fi
+#          The conditions for including neon code in tesseract are
+#          dismally inconsistent in different parts of the code, so
+#          I'm disabling it completely until I have time to look in
+#          more detail.
+#          AC_MSG_CHECKING([neon support])
+#          CXXFLAGS="$save_cxxflags"
+#          LDFLAGS="$save_ldflags -mfpu=neon -mcpu=cortex-a53"
+#
+#          TESS_NEON=""
+#          AC_LINK_IFELSE(
+#           [AC_LANG_PROGRAM([#include "arm_neon.h"],
+#                            [int32x4_t round = vdupq_n_s32(10);
+#                             return(0);])],
+#           [TESS_NEON="-D__ARM_NEON__"],
+#           [TESS_NEON=""])
+#
+#          if test "x$TESS_NEON" != x && test "x$enable_neon" != xno; then
+#            AC_MSG_RESULT(yes)
+#            TESS_CXXFLAGS="$TESS_CXXFLAGS -DHAVE_NEON"
+#            LDFLAGS="$save_ldflags -mfpu=neon -mcpu=cortex-a53"
+#          else
+#            AC_MSG_RESULT(no)
+#            TESS_NEON=""
+#            LDFLAGS="$save_ldflags"
+#          fi
 
           CXXFLAGS="$save_cxxflags"
 
@@ -1327,6 +1334,7 @@ if test x"$enable_fapi" != xno; then
   if test x"$with_ufst" != xno; then
     if test -d $with_ufst; then
       INSERT_UFST_BRIDGE_EQUAL_ONE="UFST_BRIDGE=1"
+      CFLAGS="$CFLAGS -DUFST_BRIDGE=1"
       case $with_ufst in
         /*) UFST_ROOT=$with_ufst ;;
          *) UFST_ROOT=`pwd`/$with_ufst ;;
@@ -2535,49 +2543,50 @@ X_CFLAGS=""
 X_DEVS=""
 X_LIBS=""
 
-if test x$no_x != xyes; then
-        if test "$x_libraries" = "/usr/lib"; then
-                echo "Ignoring X library directory \"$x_libraries\" requested by configure."
-                x_libraries="NONE"
-        fi
-        if test ! "$x_libraries" = "NONE" -a ! "$x_libraries" = ""; then
-                X_LDFLAGS="-L$x_libraries"
-                case $host in
-                    *-sun*|*-solaris*)
-                        X_LDFLAGS="$X_LDFLAGS -R$x_libraries"
-                    ;;
-                    *)
-                    ;;
-                esac
+if test x"$no_x" != x"yes"; then
+  if test "$x_libraries" = "/usr/lib"; then
+          echo "Ignoring X library directory \"$x_libraries\" requested by configure."
+          x_libraries="NONE"
+  fi
+  if test ! "$x_libraries" = "NONE" -a ! "$x_libraries" = ""; then
+          X_LDFLAGS="-L$x_libraries"
+          case $host in
+              *-sun*|*-solaris*)
+                  X_LDFLAGS="$X_LDFLAGS -R$x_libraries"
+              ;;
+              *)
+              ;;
+          esac
 
-        fi
+  fi
 
-        if test "$x_includes" = "/usr/include"; then
-                echo "Ignoring X include directory \"$x_includes\" requested by configure."
-                x_includes="NONE"
-        fi
-        if test ! "$x_includes" = "NONE" -a ! "$x_includes" = ""; then
-                X_CFLAGS="-I$x_includes"
-        fi
+  if test "$x_includes" = "/usr/include"; then
+          echo "Ignoring X include directory \"$x_includes\" requested by configure."
+          x_includes="NONE"
+  fi
+  if test ! "$x_includes" = "NONE" -a ! "$x_includes" = ""; then
+          X_CFLAGS="-I$x_includes"
+  fi
 
-        SAVELIBS="$LIBS"
-        SAVELDFLAGS="$LDFLAGS"
-        LDFLAGS="$LDFLAGS $X_LDFLAGS"
+  SAVELIBS="$LIBS"
+  SAVELDFLAGS="$LDFLAGS"
+  LDFLAGS="$LDFLAGS $X_LDFLAGS"
 
-        AC_CHECK_LIB(X11,XOpenDisplay)
-        AC_CHECK_LIB(Xext,XdbeQueryExtension)
-        AC_CHECK_LIB(Xt,XtAppCreateShell)
+  AC_CHECK_LIB(X11,XOpenDisplay,[],[no_x=yes])
+  AC_CHECK_LIB(Xext,XdbeQueryExtension,[],[no_x=yes])
+  AC_CHECK_LIB(Xt,XtAppCreateShell,[],[no_x=yes])
 
-        LDFLAGS="$SAVELDFLAGS"
-        LIBS="$SAVELIBS"
+  LDFLAGS="$SAVELDFLAGS"
+  LIBS="$SAVELIBS"
 
-        if test "$ac_cv_lib_Xt_XtAppCreateShell" = yes; then
-                X11DEVS="x11 x11alpha x11cmyk x11mono x11_ x11alt_ x11cmyk2 x11cmyk4 x11cmyk8 x11rg16x x11rg32x x11gray2 x11gray4"
-                X_DEVS=$X11DEVS
-                # the makefile wants a list of just the library names in X_LIBS
-                GS_SPLIT_LIBS([X_LIBS],
-                        [-lXt $X_PRE_LIBS -lXext -lX11 $X_EXTRA_LIBS])
-        fi
+  if test x"$no_x" = x"yes"; then
+    AC_MSG_ERROR([X11 libraries (libX11, libXt, libXext) not available, either install them, or rerun configure with "--without-x"])
+  else
+    X11DEVS="x11 x11alpha x11cmyk x11mono x11_ x11alt_ x11cmyk2 x11cmyk4 x11cmyk8 x11rg16x x11rg32x x11gray2 x11gray4"
+    X_DEVS=$X11DEVS
+    # the makefile wants a list of just the library names in X_LIBS
+    GS_SPLIT_LIBS([X_LIBS], [-lXt $X_PRE_LIBS -lXext -lX11 $X_EXTRA_LIBS])
+  fi
 fi
 
 AC_SUBST(X_LDFLAGS)
@@ -3230,6 +3239,16 @@ case $host in
         PDF_DYNAMIC_LDFLAGS="-G -qmkshrobj -Wl,-brtl,-G"
       fi
       SO_LIB_EXT=".so"
+      ;;
+      *-hpux*)
+        DYNAMIC_CFLAGS="+z $DYNAMIC_CFLAGS"
+        GS_DYNAMIC_LDFLAGS="-b -Wl,+h,\$(LDFLAGS_SO_PREFIX)\$(GS_SONAME_MAJOR)"
+        PCL_DYNAMIC_LDFLAGS="-b -Wl,+h,\$(LDFLAGS_SO_PREFIX)\$(PCL_SONAME_MAJOR)"
+        XPS_DYNAMIC_LDFLAGS="-b -Wl,+h,\$(LDFLAGS_SO_PREFIX)\$(XPS_SONAME_MAJOR)"
+        PDL_DYNAMIC_LDFLAGS="-b -Wl,+h,\$(LDFLAGS_SO_PREFIX)\$(GPDL_SONAME_MAJOR)"
+        PDF_DYNAMIC_LDFLAGS="-b -Wl,+h,\$(LDFLAGS_SO_PREFIX)\$(PDF_SONAME_MAJOR)"
+        DYNAMIC_LIBS=""
+        SO_LIB_EXT=".so"
       ;;
 esac
 

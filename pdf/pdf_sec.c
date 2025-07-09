@@ -1,4 +1,4 @@
-/* Copyright (C) 2020-2024 Artifex Software, Inc.
+/* Copyright (C) 2020-2025 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -201,7 +201,7 @@ static int apply_sasl(pdf_context *ctx, char *Password, int Len, char **NewPassw
 
 static int check_user_password_R5(pdf_context *ctx, char *Password, int Len, int KeyLen)
 {
-    char *UTF8_Password, *Test = NULL, Buffer[32], UEPadded[48];
+    char *UTF8_Password = NULL, *Test = NULL, Buffer[32], UEPadded[48];
     int NewLen;
     int code = 0;
     pdf_c_stream *stream = NULL, *filter_stream = NULL;
@@ -605,7 +605,7 @@ error:
 
 static int check_owner_password_R5(pdf_context *ctx, char *Password, int Len, int KeyLen)
 {
-    char *UTF8_Password, *Test = NULL, Buffer[32], OEPadded[48];
+    char *UTF8_Password = NULL, *Test = NULL, Buffer[32], OEPadded[48];
     int NewLen;
     int code = 0;
     pdf_c_stream *stream = NULL, *filter_stream = NULL;
@@ -709,7 +709,8 @@ error:
     pdfi_countdown(Key);
     gs_free_object(ctx->memory, Test, "R5 password test");
 #ifdef HAVE_LIBIDN
-    gs_free_object(ctx->memory, UTF8_Password, "free sasl result");
+    if (UTF8_Password != Password)
+        gs_free_object(ctx->memory, UTF8_Password, "free sasl result");
 #endif
     return code;
 }
@@ -927,7 +928,7 @@ int pdfi_compute_objkey(pdf_context *ctx, pdf_obj *obj, pdf_string **Key)
 
 int pdfi_decrypt_string(pdf_context *ctx, pdf_string *string)
 {
-    int code = 0;
+    int code = 0, bytes_decrypted = 0;
     pdf_c_stream *stream = NULL, *crypt_stream = NULL;
     pdf_string *EKey = NULL;
     char *Buffer = NULL;
@@ -973,11 +974,23 @@ int pdfi_decrypt_string(pdf_context *ctx, pdf_string *string)
             goto error;
         }
 
-        sfread(Buffer, 1, string->length, crypt_stream->s);
+        /* The decrypted string length will likely be less than the original encrypted
+         * string length. sfread won't tell us how many bytes it actually read, so we need
+         * to decrypt one byte at a time until it returns EOD/ERRC. Then we can copy the
+         * bytes we actually read and change the string length.
+         */
+        for (bytes_decrypted = 0;bytes_decrypted < string->length;bytes_decrypted++) {
+            code = sfread(&Buffer[bytes_decrypted], 1, 1, crypt_stream->s);
+            if (code != 1) {
+                code = 0;
+                break;
+            }
+        }
 
         pdfi_close_file(ctx, crypt_stream);
         pdfi_close_memory_stream(ctx, NULL, stream);
 
+        string->length = bytes_decrypted;
         memcpy(string->data, Buffer, string->length);
     }
 
