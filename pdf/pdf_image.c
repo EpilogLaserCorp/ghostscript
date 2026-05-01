@@ -1,4 +1,4 @@
-/* Copyright (C) 2018-2024 Artifex Software, Inc.
+/* Copyright (C) 2018-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -44,11 +44,24 @@
 #include "gspath.h"         /* For gs_moveto() and friends */
 #include "gsstate.h"        /* For gs_setoverprintmode() */
 #include "gscoord.h"        /* for gs_concat() and others */
+#include "gxgstate.h"
 
 int pdfi_BI(pdf_context *ctx)
 {
-    if (ctx->text.BlockDepth != 0)
-        pdfi_set_warning(ctx, 0, NULL, W_PDF_OPINVALIDINTEXT, "pdfi_BI", NULL);
+    int code;
+
+    if (ctx->text.BlockDepth != 0) {
+        ctx->text.BlockDepth = 0;
+        if (ctx->text.TextClip) {
+            gx_device *dev = gs_currentdevice_inline(ctx->pgs);
+
+            ctx->text.TextClip = false;
+            (void)dev_proc(dev, dev_spec_op)(dev, gxdso_hilevel_text_clip, (void *)0, 1);
+        }
+        code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_syntaxerror), NULL, W_PDF_OPINVALIDINTEXT, "pdfi_BI", NULL);
+        if (code < 0)
+            return code;
+    }
 
     return pdfi_mark_stack(ctx, PDF_DICT_MARK);
 }
@@ -270,8 +283,7 @@ pdfi_scan_jpxfilter(pdf_context *ctx, pdf_c_stream *source, int length, pdfi_jpx
         avail -= 8;
         box_len -= 8;
         if (box_len <= 0 || box_len > avail) {
-            dmprintf1(ctx->memory, "WARNING: invalid JPX header, box_len=0x%x\n", box_len+8);
-            code = gs_note_error(gs_error_syntaxerror);
+            code = pdfi_set_error_stop(ctx, gs_note_error(gs_error_syntaxerror), NULL, E_PDF_INVALID_JPX_HDR, "pdfi_scan_jpxfilter", NULL);
             goto exit;
         }
         if (box_val == K4('j','p','2','h')) {
@@ -1012,6 +1024,8 @@ pdfi_do_image_smask(pdf_context *ctx, pdf_c_stream *source, pdfi_image_info_t *i
     int code, code1;
     pdfi_int_gstate *igs = (pdfi_int_gstate *)ctx->pgs->client_data;
     pdf_stream *stream_obj = NULL;
+    gs_rect clip_box;
+    int empty = 0;
 
 #if DEBUG_IMAGES
     dbgmprintf(ctx->memory, "pdfi_do_image_smask BEGIN\n");
@@ -1034,11 +1048,6 @@ pdfi_do_image_smask(pdf_context *ctx, pdf_c_stream *source, pdfi_image_info_t *i
 
     gs_trans_mask_params_init(&params, TRANSPARENCY_MASK_Luminosity);
 
-    code = pdfi_image_get_matte(ctx, image_info->SMask, params.Matte, GS_CLIENT_COLOR_MAX_COMPONENTS, has_Matte);
-
-    if (code >= 0)
-        params.Matte_components = code;
-
     /* gs_begin_transparency_mask is going to crap all over the current
      * graphics state. We need to be sure that everything goes back as
      * it was. So, gsave here, and grestore on the 'end', right? Well
@@ -1046,11 +1055,35 @@ pdfi_do_image_smask(pdf_context *ctx, pdf_c_stream *source, pdfi_image_info_t *i
      * drawn! We'll do some magic to ensure that doesn't happen. */
     code = gs_gsave(ctx->pgs);
     if (code < 0)
-        goto exitSaved;
+        goto exit;
+
+    if (gs_clip_bounds_in_user_space(ctx->pgs, &clip_box) >= 0)
+    {
+        rect_intersect(bbox, clip_box);
+        if (bbox.p.x >= bbox.q.x || bbox.p.y >= bbox.q.y)
+        {
+            /* If the bbox is illegal, we still need to set up an empty mask.
+             * We can't just skip forwards as everything will now be unmasked!
+             * We can skip doing the actual work though. */
+            empty = 1;
+        }
+    }
+
+    code = pdfi_image_get_matte(ctx, image_info->SMask, params.Matte, GS_CLIENT_COLOR_MAX_COMPONENTS, has_Matte);
+
+    if (code < 0) {
+        code = pdfi_set_warning_stop(ctx, code, NULL, W_PDF_ERROR_IN_MATTE, "", NULL);
+        if (code < 0)
+            goto exitSaved;
+    }
+    if (code >= 0)
+        params.Matte_components = code;
 
     code = gs_begin_transparency_mask(ctx->pgs, &params, &bbox, true);
     if (code < 0)
         goto exitSaved;
+    if (empty)
+        goto exitMasked;
     savedoffset = pdfi_tell(ctx->main_stream);
     code = pdfi_gsave(ctx);
     if (code < 0)
@@ -1085,9 +1118,9 @@ pdfi_do_image_smask(pdf_context *ctx, pdf_c_stream *source, pdfi_image_info_t *i
             goto exitSavedTwice;
     }
 
+exitSavedTwice:
     pdfi_seek(ctx, ctx->main_stream, savedoffset, SEEK_SET);
 
-exitSavedTwice:
     code1 = pdfi_grestore(ctx);
     if (code < 0)
         code = code1;
@@ -1302,6 +1335,7 @@ static int pdfi_create_JPX_Lab(pdf_context *ctx, pdf_obj **ColorSpace)
     code = pdfi_array_alloc(ctx, 3, &WhitePoint);
     if (code < 0)
         goto cleanupExit;
+    pdfi_countup(WhitePoint);
 
     for (i = 0; i < 3; i++) {
         code = pdfi_object_alloc(ctx, PDF_REAL, 0, (pdf_obj **)&num);
@@ -1417,8 +1451,8 @@ pdfi_image_get_color(pdf_context *ctx, pdf_c_stream *source, pdfi_image_info_t *
                                                               jpx_info->icc_length, jpx_info->comps, &dummy,
                                                               dictkey, pcs);
                 if (code < 0) {
-                    dmprintf2(ctx->memory,
-                              "WARNING JPXDecode: Error setting icc colorspace (offset=%d,len=%d)\n",
+                    code = pdfi_set_error_stop(ctx, code, NULL, E_PDF_JPX_CS_ERROR, "pdfi_image_get_color", NULL);
+                    dbgprintf2("WARNING JPXDecode: Error setting icc colorspace (offset=%d,len=%d)\n",
                               jpx_info->icc_offset, jpx_info->icc_length);
                     goto cleanupExit;
                 }
@@ -1506,7 +1540,7 @@ pdfi_image_get_color(pdf_context *ctx, pdf_c_stream *source, pdfi_image_info_t *
                                   image_info->stream_dict, image_info->page_dict,
                                   pcs, image_info->inline_image);
     if (code < 0) {
-        dmprintf(ctx->memory, "WARNING: Image has unsupported ColorSpace ");
+        dbgprintf("WARNING: Image has unsupported ColorSpace ");
         if (pdfi_type_of(ColorSpace) == PDF_NAME) {
             pdf_name *name = (pdf_name *)ColorSpace;
             char str[100];
@@ -1518,10 +1552,10 @@ pdfi_image_get_color(pdf_context *ctx, pdf_c_stream *source, pdfi_image_info_t *
 
                 memcpy(str, (const char *)name->data, length);
                 str[length] = '\0';
-                dmprintf1(ctx->memory, "NAME:%s\n", str);
+                dbgprintf1("NAME:%s\n", str);
             }
         } else {
-            dmprintf(ctx->memory, "(not a name)\n");
+            dbgmprintf(ctx->memory, "(not a name)\n");
         }
 
         /* If we were trying an enum_cs, attempt to use backup_color_name instead */
@@ -1565,7 +1599,7 @@ pdfi_make_smask_dict(pdf_context *ctx, pdf_stream *image_stream, pdfi_image_info
     pdf_dict *image_dict = NULL, *dict = NULL; /* alias */
 
     if (image_info->SMask != NULL) {
-        dmprintf(ctx->memory, "ERROR SMaskInData when there is already an SMask?\n");
+        code = pdfi_set_error_stop(ctx, code, NULL, E_PDF_SMASK_IN_SMASK, "pdfi_make_smask_dict", NULL);
         goto exit;
     }
 
@@ -1730,7 +1764,7 @@ pdfi_do_image(pdf_context *ctx, pdf_dict *page_dict, pdf_dict *stream_dict, pdf_
         goto cleanupExit;
     /* If there is an OC dictionary, see if we even need to render this */
     if (image_info.OC) {
-        if (!(ctx->device_state.writepdfmarks && ctx->args.preservemarkedcontent && ctx->device_state.WantsOptionalContent)) {
+        if (!(ctx->device_state.writepdfmarks && ctx->device_state.WantsOptionalContent)) {
             if (!pdfi_oc_is_ocg_visible(ctx, image_info.OC))
                 goto cleanupExit;
         }
@@ -1995,6 +2029,8 @@ pdfi_do_image(pdf_context *ctx, pdf_dict *page_dict, pdf_dict *stream_dict, pdf_
         mask_stream = NULL;
         code = pdfi_image_setup_type3x(ctx, &image_info, &t3ximage, &smask_info, comps);
         if (code < 0) {
+            if ((code = pdfi_set_error_stop(ctx, gs_note_error(code), NULL, E_PDF_INVALID_MATTE, "pdfi_do_image", "")) < 0)
+                goto cleanupExitError;
             /* If this got an error, setup as a Type 1 image */
             /* NOTE: I did this error-handling the same as for Type 4 image below.
              * Dunno if it's better to do this or to just abort the whole image?
@@ -2002,6 +2038,7 @@ pdfi_do_image(pdf_context *ctx, pdf_dict *page_dict, pdf_dict *stream_dict, pdf_
             memset(&t1image, 0, sizeof(t1image));
             pim = (gs_pixel_image_t *)&t1image;
             gs_image_t_init_adjust(&t1image, pcs, true);
+            smask_stream = mask_stream = NULL;
         } else {
             pim = (gs_pixel_image_t *)&t3ximage;
         }
@@ -2152,7 +2189,7 @@ pdfi_do_image(pdf_context *ctx, pdf_dict *page_dict, pdf_dict *stream_dict, pdf_
                              comps, image_info.ImageMask);
     if (code < 0) {
         if (ctx->args.pdfdebug)
-            dmprintf1(ctx->memory, "WARNING: pdfi_do_image: error %d from pdfi_render_image\n", code);
+            outprintf(ctx->memory, "WARNING: pdfi_do_image: error %d from pdfi_render_image\n", code);
     }
 
     if (trans_required) {
@@ -2165,6 +2202,7 @@ pdfi_do_image(pdf_context *ctx, pdf_dict *page_dict, pdf_dict *stream_dict, pdf_
     if (code < 0)
         code = pdfi_set_warning_stop(ctx, code, NULL, W_PDF_IMAGE_ERROR, "pdfi_do_image", NULL);
 
+ cleanupExitError:
     if (transparency_group) {
         pdfi_trans_end_isolated_group(ctx);
         if (need_smask_cleanup)
@@ -2204,7 +2242,15 @@ int pdfi_ID(pdf_context *ctx, pdf_dict *stream_dict, pdf_dict *page_dict, pdf_c_
     pdf_stream *image_stream;
 
     if (ctx->text.BlockDepth != 0) {
-        if ((code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_rangecheck), NULL, W_PDF_OPINVALIDINTEXT, "pdfi_ID", NULL)) < 0)
+        ctx->text.BlockDepth = 0;
+        if (ctx->text.TextClip) {
+            gx_device *dev = gs_currentdevice_inline(ctx->pgs);
+
+            ctx->text.TextClip = false;
+            (void)dev_proc(dev, dev_spec_op)(dev, gxdso_hilevel_text_clip, (void *)0, 1);
+        }
+        code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_syntaxerror), NULL, W_PDF_OPINVALIDINTEXT, "pdfi_ID", NULL);
+        if (code < 0)
             return code;
     }
 
@@ -2236,6 +2282,13 @@ error:
 int pdfi_EI(pdf_context *ctx)
 {
     if (ctx->text.BlockDepth != 0) {
+        ctx->text.BlockDepth = 0;
+        if (ctx->text.TextClip) {
+            gx_device *dev = gs_currentdevice_inline(ctx->pgs);
+
+            ctx->text.TextClip = false;
+            (void)dev_proc(dev, dev_spec_op)(dev, gxdso_hilevel_text_clip, (void *)0, 1);
+        }
         return pdfi_set_warning_stop(ctx, gs_note_error(gs_error_rangecheck), NULL, W_PDF_OPINVALIDINTEXT, "pdfi_EI", NULL);
     }
 
@@ -2640,7 +2693,7 @@ int pdfi_do_image_or_form(pdf_context *ctx, pdf_dict *stream_dict,
         if (pdfi_type_of(OCDict) == PDF_DICT) {
             char *label = NULL;
 
-            if (ctx->device_state.writepdfmarks && ctx->args.preservemarkedcontent && ctx->device_state.WantsOptionalContent) {
+            if (ctx->device_state.writepdfmarks && ctx->device_state.WantsOptionalContent) {
                 code = pdfi_pdfmark_dict(ctx, OCDict);
                 if (code < 0) {
                     if ((code = pdfi_set_warning_stop(ctx, code, NULL, W_PDF_DO_OC_FAILED, "pdfi_do_image_or_form", NULL)) < 0) {
@@ -2763,8 +2816,16 @@ int pdfi_Do(pdf_context *ctx, pdf_dict *stream_dict, pdf_dict *page_dict)
     }
 
     if (ctx->text.BlockDepth != 0) {
-        if ((code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_rangecheck), NULL, W_PDF_OPINVALIDINTEXT, "pdfi_Do", NULL)) < 0)
-            goto exit1;
+        ctx->text.BlockDepth = 0;
+        if (ctx->text.TextClip) {
+            gx_device *dev = gs_currentdevice_inline(ctx->pgs);
+
+            ctx->text.TextClip = false;
+            (void)dev_proc(dev, dev_spec_op)(dev, gxdso_hilevel_text_clip, (void *)0, 1);
+        }
+        code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_syntaxerror), NULL, W_PDF_OPINVALIDINTEXT, "pdfi_Do", NULL);
+        if (code < 0)
+            goto exit;
     }
 
     code = pdfi_loop_detector_mark(ctx);

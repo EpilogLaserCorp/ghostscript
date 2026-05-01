@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2025 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -59,10 +59,11 @@ int
 pdf_save_viewer_state(gx_device_pdf *pdev, stream *s)
 {
     const int i = pdev->vgstack_depth;
+    int code = 0;
 
     if (pdev->vgstack_depth >= pdev->vgstack_size) {
         pdf_viewer_state *new_vgstack = (pdf_viewer_state *)gs_alloc_bytes(pdev->pdf_memory,
-            (pdev->vgstack_size + 5) * sizeof(pdf_viewer_state), "increase graphics state stack size");
+            (size_t)(pdev->vgstack_size + 5) * sizeof(pdf_viewer_state), "increase graphics state stack size");
         if (new_vgstack == 0)
             return_error(gs_error_VMerror);
         memset(new_vgstack, 0x00, (pdev->vgstack_size + 5) * sizeof(pdf_viewer_state));
@@ -101,7 +102,7 @@ pdf_save_viewer_state(gx_device_pdf *pdev, stream *s)
     if (pdev->dash_pattern) {
         if (pdev->vgstack[i].dash_pattern)
             gs_free_object(pdev->memory->non_gc_memory, pdev->vgstack[i].dash_pattern, "free gstate copy dash");
-        pdev->vgstack[i].dash_pattern = (float *)gs_alloc_bytes(pdev->memory->non_gc_memory, pdev->dash_pattern_size * sizeof(float), "gstate copy dash");
+        pdev->vgstack[i].dash_pattern = (float *)gs_alloc_bytes(pdev->memory->non_gc_memory, (size_t)pdev->dash_pattern_size * sizeof(float), "gstate copy dash");
         if (pdev->vgstack[i].dash_pattern == NULL)
             return_error(gs_error_VMerror);
         memcpy(pdev->vgstack[i].dash_pattern, pdev->dash_pattern, pdev->dash_pattern_size * sizeof(float));
@@ -111,6 +112,26 @@ pdf_save_viewer_state(gx_device_pdf *pdev, stream *s)
             gs_free_object(pdev->memory->non_gc_memory, pdev->vgstack[i].dash_pattern, "free gstate copy dash");
             pdev->vgstack[i].dash_pattern = 0;
             pdev->vgstack[i].dash_pattern_size = 0;
+        }
+    }
+    if (pdev->clip_path != 0) {
+        if (pdev->vgstack[i].clip_path != 0)
+            gx_path_free(pdev->vgstack[i].clip_path, "pdf clip path");
+
+        pdev->vgstack[i].clip_path = gx_path_alloc(pdev->pdf_memory->non_gc_memory, "pdf clip path");
+        if (pdev->vgstack[i].clip_path == 0)
+            return_error(gs_error_VMerror);
+
+        code = gx_path_copy(pdev->clip_path, pdev->vgstack[i].clip_path);
+        if (code < 0)
+            return code;
+
+        pdev->vgstack[i].clip_path_id = pdev->clip_path_id;
+    } else {
+        if (pdev->vgstack[i].clip_path != 0) {
+            gx_path_free(pdev->vgstack[i].clip_path, "pdf clip path");
+            pdev->vgstack[i].clip_path = 0;
+            pdev->vgstack[i].clip_path_id = 0;
         }
     }
     pdev->vgstack_depth++;
@@ -123,6 +144,8 @@ pdf_save_viewer_state(gx_device_pdf *pdev, stream *s)
 static int
 pdf_load_viewer_state(gx_device_pdf *pdev, pdf_viewer_state *s)
 {
+    int code = 0;
+
     pdev->transfer_ids[0] = s->transfer_ids[0];
     pdev->transfer_ids[1] = s->transfer_ids[1];
     pdev->transfer_ids[2] = s->transfer_ids[2];
@@ -151,7 +174,7 @@ pdf_load_viewer_state(gx_device_pdf *pdev, pdf_viewer_state *s)
     if (s->dash_pattern) {
         if (pdev->dash_pattern)
             gs_free_object(pdev->memory->stable_memory, pdev->dash_pattern, "vector free dash pattern");
-        pdev->dash_pattern = (float *)gs_alloc_bytes(pdev->memory->stable_memory, s->dash_pattern_size * sizeof(float), "vector allocate dash pattern");
+        pdev->dash_pattern = (float *)gs_alloc_bytes(pdev->memory->stable_memory, (size_t)s->dash_pattern_size * sizeof(float), "vector allocate dash pattern");
         if (pdev->dash_pattern == NULL)
             return_error(gs_error_VMerror);
         memcpy(pdev->dash_pattern, s->dash_pattern, sizeof(float)*s->dash_pattern_size);
@@ -163,6 +186,25 @@ pdf_load_viewer_state(gx_device_pdf *pdev, pdf_viewer_state *s)
             pdev->dash_pattern_size = 0;
         }
     }
+
+    if (pdev->clip_path != 0) {
+        gx_path_free(pdev->clip_path, "pdf clip path");
+        pdev->clip_path = 0;
+        pdev->clip_path_id = 0;
+    }
+
+    if (s->clip_path != 0) {
+        pdev->clip_path = gx_path_alloc(pdev->pdf_memory, "pdf clip path");
+        if (pdev->clip_path == 0)
+            return_error(gs_error_VMerror);
+
+        code = gx_path_copy(s->clip_path, pdev->clip_path);
+        if (code < 0)
+            return code;
+
+        pdev->clip_path_id = s->clip_path_id;
+    }
+
     return 0;
 }
 
@@ -170,11 +212,17 @@ pdf_load_viewer_state(gx_device_pdf *pdev, pdf_viewer_state *s)
 int
 pdf_restore_viewer_state(gx_device_pdf *pdev, stream *s)
 {
-    const int i = --pdev->vgstack_depth;
+    int i;
 
-    if (i < pdev->vgstack_bottom || i < 0) {
-        if ((pdev->ObjectFilter & FILTERIMAGE) == 0)
+    if (pdev->vgstack_depth == 0)
+        return 0;
+
+    i = --pdev->vgstack_depth;
+
+    if (i < pdev->vgstack_bottom) {
+        if ((pdev->ObjectFilter & FILTERIMAGE) == 0) {
             return_error(gs_error_unregistered); /* Must not happen. */
+        }
         else
             return 0;
     }
@@ -265,6 +313,8 @@ pdf_viewer_state_from_gs_gstate(gx_device_pdf * pdev,
     gx_hld_save_color(pgs, pdevc, &vs.saved_stroke_color);
     vs.fill_used_process_color = 0;
     vs.stroke_used_process_color = 0;
+    vs.clip_path = 0;
+    vs.clip_path_id = 0;
     /* pdf_load_viewer_state should never fail, as vs has a NULL
      * dash pattern, and therefore will not allocate. */
     (void)pdf_load_viewer_state(pdev, &vs);
@@ -788,7 +838,7 @@ int convert_DeviceN_alternate(gx_device_pdf * pdev, const gs_gstate * pgs, const
         return_error(gs_error_VMerror);
 
     samples = (unsigned int)pow(2, pcs->params.device_n.num_components);
-    data_buff = gs_alloc_bytes(pdev->memory, (unsigned int)pdev->color_info.num_components * samples, "Convert DeviceN");
+    data_buff = gs_alloc_bytes(pdev->memory, (unsigned int)pdev->color_info.num_components * (size_t)samples, "Convert DeviceN");
     if (data_buff == 0) {
         COS_FREE(pca, "convert DeviceN");
         return_error(gs_error_VMerror);
@@ -822,7 +872,7 @@ int convert_DeviceN_alternate(gx_device_pdf * pdev, const gs_gstate * pgs, const
                     cc.paint.values[0] = 1;
                 else {
                     int cascade = 0;
-                    while (cc.paint.values[cascade] == 1 && cascade < samples) {
+                    while (cascade < pcs->params.device_n.num_components && cc.paint.values[cascade] == 1) {
                         cc.paint.values[cascade++] = 0;
                     }
                     cc.paint.values[cascade] = 1;
@@ -1059,6 +1109,9 @@ int convert_DeviceN_alternate(gx_device_pdf * pdev, const gs_gstate * pgs, const
         pcs = pcs_save;
         discard(COS_OBJECT_VALUE(&value, pca));
         pca1 = cos_array_alloc(pdev, "pdf_color_space");
+        if (pca1 == NULL)
+            return_error(gs_error_VMerror);
+
         code = pdf_indexed_color_space(pdev, pgs, &value, pcs, pca1, (cos_value_t *)&value);
         pca = pca1;
 
@@ -1354,6 +1407,9 @@ int convert_separation_alternate(gx_device_pdf * pdev, const gs_gstate * pgs, co
 
         discard(COS_OBJECT_VALUE(&value, pca));
         pca1 = cos_array_alloc(pdev, "pdf_color_space");
+        if (pca1 == NULL)
+            return_error(gs_error_VMerror);
+
         code = pdf_indexed_color_space(pdev, pgs, &value, pcs, pca1, (cos_value_t *)&value);
         pca = pca1;
 
@@ -1422,7 +1478,7 @@ rescale_cie_color(gs_range_t *ranges, int num_colorants,
 static int check_colorants_for_pdfx4(const gs_color_space *pcs)
 {
     int comp, all_present = 1;
-    char *ink, *Colorant;
+    char *ink;
     gs_device_n_colorant *colorant = NULL;
 
     if (pcs->params.device_n.colorants == NULL) {
@@ -3007,11 +3063,23 @@ pdf_update_alpha(gx_device_pdf *pdev, const gs_gstate *pgs,
         char buf[20];
 
         if (pgs->soft_mask_id == 0) {
+            char buf[256];
+
             code = pdf_open_contents(pdev, PDF_IN_STREAM);
             if (code < 0)
                 return code;
             if (pdev->vgstack_depth > pdev->vgstack_bottom) {
                 code = pdf_restore_viewer_state(pdev, pdev->strm);
+                if (code < 0)
+                    return code;
+            }
+            if (pdev->state.soft_mask_id != 0) {
+                gs_snprintf(buf, sizeof(buf), "/None");
+                code = pdf_open_gstate(pdev, ppres);
+                if (code < 0)
+                    return code;
+                code = cos_dict_put_c_key_string(resource_dict(*ppres),
+                            "/SMask", (byte *)buf, strlen(buf));
                 if (code < 0)
                     return code;
             }
@@ -3023,9 +3091,6 @@ pdf_update_alpha(gx_device_pdf *pdev, const gs_gstate *pgs,
                 return code;
             code = cos_dict_put_c_key_string(resource_dict(*ppres),
                         "/SMask", (byte *)buf, strlen(buf));
-            if (code < 0)
-                return code;
-            code = pdf_save_viewer_state(pdev, pdev->strm);
             if (code < 0)
                 return code;
         }
@@ -3510,7 +3575,7 @@ pdf_prepare_fill_stroke(gx_device_pdf *pdev, const gs_gstate *pgs, bool for_text
 
     if (pdev->context != PDF_IN_STREAM) {
         code = pdf_try_prepare_fill_stroke(pdev, pgs, for_text);
-        if (code != gs_error_interrupt) /* See pdf_open_gstate */
+        if (code < 0 && code != gs_error_interrupt) /* See pdf_open_gstate */
             return code;
         code = pdf_open_contents(pdev, PDF_IN_STREAM);
         if (code < 0)

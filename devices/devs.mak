@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2024 Artifex Software, Inc.
+# Copyright (C) 2001-2026 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -743,6 +743,7 @@ $(DD)pdfwrite.dev : $(ECHOGS_XE) $(pdfwrite_)\
  $(GLD)cmyklib.dev $(GLD)cfe.dev $(GLD)lzwe.dev\
  $(GLD)rle.dev $(GLD)sdcte.dev $(GLD)sdeparam.dev $(GLD)smd5.dev\
  $(GLD)szlibe.dev $(GLD)psdf.dev $(GLD)gsagl.dev $(GLD)sarc4.dev $(DD)pdtext.dev $(libocr_dev) $(GDEV)\
+ $(GLD)sbrotlie.dev \
  $(DEVS_MAK) $(MAKEDIRS)
 	$(SETDEV2) $(DD)pdfwrite $(pdfwrite1_)
 	$(ADDMOD) $(DD)pdfwrite $(pdfwrite2_)
@@ -761,6 +762,7 @@ $(DD)pdfwrite.dev : $(ECHOGS_XE) $(pdfwrite_)\
 	$(ADDMOD) $(DD)pdfwrite -include $(GLD)psdf $(GLD)gsagl
 	$(ADDMOD) $(DD)pdfwrite -include $(DD)pdtext
 	$(ADDMOD) $(DD)pdfwrite $(ocr_i_)
+	$(ADDMOD) $(DD)pdfwrite $(GLD)sbrotlie
 
 gdevpdfb_h=$(DEVVECSRC)gdevpdfb.h
 gdevpdfc_h=$(DEVVECSRC)gdevpdfc.h
@@ -1259,6 +1261,9 @@ $(DD)psdcmyktags.dev : $(psd_) $(GLD)page.dev $(GDEV) $(DEVS_MAK) $(MAKEDIRS)
 
 $(DD)psdrgb16.dev : $(DEVS_MAK) $(psd_) $(GLD)page.dev $(GDEV)
 	$(SETDEV) $(DD)psdrgb16 $(psd_)
+
+$(DD)psdrgbtags16.dev : $(DEVS_MAK) $(psd_) $(GLD)page.dev $(GDEV)
+	$(SETDEV) $(DD)psdrgbtags16 $(psd_)
 
 $(DD)psdcmyk16.dev : $(DEVS_MAK) $(psd_) $(GLD)page.dev $(GDEV)
 	$(SETDEV) $(DD)psdcmyk16 $(psd_)
@@ -1959,25 +1964,30 @@ $(DEVOBJ)gdevcmykog.$(OBJ) : $(DEVSRC)gdevcmykog.c $(GDEV) \
 
 gdevpdfimg_h=$(DEVSRC)gdevpdfimg.h
 
-$(DD)pdfimage8.dev : $(DEVOBJ)gdevpdfimg.$(OBJ) $(GLD)page.dev $(GDEV) $(DEVS_MAK) $(MAKEDIRS)
+$(DD)pdfimage8.dev : $(DEVOBJ)gdevpdfimg.$(OBJ) $(GLD)page.dev $(GLD)sbrotlie.dev $(GDEV) $(DEVS_MAK) $(MAKEDIRS)
 	$(SETPDEV2) $(DD)pdfimage8 $(DEVOBJ)gdevpdfimg.$(OBJ)
 	$(ADDMOD) $(DD)pdfimage8 -include $(GLD)page
+	$(ADDMOD) $(DD)pdfimage8 -include $(GLD)sbrotlie
 
-$(DD)pdfimage24.dev : $(DEVOBJ)gdevpdfimg.$(OBJ) $(GLD)page.dev $(GDEV) $(DEVS_MAK) $(MAKEDIRS)
+$(DD)pdfimage24.dev : $(DEVOBJ)gdevpdfimg.$(OBJ) $(GLD)page.dev $(GLD)sbrotlie.dev $(GDEV) $(DEVS_MAK) $(MAKEDIRS)
 	$(SETPDEV2) $(DD)pdfimage24 $(DEVOBJ)gdevpdfimg.$(OBJ)
 	$(ADDMOD) $(DD)pdfimage24 -include $(GLD)page
+	$(ADDMOD) $(DD)pdfimage24 -include $(GLD)sbrotlie
 
-$(DD)pdfimage32.dev : $(DEVOBJ)gdevpdfimg.$(OBJ) $(GLD)page.dev $(GDEV) $(DEVS_MAK) $(MAKEDIRS)
+$(DD)pdfimage32.dev : $(DEVOBJ)gdevpdfimg.$(OBJ) $(GLD)page.dev $(GLD)sbrotlie.dev $(GDEV) $(DEVS_MAK) $(MAKEDIRS)
 	$(SETPDEV2) $(DD)pdfimage32 $(DEVOBJ)gdevpdfimg.$(OBJ)
 	$(ADDMOD) $(DD)pdfimage32 -include $(GLD)page
+	$(ADDMOD) $(DD)pdfimage32 -include $(GLD)sbrotlie
 
-$(DD)PCLm.dev : $(DEVOBJ)gdevpdfimg.$(OBJ) $(GLD)page.dev $(GDEV) $(DEVS_MAK) $(MAKEDIRS)
+$(DD)PCLm.dev : $(DEVOBJ)gdevpdfimg.$(OBJ) $(GLD)page.dev $(GLD)sbrotlie.dev $(GDEV) $(DEVS_MAK) $(MAKEDIRS)
 	$(SETPDEV2) $(DD)PCLm $(DEVOBJ)gdevpdfimg.$(OBJ)
 	$(ADDMOD) $(DD)PCLm -include $(GLD)page
+	$(ADDMOD) $(DD)PCLm -include $(GLD)sbrotlie
 
-$(DD)PCLm8.dev : $(DEVOBJ)gdevpdfimg.$(OBJ) $(GLD)page.dev $(GDEV) $(DEVS_MAK) $(MAKEDIRS)
+$(DD)PCLm8.dev : $(DEVOBJ)gdevpdfimg.$(OBJ) $(GLD)page.dev $(GLD)sbrotlie.dev $(GDEV) $(DEVS_MAK) $(MAKEDIRS)
 	$(SETPDEV2) $(DD)PCLm8 $(DEVOBJ)gdevpdfimg.$(OBJ)
 	$(ADDMOD) $(DD)PCLm8 -include $(GLD)page
+	$(ADDMOD) $(DD)PCLm8 -include $(GLD)sbrotlie
 
 $(DEVOBJ)gdevpdfimg.$(OBJ) : $(DEVSRC)gdevpdfimg.c $(AK) $(gdevkrnlsclass_h) \
   $(DEVS_MAK) $(arch_h) $(stdint__h) $(gdevprn_h) $(gxdownscale_h) \

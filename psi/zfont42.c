@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -30,6 +30,7 @@
 #include "ichar1.h"
 #include "iname.h"
 #include "store.h"
+#include "ipacked.h"
 
 /* Forward references */
 static int z42_string_proc(gs_font_type42 *, ulong, uint, const byte **);
@@ -136,6 +137,8 @@ font_string_array_param(const gs_memory_t *mem, os_ptr op, const char *kstr, ref
     if (dict_find_string(op, kstr, &pvsa) <= 0)
         return_error(gs_error_invalidfont);
     *psa = *pvsa;
+    if (!r_has_type(pvsa, t_array))
+        return_error(gs_error_typecheck);
     /*
      * We only check the first element of the array now, as a sanity test;
      * elements are checked as needed by string_array_access_proc.
@@ -349,18 +352,25 @@ z42_gdir_enumerate_glyph(gs_font *font, int *pindex,
     if (glyph_space == GLYPH_SPACE_INDEX) {
         pgdict = &pfont_data(font)->u.type42.GlyphDirectory;
         if (!r_has_type(pgdict, t_dictionary)) {
+            const ref_packed *packed = pgdict->value.packed;
             ref gdef;
+            uint i;
 
-            for (;; (*pindex)++) {
-                if (array_get(font->memory, pgdict, (long)*pindex, &gdef) < 0) {
-                    *pindex = 0;
-                    return 0;
-                }
+            /* Advance to *pindex */
+            for (i = 0; i < (uint)*pindex; i++)
+                packed = packed_next(packed);
+
+            /* Scan forward for non-null */
+            for (; (uint)*pindex < r_size(pgdict); (*pindex)++) {
+                packed_get(font->memory, packed, &gdef);
+                packed = packed_next(packed);
                 if (!r_has_type(&gdef, t_null)) {
                     *pglyph = GS_MIN_GLYPH_INDEX + (*pindex)++;
                     return 0;
                 }
             }
+            *pindex = 0;
+            return 0;
         }
     } else
         pgdict = &pfont_data(font)->CharStrings;

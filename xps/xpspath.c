@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -28,9 +28,13 @@ xps_get_real_params(char *s, int num, float *x)
     if (s != NULL && *s != 0) {
         while (*s)
         {
+            char *s0;
             while (*s == 0x0d || *s == '\t' || *s == ' ' || *s == 0x0a)
                 s++;
+            s0 = s;
             x[k] = (float)strtod(s, &s);
+            if (s == s0)
+                return NULL; /* Failed to read */
             while (*s == 0x0d || *s == '\t' || *s == ' ' || *s == 0x0a)
                 s++;
             if (*s == ',')
@@ -263,14 +267,14 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
     float smooth_x, smooth_y; /* saved cubic bezier control point for smooth curves */
     int reset_smooth;
 
-    args = xps_alloc(ctx, sizeof(char*) * (strlen(geom) + 1));
+    args = xps_alloc(ctx, (size_t)sizeof(char*) * (strlen(geom) + 1));
     if (!args) {
         gs_throw(gs_error_VMerror, "out of memory: args.\n");
         return;
     }
     pargs = args;
 
-    //dmprintf1(ctx->memory, "new path (%.70s)\n", geom);
+    /*dmprintf1(ctx->memory, "new path (%.70s)\n", geom); */
     gs_newpath(ctx->pgs);
 
     while (*s)
@@ -332,7 +336,7 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
             if (i + 2 <= n)
             {
                 gs_moveto(ctx->pgs, atof(args[i]), atof(args[i+1]));
-                //dmprintf2(ctx->memory, "moveto %g %g\n", atof(args[i]), atof(args[i+1]));
+                /*dmprintf2(ctx->memory, "moveto %g %g\n", atof(args[i]), atof(args[i+1])); */
                 i += 2;
             }
             break;
@@ -340,7 +344,7 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
             if (i + 2 <= n)
             {
                 gs_rmoveto(ctx->pgs, atof(args[i]), atof(args[i+1]));
-                //dmprintf2(ctx->memory, "rmoveto %g %g\n", atof(args[i]), atof(args[i+1]));
+                /*dmprintf2(ctx->memory, "rmoveto %g %g\n", atof(args[i]), atof(args[i+1])); */
                 i += 2;
             }
             break;
@@ -349,7 +353,7 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
             if (i + 2 <= n)
             {
                 gs_lineto(ctx->pgs, atof(args[i]), atof(args[i+1]));
-                //dmprintf2(ctx->memory, "lineto %g %g\n", atof(args[i]), atof(args[i+1]));
+                /*dmprintf2(ctx->memory, "lineto %g %g\n", atof(args[i]), atof(args[i+1])); */
                 i += 2;
             }
             break;
@@ -357,7 +361,7 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
             if (i + 2 <= n)
             {
                 gs_rlineto(ctx->pgs, atof(args[i]), atof(args[i+1]));
-                //dmprintf2(ctx->memory, "rlineto %g %g\n", atof(args[i]), atof(args[i+1]));
+                /*dmprintf2(ctx->memory, "rlineto %g %g\n", atof(args[i]), atof(args[i+1])); */
                 i += 2;
             }
             break;
@@ -367,7 +371,7 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
             {
                 gs_currentpoint(ctx->pgs, &pt);
                 gs_lineto(ctx->pgs, atof(args[i]), pt.y);
-                //dmprintf1(ctx->memory, "hlineto %g\n", atof(args[i]));
+                /*dmprintf1(ctx->memory, "hlineto %g\n", atof(args[i])); */
                 i += 1;
             }
             break;
@@ -375,7 +379,7 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
             if (i + 1 <= n)
             {
                 gs_rlineto(ctx->pgs, atof(args[i]), 0.0);
-                //dmprintf1(ctx->memory, "rhlineto %g\n", atof(args[i]));
+                /*dmprintf1(ctx->memory, "rhlineto %g\n", atof(args[i])); */
                 i += 1;
             }
             break;
@@ -385,7 +389,7 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
             {
                 gs_currentpoint(ctx->pgs, &pt);
                 gs_lineto(ctx->pgs, pt.x, atof(args[i]));
-                //dmprintf1(ctx->memory, "vlineto %g\n", atof(args[i]));
+                /*dmprintf1(ctx->memory, "vlineto %g\n", atof(args[i])); */
                 i += 1;
             }
             break;
@@ -393,7 +397,7 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
             if (i + 1 <= n)
             {
                 gs_rlineto(ctx->pgs, 0.0, atof(args[i]));
-                //dmprintf1(ctx->memory, "rvlineto %g\n", atof(args[i]));
+                /*dmprintf1(ctx->memory, "rvlineto %g\n", atof(args[i])); */
                 i += 1;
             }
             break;
@@ -441,7 +445,7 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
                 y1 = atof(args[i+1]);
                 x2 = atof(args[i+2]);
                 y2 = atof(args[i+3]);
-                //dmprintf2(ctx->memory, "smooth %g %g\n", smooth_x, smooth_y);
+                /*dmprintf2(ctx->memory, "smooth %g %g\n", smooth_x, smooth_y); */
                 gs_curveto(ctx->pgs, pt.x + smooth_x, pt.y + smooth_y, x1, y1, x2, y2);
                 i += 4;
                 reset_smooth = 0;
@@ -458,7 +462,7 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
                 y1 = atof(args[i+1]) + pt.y;
                 x2 = atof(args[i+2]) + pt.x;
                 y2 = atof(args[i+3]) + pt.y;
-                //dmprintf2(ctx->memory, "smooth %g %g\n", smooth_x, smooth_y);
+                /*dmprintf2(ctx->memory, "smooth %g %g\n", smooth_x, smooth_y); */
                 gs_curveto(ctx->pgs, pt.x + smooth_x, pt.y + smooth_y, x1, y1, x2, y2);
                 i += 4;
                 reset_smooth = 0;
@@ -475,7 +479,7 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
                 y1 = atof(args[i+1]);
                 x2 = atof(args[i+2]);
                 y2 = atof(args[i+3]);
-                //dmprintf4(ctx->memory, "conicto %g %g %g %g\n", x1, y1, x2, y2);
+                /*dmprintf4(ctx->memory, "conicto %g %g %g %g\n", x1, y1, x2, y2); */
                 gs_curveto(ctx->pgs,
                         (pt.x + 2 * x1) / 3, (pt.y + 2 * y1) / 3,
                         (x2 + 2 * x1) / 3, (y2 + 2 * y1) / 3,
@@ -491,7 +495,7 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
                 y1 = atof(args[i+1]) + pt.y;
                 x2 = atof(args[i+2]) + pt.x;
                 y2 = atof(args[i+3]) + pt.y;
-                //dmprintf4(ctx->memory, "conicto %g %g %g %g\n", x1, y1, x2, y2);
+                /*dmprintf4(ctx->memory, "conicto %g %g %g %g\n", x1, y1, x2, y2); */
                 gs_curveto(ctx->pgs,
                         (pt.x + 2 * x1) / 3, (pt.y + 2 * y1) / 3,
                         (x2 + 2 * x1) / 3, (y2 + 2 * y1) / 3,
@@ -525,7 +529,7 @@ xps_parse_abbreviated_geometry(xps_context_t *ctx, char *geom)
         case 'Z':
         case 'z':
             gs_closepath(ctx->pgs);
-            //dmputs(ctx->memory, "closepath\n");
+            /*dmputs(ctx->memory, "closepath\n"); */
             break;
 
         default:
@@ -618,6 +622,10 @@ xps_parse_poly_quadratic_bezier_segment(xps_context_t *ctx, xps_item_t *root, in
     {
         while (*s == ' ') s++;
         s = xps_get_point(s, &x[n], &y[n]);
+        if (s == NULL) {
+            gs_warn("PolyQuadraticBezierSegment element has malformed points");
+            return;
+        }
         n ++;
         if (n == 2)
         {
@@ -666,6 +674,10 @@ xps_parse_poly_bezier_segment(xps_context_t *ctx, xps_item_t *root, int stroking
     {
         while (*s == ' ') s++;
         s = xps_get_point(s, &x[n], &y[n]);
+        if (s == NULL) {
+            gs_warn("PolyBezierSegment element has malformed points");
+            return;
+        }
         n ++;
         if (n == 3)
         {
@@ -703,6 +715,10 @@ xps_parse_poly_line_segment(xps_context_t *ctx, xps_item_t *root, int stroking, 
     while (*s != 0)
     {
         s = xps_get_real_params(s, 2, &xy[0]);
+        if (s == NULL) {
+            gs_warn("PolyLineSegment element has malformed points");
+            return;
+        }
         if (stroking && !is_stroked)
             gs_moveto(ctx->pgs, xy[0], xy[1]);
         else
@@ -1236,7 +1252,7 @@ xps_parse_path(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, xps_ite
                         dash_mem_count = dash_mem_count * 2;
                     else
                         dash_mem_count = dash_mem_count + ADDITIVE_DASH_SIZE;
-                    dash_array = (float*) xps_realloc(ctx, dash_array, sizeof(float) * dash_mem_count);
+                    dash_array = (float*) xps_realloc(ctx, dash_array, (size_t)sizeof(float) * dash_mem_count);
                     if (dash_array == NULL)
                     {
                         gs_throw(gs_error_VMerror, "out of memory: dash_array realloc.\n");
@@ -1287,7 +1303,7 @@ xps_parse_path(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, xps_ite
         xps_clip(ctx);
     }
 
-#if 0 // XXX
+#if 0 /* XXX */
     if (opacity_att || opacity_mask_tag)
     {
         /* clip the bounds with the actual path */

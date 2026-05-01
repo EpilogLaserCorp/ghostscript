@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -162,6 +162,9 @@ gs_main_init_with_args01(gs_main_instance * minst, int argc, char *argv[])
         if (code < 0) {         /* key present, value doesn't fit */
             char *path = (char *)gs_alloc_bytes(minst->heap, len, "GS_LIB");
 
+            if (path == NULL)
+                return_error(gs_error_VMerror);
+
             gp_getenv(GS_LIB, path, &len);      /* can't fail */
             minst->lib_path.env = path;
         }
@@ -170,13 +173,13 @@ gs_main_init_with_args01(gs_main_instance * minst, int argc, char *argv[])
     minst->lib_path.final = gs_lib_default_path;
     code = gs_main_set_lib_paths(minst);
     if (code < 0)
-        return code;
+        goto error;
     /* Prescan the command line for --help and --version. */
     {
         int i;
         bool helping = false;
 
-        for (i = 1; i < argc; ++i)
+        for (i = 1; i < argc; ++i) {
             if (!arg_strcmp(&args, argv[i], "--")) {
                 /* A PostScript program will be interpreting all the */
                 /* remaining switches, so stop scanning. */
@@ -193,8 +196,11 @@ gs_main_init_with_args01(gs_main_instance * minst, int argc, char *argv[])
                 puts(minst->heap, "");  /* \n */
                 helping = true;
             }
-        if (helping)
-            return gs_error_Info;
+        }
+        if (helping) {
+            code = gs_note_error(gs_error_Info);
+            goto error;
+        }
     }
     /* Execute files named in the command line, */
     /* processing options along the way. */
@@ -210,20 +216,28 @@ gs_main_init_with_args01(gs_main_instance * minst, int argc, char *argv[])
             char *opts =
             (char *)gs_alloc_bytes(minst->heap, len, "GS_OPTIONS");
 
+            if (opts == NULL) {
+                code = gs_note_error(gs_error_VMerror);
+                    goto error;
+            }
             gp_getenv(GS_OPTIONS, opts, &len);  /* can't fail */
-            if (arg_push_decoded_memory_string(&args, opts, false, true, minst->heap))
-                return gs_error_Fatal;
+            if (arg_push_decoded_memory_string(&args, opts, false, true, minst->heap)) {
+                if (opts != NULL)
+                    gs_free_object(minst->heap, opts, "error in gs_main_init_with_args");
+                code = gs_note_error(gs_error_Fatal);
+                goto error;
+            }
         }
     }
     while ((code = arg_next(&args, (const char **)&arg, minst->heap)) > 0) {
         code = gs_lib_ctx_stash_sanitized_arg(minst->heap->gs_lib_ctx, arg);
         if (code < 0)
-            return code;
+            goto error;
         switch (*arg) {
             case '-':
                 code = swproc(minst, arg, &args);
                 if (code < 0)
-                    return code;
+                    goto error;
                 if (code > 0)
                     outprintf(minst->heap, "Unknown switch %s - ignoring\n", arg);
                 if (gs_debug[':'] && !have_dumped_args) {
@@ -242,7 +256,7 @@ gs_main_init_with_args01(gs_main_instance * minst, int argc, char *argv[])
                 /* default is to treat this as a file name to be run */
                 code = argproc(minst, arg);
                 if (code < 0)
-                    return code;
+                    goto error;
                 if (minst->saved_pages_test_mode) {
                     gx_device *pdev;
                     int ret;
@@ -259,14 +273,21 @@ gs_main_init_with_args01(gs_main_instance * minst, int argc, char *argv[])
                     } while ((ret > 0) && (child_dev_data.n != 0));
                     if ((code = gx_saved_pages_param_process((gx_device_printer *)pdev,
                                (byte *)"print normal flush", 18)) < 0)
-                        return code;
+                        goto error;
                     if (code > 0)
                         if ((code = gs_erasepage(minst->i_ctx_p->pgs)) < 0)
-                            return code;
+                            goto error;
                 }
         }
     }
 
+    return code;
+
+error:
+    if (minst->lib_path.env != NULL) {
+        gs_free_object(minst->heap, (char *)minst->lib_path.env, "error in gs_main_init_with_args");
+        minst->lib_path.env = NULL;
+    }
     return code;
 }
 
@@ -324,7 +345,7 @@ do_arg_match(const char **arg, const char *match, size_t match_len)
     if (strncmp(s, match, match_len) != 0)
         return 0;
     s += match_len;
-    if (*s == '=')
+    if (*s == '=' || *s == '#')
         *arg = ++s;
     else if (*s != 0)
         return 0;
@@ -405,7 +426,7 @@ run_stdin:
                     if (minst->saved_pages_initial_arg == NULL) {
                         /* Tuck the parameters away for later when init2 is done (usually "begin") */
                         minst->saved_pages_initial_arg = (char *)gs_alloc_bytes(minst->heap,
-                                                                                1+strlen((char *)arg+12),
+                                                                                1+strlen((char *)arg+(size_t)12),
                                                                                "GS_OPTIONS");
                         if (minst->saved_pages_initial_arg != NULL) {
                             strcpy(minst->saved_pages_initial_arg,(char *)arg+12);
@@ -708,9 +729,9 @@ run_stdin:
             break;
         case 'N':               /* set size of name table */
             {
-                unsigned nsize = 0;
+                unsigned int nsize = 0;
 
-                (void)sscanf((const char *)arg, "%d", &nsize);
+                (void)sscanf((const char *)arg, "%ud", &nsize);
                 if (nsize < 2 || nsize > (max_uint >> 10)) {
                     outprintf(minst->heap, "-N must be between 2 and %d\n", (int)(max_uint >> 10));
                     return gs_error_Fatal;
@@ -956,7 +977,7 @@ run_stdin:
                 /* Slightly uncomfortable calling back up to a higher
                  * level, but we'll live with it. */
                 code = gsapi_set_param(gs_lib_ctx_get_interp_instance(minst->heap),
-                                       adef, eqp, gs_spt_parsed);
+                                       adef, eqp, gs_spt_parsed | gs_spt_more_to_come);
                 if (code < 0) {
                     arg_free((char *)adef, minst->heap);
                     return code;
@@ -1114,6 +1135,9 @@ runarg(gs_main_instance *minst,
     int len = strlen(pre) + esc_strlen(arg) + strlen(post) + 1;
     int code;
     char *line;
+
+    if (len < 0)
+        return gs_note_error(gs_error_rangecheck);
 
     if (options & runInit) {
         code = gs_main_init2(minst);    /* Finish initialization */
@@ -1367,7 +1391,7 @@ print_devices(const gs_main_instance *minst)
         for (i = 0; gs_getdevice(i) != 0; i++)
             ;
         ndev = (size_t)i;
-        names = (const char **)gs_alloc_bytes(minst->heap, ndev * sizeof(const char*), "print_devices");
+        names = (const char **)gs_alloc_bytes(minst->heap, (size_t)ndev * sizeof(const char*), "print_devices");
         if (names == (const char **)NULL) { /* old-style unsorted device list */
             for (i = 0; (pdev = gs_getdevice(i)) != 0; i++) {
                 const char *dname = gs_devicename(pdev);

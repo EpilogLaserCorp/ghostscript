@@ -34,7 +34,7 @@
 % Interpreter library version number
 % NOTE: the interpreter code requires that the first non-comment token
 % in this file be an integer, and that it match the compiled-in version!
-10051
+10070
 
 % Check the interpreter revision.
 dup revision ne
@@ -218,10 +218,6 @@ currentdict /SHORTERRORS known   /SHORTERRORS exch def
 currentdict /TTYPAUSE known   /TTYPAUSE exch def
 currentdict /WRITESYSTEMDICT known   /WRITESYSTEMDICT exch def
 currentdict /RENDERTTNOTDEF known /RENDERTTNOTDEF exch def
-currentdict /SCANCONVERTERTYPE known
-{
-  currentdict /SCANCONVERTERTYPE get .setscanconverter
-} if
 
 currentdict /EPSFitPage known { /PSFitPage //true def } if
 % This is a "convenience" option that sets a combination of EPSFitPage, PDFFitPage and PSFitPage
@@ -264,7 +260,7 @@ currentdict /DEVICE known not
 % This avoids allocating space for the skipped procedures.
 % We can't use readline, because that imposes a line length limit.
 /.skipeof	% <string> .skipeof -
- { currentfile exch 1 exch .subfiledecode flushfile
+ { currentfile exch 1 exch /SubFileDecode filter flushfile
  } .forcebind def
 
 % Define procedures to assist users who don't read the documentation.
@@ -894,8 +890,6 @@ currentdict /.makeinternaldict .undef
            { /undefinedfilename signalerror }
           ifelse
         } .internalbind def
-/selectdevice
-        { finddevice setdevice .setdefaultscreen } .internalbind odef
 /signalerror		% <object> <errorname> signalerror -
         { /errordict .systemvar exch get exec } .internalbind def
 /signaloperror {	% <object> <errorname> signaloperror -
@@ -2319,8 +2313,11 @@ gsave
 <1b45> cvn { } def		% PJL reset prologue (ESC E)
 <1b451b> cvn <1b> cvn load def	% PJL reset epilogue (ESC E + UEL)
 (\001M) cvn			% TBCP initiator
- { currentfile /TBCPDecode filter cvx exec
- } .internalbind def
+ { (\n!! ERROR !!\n) print
+ (In-job PJL tried to select TBCP communications Protocol which is no longer supported.\n) print
+ (You must recreate the input file without requiring TBCP support.\n\n) print
+ /TBCPDecode /filter /undefined signalerror.
+ } odef
 /@PJL				% H-P job control
  {
    % Windows 2000 driver includes PJL into %%BeginFeature block.
@@ -2365,20 +2362,6 @@ readonly def
   //systemdict /SAFERUndefinePostScriptOperators .forceundef
 } .forcebind def % must be bound and hidden for .forceundef
 
-/tempfilepaths
-[
-  (TMPDIR) getenv not
-  {
-    (TEMP) getenv not
-    {
-      (TMP) getenv not
-      {
-        (/temp) (/tmp)
-      } if
-    } if
-  } if
-] def
-
 /.lockfileaccess {
   .currentpathcontrolstate
   {
@@ -2390,7 +2373,6 @@ readonly def
   }
   {
     [
-      //tempfilepaths (*) .generate_dir_list_templates
       /FONTPATH .systemvar (*) .generate_dir_list_templates
       /level2dict where {
           pop
@@ -2404,14 +2386,6 @@ readonly def
       } if
     ] {/PermitFileReading exch .addcontrolpath} forall
 
-    [
-      //tempfilepaths (*) .generate_dir_list_templates
-    ] {/PermitFileWriting exch .addcontrolpath} forall
-
-    [
-      //tempfilepaths (*) .generate_dir_list_templates
-    ] {/PermitFileControl exch .addcontrolpath} forall
-
     .activatepathcontrol
   } ifelse
 } .internalbind def
@@ -2421,7 +2395,6 @@ readonly def
     <<
       /PermitFileReading [
         currentuserparams /PermitFileReading get aload pop
-        //tempfilepaths (*) .generate_dir_list_templates
         /FONTPATH .systemvar (*) .generate_dir_list_templates
           % Library files :
         /LIBPATH  .systemvar (*) .generate_dir_list_templates
@@ -2441,21 +2414,12 @@ readonly def
           .generate_dir_list_templates
         } if
       ]
-      /PermitFileWriting [
-          currentuserparams /PermitFileWriting get aload pop
-          //tempfilepaths (*) .generate_dir_list_templates
-      ]
-      /PermitFileControl [
-          currentuserparams /PermitFileControl get aload pop
-          //tempfilepaths (*) .generate_dir_list_templates
-      ]
       /LockFilePermissions //true
     >> setuserparams
   }
   if
 } .forcebind def
 
-currentdict /tempfilepaths undef
 
 %% --- These are documented extensions ---
 /.locksafe {
@@ -2549,9 +2513,6 @@ currentdict /.locksafeglobal .undef
 
 /UndefinePostScriptFilters {
   [
-   /BCPEncode /TBCPEncode /PNGPredictorEncode /PNGPredictorDecode /PixelDifferenceDecode /PixelDifferenceEncode
-   /zlibEncode /zlibDecode /PWGDecode /eexecEncode /ArcfourEncode /PSStringEncode /BCPDecode
-   /OLDPDF where {/OLDPDF get not {/SHA256Encode /MD5Encode /AESDecode /JPXDecode /JBIG2Decode /ArcfourDecode /.EOFDecode} if} if
   ]
   {filterdict exch undef} forall
 } .forcebind def
@@ -2567,7 +2528,7 @@ currentdict /.locksafeglobal .undef
   /.setdefaultmatrix /.updatematrices /.isprocfilter /.unread /.psstringencode
   /.buildsampledfunction /.isencapfunction /.currentaccuratecurves /.currentcurvejoin /.currentdashadapt /.currentdotlength
   /.currentlimitclamp /.dotorientation /.setaccuratecurves /.setcurvejoin /.setdashadapt /.setdotorientation
-  /.setlimitclamp /.currentscreenlevels /.dashpath /.pathbbox /.identeq /.identne /.tokenexec /.forgetsave /.pantonecallback
+  /.setlimitclamp /.currentscreenlevels /.dashpath /.pathbbox /.identeq /.identne /.tokenexec /.pantonecallback
 
   % Used by our own test suite files
   %/.setdotlength % Bug687720.ps
@@ -2589,7 +2550,7 @@ currentdict /.locksafeglobal .undef
   /.setpagedevice /.currentpagedevice /.knownundef /.setmaxlength /.rectappend /.initialize_dsc_parser /.parse_dsc_comments
   /.fillCIDMap /.fillIdentityCIDMap /.buildcmap /.filenamelistseparator /.libfile /.getfilename
   /.file_name_combine /.file_name_is_absolute /.file_name_separator /.file_name_directory_separator /.file_name_current /.filename
-  /.peekstring /.writecvp /.subfiledecode /.setupUnicodeDecoder /.jbig2makeglobalctx /.registerfont /.parsecff
+  /.peekstring /.writecvp /.setupUnicodeDecoder /.jbig2makeglobalctx /.registerfont /.parsecff
   /.getshowoperator /.getnativefonts /.beginform /.endform /.get_form_id /.repeatform /.reusablestream /.rsdparams
   /.buildfunction /.sethpglpathmode /.currenthpglpathmode
   /.currenthalftone /.sethalftone5 /.image1 /.imagemask1 /.image3 /.image4
@@ -2600,7 +2561,7 @@ currentdict /.locksafeglobal .undef
   /.shfill /.argindex /.bytestring /.namestring /.stringbreak /.stringmatch /.globalvmarray /.globalvmdict /.globalvmpackedarray /.globalvmstring
   /.localvmarray /.localvmdict /.localvmpackedarray /.localvmstring /.systemvmarray /.systemvmdict /.systemvmpackedarray /.systemvmstring /.systemvmfile /.systemvmlibfile
   /.systemvmSFD /.settrapparams /.currentsystemparams /.currentuserparams /.getsystemparam /.getuserparam /.setsystemparams /.setuserparams
-  /.checkpassword /.locale_to_utf8 /.currentglobal /.gcheck /.imagepath /.currentoutputdevice
+  /.checkpassword /.currentglobal /.gcheck /.imagepath /.currentoutputdevice
   /.type /.writecvs /.setSMask /.currentSMask /.needinput /.countexecstack /.execstack
   /filterdict /.cidfonttypes /.colorrenderingtypes
   /.formtypes /.halftonetypes /.imagetypes /.imagemasktypes
@@ -2645,6 +2606,7 @@ currentdict /.locksafeglobal .undef
   /.beginpage /.endpage
   /.getpath
   /.confirm /.confirmread
+  /.tempfile
 
   % Used by a free user in the Library of Congress. Apparently this is used to
   % draw a partial page, which is then filled in by the results of a barcode
@@ -2665,7 +2627,7 @@ currentdict /.locksafeglobal .undef
   %/.buildfont32 /.buildfont42 /.swapcolors
   %/currentdevice  /.quit /.setuseciecolor /.needinput /.setoverprintmode /.special_op /.dicttomark /.knownget
   %/.FAPIBuildGlyph /.FAPIBuildChar /.FAPIBuildGlyph9
-  %/.tempfile /.max /.min /.setglobal
+  %/.max /.min /.setglobal
   %/.setdebug /.mementolistnewblocks /getenv
   ]
   {systemdict exch .forceundef} forall

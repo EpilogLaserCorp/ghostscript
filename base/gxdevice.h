@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -688,6 +688,48 @@ int gx_update_from_subclass(gx_device *dev);
 int gx_subclass_composite(gx_device *dev, gx_device **pcdev, const gs_composite_t *pcte,
     gs_gstate *pgs, gs_memory_t *memory, gx_device *cdev);
 void gx_subclass_fill_in_page_procs(gx_device *dev);
+
+/* ---------------- End subclassing procedures ---------------- */
+
+static inline int check_64bit_multiply(int64_t x, int64_t y, int64_t *result)
+{
+    *result = x * y;
+
+    if (x != 0 && (*result) / x != y)
+        return -1;
+    return 0;
+}
+
+/* This is named 'int' rather than '32bit' in case we have a platform where int is not
+ * 32-bit. This is specifically to check the result of multiplying two ints fits into
+ * an int without overflow.
+ */
+static inline int check_int_multiply(int x, int y, int *result)
+{
+    *result = x * y;
+
+    if (x != 0 && (*result) / x != y)
+        return -1;
+    return 0;
+}
+
+static inline uint32_t check_uint32_multiply(uint32_t x, uint32_t y, uint32_t *result)
+{
+    *result = x * y;
+
+    if (x != 0 && (*result) / x != y)
+        return (uint32_t)-1;
+    return 0;
+}
+
+static inline size_t check_size_multiply(size_t x, size_t y, size_t *result)
+{
+    *result = x * y;
+
+    if (x != 0 && (*result) / x != y)
+        return (size_t)-1;
+    return 0;
+}
 
 int gx_init_non_threadsafe_device(gx_device *dev);
 

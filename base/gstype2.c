@@ -109,6 +109,8 @@ type2_vstem(gs_type1_state * pcis, cs_ptr csp, cs_ptr cstack)
             return code;
     }
     pcis->num_hints += (csp + 1 - cstack) >> 1;
+    if (pcis->num_hints > max_total_stem_hints)
+        pcis->num_hints = max_total_stem_hints;
     return 0;
 }
 
@@ -145,6 +147,7 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
     } Registry[1];
 
     Registry[0].values = pcis->pfont->data.WeightVector.values;
+    Registry[0].size = pcis->pfont->data.WeightVector.count;
 
     switch (pcis->init_done) {
         case -1:
@@ -351,6 +354,7 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                      * tables.)
                      */
                     pcis->num_hints = 0;
+                    h->hint_count = 0;
                     /* do accent of seac */
                     ipsp = &pcis->ipstack[pcis->ips_count - 1];
                     cip = ipsp->cs_data.bits.data;
@@ -366,7 +370,8 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                          even though this is only allowed before hintmask and cntrmask.
                          Thanks to Felix Pahl.
                        */
-                      type2_vstem(pcis, csp - 2, cstack);
+                      if ((code = type2_vstem(pcis, csp - 2, cstack)) < 0)
+                          return code;
                       cstack [0] = csp [-1];
                       cstack [1] = csp [ 0];
                       csp = cstack + 1;
@@ -416,21 +421,25 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                 if (CS_CHECK_CSTACK_BOUNDS(csp, cstack))
                 {
                     int n = fixed2int_var(*csp);
-                    int num_values = csp - cstack;
                     gs_font_type1 *pfont = pcis->pfont;
                     int k = pfont->data.WeightVector.count;
+                    int num_values = n * k;
                     int i, j;
                     cs_ptr base, deltas;
 
-                    base = csp - 1 - num_values;
+                    if (n <= 0 || num_values <= 0 ||
+                        !CS_CHECK_CSTACK_BOUNDS(csp - num_values, cstack))
+                        return_error(gs_error_invalidfont);
+
+                    base = csp - num_values;
                     deltas = base + n - 1;
                     for (j = 0; j < n; j++, base++, deltas += k - 1)
                         for (i = 1; i < k; i++)
                             *base += (fixed)(deltas[i] *
                                 pfont->data.WeightVector.values[i]);
+                    csp = base - 1;
                 } else
                     return gs_note_error(gs_error_invalidfont);
-                clear;
                 continue;
             case c2_hstemhm:
               hstem: check_first_operator(!((csp - cstack) & 1));
@@ -444,6 +453,8 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                     }
                 }
                 pcis->num_hints += (csp + 1 - cstack) >> 1;
+                if (pcis->num_hints > max_total_stem_hints)
+                    pcis->num_hints = max_total_stem_hints;
                 clear;
                 continue;
             case c2_hintmask:
@@ -455,7 +466,8 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
             case c2_cntrmask:
                 if (CS_CHECK_CSTACK_BOUNDS(csp, cstack)) {
                     check_first_operator(!((csp - cstack) & 1));
-                    type2_vstem(pcis, csp, cstack);
+                    if ((code = type2_vstem(pcis, csp, cstack)) < 0)
+                        return code;
                 }
                 /*
                  * We should clear the stack here only if this is the
@@ -491,7 +503,8 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
               vstem:
                 if (CS_CHECK_CSTACK_BOUNDS(csp, cstack)) {
                     check_first_operator(!((csp - cstack) & 1));
-                    type2_vstem(pcis, csp, cstack);
+                    if ((code = type2_vstem(pcis, csp, cstack)) < 0)
+                        return code;
                 }else
                     return gs_note_error(gs_error_invalidfont);
                 clear;
@@ -648,15 +661,22 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                         {
                             int i, n = fixed2int_var(*csp);
                             int ind = fixed2int_var(csp[-3]);
-                            int offs = fixed2int_var(csp[-2]);
+                            int reg_offs = fixed2int_var(csp[-2]);
+                            int ta_offs = fixed2int_var(csp[-1]);
                             float *to;
-                            const fixed *from = pcis->transient_array + fixed2int_var(csp[-1]);
+                            const fixed *from = pcis->transient_array + ta_offs;
 
-                            if (!CS_CHECK_TRANSIENT_BOUNDS(from, pcis->transient_array))
+                            if (n < 0 || ind < 0 || reg_offs < 0 || ta_offs < 0)
+                                return_error(gs_error_invalidfont);
+
+                            if (!CS_CHECK_TRANSIENT_BOUNDS(from, pcis->transient_array) ||
+                                (n && !CS_CHECK_TRANSIENT_BOUNDS(from + n - 1, pcis->transient_array)))
                                 return_error(gs_error_invalidfont);
 
                             if (ind < countof(Registry)) {
-                                to = Registry[ind].values + offs;
+                                if (reg_offs + n > Registry[ind].size)
+                                    return_error(gs_error_invalidfont);
+                                to = Registry[ind].values + reg_offs;
                                 for (i = 0; i < n; ++i)
                                     to[i] = fixed2float(from[i]);
                             }
@@ -697,12 +717,20 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                         {
                             int i, n = fixed2int_var(*csp);
                             int ind = fixed2int_var(csp[-2]);
+                            int ta_offs = fixed2int_var(csp[-1]);
                             const float *from;
-                            fixed *to = pcis->transient_array + fixed2int_var(csp[-1]);
+                            fixed *to = pcis->transient_array + ta_offs;
 
-                            if (!CS_CHECK_TRANSIENT_BOUNDS(to, pcis->transient_array))
+                            if (n < 0 || ind < 0 || ta_offs < 0)
                                 return_error(gs_error_invalidfont);
+
+                            if (!CS_CHECK_TRANSIENT_BOUNDS(to, pcis->transient_array) ||
+                                (n && !CS_CHECK_TRANSIENT_BOUNDS(to + n - 1, pcis->transient_array)))
+                                return_error(gs_error_invalidfont);
+
                             if (ind < countof(Registry)) {
+                                if (n > Registry[ind].size)
+                                    return_error(gs_error_invalidfont);
                                 from = Registry[ind].values;
                                 for (i = 0; i < n; ++i)
                                     to[i] = float2fixed(from[i]);

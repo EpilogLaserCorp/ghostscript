@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2025 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -192,12 +192,15 @@ cmd_put_drawing_color(gx_device_clist_writer * cldev, gx_clist_state * pcls,
         pattern_id = gs_dc_get_pattern_id(pdcolor);
 
         if (pattern_id != gs_no_id && pcls->pattern_id == pattern_id) {
-            /* The pattern is known, write its id only.
-               Note that gx_dc_pattern_write must process this case especially. */
-            /* Note that id is gs_no_id when the pattern supplies an empty tile.
-               In this case the full serialized pattern is shorter (left == 0),
-               so go with it. */
-            left = sizeof(pattern_id);
+            if (pcls->step_phase.x == pdcolor->colors.pattern.p_tile->step_matrix.tx &&
+                pcls->step_phase.y == pdcolor->colors.pattern.p_tile->step_matrix.ty) {
+                /* The pattern is known, write its id only.
+                   Note that gx_dc_pattern_write must process this case especially. */
+                /* Note that id is gs_no_id when the pattern supplies an empty tile.
+                   In this case the full serialized pattern is shorter (left == 0),
+                   so go with it. */
+                left = sizeof(pattern_id);
+            }
         }
     }
 
@@ -272,6 +275,15 @@ cmd_put_drawing_color(gx_device_clist_writer * cldev, gx_clist_state * pcls,
         /* HACK: since gx_dc_pattern_write identifies pattern by tile id,
            replace the client's pattern id with tile id in the saved color.  */
         pcls->sdc.colors.pattern.id = pattern_id;
+        if (pdcolor->colors.pattern.p_tile) {
+            pcls->sdc.colors.pattern.step_matrix = pdcolor->colors.pattern.p_tile->step_matrix;
+            pcls->step_phase.x = pdcolor->colors.pattern.p_tile->step_matrix.tx;
+            pcls->step_phase.y = pdcolor->colors.pattern.p_tile->step_matrix.ty;
+        } else {
+            memset(&pcls->sdc.colors.pattern.step_matrix, 0, sizeof(pcls->sdc.colors.pattern.step_matrix));
+            pcls->step_phase.x = 0;
+            pcls->step_phase.y = 0;
+        }
         if (pattern_id &&
             (gx_pattern1_get_transptr(pdcolor) != NULL ||
              gx_pattern1_clist_has_trans(pdcolor))) {

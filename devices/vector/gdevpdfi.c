@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2025 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -513,7 +513,7 @@ static int setup_image_process_colorspace(gx_device_pdf *pdev, image_union_t *im
 static int check_colorants_for_pdfx4(const gs_color_space *pcs)
 {
     int comp, all_present = 1;
-    char *ink, *Colorant;
+    char *ink;
     gs_device_n_colorant *colorant = NULL;
 
     if (pcs->params.device_n.colorants == NULL) {
@@ -752,11 +752,11 @@ static int setup_image_colorspace(gx_device_pdf *pdev, image_union_t *image, con
                     case gs_color_space_index_DeviceN:
                         if (pdev->PDFX > 0) {
                             if (pdev->PDFX < 4) {
-                                *pcs_orig = pcs;
+                                *pcs_orig = (gs_color_space *)pcs;
                                 return 1;
                             }
                             if (!check_colorants_for_pdfx4(pcs2)){
-                                *pcs_orig = pcs;
+                                *pcs_orig = (gs_color_space *)pcs;
                                 return 1;
                             }
                         }
@@ -1059,6 +1059,7 @@ pdf_image_handle_eps(gx_device_pdf *pdev, const gs_gstate * pgs,
                                  float2fixed(corners[3].x) - x0,
                                  float2fixed(corners[3].y) - y0,
                                  bx2, by2, &devc, lop_default);
+        gx_destroy_clip_device_on_stack(&cdev);
         pdev->AccumulatingBBox--;
     } else {
         /* Just use the bounding box. */
@@ -1185,7 +1186,7 @@ pdf_begin_typed_image(gx_device_pdf *pdev, const gs_gstate * pgs,
             pdev->image_mask_is_SMask = true;
 
             if (pdev->PendingOC)
-                gs_free_object(pdev->memory, pdev->PendingOC, "");
+                gs_free_object(pdev->memory->non_gc_memory, pdev->PendingOC, "");
             OC = pdev->PendingOC = NULL;
             code = gx_begin_image3x_generic((gx_device *)pdev, pgs, pmat, pic,
                                             prect, pdcolor, pcpath, mem,
@@ -1651,11 +1652,6 @@ pdf_begin_typed_image(gx_device_pdf *pdev, const gs_gstate * pgs,
     }
 
     if (pdev->JPEG_PassThrough || pdev->JPX_PassThrough) {
-/*        if (pie->writer.alt_writer_count > 1) {
-            s_close_filters(&pie->writer.binary[0].strm, uncompressed);
-            memset(pie->writer.binary + 1, 0, sizeof(pie->writer.binary[1]));
-            memset(pie->writer.binary + 2, 0, sizeof(pie->writer.binary[1]));
-        }*/
         pdev->PassThroughWriter = pie->writer.binary[0].strm;
         pie->writer.alt_writer_count = 1;
     }
@@ -1945,6 +1941,8 @@ use_image_as_pattern(gx_device_pdf *pdev, pdf_resource_t *pres1,
     if (code >= 0)
         pprinti64d1(pdev->strm, "/R%"PRId64" Do\n", pdf_resource_id(pres1));
     pres = pdev->accumulating_substream_resource;
+    if (pres == NULL)
+        code = gs_note_error(gs_error_unregistered);
     if (code >= 0)
         code = pdf_add_resource(pdev, pdev->substream_Resources, "/XObject", pres1);
     if (code >= 0) {
@@ -2068,7 +2066,13 @@ pdf_image_end_image_data(gx_image_enum_common_t * info, bool draw_last,
             if (code < 0)
                 return code;
         }
+        /* This closes the stream pointed to by PassThroughWriter
+           so we need to NULL that pointer
+         */
         code = pdf_end_image_binary(pdev, &pie->writer, data_height);
+        pdev->PassThroughWriter = NULL;
+        pdev->JPX_PassThrough = false;
+        pdev->JPEG_PassThrough = false;
         /* The call above possibly decreases pie->writer.alt_writer_count in 2. */
         if (code < 0)
             return code;
@@ -2094,7 +2098,13 @@ pdf_image_end_image_data(gx_image_enum_common_t * info, bool draw_last,
             code = pdf_end_and_do_image(pdev, &pie->writer, &pie->mat, info->id, do_image);
         pie->writer.alt_writer_count--; /* For GC. */
     } else {
+        /* This closes the stream pointed to by PassThroughWriter
+           so we need to NULL that pointer
+         */
         code = pdf_end_image_binary(pdev, &pie->writer, data_height);
+        pdev->PassThroughWriter = NULL;
+        pdev->JPX_PassThrough = false;
+        pdev->JPEG_PassThrough = false;
         code = pdf_end_abort_image(pdev, &pie->writer);
         pie->writer.alt_writer_count--; /* For GC. */
     }
@@ -2337,6 +2347,18 @@ pdf_image3x_make_mcde(gx_device *dev, const gs_gstate *pgs,
         return_error(gs_error_rangecheck);
     }
     pmie = (pdf_image_enum *)pminfo[i];
+    if (pmie->writer.alt_writer_count == 3) {
+        cos_stream_t *s;
+
+        s = cos_stream_from_pipeline(pmie->writer.binary[1].strm);
+        s_close_filters(&pmie->writer.binary[1].strm, pmie->writer.binary[1].target);
+        s->cos_procs->release((cos_object_t *)s, "pdf_image_choose_filter");
+        s->written = 1;
+        s_close_filters(&pmie->writer.binary[2].strm, pmie->writer.binary[2].target);
+        pmie->writer.binary[1].strm = pmie->writer.binary[2].strm = 0; /* for GC */
+        pmie->writer.binary[1].target = pmie->writer.binary[2].target = 0;
+        pmie->writer.alt_writer_count = 1;
+    }
     /*
      * Add the SMask entry to the image dictionary, and, if needed,
      * the Matte entry to the mask dictionary.
@@ -2378,6 +2400,8 @@ pdf_image3x_make_mcde(gx_device *dev, const gs_gstate *pgs,
         }
 
         if (DoMatte) {
+            int code;
+
             code = cos_dict_put_c_key_floats((gx_device_pdf *)dev,
                                     (cos_dict_t *)pmie->writer.pres->object,
                                     "/Matte", pixm->Matte,
@@ -2518,6 +2542,8 @@ gdev_pdf_dev_spec_op(gx_device *pdev1, int dev_spec_op, void *data, int size)
                 gs_free_object(pdev->memory->non_gc_memory, pdev->PDFFormName, "free Name of Form for pdfmark");
             }
             pdev->PDFFormName = (char *)gs_alloc_bytes(pdev->memory->non_gc_memory, size + 1, "Name of Form for pdfmark");
+            if (pdev->PDFFormName == NULL)
+                return_error(gs_error_VMerror);
             memset(pdev->PDFFormName, 0x00, size + 1);
             memcpy(pdev->PDFFormName, data, size);
             return 0;
@@ -2727,6 +2753,8 @@ gdev_pdf_dev_spec_op(gx_device *pdev1, int dev_spec_op, void *data, int size)
                         return code;
                 }
                 pres = pres1 = pdev->accumulating_substream_resource;
+                if (pres == NULL)
+                    return_error(gs_error_unregistered);
                 code = pdf_exit_substream(pdev);
                 if (code < 0)
                     return code;
@@ -2838,6 +2866,8 @@ gdev_pdf_dev_spec_op(gx_device *pdev1, int dev_spec_op, void *data, int size)
                     int pdepth;
 
                     new_states = (gs_gstate **)gs_alloc_bytes(pdev->pdf_memory->non_gc_memory, sizeof(gs_gstate *) * (pdev->PatternDepth + 2), "pattern initial graphics state stack");
+                    if (new_states == NULL)
+                        return_error(gs_error_VMerror);
                     memset(new_states, 0x00, sizeof(gs_gstate *) * (pdev->PatternDepth + 2));
                     for (pdepth = 0; pdepth < pdev->PatternDepth;pdepth++)
                         new_states[pdepth] = pdev->initial_pattern_states[pdepth];
@@ -2900,7 +2930,10 @@ gdev_pdf_dev_spec_op(gx_device *pdev1, int dev_spec_op, void *data, int size)
                     }
                 }
                 pres = pres1 = pdev->accumulating_substream_resource;
-                code = pdf_exit_substream(pdev);
+                if (pres == NULL)
+                    code = gs_note_error(gs_error_unregistered);
+                else
+                    code = pdf_exit_substream(pdev);
                 if (code < 0) {
                     gs_free_object(pdev->pdf_memory, pdev->initial_pattern_states[pdev->PatternDepth], "Freeing dangling pattern state");
                     pdev->initial_pattern_states[pdev->PatternDepth] = NULL;
@@ -2984,6 +3017,12 @@ gdev_pdf_dev_spec_op(gx_device *pdev1, int dev_spec_op, void *data, int size)
             pdev->JPEG_PassThrough = pdev->params.PassThroughJPEGImages;
             return 1;
             break;
+        case gxdso_set_JPEG_PassThrough:
+            pdev->params.PassThroughJPEGImages = *((bool *)data);
+            if (*((bool *)data) == 0 && pdev->JPEG_PassThrough)
+                pdev->JPEG_PassThrough = 0;
+            return 0;
+            break;
         case gxdso_JPEG_passthrough_begin:
             return 0;
             break;
@@ -3007,6 +3046,12 @@ gdev_pdf_dev_spec_op(gx_device *pdev1, int dev_spec_op, void *data, int size)
             pdev->JPX_PassThrough = pdev->params.PassThroughJPXImages;
             return 1;
             break;
+        case gxdso_set_JPX_PassThrough:
+            pdev->params.PassThroughJPXImages = *((bool *)data);
+            if (*((bool *)data) == 0 && pdev->JPX_PassThrough)
+                pdev->JPX_PassThrough = 0;
+            return 0;
+            break;
         case gxdso_JPX_passthrough_begin:
             return 0;
             break;
@@ -3026,6 +3071,7 @@ gdev_pdf_dev_spec_op(gx_device *pdev1, int dev_spec_op, void *data, int size)
             pdev->PassThroughWriter = 0;
             return 0;
             break;
+
         case gxdso_event_info:
             {
                 dev_param_req_t *request = (dev_param_req_t *)data;
@@ -3095,8 +3141,10 @@ gdev_pdf_dev_spec_op(gx_device *pdev1, int dev_spec_op, void *data, int size)
             {
                 char *object = data;
                 if (pdev->PendingOC)
-                    gs_free_object(pdev->memory, pdev->PendingOC, "");
-                pdev->PendingOC = (char *)gs_alloc_bytes(pdev->memory, strlen(object) + 1, "");
+                    gs_free_object(pdev->memory->non_gc_memory, pdev->PendingOC, "");
+                pdev->PendingOC = (char *)gs_alloc_bytes(pdev->memory->non_gc_memory, strlen(object) + 1, "");
+                if (pdev->PendingOC == NULL)
+                    return_error(gs_error_VMerror);
                 memcpy(pdev->PendingOC, object, strlen(object) + 1);
             }
             return 0;

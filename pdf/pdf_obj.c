@@ -1,4 +1,4 @@
-/* Copyright (C) 2020-2024 Artifex Software, Inc.
+/* Copyright (C) 2020-2025 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -138,7 +138,7 @@ int pdfi_object_alloc(pdf_context *ctx, pdf_obj_type type, unsigned int size, pd
 
                 ((pdf_array *)*obj)->size = size;
                 if (size > 0) {
-                    values = (pdf_obj **)gs_alloc_bytes(ctx->memory, size * sizeof(pdf_obj *), "pdfi_object_alloc");
+                    values = (pdf_obj **)gs_alloc_bytes(ctx->memory, (size_t)size * sizeof(pdf_obj *), "pdfi_object_alloc");
                     if (values == NULL) {
                         code = gs_note_error(gs_error_VMerror);
                         goto error_out;
@@ -154,7 +154,7 @@ int pdfi_object_alloc(pdf_context *ctx, pdf_obj_type type, unsigned int size, pd
 
                 ((pdf_dict *)*obj)->size = size;
                 if (size > 0) {
-                    entries = (pdf_dict_entry *)gs_alloc_bytes(ctx->memory, size * sizeof(pdf_dict_entry), "pdfi_object_alloc");
+                    entries = (pdf_dict_entry *)gs_alloc_bytes(ctx->memory, (size_t)size * sizeof(pdf_dict_entry), "pdfi_object_alloc");
                     if (entries == NULL) {
                         code = gs_note_error(gs_error_VMerror);
                         goto error_out;
@@ -174,7 +174,7 @@ int pdfi_object_alloc(pdf_context *ctx, pdf_obj_type type, unsigned int size, pd
     }
 #if REFCNT_DEBUG
     (*obj)->UID = ctx->ref_UID++;
-    dmprintf2(ctx->memory, "Allocated object of type %c with UID %"PRIi64"\n", (*obj)->type, (*obj)->UID);
+    outprintf(ctx->memory, "Allocated object of type %c with UID %"PRIi64"\n", (*obj)->type, (*obj)->UID);
 #endif
     return 0;
 error_out:
@@ -451,6 +451,9 @@ static int pdfi_bufstream_increase(pdf_context *ctx, pdfi_bufstream_t *stream, u
 {
     byte *data = NULL;
     uint64_t newsize;
+
+    if (needed > max_int || stream->len > (max_int - needed) / 2)
+        return_error(gs_error_rangecheck);
 
     newsize = stream->len * 2 + needed;
     data = gs_alloc_bytes(ctx->memory, newsize, "pdfi_bufstream_increase(data)");

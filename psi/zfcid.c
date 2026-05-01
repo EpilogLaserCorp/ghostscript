@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -32,7 +32,7 @@ cid_font_system_info_param(gs_cid_system_info_t *pcidsi, const ref *prfont)
 {
     ref *prcidsi;
 
-    if (dict_find_string(prfont, "CIDSystemInfo", &prcidsi) <= 0)
+    if (dict_find_string_with_type(prfont, "CIDSystemInfo", &prcidsi, t_dictionary) <= 0)
         return_error(gs_error_rangecheck);
     return cid_system_info_param(pcidsi, prcidsi);
 }
@@ -80,7 +80,7 @@ cid_font_data_param(os_ptr op, gs_font_cid_data *pdata, ref *pGlyphDirectory)
             index = dict_first(pgdir);
             while (index >= 0) {
                 index = dict_next(pgdir, index, (ref *)&element);
-                if (index >= 0) {
+                if (index >= 0 && r_has_type(&(element[0]), t_integer)) {
                     if (element[0].value.intval > pdata->MaxCID)
                         pdata->MaxCID = element[0].value.intval;
                 }

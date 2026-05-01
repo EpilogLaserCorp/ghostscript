@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -564,8 +564,8 @@ gs_param_list_dump(plist_orig);
     if (msa.data != NULL) {
         Nup_device_subclass_data *pNup_data = dev->subclass_data;
         /* Use the PostScript tolerance for PageSize "match" of 5 points */
-        if (abs(pNup_data->NestedPageW - msa.data[0]) > 5 ||
-            abs(pNup_data->NestedPageH - msa.data[1]) > 5) {
+        if (fabs(pNup_data->NestedPageW - msa.data[0]) > 5.0f ||
+            fabs(pNup_data->NestedPageH - msa.data[1]) > 5.0f) {
             /* If needed, flush previous nest before changing */
             if (pNup_data->PageCount > 0 && pNup_data->PagesPerNest > 1) {
                 code = nup_flush_nest_to_output(dev, pNup_data);
@@ -682,7 +682,7 @@ nup_dev_spec_op(gx_device *dev, int dev_spec_op, void *data, int size)
         case gxdso_get_dev_param:
             {
                 dev_param_req_t *request = (dev_param_req_t *)data;
-                int code = false;
+                bool code = false;
 
                 /* We need to disable pdfmark writing, primarily for CropBox, but also	*/
                 /* they are probably not relevant for multiple input files to a single	*/

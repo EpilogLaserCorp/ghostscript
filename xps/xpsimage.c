@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -22,6 +22,7 @@
  */
 
 #include "ghostxps.h"
+#include "gxdevice.h"
 
 /*
  * Un-interleave the alpha channel.
@@ -42,10 +43,10 @@ xps_isolate_alpha_channel_8(xps_context_t *ctx, xps_image_t *image)
 
     for (y = 0; y < image->height; y++)
     {
-        sp = image->samples + image->width * n * y;
-        dp = image->samples + image->width * (n - 1) * y;
-        ap = image->alpha + image->width * y;
-        for (x = 0; x < image->width; x++)
+        sp = image->samples + (size_t)image->width * n * y;
+        dp = image->samples + (size_t)image->width * (n - 1) * y;
+        ap = image->alpha + (size_t)image->width * y;
+        for (x = 0; x < (size_t)image->width; x++)
         {
             for (k = 0; k < n - 1; k++)
                 *dp++ = *sp++;
@@ -73,9 +74,9 @@ xps_isolate_alpha_channel_16(xps_context_t *ctx, xps_image_t *image)
 
     for (y = 0; y < image->height; y++)
     {
-        sp = ((unsigned short*)image->samples) + (image->width * n * y);
-        dp = ((unsigned short*)image->samples) + (image->width * (n - 1) * y);
-        ap = ((unsigned short*)image->alpha) + (image->width * y);
+        sp = ((unsigned short*)image->samples) + ((size_t)image->width * n * y);
+        dp = ((unsigned short*)image->samples) + ((size_t)image->width * (n - 1) * y);
+        ap = ((unsigned short*)image->alpha) + ((size_t)image->width * y);
         for (x = 0; x < image->width; x++)
         {
             for (k = 0; k < n - 1; k++)
@@ -86,7 +87,7 @@ xps_isolate_alpha_channel_16(xps_context_t *ctx, xps_image_t *image)
 
     image->hasalpha = 0;
     image->comps --;
-    image->stride = image->width * image->comps * 2;
+    image->stride = (size_t)image->width * image->comps * 2;
 }
 
 static int
@@ -158,7 +159,7 @@ xps_decode_image(xps_context_t *ctx, xps_part_t *part, xps_image_t *image)
     else
         return gs_throw(-1, "unknown image file format");
 
-    // TODO: refcount image->colorspace
+    /* TODO: refcount image->colorspace */
 
     /* See if we need to use the embedded profile. */
     if (image->profile)
@@ -239,16 +240,29 @@ xps_paint_image_brush_imp(xps_context_t *ctx, xps_image_t *image, int alpha)
 
     if (alpha)
     {
+        size_t z;
         colorspace = ctx->gray_lin;
         samples = image->alpha;
-        count = (image->width * image->bits + 7) / 8 * image->height;
+        if (check_size_multiply(image->width, image->bits, &z))
+            return gs_throw(-1, "image size overflow");
+        if (z & 7)
+            z = (z>>3)+1;
+        else
+            z = (z>>3);
+
+        if (check_size_multiply(z, image->height, &z))
+            return gs_throw(-1, "image size overflow");
+        if (z > (size_t)UINT_MAX)
+            return gs_throw(-1, "image size overflow");
+        count = z;
         used = 0;
     }
     else
     {
         colorspace = image->colorspace;
         samples = image->samples;
-        count = image->stride * image->height;
+        if (check_int_multiply(image->stride, image->height, (int *)&count))
+            return gs_throw(-1, "image size overflow");
         used = 0;
     }
 
@@ -432,23 +446,29 @@ xps_find_image_brush_source_part(xps_context_t *ctx, char *base_uri, xps_item_t 
 int
 xps_parse_image_brush(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, xps_item_t *root)
 {
-    xps_part_t *part;
-    xps_image_t *image;
+    xps_part_t *part = NULL;
+    xps_image_t *image = NULL;
     gs_color_space *colorspace;
     char *profilename = NULL;
     int code;
 
     code = xps_find_image_brush_source_part(ctx, base_uri, root, &part, &profilename);
-    if (code < 0)
-        return gs_rethrow(code, "cannot find image source");
+    if (code < 0) {
+        gs_rethrow(code, "cannot find image source");
+        goto fail;
+    }
 
     image = xps_alloc(ctx, sizeof(xps_image_t));
-    if (!image)
-        return gs_throw(-1, "out of memory: image struct");
+    if (!image) {
+        gs_throw(-1, "out of memory: image struct");
+        goto fail;
+    }
 
     code = xps_decode_image(ctx, part, image);
-    if (code < 0)
-        return gs_rethrow1(code, "cannot decode image '%s'", part->name);
+    if (code < 0) {
+        gs_rethrow1(code, "cannot decode image '%s'", part->name);
+        goto fail;
+    }
 
     /* Override any embedded colorspace profiles if the external one matches. */
     if (profilename)
@@ -464,15 +484,17 @@ xps_parse_image_brush(xps_context_t *ctx, char *base_uri, xps_resource_t *dict, 
     }
 
     code = xps_parse_tiling_brush(ctx, base_uri, dict, root, xps_paint_image_brush, image);
-    if (code < 0)
-        return gs_rethrow(-1, "cannot parse tiling brush");
+    if (code < 0) {
+        code = gs_rethrow(-1, "cannot parse tiling brush");
+    }
 
+fail:
     if (profilename)
         xps_free(ctx, profilename);
     xps_free_image(ctx, image);
     xps_free_part(ctx, part);
 
-    return 0;
+    return code;
 }
 
 int
@@ -499,6 +521,8 @@ xps_image_brush_has_transparency(xps_context_t *ctx, char *base_uri, xps_item_t 
 void
 xps_free_image(xps_context_t *ctx, xps_image_t *image)
 {
+    if (image == NULL)
+        return;
     rc_decrement(image->colorspace, "xps_free_image");
     if (image->samples)
         xps_free(ctx, image->samples);

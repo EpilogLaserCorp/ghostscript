@@ -1,4 +1,4 @@
-dnl Copyright (C) 2001-2024 Artifex Software, Inc.
+dnl Copyright (C) 2001-2026 Artifex Software, Inc.
 dnl All Rights Reserved.
 dnl
 dnl This software is provided AS-IS with no warranty, either express or
@@ -138,7 +138,7 @@ if test x"$host" != x"$build" ; then
   echo $AUXFLAGS_MAK_LINE07 >> $AUXFLAGS_MAK.in
 
   AC_MSG_NOTICE([Begin recursive call to configure script (for auxiliary tools)])
-  "$absolute_source_path/configure" CC="$CCAUX" CFLAGS="$CFLAGSAUX" CPPFLAGS="$CPPFLAGSAUX" LDFLAGS="$LDFLAGSAUX" CCAUX= CFLAGSAUX= CFLAGSAUX= MAKEFILE=$AUXFLAGS_MAK --host=$build --build=$build --enable-auxtools_only --disable-hidden-visibility --with-local-zlib --without-libtiff --disable-contrib --disable-fontconfig --disable-dbus --disable-freetype --disable-cups --disable-openjpeg --disable-gtk --with-libiconv=no --without-libidn --without-libpaper --without-pdftoraster --without-ijs --without-jbig2dec --without-x --with-drivers=""
+  "$absolute_source_path/configure" CC="$CCAUX" CFLAGS="$CFLAGSAUX" CPPFLAGS="$CPPFLAGSAUX" LDFLAGS="$LDFLAGSAUX" CCAUX= CFLAGSAUX= CFLAGSAUX= MAKEFILE=$AUXFLAGS_MAK --host=$build --build=$build --enable-auxtools_only --disable-hidden-visibility --with-local-zlib --with-local-brotli --without-libtiff --disable-contrib --disable-fontconfig --disable-dbus --disable-cups --disable-openjpeg --disable-gtk --with-libiconv=no --without-libidn --without-libpaper --without-pdftoraster --without-ijs --without-jbig2dec --without-x --with-drivers=""
   status=$?
   cp config.log "$olddir/configaux.log"
   if test $status -eq 0 ; then
@@ -331,6 +331,7 @@ case $host in
             CC_DBG_FLAGS_TO_TRY="-gdwarf-2 -g3 -O0"
             SET_DT_SONAME="so"
             CC_VISIBILITY_FLAGS_TO_TRY="-fvisibility=hidden"
+            LDFLAGS="-Wl,-bbigtoc $LD_FLAGS"
         fi
         ;;
 esac
@@ -563,10 +564,13 @@ dnl Check for headers
 dnl --------------------------------------------------
 
 AC_HEADER_DIRENT
-AC_CHECK_HEADERS([errno.h fcntl.h malloc.h memory.h stdlib.h strings.h sys/ioctl.h sys/param.h sys/time.h sys/times.h syslog.h unistd.h dirent.h ndir.h sys/dir.h sys/ndir.h inttypes.h])
+AC_CHECK_HEADERS([errno.h fcntl.h malloc.h memory.h stdlib.h strings.h sys/ioctl.h sys/param.h sys/time.h sys/times.h syslog.h dirent.h ndir.h sys/dir.h sys/ndir.h inttypes.h])
 
 AC_CHECK_HEADER([limits.h], [CFLAGS="$CFLAGS -DHAVE_LIMITS_H=1"])
 AC_CHECK_HEADER([string.h], [CFLAGS="$CFLAGS -DHAVE_STRING_H=1"])
+
+AC_CHECK_HEADER([unistd.h], [GCFLAGS="$GCFLAGS -DHAVE_UNISTD_H=1"],[GCFLAGS="$GCFLAGS -DHAVE_UNISTD_H=0"])
+AC_CHECK_HEADER([stdarg.h], [GCFLAGS="$GCFLAGS -DHAVE_STDARG_H=1"],[GCFLAGS="$GCFLAGS -DHAVE_STDARG_H=0"])
 
 dnl --------------------------------------------------
 dnl Sun, BSD possibly other makes don't have quite the
@@ -633,35 +637,51 @@ if test "$ac_cv_c_const" != yes; then
         GCFLAGS="$GCFLAGS -Dconst="
 fi
 if test "x$ac_cv_header_stdint_h" = "xyes"; then
-        GCFLAGS="$GCFLAGS -DHAVE_STDINT_H=1"
+  GCFLAGS="$GCFLAGS -DHAVE_STDINT_H=1"
+else
+  GCFLAGS="$GCFLAGS -DHAVE_STDINT_H=0"
 fi
 
 if test "x$ac_cv_header_dirent_h" = "xyes"; then
-        GCFLAGS="$GCFLAGS -DHAVE_DIRENT_H=1"
+  GCFLAGS="$GCFLAGS -DHAVE_DIRENT_H=1"
+else
+  GCFLAGS="$GCFLAGS -DHAVE_DIRENT_H=0"
 fi
 
 if test "x$ac_cv_header_ndir_h" = xyes; then
-        GCFLAGS="$GCFLAGS -DHAVE_NDIR_H=1"
+  GCFLAGS="$GCFLAGS -DHAVE_NDIR_H=1"
+else
+  GCFLAGS="$GCFLAGS -DHAVE_NDIR_H=0"
 fi
 
 if test "x$ac_cv_header_sys_dir_h" = "xyes"; then
-        GCFLAGS="$GCFLAGS -DHAVE_SYS_DIR_H=1"
+  GCFLAGS="$GCFLAGS -DHAVE_SYS_DIR_H=1"
+else
+  GCFLAGS="$GCFLAGS -DHAVE_SYS_DIR_H=0"
 fi
 
 if test "x$ac_cv_header_sys_ndir_h" = "xyes"; then
-        GCFLAGS="$GCFLAGS -DHAVE_SYS_NDIR_H=1"
+  GCFLAGS="$GCFLAGS -DHAVE_SYS_NDIR_H=1"
+else
+  GCFLAGS="$GCFLAGS -DHAVE_SYS_NDIR_H=0"
 fi
 
 if test "x$ac_cv_header_sys_time_h" = "xyes"; then
-        GCFLAGS="$GCFLAGS -DHAVE_SYS_TIME_H=1"
+  GCFLAGS="$GCFLAGS -DHAVE_SYS_TIME_H=1"
+else
+  GCFLAGS="$GCFLAGS -DHAVE_SYS_TIME_H=0"
 fi
 
 if test "x$ac_cv_header_sys_times_h" = "xyes"; then
-        GCFLAGS="$GCFLAGS -DHAVE_SYS_TIMES_H=1"
+  GCFLAGS="$GCFLAGS -DHAVE_SYS_TIMES_H=1"
+else
+  GCFLAGS="$GCFLAGS -DHAVE_SYS_TIMES_H=0"
 fi
 
 if test "x$ac_cv_header_inttypes_h" = "xyes"; then
-        GCFLAGS="$GCFLAGS -DHAVE_INTTYPES_H=1"
+  GCFLAGS="$GCFLAGS -DHAVE_INTTYPES_H=1"
+else
+  GCFLAGS="$GCFLAGS -DHAVE_INTTYPES_H=0"
 fi
 
 AC_CHECK_LIB([dl], [dlopen],
@@ -909,21 +929,27 @@ if test x$with_tesseract != xno; then
 
         save_cxxflags="$CXXFLAGS"
         save_ldflags="$LDFLAGS"
-        cxxflags_to_try="-std=c++17 -stdlib=libstdc++"
         CXXFLAGS_TO_USE=""
 
         AC_MSG_CHECKING([supported C++ compiler flags])
-        for flag in $cxxflags_to_try ; do
+        for flag in "-std=c++17 -stdlib=libstdc++" "-std=c++17" "-stdlib=libstdc++" ; do
           CXXFLAGS="$CXXFLAGS $flag"
 
-          AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <cstdlib>]], [[return 0;]])],[
+          AC_COMPILE_IFELSE([AC_LANG_PROGRAM([
+          [
+            #include <cstdlib>
+            #include <cstdint>
+            #include <filesystem>
+          ]],
+          [[return 0;]])],
+          [
                   echo "   $flag"; CXXFLAGS_TO_USE="$CXXFLAGS_TO_USE $flag"
           ],[])
 
           CXXFLAGS="$old_cflags"
         done
 
-        if test x"$GXX" = x"no" || echo $CXXFLAGS_TO_USE | grep "std=c++17" ; then
+        if test x"$GXX" = x"no" || test "x$CXXFLAGS_TO_USE" != x; then
           if test x"$GXX" = x"no" ; then
             OCR_DEVS_WARNING_LINE1="C++ compiler does not appear to be gcc or compatible, attempting to continue anyway"
             OCR_DEVS_WARNING_LINE2="NOTE: that tesseract requires a C++17 compatible C++ compiler"
@@ -1053,7 +1079,7 @@ if test x$with_tesseract != xno; then
           TESSERACTINCLUDE="include \$(GLSRCDIR)/tesseract.mak"
           TESSERACT_LIBS="-lstdc++"
         else
-          OCR_DEVS_WARNING_LINE1="OCR devices disabled due to incompatible compiler: tesseract requires a C++17 compatible compiler"
+          OCR_DEVS_WARNING_LINE1="OCR devices disabled due to missing or incompatible C++ compiler or supporting libraries"
         fi
       fi
       AC_LANG_POP()
@@ -1202,14 +1228,7 @@ if test x$with_libidn != xno; then
   fi
 fi
 
-UTF8DEVS=''
-if test x$with_libidn != xno; then
-  if test x$found_iconv != xno; then
-    UTF8DEVS='$(PSD)utf8.dev'
-  fi
-fi
 AC_SUBST(HAVE_LIBIDN)
-AC_SUBST(UTF8DEVS)
 
 if test x"$GPL_CONF" = x"yes" ; then
 
@@ -1309,14 +1328,12 @@ AC_SUBST(DBUS_CFLAGS)
 AC_SUBST(DBUS_LIBS)
 
 
-AC_ARG_ENABLE([freetype], AS_HELP_STRING([--disable-freetype],
-        [Disable freetype for font rasterization]))
-
 FT_BRIDGE=0
 SHARE_FT=0
 FTSRCDIR=src
 FT_CFLAGS=
 FT_LIBS=
+
 
 INSERT_UFST_BRIDGE_EQUAL_ONE=
 UFST_ROOT=
@@ -1456,7 +1473,6 @@ AC_SUBST(UFST_CFLAGS)
 AC_SUBST(UFST_LIB_EXT)
 AC_SUBST(FAPIUFST_MAK)
 
-AC_SUBST(FT_BRIDGE)
 AC_SUBST(SHARE_FT)
 AC_SUBST(FTSRCDIR)
 AC_SUBST(FT_CFLAGS)
@@ -1614,6 +1630,63 @@ fi
 AC_SUBST(SHARE_LIBPNG)
 AC_SUBST(LIBPNGDIR)
 #AC_SUBST(PNGDEVS)
+
+# this option is useful if you're cross-compiling and want to use
+# your toolchain's brotli for $host but the local one for $build
+AC_ARG_WITH([local-brotli], AS_HELP_STRING([--without-local-brotli],
+  [do not check for local brotli sources (has no effect on AUX toolchain when cross-building)]))
+
+AC_MSG_CHECKING([for local brotli source])
+BROTLIDIR=src
+SHARE_BROTLI=
+BROTLICFLAGS=""
+
+BROTLI_COMMON_NAME=""
+BROTLI_ENCODE_NAME=""
+BROTLI_DECODE_NAME=""
+
+if test x"$with_local_brotli" = x"no" || [[ ! -d $srcdir/brotli ]] ; then
+  AC_MSG_RESULT([no.])
+
+  AC_CHECK_LIB(brotlicommon, BrotliDefaultAllocFunc, [
+          AC_CHECK_HEADERS(brotli/shared_dictionary.h, [BROTLI_COMMON_NAME="brotlicommon"])
+        ], [], [-lbrotlicommon])
+
+  AC_CHECK_LIB(brotlienc, BrotliEncoderCreateInstance, [
+          AC_CHECK_HEADERS(brotli/encode.h, [BROTLI_ENCODE_NAME="brotlienc"])
+        ], [], [-lbrotlicommon])
+
+
+  AC_CHECK_LIB(brotlidec, BrotliDecoderCreateInstance, [
+          AC_CHECK_HEADERS(brotli/decode.h, [BROTLI_DECODE_NAME="brotlidec"])
+        ], [], [-lbrotlicommon])
+
+  if test x"$BROTLI_COMMON_NAME" = x"" || test x"$BROTLI_ENCODE_NAME" = x"" || test x"$BROTLI_DECODE_NAME" = x"" ; then
+    BROTLI_COMMON_NAME=""
+    BROTLI_ENCODE_NAME=""
+    BROTLI_DECODE_NAME=""
+  else
+    SHARE_BROTLI=1
+  fi
+else
+  AC_MSG_RESULT([yes])
+  SHARE_BROTLI=0
+  BROTLIDIR=$srcdir/brotli
+  if test x"$GCC" = x"yes"; then
+    BROTLICFLAGS="-Wno-write-strings"
+  fi
+fi
+if test -z "$SHARE_BROTLI"; then
+  AC_MSG_WARN([I did not find a copy of brotli on your system.])
+fi
+
+AC_SUBST(BROTLI_COMMON_NAME)
+AC_SUBST(BROTLI_ENCODE_NAME)
+AC_SUBST(BROTLI_DECODE_NAME)
+
+AC_SUBST(SHARE_BROTLI)
+AC_SUBST(BROTLICFLAGS)
+AC_SUBST(BROTLIDIR)
 
 WHICHLCMS=
 
@@ -2278,7 +2351,6 @@ if test "x$JPX_DECODER" = "x"; then
 
       JPX_AUTOCONF_CFLAGS="$JPX_AUTOCONF_CFLAGS -DOPJ_STATIC -DMUTEX_pthread=0 $OPJ_LRINTF_SUBST -DUSE_JPIP -DUSE_OPENJPEG_JP2 $CFLAGS_OPJ_HAVE_STDINT_H $CFLAGS_OPJ_HAVE_INTTYPES_H $CFLAGS_OPJ_BIGENDIAN $CFLAGS_OPJ_HAVE_FSEEKO $CFLAGS_OPJ_HAVE_MALLOC_H $CFLAGS_OPJ_HAVE_ALIGNED_ALLOC $CFLAGS_OPJ_HAVE__ALIGNED_ALLOC $CFLAGS_OPJ_HAVE_MEMALIGN $CFLAGS_OPJ_HAVE_POSIX_MEMALIGN"
 
-      JPXDEVS='$(PSD)jpx.dev'
     else
       AC_MSG_RESULT([no])
       check_for_opj_stream_set_user_data=no
@@ -2776,7 +2848,7 @@ if test "x$driversfile" != x; then
         drivers="`tr '\n' ',' <$driversfile`"
 fi
 
-if echo $drivers | grep 'APPLE\|iwhi\|iwlo\|iwlq' >/dev/null; then
+if echo $drivers | grep 'APPLE\|appledmp\|iwhi\|iwhic\|iwlo\|iwlow\|iwlq\|iwlqc' >/dev/null; then
    APPLE_DEVICES_REQUESTED="yes"
 fi
 
@@ -2798,7 +2870,7 @@ EPSON_DEVS='eps9high eps9mid epson epsonc escp lp8000 lq850 photoex st800 stcolo
 CANON_DEVS='bj10e bj200 bjc600 bjc800 lbp8 lips3 bjcmono bjcgray bjccmyk bjccolor'
 LEXMARK_DEVS='lxm5700m lxm3200 lex2050 lex3200 lex5700 lex7000'
 BROTHER_DEVS='hl7x0 hl1240 hl1250'
-APPLE_DEVS='appledmp iwhi iwlo iwlq'
+APPLE_DEVS='appledmp iwhi iwhic iwlo iwlow iwlq iwlqc'
 IBM_DEVS='ibmpro jetp3852'
 OKI_DEVS='oki182 okiibm oki4w'
 JAPAN_DEVS='lips4 lips4v ljet4pjl lj4dithp dj505j picty180 lips2p bjc880j pr201 pr150 pr1000 pr1000_4 jj100 bj10v bj10vh mj700v2c mj500c mj6000c mj8000c fmpr fmlbp ml600 lbp310 lbp320 md50Mono md50Eco md1xMono escpage lp2000 npdl rpdl'
@@ -3037,9 +3109,9 @@ fi
 
 # if the user explicitly requested the Apple devices, then hard fail if they aren't available
 if test x"$APPLE_DEVICES_REQUESTED" = x"yes" ; then
-  APDEVS=`echo $P_DEVS | grep 'APPLE\|iwhi\|iwlo\|iwlq'`
+  APDEVS=`echo $P_DEVS | grep 'APPLE\|appledmp\|iwhi\|iwhic\|iwlo\|iwlow\|iwlq\|iwlqc'`
   if test -z "$APDEVS" ; then
-    AC_MSG_ERROR([Requested Apple device(s) not available (iwhi, iwlo, and/or iwlq)])
+    AC_MSG_ERROR([Requested Apple device(s) not available (appledmp, iwhi, iwhic, iwlo, iwlow, iwlq and/or iwlqc)])
   fi
 fi
 
@@ -3782,6 +3854,7 @@ if test x"$build" != x"$host"; then
   AC_CHECK_ALIGNOF([void *])
   AC_CHECK_ALIGNOF([float])
   AC_CHECK_ALIGNOF([double])
+  AC_CHECK_ALIGNOF([uint64_t])
 
   AC_SUBST(ARCH_ALIGN_SHORT_MOD, $ac_cv_alignof_short)
   AC_SUBST(ARCH_ALIGN_INT_MOD, $ac_cv_alignof_int)
@@ -3790,6 +3863,7 @@ if test x"$build" != x"$host"; then
   AC_SUBST(ARCH_ALIGN_PTR_MOD, $ac_cv_alignof_void_p)
   AC_SUBST(ARCH_ALIGN_FLOAT_MOD, $ac_cv_alignof_float)
   AC_SUBST(ARCH_ALIGN_DOUBLE_MOD, $ac_cv_alignof_double)
+  AC_SUBST(ARCH_ALIGN_UINT64_T_MOD, $ac_cv_alignof_uint64_t)
 
   AC_CHECK_SIZEOF([char])
   AC_CHECK_SIZEOF([short])
@@ -3896,6 +3970,8 @@ fi
 
 CFLAGSAUX=$(echo $CFLAGSAUX | sed -e 's/-DGS_NO_FILESYSTEM//g')
 
+GXXFLAGS=$(echo $GCFLAGS | sed -e 's/-Wstrict-prototypes//g' | sed -e 's/-Wmissing-prototypes//g' | sed -e 's/-Werror=declaration-after-statement//g')
+
 dnl --------------------------------------------------
 dnl Do substitutions
 dnl --------------------------------------------------
@@ -3904,6 +3980,7 @@ AC_SUBST(SRCDIR)
 AC_SUBST(OPT_CFLAGS)
 AC_SUBST(DBG_CFLAGS)
 AC_SUBST(GCFLAGS)
+AC_SUBST(GXXFLAGS)
 AC_SUBST(CFLAGS_SANITIZE)
 AC_SUBST(STRIP_XE)
 AC_SUBST(JPX_SSE_CFLAGS)

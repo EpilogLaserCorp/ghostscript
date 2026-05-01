@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -107,6 +107,7 @@ typedef struct psdf_distiller_params_s {
     int OPM;
     bool PreserveOPIComments;
     bool UseFlateCompression;
+    bool UseBrotliCompression;
 
     /* Color processing parameters */
 
@@ -128,6 +129,14 @@ typedef struct psdf_distiller_params_s {
         "LeaveColorUnchanged", \
         "UseDeviceIndependentColor", "UseDeviceIndependentColorForImages",\
         "sRGB", "CMYK", "Gray", "RGB", "ByObjectType"
+
+    enum psdf_blend_conversion_strategy {
+        bcs_None,
+        bcs_Simple,
+        bcs_Managed
+    } BlendConversionStrategy;
+#define psdf_bcs_names\
+    "None", "Simple", "Managed"
 
     bool PreserveHalftoneInfo;
     bool PreserveOverprintSettings;
@@ -204,12 +213,14 @@ extern const stream_template s_zlibE_template;
     0,		    /* Overprintmode (OPM) */ \
     0,		    /* PreserveOPIComments (false) */ \
     1,		    /* UseFlateCompression (true) */ \
+    0,		    /* UseBrotliCompression (false) */ \
         /* Color processing parameters */\
     {0},	    /* calCMYKProfile */ \
     {0},	    /* CalGrayProfile */ \
     {0},	    /* calRGBProfile */ \
     {0},	    /* sRGBProfile */ \
     ccs_LeaveColorUnchanged, /* ColorConversionStrategy */ \
+    bcs_Simple, /* BlendConversionStrategy */ \
     0,		    /* PreserveHalftoneInfo (false) */ \
     0,		    /* PreserveOverprintSettings (false) */ \
     tfi_Preserve,   /* TransferFunctionInfo */ \
@@ -218,7 +229,7 @@ extern const stream_template s_zlibE_template;
 #define psdf_color_image_param_defaults\
   { NULL,	    /* ACSDict (JPEG) */ \
     0,		    /* AntiAlias (false) */ \
-    0,		    /* AutoFilter (false) */ \
+    1,		    /* AutoFilter (false) */ \
     -1,		    /* Depth */ \
     NULL,	    /* Dict (JPEG or CCITTFax) */ \
     0,		    /* Downsample (false) */ \
@@ -235,7 +246,7 @@ extern const stream_template s_zlibE_template;
 #define psdf_gray_image_param_defaults\
   { NULL,	    /* ACSDict (JPEG) */ \
     0,		    /* AntiAlias (false) */ \
-    0,		    /* AutoFilter (false) */ \
+    1,		    /* AutoFilter (false) */ \
     -1,		    /* Depth */ \
     NULL,	    /* Dict (JPEG or CCITTFax) */ \
     0,		    /* Downsample (false) */ \

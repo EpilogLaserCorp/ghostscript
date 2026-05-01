@@ -1,4 +1,4 @@
-/* Copyright (C) 2020-2025 Artifex Software, Inc.
+/* Copyright (C) 2020-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -209,7 +209,7 @@ pdfi_pscript_interpret(pdf_ps_ctx_t *cs, byte *pdfpsbuf, int64_t buflen)
                     int i, size = pdf_ps_stack_count_to_mark(cs, PDF_PS_OBJ_ARR_MARK);
 
                     if (size > 0 && arraydepth > 0) {
-                        arr = (pdf_ps_stack_object_t *) gs_alloc_bytes(cs->pdfi_ctx->memory, size * sizeof(pdf_ps_stack_object_t), "pdfi_pscript_interpret(pdf_ps_stack_object_t");
+                        arr = (pdf_ps_stack_object_t *) gs_alloc_bytes(cs->pdfi_ctx->memory, (size_t)size * sizeof(pdf_ps_stack_object_t), "pdfi_pscript_interpret(pdf_ps_stack_object_t");
                         if (arr == NULL) {
                             code = gs_note_error(gs_error_VMerror);
                             /* clean up the stack, including the mark object */
@@ -266,7 +266,7 @@ pdfi_pscript_interpret(pdf_ps_ctx_t *cs, byte *pdfpsbuf, int64_t buflen)
                         pdfpsbuf = n + 1;
                         goto retry_as_oper;
                     }
-                    numbuf = gs_alloc_bytes(cs->pdfi_ctx->memory, len + 1, "ps pdf number buffer");
+                    numbuf = gs_alloc_bytes(cs->pdfi_ctx->memory, (size_t)len + 1, "ps pdf number buffer");
                     if (numbuf == NULL) {
                         code = gs_note_error(gs_error_VMerror);
                     }
@@ -370,7 +370,7 @@ ps_font_def_func(gs_memory_t *mem, pdf_ps_ctx_t *s, byte *buf, byte *bufend)
               if (pdf_ps_name_cmp(&s->cur[-1], "XUID")) {
                   if (pdf_ps_obj_has_type(&s->cur[0], PDF_PS_OBJ_ARRAY) && uid_is_valid(&priv->gsu.gst1.UID) == false) {
                       int i, size = s->cur[0].size;
-                      long *xvals = (long *)gs_alloc_bytes(mem, size *sizeof(long), "ps_font_def_func(xuid vals)");
+                      long *xvals = (long *)gs_alloc_bytes(mem, (size_t)size *sizeof(long), "ps_font_def_func(xuid vals)");
 
                       if (xvals != NULL) {
                           for (i = 0; i < size; i++) {
@@ -773,18 +773,18 @@ ps_font_def_func(gs_memory_t *mem, pdf_ps_ctx_t *s, byte *buf, byte *bufend)
                               priv->gsu.gst1.data.WeightVector.values[i] = 0;
                           }
                       }
-                      priv->gsu.gst1.data.WeightVector.count = s->cur[0].size;
+                      priv->gsu.gst1.data.WeightVector.count = size;
                   }
               }
               break;
           case 14:
               if (pdf_ps_name_cmp(&s->cur[-1], "BlendAxisTypes")) {
                   if (pdf_ps_obj_has_type(&s->cur[0], PDF_PS_OBJ_ARRAY)) {
-                      int i;
-                      code = pdfi_array_alloc(s->pdfi_ctx, s->cur[0].size, &priv->u.t1.blendaxistypes);
+                      int i, size = s->cur[0].size > 16 ? 16 : s->cur[0].size;
+                      code = pdfi_array_alloc(s->pdfi_ctx, size, &priv->u.t1.blendaxistypes);
                       if (code >= 0) {
                           pdfi_countup(priv->u.t1.blendaxistypes);
-                          for (i = 0; i < s->cur[0].size; i++) {
+                          for (i = 0; i < size; i++) {
                               pdf_ps_stack_object_t *so = &s->cur[0].val.arr[i];
                               pdf_name *n;
                               if (pdf_ps_obj_has_type(so, PDF_PS_OBJ_NAME)) {
@@ -806,12 +806,14 @@ ps_font_def_func(gs_memory_t *mem, pdf_ps_ctx_t *s, byte *buf, byte *bufend)
               else if (pdf_ps_name_cmp(&s->cur[-1], "BlendDesignMap")) {
                   if (pdf_ps_obj_has_type(&s->cur[0], PDF_PS_OBJ_ARRAY)) {
                       int i, j, k;
+                      int size = s->cur[0].size > 16 ? 16 : s->cur[0].size;
                       pdf_ps_stack_object_t *arr1 = &s->cur[0], *arr2, *arr3;
                       pdf_array *parr2, *parr3;
-                      code = pdfi_array_alloc(s->pdfi_ctx, arr1->size, &priv->u.t1.blenddesignmap);
+
+                      code = pdfi_array_alloc(s->pdfi_ctx, size, &priv->u.t1.blenddesignmap);
                       if (code >= 0) {
                           pdfi_countup(priv->u.t1.blenddesignmap);
-                          for (i = 0; i < arr1->size && code >= 0; i++) {
+                          for (i = 0; i < size && code >= 0; i++) {
                               if (pdf_ps_obj_has_type(&arr1->val.arr[i], PDF_PS_OBJ_ARRAY)) {
                                   arr2 = &arr1->val.arr[i];
                                   code = pdfi_array_alloc(s->pdfi_ctx, arr2->size, &parr2);
@@ -870,12 +872,13 @@ ps_font_def_func(gs_memory_t *mem, pdf_ps_ctx_t *s, byte *buf, byte *bufend)
           case 20:
               if (pdf_ps_name_cmp(&s->cur[-1], "BlendDesignPositions")) {
                   if (pdf_ps_obj_has_type(&s->cur[0], PDF_PS_OBJ_ARRAY)) {
-                      code = pdfi_array_alloc(s->pdfi_ctx, s->cur[0].size, &priv->u.t1.blenddesignpositions);
+                      int size = s->cur[0].size > 16 ? 16 : s->cur[0].size;
+                      code = pdfi_array_alloc(s->pdfi_ctx, size, &priv->u.t1.blenddesignpositions);
                       if (code >= 0) {
                           int i, j;
                           pdfi_countup(priv->u.t1.blenddesignpositions);
 
-                          for (i = 0; i < s->cur[0].size && code >= 0; i++) {
+                          for (i = 0; i < size && code >= 0; i++) {
                               pdf_ps_stack_object_t *so = &s->cur[0].val.arr[i];
 
                               if (pdf_ps_obj_has_type(so, PDF_PS_OBJ_ARRAY)) {
@@ -1087,7 +1090,7 @@ ps_font_array_func(gs_memory_t *mem, pdf_ps_ctx_t *s, byte *buf, byte *bufend)
         int size = s->cur[0].val.i;
 
         if (size > 0) {
-            arr = (pdf_ps_stack_object_t *) gs_alloc_bytes(mem, size *sizeof(pdf_ps_stack_object_t), "ps_font_array_func(encoding array)");
+            arr = (pdf_ps_stack_object_t *) gs_alloc_bytes(mem, (size_t)size *sizeof(pdf_ps_stack_object_t), "ps_font_array_func(encoding array)");
             if (arr != NULL) {
                 code = pdf_ps_stack_pop(s, 1);
                 if (code < 0) {

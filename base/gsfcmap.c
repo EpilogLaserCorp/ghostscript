@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -22,6 +22,7 @@
 #include "gsstruct.h"
 #include "gsutil.h"		/* for gs_next_ids */
 #include "gxfcmap.h"
+#include "gxdevice.h"
 
 typedef struct gs_cmap_identity_s {
     GS_CMAP_COMMON;
@@ -221,7 +222,7 @@ gs_cmap_create_char_identity(gs_cmap_t **ppcmap, int num_bytes, int wmode,
 /*
  * Check for identity CMap. Uses a fast check for special cases.
  */
-int
+bool
 gs_cmap_is_identity(const gs_cmap_t *pcmap, int font_index_only)
 {
     return pcmap->procs->is_identity(pcmap, font_index_only);
@@ -577,6 +578,15 @@ gs_cmap_ToUnicode_alloc(gs_memory_t *mem, int id, int num_codes, int key_size, i
         memcpy(cmap_name, pref, pref_len);
         memcpy(cmap_name + pref_len, sid, sid_len);
 #   endif
+    /* code is sacrifical here */
+    /* Realistically, we don't expect code maps larger than 2Gb
+     * Although this creation code handles that, later code to populate
+     * the map doesn't.
+     */
+    if (check_int_multiply(num_codes, value_size + 2, &code) < 0) {
+        return_error(gs_error_VMerror);
+    }
+
     code = gs_cmap_alloc(ppcmap, &st_cmap_ToUnicode,
               0, cmap_name, name_len, NULL, 0, &gs_cmap_ToUnicode_procs, mem);
     if (code < 0)
@@ -668,7 +678,7 @@ gs_cmap_ToUnicode_add_pair(gs_cmap_t *pcmap, int code0, ushort *u, unsigned int 
     const int num_codes = ((gs_cmap_ToUnicode_t *)pcmap)->num_codes;
     int i, code1 = 0;
 
-    if (code0 >= num_codes)
+    if (code0 < 0 || code0 >= num_codes)
         return; /* must not happen. */
     map[code0 * (cmap->value_size + 2)] = (uchar)(length >> 8);
     map[code0 * (cmap->value_size + 2) + 1] = (uchar)(length & 0xFF);

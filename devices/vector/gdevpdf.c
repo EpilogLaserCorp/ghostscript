@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2025 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -28,6 +28,7 @@
 #include "gdevpdfo.h"
 #include "smd5.h"
 #include "sarc4.h"
+#include "sbrotlix.h"
 #include "gscms.h"
 #include "gdevpdtf.h"
 #include "gdevpdtx.h"
@@ -428,10 +429,21 @@ pdf_initialize_ids(gx_device_pdf * pdev)
     {
         char buf[PDF_MAX_PRODUCER];
 
+        /* This comment, the delimiting comments below, and the lines of
+         * source code between the delimiting comments may not be altered,
+         * replaced, changed, or otherwise modified for the purpose of
+         * misrepresenting the origin of works generated using this
+         * software.
+         *
+         * The supplemental term above has been added in accordance with
+         * Section 7(b) of the Affero General Public License version 3.
+         */
+
+        /*  BEGIN -- CHANGES RESTRICTED UNDER 7(b) */
         pdf_store_default_Producer(buf);
-        if (pdev->CompatibilityLevel <= 1.7)
-            cos_dict_put_c_key_string(pdev->Info, "/Producer", (byte *)buf,
+        cos_dict_put_c_key_string(pdev->Info, "/Producer", (byte *)buf,
                                   strlen(buf));
+        /*  END -- CHANGES RESTRICTED UNDER 7(b) */
     }
     /*
      * Acrobat Distiller sets CreationDate and ModDate to the current
@@ -844,8 +856,16 @@ pdf_open(gx_device * dev)
     pdev->local_named_objects =
         pdev->global_named_objects =
         cos_dict_alloc(pdev, "pdf_open(global_named_objects)");
+    if (pdev->local_named_objects == NULL) {
+        code = gs_error_VMerror;
+        goto fail;
+    }
     /* Initialize internal structures that don't have IDs. */
     pdev->NI_stack = cos_array_alloc(pdev, "pdf_open(NI stack)");
+    if (pdev->NI_stack == NULL) {
+        code = gs_error_VMerror;
+        goto fail;
+    }
     pdev->vgstack = (pdf_viewer_state *)gs_alloc_bytes(pdev->pdf_memory, 11 * sizeof(pdf_viewer_state), "pdf_open(graphics state stack)");
     if (pdev->vgstack == 0) {
         code = gs_error_VMerror;
@@ -854,6 +874,10 @@ pdf_open(gx_device * dev)
     memset(pdev->vgstack, 0x00, 11 * sizeof(pdf_viewer_state));
     pdev->vgstack_size = 11;
     pdev->Namespace_stack = cos_array_alloc(pdev, "pdf_open(Namespace stack)");
+    if (pdev->Namespace_stack == NULL) {
+        code = gs_error_VMerror;
+        goto fail;
+    }
     pdf_initialize_ids(pdev);
     code = pdf_compute_fileID(pdev);
     if (code < 0)
@@ -874,6 +898,10 @@ pdf_open(gx_device * dev)
     /* Now create a new dictionary for the local named objects. */
     pdev->local_named_objects =
         cos_dict_alloc(pdev, "pdf_open(local_named_objects)");
+    if (pdev->local_named_objects == NULL) {
+        code = gs_error_VMerror;
+        goto fail;
+    }
     pdev->outlines_id = 0;
     pdev->next_page = 0;
     pdev->text = pdf_text_data_alloc(mem);
@@ -898,6 +926,11 @@ pdf_open(gx_device * dev)
                 pdev->resources[i].chains[j] = 0;
     }
     pdev->outline_levels = (pdf_outline_level_t *)gs_alloc_bytes(mem, INITIAL_MAX_OUTLINE_DEPTH * sizeof(pdf_outline_level_t), "outline_levels array");
+    if (pdev->outline_levels == NULL) {
+        code = gs_error_VMerror;
+        goto fail;
+    }
+
     memset(pdev->outline_levels, 0x00, INITIAL_MAX_OUTLINE_DEPTH * sizeof(pdf_outline_level_t));
     pdev->max_outline_depth = INITIAL_MAX_OUTLINE_DEPTH;
     pdev->outline_levels[0].first.id = 0;
@@ -961,7 +994,10 @@ pdf_ferror(gx_device_pdf *pdev)
 {
     int code = 0;
 
-    gp_fflush(pdev->file);
+    if (pdev->file != NULL) {
+        gp_fflush(pdev->file);
+        code = gp_ferror(pdev->file);
+    }
     gp_fflush(pdev->xref.file);
     if (pdev->strm->file != NULL)
         sflush(pdev->strm);
@@ -970,12 +1006,13 @@ pdf_ferror(gx_device_pdf *pdev)
     if (pdev->streams.strm->file != NULL)
         sflush(pdev->streams.strm);
     if (pdev->ObjStm.strm != NULL && pdev->ObjStm.strm->file != NULL) {
+        int code2;
         sflush(pdev->ObjStm.strm);
-        code = gp_ferror(pdev->ObjStm.file);
+        code2 = gp_ferror(pdev->ObjStm.file);
+        if (code >= 0) code = code2;
     }
-    return gp_ferror(pdev->file) || gp_ferror(pdev->xref.file) ||
-        gp_ferror(pdev->asides.file) || gp_ferror(pdev->streams.file) ||
-        code;
+    return gp_ferror(pdev->xref.file) || gp_ferror(pdev->asides.file) ||
+           gp_ferror(pdev->streams.file) || code;
 }
 
 /* Compute the dominant text orientation of a page. */
@@ -1661,8 +1698,10 @@ static int find_end_xref_section (gx_device_pdf *pdev, gp_file *tfile, int64_t s
                     return(gs_note_error(gs_error_ioerror));
             } else
                 index = 0;
-            if (pos & ASIDES_BASE_POSITION)
-                pos += resource_pos - ASIDES_BASE_POSITION;
+            if (pos & ASIDES_BASE_POSITION) {
+                pos &= ~ASIDES_BASE_POSITION;
+                pos += resource_pos;
+            }
             pos -= pdev->OPDFRead_procset_length;
             if (pos == 0 && index == 0) {
                 return i;
@@ -1698,8 +1737,10 @@ static int write_xref_section(gx_device_pdf *pdev, gp_file *tfile, int64_t start
                     return(gs_note_error(gs_error_ioerror));
             }
 
-            if (pos & ASIDES_BASE_POSITION)
-                pos += resource_pos - ASIDES_BASE_POSITION;
+            if (pos & ASIDES_BASE_POSITION) {
+                pos &= ~ASIDES_BASE_POSITION;
+                pos += resource_pos;
+            }
             pos -= pdev->OPDFRead_procset_length;
 
             /* check to see we haven't got an offset which is too large to represent
@@ -1755,8 +1796,10 @@ static int write_xrefstm_section(gx_device_pdf *pdev, gp_file *tfile, int64_t st
             }
 
             if (!pdev->doubleXref || objstm == 0) {
-                if (pos & ASIDES_BASE_POSITION)
-                    pos += resource_pos - ASIDES_BASE_POSITION;
+                if (pos & ASIDES_BASE_POSITION) {
+                    pos &= ~ASIDES_BASE_POSITION;
+                    pos += resource_pos;
+                }
                 pos -= pdev->OPDFRead_procset_length;
 
                 /* check to see we haven't got an offset which is too large to represent
@@ -2216,11 +2259,19 @@ static int pdf_linearise(gx_device_pdf *pdev, pdf_linearisation_t *linear_params
     memset(linear_params->HintBuffer, 0x00, 256);
     linear_params->HintBits = linear_params->HintByte = 0;
 
-    linear_params->PageHints = (page_hint_stream_t *)gs_alloc_bytes(pdev->pdf_memory, pdev->next_page * sizeof(page_hint_stream_t), "Hints for the pages");
+    linear_params->PageHints = (page_hint_stream_t *)gs_alloc_bytes(pdev->pdf_memory, (size_t)(pdev->next_page) * sizeof(page_hint_stream_t), "Hints for the pages");
+    if (linear_params->PageHints == NULL) {
+        code = gs_error_VMerror;
+        goto error;
+    }
     memset(linear_params->PageHints, 0x00, pdev->next_page * sizeof(page_hint_stream_t));
     linear_params->NumPageHints = pdev->next_page;
 
-    linear_params->SharedHints = (shared_hint_stream_t *)gs_alloc_bytes(pdev->pdf_memory, (linear_params->NumPage1Resources + linear_params->NumSharedResources) * sizeof(shared_hint_stream_t), "Hints for the shared objects");
+    linear_params->SharedHints = (shared_hint_stream_t *)gs_alloc_bytes(pdev->pdf_memory, (size_t)(linear_params->NumPage1Resources + linear_params->NumSharedResources) * sizeof(shared_hint_stream_t), "Hints for the shared objects");
+    if (linear_params->SharedHints == NULL) {
+        code = gs_error_VMerror;
+        goto error;
+    }
     memset(linear_params->SharedHints, 0x00, (linear_params->NumPage1Resources + linear_params->NumSharedResources) * sizeof(shared_hint_stream_t));
     linear_params->NumSharedHints = linear_params->NumPage1Resources + linear_params->NumSharedResources;
 
@@ -2263,12 +2314,20 @@ static int pdf_linearise(gx_device_pdf *pdev, pdf_linearisation_t *linear_params
 
                 pagehint = &linear_params->PageHints[page - 1];
                 if (pagehint->SharedObjectRef){
-                    int *Temp = (int *)gs_alloc_bytes(pdev->pdf_memory, (pagehint->NumSharedObjects + 1) * sizeof(int), "realloc shared object hints");
+                    int *Temp = (int *)gs_alloc_bytes(pdev->pdf_memory, (size_t)(pagehint->NumSharedObjects + 1) * sizeof(int), "realloc shared object hints");
+                    if (Temp == NULL) {
+                        code = gs_note_error(gs_error_VMerror);
+                        goto error;
+                    }
                     memcpy(Temp, pagehint->SharedObjectRef, (pagehint->NumSharedObjects) * sizeof(int));
                     gs_free_object(pdev->pdf_memory, pagehint->SharedObjectRef, "realloc shared object hints");
                     pagehint->SharedObjectRef = (unsigned int *)Temp;
                 } else {
-                    pagehint->SharedObjectRef = (unsigned int *)gs_alloc_bytes(pdev->pdf_memory, (pagehint->NumSharedObjects + 1) * sizeof(int), "shared object hints");
+                    pagehint->SharedObjectRef = (unsigned int *)gs_alloc_bytes(pdev->pdf_memory, (size_t)(pagehint->NumSharedObjects + 1) * sizeof(int), "shared object hints");
+                    if (pagehint->SharedObjectRef == NULL) {
+                        code = gs_note_error(gs_error_VMerror);
+                        goto error;
+                    }
                 }
                 pagehint->SharedObjectRef[pagehint->NumSharedObjects] = i;
                 pagehint->NumSharedObjects++;
@@ -2684,9 +2743,13 @@ int pdf_record_usage(gx_device_pdf *const pdev, int64_t resource_id, int page_nu
             pdev->ResourceUsageSize = resource_id + 1;
             pdev->ResourceUsage = gs_alloc_struct_array(pdev->pdf_memory->non_gc_memory, resource_id + 1, pdf_linearisation_record_t,
                               &st_pdf_linearisation_record_element, "start resource usage array");
+            if (pdev->ResourceUsage == NULL)
+                return_error(gs_error_VMerror);
             memset((char *)pdev->ResourceUsage, 0x00, (resource_id + 1) * sizeof(pdf_linearisation_record_t));
         } else {
             resize = gs_resize_object(pdev->pdf_memory->non_gc_memory, pdev->ResourceUsage, resource_id + 1, "resize resource usage array");
+            if (resize == NULL)
+                return_error(gs_error_VMerror);
             memset(&resize[pdev->ResourceUsageSize], 0x00, sizeof(pdf_linearisation_record_t) * (resource_id - pdev->ResourceUsageSize + 1));
             pdev->ResourceUsageSize = resource_id + 1;
             pdev->ResourceUsage = resize;
@@ -2716,7 +2779,9 @@ int pdf_record_usage(gx_device_pdf *const pdev, int64_t resource_id, int page_nu
                 return 0;
         }
     }
-    Temp = gs_alloc_bytes(pdev->pdf_memory->non_gc_memory, (pdev->ResourceUsage[resource_id].NumPagesUsing + 1) * sizeof (int), "Page usage records");
+    Temp = gs_alloc_bytes(pdev->pdf_memory->non_gc_memory, (size_t)(pdev->ResourceUsage[resource_id].NumPagesUsing + 1) * sizeof (int), "Page usage records");
+    if (Temp == NULL)
+        return_error(gs_error_VMerror);
     memset((char *)Temp, 0x00, (pdev->ResourceUsage[resource_id].NumPagesUsing + 1) * sizeof (int));
     memcpy((char *)Temp, pdev->ResourceUsage[resource_id].PageList, pdev->ResourceUsage[resource_id].NumPagesUsing * sizeof (int));
     gs_free_object(pdev->pdf_memory->non_gc_memory, (byte *)pdev->ResourceUsage[resource_id].PageList, "Free old page usage records");
@@ -2816,6 +2881,65 @@ static int discard_dict_refs(void *client_data, const byte *key_data, uint key_s
                 cos_dict_forall((const cos_dict_t *)v->contents.object, pdev, discard_dict_refs);
             }
         }
+    }
+    return 0;
+}
+
+/* Count up the maximum size of all the keys in the /Info dictionary (including NULL terminators) */
+static int count_Info(void *client_data, const byte *key_data, uint key_size, const cos_value_t *v)
+{
+    int *Size = (int *)client_data;
+    *Size += key_size + 1;
+    return 0;
+}
+
+/* Retrieve a copy of all the keys in the /Info dictionary, each key is NULL terminated and the whole is double NULL terminated.
+ * We assume the buffer is large enough to hold all the keys, and has been initialised with all NULLs. We do not return the
+ * ModDate and CreationDate keys, because those are still permitted in the Info dictionary in PDF 2.0.
+ */
+static int get_Info(void *client_data, const byte *key_data, uint key_size, const cos_value_t *v)
+{
+    char *Buffer = (char *)client_data, *ptr = Buffer;
+
+    if (key_size == 8 && !strncmp((const char *)key_data, "/ModDate", 7))
+        return 0;
+    if (key_size == 13 && !strncmp((const char *)key_data, "/CreationDate", 12))
+        return 0;
+    if (Buffer[0] == 0x00) {
+        memcpy(Buffer, key_data, key_size);
+        return 0;
+    }
+    while (*ptr != 0x00 || *(ptr + 1) != 0x00)
+        ptr++;
+    memcpy(ptr + 1, key_data, key_size);
+    return 0;
+}
+
+/* Remove all the keys *except* ModDate and CreationDtae from the Info dictionary. This is used for production of
+ * PDF 2.0 where only these keys 'should' be used. We need to keep them in the Info dictionary until the last minute
+ * because the XMP Metadata uses them, if we delete them before writing the XMP metadata then they won't get written
+ * out there either, and we want them in the XMP block.
+ */
+static int reduce_Info(gx_device_pdf *pdev)
+{
+    int Size = 0, code;
+    char *Buffer, *ptr;
+
+    code = cos_dict_forall(pdev->Info, &Size, count_Info);
+    if (code >= 0) {
+        Buffer = (char *)gs_alloc_bytes(pdev->pdf_memory, Size + 1, "working Info buffer");
+        if (Buffer == NULL)
+            return 0;
+        memset(Buffer, 0x00, Size + 1);
+        code = cos_dict_forall(pdev->Info, Buffer, get_Info);
+        if (code >= 0) {
+            ptr = Buffer;
+            while (*ptr != 0x00 && ptr < Buffer + Size) {
+                (void)cos_dict_delete_c_key(pdev->Info, ptr);
+                ptr += strlen(ptr) + 1;
+            }
+        }
+        gs_free_object(pdev->pdf_memory, Buffer, "working Info buffer");
     }
     return 0;
 }
@@ -3077,6 +3201,14 @@ pdf_close(gx_device * dev)
             if (code >= 0)
                 code = code1;
         }
+        /* We don't want to write some key/value pairs into the document information dictionary when we are producing
+         * PDF 2.0, because the 2.0 spec deprecates the /Info dictionary (Bah) and states we 'should' only write
+         * ModDate and CreationDate. But if we don't put the keys in the dictionary then the XMP metadata
+         * won't contain them either, and we do want things like the Producer in there.
+         * So, now that we've written the XMP metadata, we can remove any keys we don't want in the /Info dictionary.
+         */
+        if (pdev->CompatibilityLevel >= 2.0)
+            reduce_Info(pdev);
 
         /* Write the Catalog. */
 
@@ -3283,6 +3415,10 @@ pdf_close(gx_device * dev)
     if (pdev->Linearise) {
         linear_params.LastResource = pdev->next_id - 1;
         linear_params.Offsets = (gs_offset_t *)gs_alloc_bytes(pdev->pdf_memory, pdev->next_id * sizeof(gs_offset_t), "temp xref storage");
+        if (linear_params.Offsets == NULL) {
+            code = gs_error_VMerror;
+            goto error_cleanup;
+        }
         memset(linear_params.Offsets, 0x00, linear_params.LastResource * sizeof(gs_offset_t));
     }
 
@@ -3432,13 +3568,23 @@ pdf_close(gx_device * dev)
 
                 xs1 = xref_temp.strm;
                 if (pdev->CompressStreams) {
-                    st = s_alloc_state(pdev->pdf_memory, s_zlibE_template.stype, "write_xref_strm");
-                    if (st == NULL)
-                        return_error(gs_error_VMerror);
-                    s_zlibE_template.set_defaults (st);
-                    xs = s_add_filter(&xref_temp.strm, &s_zlibE_template, st, pdev->pdf_memory);
-                    if (xs == NULL)
-                        xs = xref_temp.strm;
+                    if (pdev->UseBrotli) {
+                        st = s_alloc_state(pdev->pdf_memory, s_brotliE_template.stype, "write_xref_strm");
+                        if (st == NULL)
+                            return_error(gs_error_VMerror);
+                        s_brotliE_template.set_defaults (st);
+                        xs = s_add_filter(&xref_temp.strm, &s_brotliE_template, st, pdev->pdf_memory);
+                        if (xs == NULL)
+                            xs = xref_temp.strm;
+                    } else {
+                        st = s_alloc_state(pdev->pdf_memory, s_zlibE_template.stype, "write_xref_strm");
+                        if (st == NULL)
+                            return_error(gs_error_VMerror);
+                        s_zlibE_template.set_defaults (st);
+                        xs = s_add_filter(&xref_temp.strm, &s_zlibE_template, st, pdev->pdf_memory);
+                        if (xs == NULL)
+                            xs = xref_temp.strm;
+                    }
                 } else
                     xs = xref_temp.strm;
 
@@ -3481,8 +3627,12 @@ pdf_close(gx_device * dev)
                 sflush(xref_temp.strm);
                 length = stell(xref_temp.strm);
 
-                if (pdev->CompressStreams)
-                    gs_snprintf(str, sizeof(str), "]\n/W [1 %"PRId64" 2]\n/Filter /FlateDecode/Length %"PRId64"\n>>\nstream\n", offs_bytes, length);
+                if (pdev->CompressStreams) {
+                    if (pdev->UseBrotli)
+                        gs_snprintf(str, sizeof(str), "]\n/W [1 %"PRId64" 2]\n/Filter /BrotliDecode/Length %"PRId64"\n>>\nstream\n", offs_bytes, length);
+                    else
+                        gs_snprintf(str, sizeof(str), "]\n/W [1 %"PRId64" 2]\n/Filter /FlateDecode/Length %"PRId64"\n>>\nstream\n", offs_bytes, length);
+                }
                 else
                     gs_snprintf(str, sizeof(str), "]\n/W [1 %"PRId64" 2]\n/Length %"PRId64"\n>>\nstream\n", offs_bytes, length);
                 stream_puts(s, str);
@@ -3910,6 +4060,8 @@ error_cleanup:
         for (i=0;i < pdev->vgstack_size;i++) {
             if (pdev->vgstack[i].dash_pattern != NULL)
                 gs_free_object(pdev->memory->non_gc_memory, pdev->vgstack[i].dash_pattern, "pdfwrite final free stored dash in gstate");
+            if (pdev->vgstack[i].clip_path != 0)
+                gx_path_free(pdev->vgstack[i].clip_path, "pdf clip path");
         }
         gs_free_object(pdev->pdf_memory, pdev->vgstack, "pdf_close(graphics state stack)");
         pdev->vgstack = 0;
@@ -3950,7 +4102,7 @@ error_cleanup:
     code1 = gdev_vector_close_file((gx_device_vector *) pdev);
     if (code >= 0)
         code = code1;
-    if (pdev->max_referred_page >= pdev->next_page + 1) {
+    if (pdev->max_referred_page >= pdev->next_page + 1 && pdev->next_page != 0 && !file_per_page) {
         /* Note : pdev->max_referred_page counts from 1,
            and pdev->next_page counts from 0. */
         emprintf2(pdev->memory, "ERROR: A pdfmark destination page %d "

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -112,6 +112,8 @@ cid_to_TT_charcode(const gs_memory_t *mem,
             return code;
         if ((code = array_get(mem, SubstNWP, i + 3, &rs)) < 0)
             return code;
+        if (!r_has_type(&rb, t_integer) || !r_has_type(&re, t_integer) || !r_has_type(&rs, t_integer))
+            return_error(gs_error_typecheck);
         nb = rb.value.intval;
         ne = re.value.intval;
         ns = rs.value.intval;
@@ -150,6 +152,8 @@ set_CIDMap_element(const gs_memory_t *mem, ref *CIDMap, uint cid, uint glyph_ind
         return_error(gs_error_rangecheck); /* Can't store with GDBytes == 2. */
     for (i = 0; i < count; i++) {
         array_get(mem, CIDMap, i, &s);
+        if (!r_has_type(&s, t_string))
+            return 0;
         size = r_size(&s) & ~1;
         if (offset < size) {
             c = s.value.bytes + offset;

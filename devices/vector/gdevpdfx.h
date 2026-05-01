@@ -515,6 +515,8 @@ typedef struct pdf_viewer_state_s {
     float *dash_pattern;
     uint dash_pattern_size;
     gs_id soft_mask_id;
+    gx_path *clip_path;
+    gs_id clip_path_id;
 } pdf_viewer_state;
 
 /*
@@ -553,7 +555,8 @@ typedef struct pdf_substream_save_s {
 typedef enum {
     pdf_compress_none,
     pdf_compress_LZW,        /* not currently used, thanks to Unisys */
-    pdf_compress_Flate
+    pdf_compress_Flate,
+    pdf_compress_Brotli
 } pdf_compression_type;
 
 typedef enum {
@@ -879,7 +882,7 @@ struct gx_device_pdf_s {
                         Used only with uncached charprocs. */
     bool PS_accumulator; /* A flag to determine whether a given
                          accumulator is for a PostScript type 3 font or not. */
-    bool Scaled_accumulator; /* We scale teh CTM when accumulating type 3 fonts */
+    int32_t Scaled_accumulator; /* We scale teh CTM when accumulating type 3 fonts */
     bool accumulating_a_global_object; /* ps2write only.
                         Accumulating a global object (such as a named Form,
                         so that resources used in it must also be global.
@@ -991,6 +994,7 @@ struct gx_device_pdf_s {
     char *PendingOC;                /* An OptionalContent object is pending, the string is the name of the (already defined) object  */
     bool ToUnicodeForStdEnc;        /* Should we emit ToUnicode CMaps when a simple font has only standard glyph names. Defaults to true */
     bool EmbedSubstituteFonts;      /* When we use a substitute font to replace a missing font, should we embed it in the output */
+    bool UseBrotli;                 /* Use Brotli compression in place of Flate */
 };
 
 #define is_in_page(pdev)\
@@ -1139,10 +1143,20 @@ int pdf_record_usage_by_parent(gx_device_pdf *const pdev, int64_t resource_id, i
 
 /*
  * Define the offset that indicates that a file position is in the
- * asides file rather than the main (contents) file.
- * Must be a power of 2, and larger than the largest possible output file.
+ * asides file rather than the main (contents) file. We just use the top bit
+ * as a flag. Complexity is due to ubsan and the possibility we have 32-bit offset type.
  */
-#define ASIDES_BASE_POSITION min_int64_t
+#ifdef ARCH_SIZEOF_GS_OFFSET_T
+# if ARCH_SIZEOF_GS_OFFSET_T == 8
+#define ASIDES_BASE_POSITION ((uint64_t)1 << ((sizeof(gs_offset_t) * 8) - 1))
+# elif ARCH_SIZEOF_GS_OFFSET_T == 4
+#define ASIDES_BASE_POSITION ((uint32_t)1 << ((sizeof(gs_offset_t) * 8) - 1))
+# else
+UNSUPPORTED
+# endif
+# else
+UNSUPPORTED
+# endif
 
 /* Begin an object logically separate from the contents. */
 /* (I.e., an object in the resource file.) */
@@ -1323,6 +1337,7 @@ typedef struct pdf_lcvd_s {
     bool filled_trap;
     bool write_matrix;
     bool has_background;
+    int pass;
     gs_matrix m;
     gs_point path_offset;
 } pdf_lcvd_t;
@@ -1357,13 +1372,15 @@ typedef struct pdf_filter_names_s {
     const char *RunLengthDecode;
     const char *JBIG2Decode;
     const char *JPXDecode;
+    const char *BrotliDecode;
 } pdf_filter_names_t;
 #define PDF_FILTER_NAMES\
   "/ASCII85Decode", "/ASCIIHexDecode", "/CCITTFaxDecode",\
   "/DCTDecode",  "/DecodeParms", "/Filter", "/FlateDecode",\
-  "/LZWDecode", "/RunLengthDecode", "/JBIG2Decode", "/JPXDecode"
+  "/LZWDecode", "/RunLengthDecode", "/JBIG2Decode", "/JPXDecode",\
+  "/BrotliDecode"
 #define PDF_FILTER_NAMES_SHORT\
-  "/A85", "/AHx", "/CCF", "/DCT", "/DP", "/F", "/Fl", "/LZW", "/RL", "/???", "/???"
+  "/A85", "/AHx", "/CCF", "/DCT", "/DP", "/F", "/Fl", "/LZW", "/RL", "/???", "/???", "/Br"
 
 /* Write matrix values. */
 void pdf_put_matrix(gx_device_pdf *pdev, const char *before,

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2025 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -86,10 +86,7 @@ stream_dct_finalize(const gs_memory_t *cmem, void *vptr)
 void
 stream_dct_end_passthrough(jpeg_decompress_data *jddp)
 {
-    char EOI[2] = {0xff, 0xD9};
-
     if (jddp != NULL && jddp->PassThrough != 0 && jddp->PassThroughfn != NULL) {
-        (jddp->PassThroughfn)(jddp->device, (byte *)EOI, 2);
         (jddp->PassThroughfn)(jddp->device, NULL, 0);
         jddp->PassThrough = 0;
         jddp->PassThroughfn = NULL;

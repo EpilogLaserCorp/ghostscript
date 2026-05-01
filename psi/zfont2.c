@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -1347,7 +1347,7 @@ static int (* const offset_procs[])(unsigned int *, const cff_data_t *, unsigned
 static int
 get_cff_string(unsigned char *dst, const cff_data_t *o, unsigned p, unsigned len)
 {
-    if (p + len > o->length)
+    if (p > o->length || p + len > o->length)
         return_error(gs_error_rangecheck); /* out of range access */
     while (len) {
         unsigned chunk_len = o->mask + 1 - (p & o->mask);
@@ -1604,7 +1604,7 @@ make_string_from_index(i_ctx_t *i_ctx_p, ref *dst, const cff_index_t *index, con
 
     if ((code = peek_index(&doff, &len, index, data, id)) < 0)
         return code;
-    if (len + fdoff> 65535)
+    if (len > 65535 || len + fdoff > 65535)
         return_error(gs_error_limitcheck);
     if ((sbody = ialloc_string(len + fdoff, "make_string_from_index")) == 0)
         return_error(gs_error_VMerror);
@@ -2467,7 +2467,7 @@ parse_font(i_ctx_t *i_ctx_p,  ref *topdict,
             return code;
         if ((code = name_ref(imemory, (const unsigned char *)font_keys[k_FontMatrix], font_keys_sz[k_FontMatrix], &name_FontMatrix, 0)) < 0)
             return code;
-        top_has_FontMatrix = dict_find(topdict, &name_FontMatrix, &array_FontMatrix) > 0;
+        top_has_FontMatrix = dict_find_with_type(topdict, &name_FontMatrix, &array_FontMatrix, t_array) > 0;
 
         for (i = 0; i < fdarray.count; i++) {
             unsigned int len;

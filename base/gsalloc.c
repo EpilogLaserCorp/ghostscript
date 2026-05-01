@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -1398,7 +1398,7 @@ i_resize_object(gs_memory_t * mem, void *obj, size_t new_num_elements,
         return NULL;
 #endif
 
-    if (new_size_rounded != (obj_size_t)new_size_rounded)
+    if (new_size_rounded != (obj_size_t)new_size_rounded || new_size_rounded < new_size)
         return NULL;
 
     if (old_size_rounded == new_size_rounded) {
@@ -2521,7 +2521,8 @@ alloc_close_clump(gs_ref_memory_t * mem)
 #ifdef DEBUG
     if (gs_debug_c('A')) {
         dmlprintf1((const gs_memory_t *)mem, "[a%d]", alloc_trace_space(mem));
-        dmprintf_clump((const gs_memory_t *)mem, "closing clump", mem->cc);
+        if (mem->cc)
+            dmprintf_clump((const gs_memory_t *)mem, "closing clump", mem->cc);
     }
 #endif
 }

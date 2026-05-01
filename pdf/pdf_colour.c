@@ -1,4 +1,4 @@
-/* Copyright (C) 2018-2024 Artifex Software, Inc.
+/* Copyright (C) 2018-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -43,6 +43,7 @@
 #include "gscolor.h"    /* For gs_setgray() and friends */
 #include "gsicc.h"      /* For gs_cspace_build_ICC() */
 #include "gsstate.h"    /* For gs_gdsvae() and gs_grestore() */
+#include "gxdevsop.h"
 
 /* Forward definitions for a routine we need */
 static int pdfi_create_colorspace_by_array(pdf_context *ctx, pdf_array *color_array, int index,
@@ -1044,8 +1045,11 @@ static int pdfi_create_icc(pdf_context *ctx, char *Name, stream *s, int ncomps, 
         rc_increment(pcs->cmm_icc_profile_data);
     }
     /* Add the color space to the profile cache */
-    if (dictkey != 0)
-        gsicc_add_cs(ctx->pgs, pcs, dictkey);
+    if (dictkey != 0) {
+        code = gsicc_add_cs(ctx->pgs, pcs, dictkey);
+        if (code < 0)
+            goto exit;
+    }
 
     if (ppcs!= NULL){
         *ppcs = pcs;
@@ -1427,7 +1431,7 @@ static int pdfi_create_iccbased(pdf_context *ctx, pdf_array *color_array, int in
         switch (pdfi_type_of(Name)) {
             case PDF_STRING:
             case PDF_NAME:
-                cname = (char *)gs_alloc_bytes(ctx->memory, ((pdf_name *)Name)->length + 1, "pdfi_create_iccbased (profile name)");
+                cname = (char *)gs_alloc_bytes(ctx->memory, ((pdf_name *)Name)->length + (size_t)1, "pdfi_create_iccbased (profile name)");
                 if (cname == NULL) {
                     code = gs_note_error(gs_error_VMerror);
                     goto done;
@@ -2052,7 +2056,11 @@ static int pdfi_create_Separation(pdf_context *ctx, pdf_array *color_array, int 
     pcs_alt = NULL;
     pcs->params.separation.mem = ctx->memory;
     pcs->params.separation.sep_type = sep_type;
-    pcs->params.separation.sep_name = (char *)gs_alloc_bytes(ctx->memory->non_gc_memory, name->length + 1, "pdfi_setseparationspace(ink)");
+    pcs->params.separation.sep_name = (char *)gs_alloc_bytes(ctx->memory->non_gc_memory, (size_t)name->length + 1, "pdfi_setseparationspace(ink)");
+    if (pcs->params.separation.sep_name == NULL) {
+        code = gs_note_error(gs_error_VMerror);
+        goto pdfi_separation_error;
+    }
     memcpy(pcs->params.separation.sep_name, name->data, name->length);
     pcs->params.separation.sep_name[name->length] = 0x00;
 
@@ -2112,6 +2120,9 @@ static int pdfi_create_DeviceN(pdf_context *ctx, pdf_array *color_array, int ind
     code = pdfi_array_get_type(ctx, color_array, index + 1, PDF_ARRAY, (pdf_obj **)&inks);
     if (code < 0)
         goto pdfi_devicen_error;
+
+    if (pdfi_array_size(inks) > GS_CLIENT_COLOR_MAX_COMPONENTS)
+            return_error(gs_error_limitcheck);
 
     for (ix = 0;ix < pdfi_array_size(inks);ix++) {
         pdf_name *ink_name = NULL;
@@ -2246,7 +2257,11 @@ all_error:
         if (code < 0)
             goto pdfi_devicen_error;
 
-        pcs->params.device_n.names[ix] = (char *)gs_alloc_bytes(ctx->memory->non_gc_memory, ink_name->length + 1, "pdfi_setdevicenspace(ink)");
+        pcs->params.device_n.names[ix] = (char *)gs_alloc_bytes(ctx->memory->non_gc_memory, (size_t)ink_name->length + 1, "pdfi_setdevicenspace(ink)");
+        if (pcs->params.device_n.names[ix] == NULL) {
+            code = gs_note_error(gs_error_VMerror);
+            goto pdfi_devicen_error;
+        }
         memcpy(pcs->params.device_n.names[ix], ink_name->data, ink_name->length);
         pcs->params.device_n.names[ix][ink_name->length] = 0x00;
         pdfi_countdown(ink_name);
@@ -2317,7 +2332,7 @@ all_error:
                 goto pdfi_devicen_error;
 
             pcs->params.device_n.num_process_names = pdfi_array_size(Components);
-            pcs->params.device_n.process_names = (char **)gs_alloc_bytes(pcs->params.device_n.mem->non_gc_memory, pdfi_array_size(Components) * sizeof(char *), "pdfi_devicen(Processnames)");
+            pcs->params.device_n.process_names = (char **)gs_alloc_bytes(pcs->params.device_n.mem->non_gc_memory, (size_t)pdfi_array_size(Components) * sizeof(char *), "pdfi_devicen(Processnames)");
             if (pcs->params.device_n.process_names == NULL) {
                 code = gs_error_VMerror;
                 goto pdfi_devicen_error;
@@ -2334,7 +2349,7 @@ all_error:
                 switch (pdfi_type_of(name)) {
                     case PDF_NAME:
                     case PDF_STRING:
-                        pcs->params.device_n.process_names[ix] = (char *)gs_alloc_bytes(pcs->params.device_n.mem->non_gc_memory, ((pdf_name *)name)->length + 1, "pdfi_devicen(Processnames)");
+                        pcs->params.device_n.process_names[ix] = (char *)gs_alloc_bytes(pcs->params.device_n.mem->non_gc_memory, ((pdf_name *)name)->length + (size_t)1, "pdfi_devicen(Processnames)");
                         if (pcs->params.device_n.process_names[ix] == NULL) {
                             pdfi_countdown(Components);
                             pdfi_countdown(name);
@@ -2398,7 +2413,7 @@ all_error:
                     goto pdfi_devicen_error;
                 }
 
-                colorant_name = (char *)gs_alloc_bytes(pcs->params.device_n.mem->non_gc_memory, ((pdf_name *)Colorant)->length + 1, "pdfi_devicen(colorant)");
+                colorant_name = (char *)gs_alloc_bytes(pcs->params.device_n.mem->non_gc_memory, ((pdf_name *)Colorant)->length + (size_t)1, "pdfi_devicen(colorant)");
                 if (colorant_name == NULL) {
                     rc_decrement_cs(colorant_space, "pdfi_devicen(colorant)");
                     pdfi_countdown(Space);
@@ -2574,6 +2589,10 @@ pdfi_create_indexed(pdf_context *ctx, pdf_array *color_array, int index,
     else
         pcs = gs_cspace_alloc(ctx->memory, &gs_color_space_type_Indexed);
 
+    if (pcs == NULL) {
+        code = gs_note_error(gs_error_VMerror);
+        goto exit;
+    }
     /* NOTE: we don't need to increment the reference to pcs_base, since it is already 1 */
     pcs->base_space = pcs_base;
 
@@ -2609,7 +2628,9 @@ static int pdfi_create_DeviceGray(pdf_context *ctx, gs_color_space **ppcs)
     int code = 0;
 
     if (ppcs != NULL) {
-        if (ctx->page.DefaultGray_cs != NULL) {
+        /* Bug 709017: Don't return DefaultGray_cs if we are within a softmask */
+        if (ctx->page.DefaultGray_cs != NULL &&
+            (dev_proc(ctx->pgs->device, dev_spec_op)(ctx->pgs->device, gxdso_in_smask_construction, NULL, 0) <= 0)) {
             *ppcs = ctx->page.DefaultGray_cs;
             rc_increment(*ppcs);
         } else {
@@ -2638,7 +2659,9 @@ static int pdfi_create_DeviceRGB(pdf_context *ctx, gs_color_space **ppcs)
     int code = 0;
 
     if (ppcs != NULL) {
-        if (ctx->page.DefaultRGB_cs != NULL) {
+        /* Bug 709017: Don't return DefaultRGB_cs if we are within a softmask */
+        if (ctx->page.DefaultRGB_cs != NULL &&
+            (dev_proc(ctx->pgs->device, dev_spec_op)(ctx->pgs->device, gxdso_in_smask_construction, NULL, 0) <= 0)) {
             *ppcs = ctx->page.DefaultRGB_cs;
             rc_increment(*ppcs);
         } else {
@@ -2666,7 +2689,9 @@ static int pdfi_create_DeviceCMYK(pdf_context *ctx, gs_color_space **ppcs)
     int code = 0;
 
     if (ppcs != NULL) {
-        if (ctx->page.DefaultCMYK_cs != NULL) {
+        /* Bug 709017: Don't return DefaultCMYK_cs if we are within a softmask */
+        if (ctx->page.DefaultCMYK_cs != NULL &&
+            (dev_proc(ctx->pgs->device, dev_spec_op)(ctx->pgs->device, gxdso_in_smask_construction, NULL, 0) <= 0)) {
             *ppcs = ctx->page.DefaultCMYK_cs;
             rc_increment(*ppcs);
         } else {
@@ -3046,6 +3071,8 @@ static int pdfi_device_setoutputintent(pdf_context *ctx, pdf_dict *profile_dict,
     if (code < 0)
         goto exit;
     ncomps = (int)N;
+    if (ncomps > ICC_MAX_CHANNELS)
+        return_error(gs_error_rangecheck);
 
     picc_profile = gsicc_profile_new(stream, gs_gstate_memory(pgs), NULL, 0);
     if (picc_profile == NULL) {
@@ -3099,6 +3126,10 @@ static int pdfi_device_setoutputintent(pdf_context *ctx, pdf_dict *profile_dict,
     picc_profile->name = (char *) gs_alloc_bytes(picc_profile->memory,
                                                  MAX_DEFAULT_ICC_LENGTH,
                                                  "pdfi_color_setoutputintent");
+    if (picc_profile->name == NULL) {
+        code = gs_note_error(gs_error_VMerror);
+        goto exit;
+    }
     strncpy(picc_profile->name, OI_PROFILE, strlen(OI_PROFILE));
     picc_profile->name[strlen(OI_PROFILE)] = 0;
     picc_profile->name_length = strlen(OI_PROFILE);
