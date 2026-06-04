@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -811,8 +811,21 @@ load_glyph(gs_fapi_server * a_server, gs_fapi_font * a_fapi_font,
             && ft_face->glyph->format != FT_GLYPH_FORMAT_COMPOSITE) {
             if ((bitmap_raster(w) * h) < max_bitmap) {
                 FT_Render_Mode mode = FT_RENDER_MODE_MONO;
+                FT_UInt save_x_ppem = ft_face->glyph->face->size->metrics.x_ppem;
+                FT_UInt save_y_ppem = ft_face->glyph->face->size->metrics.y_ppem;
 
+                /* Workaround so we have more control over size of the glyph that freetype will render for us */
+                if (a_fapi_font->is_type1) {
+                    ft_face->glyph->face->size->metrics.x_ppem = ft_face->glyph->face->size->metrics.y_ppem = 1000;
+                }
+                else {
+                    ft_face->glyph->face->size->metrics.x_ppem = ft_face->glyph->face->size->metrics.y_ppem = 2048;
+                }
                 ft_error = FT_Render_Glyph(ft_face->glyph, mode);
+
+                ft_face->glyph->face->size->metrics.x_ppem = save_x_ppem;
+                ft_face->glyph->face->size->metrics.y_ppem = save_y_ppem;
+
                 if (ft_error != 0) {
                     (*a_glyph) = NULL;
                     return (gs_error_VMerror);
@@ -1195,8 +1208,8 @@ gs_fapi_ft_get_scaled_font(gs_fapi_server * a_server, gs_fapi_font * a_font,
                                    &ft_face);
 
             if (ft_error) {
-                gs_memory_t * mem = (gs_memory_t *) s->ftmemory->user;
-                gs_free(mem, own_font_data, 0, 0, "FF_open_read_stream");
+                gs_memory_t *mem = (gs_memory_t *) s->ftmemory->user;
+                gs_free(mem, own_font_data, 0, 0, "gs_fapi_ft_get_scaled_font");
                 return ft_to_gs_error(ft_error);
             }
         }
@@ -1221,6 +1234,9 @@ gs_fapi_ft_get_scaled_font(gs_fapi_server * a_server, gs_fapi_font * a_font,
                              &ft_face);
             if (ft_error) {
                 /* in the event of an error, Freetype should cleanup the stream */
+                /* But not the ft container */
+                gs_memory_t *mem = (gs_memory_t *) s->ftmemory->user;
+                gs_free(mem, ft_strm, 0, 0, "gs_fapi_ft_get_scaled_font");
                 return ft_to_gs_error(ft_error);
             }
         }
@@ -1311,8 +1327,10 @@ gs_fapi_ft_get_scaled_font(gs_fapi_server * a_server, gs_fapi_font * a_font,
 
                     code = a_font->serialize_tt_font(a_font, own_font_data,
                                           open_args.memory_size);
-                    if (code < 0)
+                    if (code < 0) {
+                        FF_free(s->ftmemory, own_font_data);
                         return code;
+                    }
                 }
 
                 /* We always load incrementally. */

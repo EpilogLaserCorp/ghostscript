@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -134,7 +134,7 @@ gs_cspace_new_DeviceN(
         gs_free_object(pmem, pcs, "gs_cspace_new_DeviceN");
         return code;
     }
-    pnames = (char **)gs_alloc_bytes(pcsdevn->mem, num_components * sizeof(char *), "gs_cspace_new_DeviceN");
+    pnames = (char **)gs_alloc_bytes(pcsdevn->mem, (size_t)num_components * sizeof(char *), "gs_cspace_new_DeviceN");
     if (pnames == 0) {
         gs_free_object(pmem, pcsdevn->map, ".gs_cspace_build_DeviceN(map)");
         gs_free_object(pmem, pcs, "gs_cspace_new_DeviceN");
@@ -485,9 +485,9 @@ gx_concretize_DeviceN(const gs_client_color * pc, const gs_color_space * pcs,
         tcode = (*pcs->params.device_n.map->tint_transform)
              (pc->paint.values, &cc.paint.values[0],
              pgs, pcs->params.device_n.map->tint_transform_data);
-        (*pacs->type->restrict_color)(&cc, pacs);
         if (tcode < 0)
             return tcode;
+        (*pacs->type->restrict_color)(&cc, pacs);
         /* First check if this was PS based. */
         if (gs_color_space_is_PSCIE(pacs)) {
             /* We may have to rescale data to 0 to 1 range */
@@ -814,10 +814,22 @@ gx_set_overprint_DeviceN(const gs_color_space * pcs, gs_gstate * pgs)
             int     i, ncomps = pcs->params.device_n.num_components;
 
             params.is_fill_color = pgs->is_fill_color;	/* for fill_stroke */
-            for (i = 0; i < ncomps; i++) {
-                int mcomp = pcmap->color_map[i];
-                if (mcomp >= 0)
-                    gs_overprint_set_drawn_comp( params.drawn_comps, mcomp);
+            if (pcs->params.device_n.named_color_supported) {
+                /* This color will not actually be the device_n color any more.
+                 * It will have been substituted with the named color replacement.
+                 * Therefore the drawn comps will be different. */
+                /* FIXME: For now, we assume the replacement color uses
+                 * C,M,Y and K. To do better, we'd either need to look at the
+                 * device color (but this is problematic, as we may have scaled light
+                 * components to 0), or we'd need to get this from the named color
+                 * code itself. Possibly by another entry in color_component_map. */
+                params.drawn_comps = 15;
+            } else {
+                for (i = 0; i < ncomps; i++) {
+                    int mcomp = pcmap->color_map[i];
+                    if (mcomp >= 0)
+                        gs_overprint_set_drawn_comp( params.drawn_comps, mcomp);
+                }
             }
         }
 

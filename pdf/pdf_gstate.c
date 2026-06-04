@@ -1,4 +1,4 @@
-/* Copyright (C) 2018-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -170,8 +170,20 @@ int pdfi_concat(pdf_context *ctx)
         return_error(gs_error_stackunderflow);
     }
 
-    if (ctx->text.BlockDepth != 0)
-        pdfi_set_warning(ctx, 0, NULL, W_PDF_OPINVALIDINTEXT, "pdfi_concat", NULL);
+    if (ctx->text.BlockDepth != 0) {
+        /* We deliberately do not set BlockDepth to 0 here, because we can recover from a 'cm' inside a text block
+         * even if it is illegal. So we preserve the text block and just do the cm.
+         */
+        if (ctx->text.TextClip) {
+            gx_device *dev = gs_currentdevice_inline(ctx->pgs);
+
+            ctx->text.TextClip = false;
+            (void)dev_proc(dev, dev_spec_op)(dev, gxdso_hilevel_text_clip, (void *)0, 1);
+        }
+        code = pdfi_set_warning_stop(ctx, gs_note_error(gs_error_syntaxerror), NULL, W_PDF_OPINVALIDINTEXT, "pdfi_concat", NULL);
+        if (code < 0)
+            return code;
+    }
 
     code = pdfi_destack_reals(ctx, Values, 6);
     if (code < 0)
@@ -232,8 +244,10 @@ int pdfi_op_Q(pdf_context *ctx)
     if (code >= 0 && ctx->device_state.preserve_tr_mode && ctx->text.TextClip && gs_currenttextrenderingmode(ctx->pgs) < 4) {
         gx_device *dev = gs_currentdevice_inline(ctx->pgs);
 
-        ctx->text.TextClip = 0;
-        dev_proc(dev, dev_spec_op)(dev, gxdso_hilevel_text_clip, (void *)0, 1);
+        ctx->text.TextClip = false;
+        code = dev_proc(dev, dev_spec_op)(dev, gxdso_hilevel_text_clip, (void *)0, 1);
+        if (code < 0 && code == gs_error_undefined)
+            code = 0;
     }
 
     return code;
@@ -348,7 +362,7 @@ int pdfi_setdash_impl(pdf_context *ctx, pdf_array *a, double phase_d)
     double temp;
     int i, code;
 
-    dash_array = (float *)gs_alloc_bytes(ctx->memory, pdfi_array_size(a) * sizeof (float),
+    dash_array = (float *)gs_alloc_bytes(ctx->memory, (size_t)pdfi_array_size(a) * sizeof (float),
                                          "temporary float array for setdash");
     if (dash_array == NULL)
         return_error(gs_error_VMerror);
@@ -1322,7 +1336,7 @@ static int build_type6_halftone(pdf_context *ctx, pdf_stream *halftone_stream, p
                                 gx_ht_order *porder, gs_halftone_component *phtc, char *name, int len)
 {
     int code;
-    int64_t w, h, length = 0;
+    int64_t w, h, length = 0, returned_length = 0;
     gs_threshold2_halftone *ptp = &phtc->params.threshold2;
     pdf_dict *halftone_dict = NULL;
 
@@ -1345,6 +1359,10 @@ static int build_type6_halftone(pdf_context *ctx, pdf_stream *halftone_stream, p
     ptp->height = h;
     ptp->height2 = 0;
 
+    if (ptp->width < 1 || w > max_int ||
+        ptp->height < 1 || h > max_int)
+        return_error(gs_error_rangecheck);
+
     ptp->bytes_per_sample = 1;
     ptp->transfer = 0;
     ptp->transfer_closure.proc = 0;
@@ -1356,19 +1374,22 @@ static int build_type6_halftone(pdf_context *ctx, pdf_stream *halftone_stream, p
 
     phtc->comp_number = gs_cname_to_colorant_number(ctx->pgs, (byte *)name, len, 1);
 
-    length = w * h;
+    returned_length = length = w * h;
     code = pdfi_stream_to_buffer(ctx, halftone_stream,
-                                 (byte **)&ptp->thresholds.data, &length);
+                                 (byte **)&ptp->thresholds.data, &returned_length);
     if (code < 0)
         goto error;
 
     /* Guard against a returned buffer larger than a gs_const_bytestring can hold */
-    if (length > max_uint) {
+    /* We must also take care that we have sufficient data for the process_threshold2()
+     * function, which will attempt to read width * height bytes.
+     */
+    if (length > max_uint || returned_length < length) {
         code = gs_note_error(gs_error_rangecheck);
         goto error;
     }
 
-    ptp->thresholds.size = length;
+    ptp->thresholds.size = returned_length;
     phtc->type = ht_type_threshold2;
     return code;
 
@@ -1380,7 +1401,7 @@ error:
 static int build_type10_halftone(pdf_context *ctx, pdf_stream *halftone_stream, pdf_dict *page_dict, gx_ht_order *porder, gs_halftone_component *phtc, char *name, int len)
 {
     int code;
-    int64_t w, h, length = 0;
+    int64_t w, h, length = 0, returned_length = 0;
     gs_threshold2_halftone *ptp = &phtc->params.threshold2;
     pdf_dict *halftone_dict = NULL;
 
@@ -1399,6 +1420,10 @@ static int build_type10_halftone(pdf_context *ctx, pdf_stream *halftone_stream, 
         return code;
     ptp->width2 = ptp->height2 = h;
 
+    if (w < 1 || w > max_int ||
+        h < 1 || h > max_int)
+        return_error(gs_error_rangecheck);
+
     ptp->bytes_per_sample = 1;
     ptp->transfer = 0;
     ptp->transfer_closure.proc = 0;
@@ -1410,19 +1435,22 @@ static int build_type10_halftone(pdf_context *ctx, pdf_stream *halftone_stream, 
 
     phtc->comp_number = gs_cname_to_colorant_number(ctx->pgs, (byte *)name, len, 1);
 
-    length = (w * w) + (h * h);
+    returned_length = length = (w * w) + (h * h);
     code = pdfi_stream_to_buffer(ctx, halftone_stream,
-                                 (byte **)&ptp->thresholds.data, &length);
+                                 (byte **)&ptp->thresholds.data, &returned_length);
     if (code < 0)
         goto error;
 
     /* Guard against a returned buffer larger than a gs_const_bytestring can hold */
-    if (length > max_uint) {
+    /* We must also take care that we have sufficient data for the process_threshold2()
+     * function, which will attempt to read width * height bytes.
+     */
+    if (length > max_uint || returned_length < length) {
         code = gs_note_error(gs_error_rangecheck);
         goto error;
     }
 
-    ptp->thresholds.size = length;
+    ptp->thresholds.size = returned_length;
     phtc->type = ht_type_threshold2;
     return code;
 
@@ -1434,7 +1462,7 @@ error:
 static int build_type16_halftone(pdf_context *ctx, pdf_stream *halftone_stream, pdf_dict *page_dict, gx_ht_order *porder, gs_halftone_component *phtc, char *name, int len)
 {
     int code;
-    int64_t w, h, length = 0;
+    int64_t w, h, length = 0, returned_length = 0;
     gs_threshold2_halftone *ptp = &phtc->params.threshold2;
     pdf_dict *halftone_dict = NULL;
 
@@ -1455,6 +1483,10 @@ static int build_type16_halftone(pdf_context *ctx, pdf_stream *halftone_stream, 
         return code;
     ptp->height = h;
 
+    if (ptp->width < 1 || w > max_int ||
+        ptp->height < 1 || h > max_int)
+        return_error(gs_error_rangecheck);
+
     w = 0;
     code = pdfi_dict_get_int(ctx, halftone_dict, "Width2", &w);
     if (code < 0 && code != gs_error_undefined)
@@ -1466,6 +1498,10 @@ static int build_type16_halftone(pdf_context *ctx, pdf_stream *halftone_stream, 
     if (code < 0 && code != gs_error_undefined)
         return code;
     ptp->height2 = h;
+
+    if (ptp->width2 < 0 || w > max_int ||
+        ptp->height2 < 0 || h > max_int)
+        return_error(gs_error_rangecheck);
 
     ptp->bytes_per_sample = 2;
     ptp->transfer = 0;
@@ -1479,23 +1515,26 @@ static int build_type16_halftone(pdf_context *ctx, pdf_stream *halftone_stream, 
     phtc->comp_number = gs_cname_to_colorant_number(ctx->pgs, (byte *)name, len, 1);
 
     if (ptp->width2 != 0 && ptp->height2 != 0) {
-        length = ((ptp->width * ptp->height) + (ptp->width2 * ptp->height2)) * 2;
+        returned_length = length = (((int64_t)ptp->width * ptp->height) + ((int64_t)ptp->width2 * ptp->height2)) * 2;
     } else {
-        length = (int64_t)ptp->width * (int64_t)ptp->height * 2;
+        returned_length = length = (int64_t)ptp->width * (int64_t)ptp->height * 2;
     }
 
     code = pdfi_stream_to_buffer(ctx, halftone_stream,
-                                 (byte **)&ptp->thresholds.data, &length);
+                                 (byte **)&ptp->thresholds.data, &returned_length);
     if (code < 0)
         goto error;
 
     /* Guard against a returned buffer larger than a gs_const_bytestring can hold */
-    if (length > max_uint) {
+    /* We must also take care that we have sufficient data for the process_threshold2()
+     * function, which will attempt to read width * height bytes.
+     */
+    if (length > max_uint || returned_length < length) {
         code = gs_note_error(gs_error_rangecheck);
         goto error;
     }
 
-    ptp->thresholds.size = length;
+    ptp->thresholds.size = returned_length;
     phtc->type = ht_type_threshold2;
     return code;
 
@@ -1624,7 +1663,7 @@ static int build_type5_halftone(pdf_context *ctx, pdf_dict *halftone_dict, pdf_d
     memset(pocs, 0x00, NumComponents * sizeof(gx_ht_order_component));
     pdht->components = pocs;
     pdht->num_comp = NumComponents;
-    phtc = (gs_halftone_component *)gs_alloc_bytes(ctx->memory, sizeof(gs_halftone_component) * NumComponents, "pdfi_do_halftone");
+    phtc = (gs_halftone_component *)gs_alloc_bytes(ctx->memory, (size_t)sizeof(gs_halftone_component) * NumComponents, "pdfi_do_halftone");
     if (phtc == 0) {
         code = gs_note_error(gs_error_VMerror);
         goto error;
@@ -1698,6 +1737,9 @@ static int build_type5_halftone(pdf_context *ctx, pdf_dict *halftone_dict, pdf_d
                             code = build_type6_halftone(ctx, (pdf_stream *)Value, page_dict, porder1, phtc1, str, str_len);
                             if (code < 0)
                                 goto error;
+                            code = process_threshold2(porder1, ctx->pgs, &phtc1->params.threshold2, ctx->memory);
+                            if (code < 0)
+                                goto error;
                             break;
                         case 10:
                             if (pdfi_type_of(Value) != PDF_STREAM) {
@@ -1707,6 +1749,9 @@ static int build_type5_halftone(pdf_context *ctx, pdf_dict *halftone_dict, pdf_d
                             code = build_type10_halftone(ctx, (pdf_stream *)Value, page_dict, porder1, phtc1, str, str_len);
                             if (code < 0)
                                 goto error;
+                            code = process_threshold2(porder1, ctx->pgs, &phtc1->params.threshold2, ctx->memory);
+                            if (code < 0)
+                                goto error;
                             break;
                         case 16:
                             if (pdfi_type_of(Value) != PDF_STREAM) {
@@ -1714,6 +1759,9 @@ static int build_type5_halftone(pdf_context *ctx, pdf_dict *halftone_dict, pdf_d
                                 goto error;
                             }
                             code = build_type16_halftone(ctx, (pdf_stream *)Value, page_dict, porder1, phtc1, str, str_len);
+                            if (code < 0)
+                                goto error;
+                            code = process_threshold2(porder1, ctx->pgs, &phtc1->params.threshold2, ctx->memory);
                             if (code < 0)
                                 goto error;
                             break;

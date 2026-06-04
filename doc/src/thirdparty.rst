@@ -42,7 +42,7 @@ The table below details the third party libraries that Ghostscript and/or GhostP
      - MIT/eXpat License
      - http://expat.sourceforge.net/
    * - FreeType
-     - 2.13.3
+     - 2.14.2
      - Font scaling and rendering
 
        for Ghostscript
@@ -64,7 +64,7 @@ The table below details the third party libraries that Ghostscript and/or GhostP
 
      - http://www.ghostscript.com/
    * - libjpeg
-     - 9f with patches
+     - 10 with patches
      - JPEG/DCT decoding/encoding
      - "Free" Can be used in
 
@@ -88,14 +88,14 @@ The table below details the third party libraries that Ghostscript and/or GhostP
      - MIT LICENSE
      - http://www.ghostscript.com/
    * - libpng
-     - 1.6.44
+     - 1.6.55
      - PNG image encoding/decoding
      - libpng license - classified as
 
        "a permissive free software license"
      - http://www.libpng.org/
    * - OpenJPEG
-     - 2.5.2
+     - 2.5.4
      - JPEG2000 image decoding for the
 
        PDF interpreter
@@ -103,12 +103,17 @@ The table below details the third party libraries that Ghostscript and/or GhostP
      - BSD-style
      - http://www.openjpeg.org/
    * - zlib
-     - 1.3.1
+     - 1.3.2
      - (De)Flate compression
      - zlib license - classified as
 
        "a permissive free software license"
      - http://www.zlib.net/
+   * - brotli
+     - 1.0.9
+     - brotli compression/decompression
+     - MIT
+     - https://github.com/google/brotli
    * - libtiff
      - 4.7.0
      - TIFF image encoding/decoding

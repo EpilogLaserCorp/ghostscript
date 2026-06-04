@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -84,16 +84,19 @@ z11_CIDMap_proc(gs_font_cid2 *pfont, gs_glyph glyph)
     ref *prgnum;
     ref *p, *fdict = pfont_dict(pfont);
 
-    if (r_has_type(fdict, t_dictionary) && dict_find_string(fdict, "Path", &p)) {
+    if (r_has_type(fdict, t_dictionary) && dict_find_string_with_type(fdict, "Path", &p, t_string)) {
         ref *Decoding = NULL, *TT_cmap = NULL, *SubstNWP = NULL, src_type, dst_type;
         uint c;
 
-        code = dict_find_string(fdict, "Decoding", &Decoding);
+        code = dict_find_string_with_type(fdict, "Decoding", &Decoding, t_dictionary);
         if (code > 0)
-            code = dict_find_string(fdict, "TT_cmap", &TT_cmap);
+            code = dict_find_string_with_type(fdict, "TT_cmap", &TT_cmap, t_dictionary);
         if (code > 0)
-            code = dict_find_string(fdict, "SubstNWP", &SubstNWP);
+            code = dict_find_string_with_type(fdict, "SubstNWP", &SubstNWP, t_dictionary);
         if (code > 0) {
+            if (!r_has_type(Decoding, t_dictionary) || !r_has_type(TT_cmap,  t_dictionary) || !r_has_type(SubstNWP, t_array))
+                return_error(gs_error_typecheck);
+
             code = cid_to_TT_charcode(pfont->memory, Decoding, TT_cmap, SubstNWP, cid, &c, &src_type, &dst_type);
             if (code >= 0)
                 gnum = c;
@@ -346,6 +349,8 @@ font11_substitute_glyph_index_vertical(gs_font_type42 *pfont, uint glyph_index,
                     ei = i;
                 else
                     bi = i;
+                if (bi <= 0) /* Broken data */
+                    break;
             }
         }
     }

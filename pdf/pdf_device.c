@@ -1,4 +1,4 @@
-/* Copyright (C) 2019-2024 Artifex Software, Inc.
+/* Copyright (C) 2019-2025 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -45,7 +45,7 @@ bool pdfi_device_check_param_bool(gx_device *dev, const char *param)
 {
     int code;
     gs_c_param_list list;
-    int value;
+    bool value;
 
     code = pdfi_device_check_param(dev, param, &list);
     if (code < 0)
@@ -57,7 +57,7 @@ bool pdfi_device_check_param_bool(gx_device *dev, const char *param)
     if (code < 0)
         value = false;
     gs_c_param_list_release(&list);
-    return (bool)value;
+    return value;
 }
 
 /* Set value of string device parameter */
@@ -158,7 +158,7 @@ void pdfi_device_set_flags(pdf_context *ctx)
     ctx->device_state.PassUserUnit = pdfi_device_check_param_bool(dev, "PassUserUnit");
 
     /* See if it is a DeviceN (spot capable) */
-    ctx->device_state.spot_capable = dev_proc(dev, dev_spec_op)(dev, gxdso_supports_devn, NULL, 0);
+    ctx->device_state.spot_capable = (dev_proc(dev, dev_spec_op)(dev, gxdso_supports_devn, NULL, 0) > 0);
 
     ctx->device_state.ModifiesPageSize = pdfi_device_check_param_bool(dev, "ModifiesPageSize");
     ctx->device_state.ModifiesPageOrder = pdfi_device_check_param_bool(dev, "ModifiesPageOrder");

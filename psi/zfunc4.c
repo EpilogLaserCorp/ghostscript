@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2025 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -119,13 +119,17 @@ static const calc_op_t calc_ops[] = {
 };
 
 /* Fix up an if or ifelse forward reference. */
-static void
+static int
 psc_fixup(byte *p, byte *to)
 {
     int skip = to - (p + 3);
 
+    if (skip > 0xFFFF)
+        return_error(gs_error_rangecheck);
+
     p[1] = (byte)(skip >> 8);
     p[2] = (byte)skip;
+    return 0;
 }
 
 /* Check whether the ref is a given operator or resolves to it */
@@ -414,7 +418,8 @@ check_psc_function(i_ctx_t *i_ctx_p, const ref *pref, int depth, byte *ops, uint
                     return_error(gs_error_VMerror);
                 if (ops) {
                     *p = PtCr_repeat;
-                    psc_fixup(p, ops + *psize);
+                    if ((code = psc_fixup(p, ops + *psize)) < 0)
+                        return code;
                     p = ops + *psize;
                     *p++ = PtCr_repeat_end;
                 }
@@ -422,7 +427,8 @@ check_psc_function(i_ctx_t *i_ctx_p, const ref *pref, int depth, byte *ops, uint
             } else if (resolves_to_oper(i_ctx_p, &elt2, zif)) {
                 if (ops) {
                     *p = PtCr_if;
-                    psc_fixup(p, ops + *psize);
+                    if ((code = psc_fixup(p, ops + *psize)) < 0)
+                        return code;
                 }
             } else if (!r_is_proc(&elt2))
                 return_error(gs_error_rangecheck);
@@ -431,7 +437,8 @@ check_psc_function(i_ctx_t *i_ctx_p, const ref *pref, int depth, byte *ops, uint
             else if (resolves_to_oper(i_ctx_p, &elt3, zifelse)) {
                 if (ops) {
                     *p = PtCr_if;
-                    psc_fixup(p, ops + *psize + 3);
+                    if ((code = psc_fixup(p, ops + *psize + 3)) < 0)
+                        return code;
                     p = ops + *psize;
                     *p = PtCr_else;
                 }
@@ -443,7 +450,8 @@ check_psc_function(i_ctx_t *i_ctx_p, const ref *pref, int depth, byte *ops, uint
                 if (code < 0)
                     return code;
                 if (ops)
-                    psc_fixup(p, ops + *psize);
+                    if ((code = psc_fixup(p, ops + *psize)) < 0)
+                        return code;
             } else
                 return_error(gs_error_rangecheck);
             }	 /* end 'default' */
@@ -468,7 +476,7 @@ gs_build_function_4(i_ctx_t *i_ctx_p, const ref *op, const gs_function_params_t 
     int code;
     byte *ops;
     uint size;
-    int AllowRepeat = 1; /* Default to permitting Repeat, devices which can't handle it implement the spec_op */
+    bool AllowRepeat = true; /* Default to permitting Repeat, devices which can't handle it implement the spec_op */
 
     *(gs_function_params_t *)&params = *mnDR;
     params.ops.data = 0;	/* in case of failure */
@@ -548,7 +556,7 @@ int make_type4_function(i_ctx_t * i_ctx_p, ref *arr, ref *pproc, gs_function_t *
     float *ptr;
     ref alternatespace, *palternatespace = &alternatespace;
     PS_colour_space_t *space, *altspace;
-    int AllowRepeat = 1; /* Default to permitting Repeat, devices which can't handle it implement the spec_op */
+    bool AllowRepeat = true; /* Default to permitting Repeat, devices which can't handle it implement the spec_op */
 
     code = get_space_object(i_ctx_p, arr, &space);
     if (code < 0)

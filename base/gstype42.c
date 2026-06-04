@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -1050,13 +1050,15 @@ gs_type42_get_outline_from_TT_file(gs_font_type42 * pfont, stream *s, uint glyph
         byte *buf;
 
         sseek(s, pfont->data.glyf + glyph_start);
-        buf = (byte *)gs_alloc_string(pgd->memory, glyph_length, "default_get_outline");
+        buf = (byte *)gs_alloc_string(pgd->memory, glyph_length, "gs_type42_get_outline_from_TT_file");
         if (buf == 0)
             return_error(gs_error_VMerror);
-        gs_glyph_data_from_string(pgd, buf, glyph_length, (gs_font *)pfont);
         sgets(s, buf, glyph_length, &count);
-        if (count < glyph_length)
+        if (count < glyph_length) {
+            gs_free_string(pgd->memory, buf, glyph_length, "gs_type42_get_outline_from_TT_file");
             return_error(gs_error_invalidfont);
+        }
+        gs_glyph_data_from_string(pgd, buf, glyph_length, (gs_font *)pfont);
     }
     return 0;
 }
@@ -1067,6 +1069,7 @@ gs_type42_substitute_glyph_index_vertical(gs_font_type42 *pfont, uint glyph_inde
 {   /* A rough trial implementation, possibly needs improvements or optimization. */
     /* Fixme: optimize : Initialize subtable_ptr when the font is defined. */
     byte *gsub_ptr = pfont->data.gsub;
+    byte *gsub_lim = gsub_ptr + pfont->data.gsub_size + 1;
     typedef struct GSUB_s {
         uint32_t Version;
         uint16_t ScriptList;
@@ -1153,18 +1156,29 @@ gs_type42_substitute_glyph_index_vertical(gs_font_type42 *pfont, uint glyph_inde
         return glyph_index;
 
     /* GSUB header */
+    if (gsub_ptr + 10 >= gsub_lim)
+        return glyph_index; /* Not a valid table */
     gsub.Version = u32(gsub_ptr + offset_of(GSUB, Version));
     gsub.ScriptList = U16(gsub_ptr + offset_of(GSUB, ScriptList));
     gsub.FeatureList = U16(gsub_ptr + offset_of(GSUB, FeatureList));
     gsub.LookupList = U16(gsub_ptr + offset_of(GSUB, LookupList));
     /* LookupList table */
+
+    if (gsub_ptr + gsub.LookupList + offset_of(LookupListTable, LookupCount) >= gsub_lim)
+        return glyph_index; /* Not a valid table */
     lookup_list_ptr = gsub_ptr + gsub.LookupList;
     lookup_list_table.LookupCount = U16(lookup_list_ptr + offset_of(LookupListTable, LookupCount));
     for (i = 0; i < lookup_list_table.LookupCount; i++) {
-        byte *lookup_table_offset_ptr = lookup_list_ptr + offset_of(LookupListTable, Lookup)
-                               + i * sizeof(uint16_t);
-        byte *lookup_table_ptr = lookup_list_ptr + U16(lookup_table_offset_ptr);
+        byte *lookup_table_offset_ptr = lookup_list_ptr + offset_of(LookupListTable, Lookup) + i * sizeof(uint16_t);
+        byte *lookup_table_ptr;
         LookupTable lookup_table;
+
+        if (lookup_table_offset_ptr + 2 >= gsub_lim)
+            return glyph_index; /* Not a valid table */
+        lookup_table_ptr = lookup_list_ptr + U16(lookup_table_offset_ptr);
+
+        if (lookup_table_ptr + offset_of(LookupTable, SubTableCount) + 2 >= gsub_lim)
+            return glyph_index; /* Not a valid table */
 
         lookup_table.LookupType = U16(lookup_table_ptr + offset_of(LookupTable, LookupType));
         lookup_table.LookupFlag = U16(lookup_table_ptr + offset_of(LookupTable, LookupFlag));
@@ -1177,11 +1191,22 @@ gs_type42_substitute_glyph_index_vertical(gs_font_type42 *pfont, uint glyph_inde
                and we think that it may need a further improvement. */
             byte *subtable_offset_ptr = lookup_table_ptr + offset_of(LookupTable, SubTable);
             for (j = 0; j < lookup_table.SubTableCount; j++) {
-                byte *subtable_ptr = lookup_table_ptr + U16(subtable_offset_ptr + j * sizeof(uint16_t));
-                uint16_t format = U16(subtable_ptr);
+                byte *subtable_ptr;
+                uint16_t format;
+
+                if ((subtable_offset_ptr + j * sizeof(uint16_t)) + 2 >= gsub_lim)
+                    return glyph_index; /* Not a valid table */
+                subtable_ptr = lookup_table_ptr + U16(subtable_offset_ptr + j * sizeof(uint16_t));
+
+                if (subtable_ptr + 2 >= gsub_lim)
+                    return glyph_index; /* Not a valid table */
+                format = U16(subtable_ptr);
 
                 if (format == 1) {
                     SingleSubstFormat1 subst;
+
+                    if (subtable_ptr + offset_of(SingleSubstFormat1, DeltaGlyphId) + 2 >= gsub_lim)
+                        return glyph_index; /* Not a valid table */
 
                     subst.SubstFormat = format; /* Debug purpose. */
                     subst.Coverage = U16(subtable_ptr + offset_of(SingleSubstFormat1, Coverage));
@@ -1193,12 +1218,23 @@ gs_type42_substitute_glyph_index_vertical(gs_font_type42 *pfont, uint glyph_inde
                     uint16_t coverage_format;
 
                     subst.SubstFormat = format; /* Debug purpose. */
+
+                    if (subtable_ptr + offset_of(SingleSubstFormat2, GlyphCount) + 2 >= gsub_lim)
+                        return glyph_index; /* Not a valid table */
+
                     subst.Coverage = U16(subtable_ptr + offset_of(SingleSubstFormat2, Coverage));
                     subst.GlyphCount = U16(subtable_ptr + offset_of(SingleSubstFormat2, GlyphCount));
+
+                    if (subtable_ptr + subst.Coverage + 2 >= gsub_lim)
+                        return glyph_index; /* Not a valid table */
+
                     coverage_ptr = subtable_ptr + subst.Coverage;
                     coverage_format = U16(coverage_ptr);
                     if (coverage_format == 1) {
                         CoverageFormat1 cov;
+
+                        if (coverage_ptr + offset_of(CoverageFormat1, GlyphCount) + 2 >= gsub_lim)
+                            return glyph_index; /* Not a valid table */
 
                         cov.CoverageFormat = coverage_format; /* Debug purpose only. */
                         cov.GlyphCount = U16(coverage_ptr + offset_of(CoverageFormat1, GlyphCount));
@@ -1207,16 +1243,23 @@ gs_type42_substitute_glyph_index_vertical(gs_font_type42 *pfont, uint glyph_inde
 
                             for (;;) {
                                 int k = (k0 + k1) / 2;
-                                GlyphID glyph = U16(coverage_ptr + offset_of(CoverageFormat1, GlyphArray)
-                                                         + sizeof(GlyphID) * k);
+                                GlyphID glyph;
+
+                                if ((coverage_ptr + offset_of(CoverageFormat1, GlyphArray) + sizeof(GlyphID) * k) + 2 >= gsub_lim)
+                                    return glyph_index; /* Not a valid table */
+
+                                glyph = U16(coverage_ptr + offset_of(CoverageFormat1, GlyphArray) + sizeof(GlyphID) * k);
                                 if (glyph_index == glyph) {
                                     /* Found. */
                                     if (k >= cov.GlyphCount)
                                         break; /* Wrong data ? (not sure). */
                                     else {
-                                        GlyphID new_glyph = U16(subtable_ptr + offset_of(SingleSubstFormat2, Substitute)
-                                                            + sizeof(GlyphID) * k);
+                                        GlyphID new_glyph;
 
+                                        if ((subtable_ptr + offset_of(SingleSubstFormat2, Substitute) + sizeof(GlyphID) * k) + 2 >= gsub_lim)
+                                            return glyph_index; /* Not a valid table */
+
+                                        new_glyph = U16(subtable_ptr + offset_of(SingleSubstFormat2, Substitute) + sizeof(GlyphID) * k);
                                         return new_glyph;
                                     }
                                 } else if (k0 >= k1 - 1) {
@@ -1230,6 +1273,9 @@ gs_type42_substitute_glyph_index_vertical(gs_font_type42 *pfont, uint glyph_inde
                     } else if (coverage_format == 2) {
                         CoverageFormat2 cov;
 
+                        if (coverage_ptr + offset_of(CoverageFormat2, RangeCount) + 2 >= gsub_lim)
+                            return glyph_index; /* Not a valid table */
+
                         cov.CoverageFormat = coverage_format; /* Debug purpose only. */
                         cov.RangeCount = U16(coverage_ptr + offset_of(CoverageFormat2, RangeCount));
                         {   /* Binary search. */
@@ -1238,6 +1284,10 @@ gs_type42_substitute_glyph_index_vertical(gs_font_type42 *pfont, uint glyph_inde
                             for (;;) {
                                 int k = (k0 + k1) / 2;
                                 RangeRecord rr;
+
+                                if ((coverage_ptr + offset_of(CoverageFormat2, RangeArray)
+                                        + sizeof(RangeRecord) * k  + offset_of(RangeRecord, StartCoverageIndex)) + 2 >= gsub_lim)
+                                    return glyph_index; /* Not a valid table */
 
                                 rr.Start = U16(coverage_ptr + offset_of(CoverageFormat2, RangeArray)
                                         + sizeof(RangeRecord) * k  + offset_of(RangeRecord, Start));
@@ -1252,9 +1302,14 @@ gs_type42_substitute_glyph_index_vertical(gs_font_type42 *pfont, uint glyph_inde
                                         break; /* Wrong data ? (not sure). */
                                     else {
                                         uint16_t subst_index = rr.StartCoverageIndex + (glyph_index - rr.Start);
-                                        GlyphID new_glyph = U16(subtable_ptr + offset_of(SingleSubstFormat2, Substitute)
-                                                            + sizeof(GlyphID) * subst_index);
+                                        GlyphID new_glyph;
 
+                                        if ((subtable_ptr + offset_of(SingleSubstFormat2, Substitute)
+                                                            + sizeof(GlyphID) * subst_index) + 2 >= gsub_lim)
+                                            return glyph_index; /* Not a valid table */
+
+                                        new_glyph = U16(subtable_ptr + offset_of(SingleSubstFormat2, Substitute)
+                                                            + sizeof(GlyphID) * subst_index);
                                         return new_glyph;
                                     }
                                 } else if (k0 >= k1 - 1) {
@@ -2202,8 +2257,8 @@ gs_woff2sfnt(gs_memory_t *mem, stream *s, byte *outbuf, int *outbuflen)
     PUTU16(obuf, (ushort)rs, 4);
     obuf += 6;
 
-    tabbuf = gs_alloc_bytes(mem, WOFF_TABDIR_ENT_LEN * ntables, "gs_woff2sfnt(tabbuf)");
-    tabbufptrs = (byte **)gs_alloc_bytes(mem, (ntables + 1) * sizeof(byte *), "gs_woff2sfnt(tabbufptrs)");
+    tabbuf = gs_alloc_bytes(mem, WOFF_TABDIR_ENT_LEN * (size_t)ntables, "gs_woff2sfnt(tabbuf)");
+    tabbufptrs = (byte **)gs_alloc_bytes(mem, (ntables + 1) * (size_t)sizeof(byte *), "gs_woff2sfnt(tabbufptrs)");
     if (!tabbuf || !tabbufptrs) {
         code = gs_note_error(gs_error_VMerror);
         goto done;

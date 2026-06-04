@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -42,6 +42,7 @@
 #include "gsiparm4.h"
 #include "gsovrc.h"
 #include "gxdevsop.h"
+#include "gsptype2.h"
 
 /* Temporary switches for experimanting with Adobe compatibility. */
 #define ADJUST_SCALE_FOR_THIN_LINES 0   /* Old code = 0 */
@@ -257,7 +258,7 @@ gs_pattern1_make_pattern(gs_client_color * pcc,
 
     inst.templat = *pcp;
     /* Even if the pattern wants to use transparency, don't permit it if there is no device which will support it */
-    inst.templat.uses_transparency &= dev_proc( gs_currentdevice_inline(pgs), dev_spec_op)( gs_currentdevice_inline(pgs), gxdso_supports_pattern_transparency, NULL, 0);
+    inst.templat.uses_transparency &= (dev_proc( gs_currentdevice_inline(pgs), dev_spec_op)( gs_currentdevice_inline(pgs), gxdso_supports_pattern_transparency, NULL, 0) > 0);
 
     code = compute_inst_matrix(&inst, &bbox, dev_width, dev_height, &bbw, &bbh);
     if (code < 0)
@@ -1586,12 +1587,17 @@ gx_dc_pattern_save_dc(
     psdc->type = pdevc->type;
     if (pdevc->ccolor_valid) {
         psdc->colors.pattern.id = pdevc->ccolor.pattern->pattern_id;
+        if (pdevc->type == gx_dc_type_pattern)
+            psdc->colors.pattern.step_matrix = pdevc->colors.pattern.p_tile->step_matrix;
+        else
+            memset(&psdc->colors.pattern.step_matrix, 0, sizeof(psdc->colors.pattern.step_matrix));
         psdc->phase = pdevc->phase;
     } else {
         /* The client color has been changed to a non-pattern color,
            but device color has not been created yet.
          */
         psdc->colors.pattern.id = gs_no_id;
+        memset(&psdc->colors.pattern.step_matrix, 0, sizeof(psdc->colors.pattern.step_matrix));
         psdc->phase.x = psdc->phase.y = 0;
     }
 }
@@ -2038,8 +2044,11 @@ gx_dc_pattern_write(
     if (ptile == NULL)
         return 0;
     if (psdc->type == pdevc->type) {
-        if (psdc->colors.pattern.id == ptile->id) {
-            /* fixme : Do we need to check phase ? How ? */
+        if (psdc->colors.pattern.id == ptile->id &&
+            psdc->colors.pattern.step_matrix.tx == ptile->step_matrix.tx &&
+            psdc->colors.pattern.step_matrix.ty == ptile->step_matrix.ty) {
+           /* We might write the whole pattern out again just because the phase
+            * changed, but at least the results will be correct! */
             return 1; /* Same as saved one, don't write. */
         }
     }
@@ -2205,9 +2214,9 @@ gx_dc_pattern_read_trans_buff(gx_color_tile *ptile, int64_t offset,
     int left = size;
     int64_t offset1 = offset;
     gx_pattern_trans_t *trans_pat = ptile->ttrans;
-    int data_size;
+    int64_t data_size;
 
-    data_size = trans_pat->planestride * trans_pat->n_chan;
+    data_size = (int64_t)trans_pat->planestride * trans_pat->n_chan;
     if (trans_pat->has_tags)
         data_size += trans_pat->planestride;
 
@@ -2358,6 +2367,8 @@ gx_dc_pattern_read(
                 /* Make a new ttrans object */
 
                 ptile->ttrans = new_pattern_trans_buff(mem);
+                if (ptile->ttrans == NULL)
+                    return_error(gs_error_VMerror);
                 /* trans_info was loaded above */
 
                 ptile->ttrans->height = trans_info.height;

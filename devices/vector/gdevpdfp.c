@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2025 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -139,6 +139,7 @@ static const gs_param_item_t pdf_param_items[] = {
     pi("WriteXRefStm", gs_param_type_bool, WriteXRefStm),
     pi("ToUnicodeForStdEnc", gs_param_type_bool, ToUnicodeForStdEnc),
     pi("EmbedSubstituteFonts", gs_param_type_bool, EmbedSubstituteFonts),
+    pi("UseBrotli", gs_param_type_bool, UseBrotli),
 #undef pi
     gs_param_item_end
 };
@@ -357,7 +358,7 @@ gdev_pdf_get_params(gx_device * dev, gs_param_list * plist)
                 break;
             case UseOCRAlways:
                 ocrstr.data = (const byte *)"Always";
-                ocrstr.size = 8;
+                ocrstr.size = 6;
                 ocrstr.persistent = false;
                 break;
         }
@@ -955,7 +956,7 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
          pdev->OwnerPassword.size) != 0)) {
         if (pdev->is_open) {
             if (pdev->PageCount == 0) {
-                gs_closedevice((gx_device *)save_dev);
+                gs_closedevice((gx_device *)pdev);
                 return 0;
             }
             else
@@ -1018,6 +1019,12 @@ gdev_pdf_put_params_impl(gx_device * dev, const gx_device_pdf * save_dev, gs_par
 
     if (pdev->FlattenFonts)
         pdev->PreserveTrMode = false;
+
+    if (pdev->ForOPDFRead)
+        pdev->params.UseBrotliCompression = pdev->UseBrotli = false;
+    else
+        pdev->params.UseBrotliCompression = pdev->UseBrotli;
+
     return 0;
  fail:
     /* Restore all the parameters to their original state. */
@@ -1127,19 +1134,19 @@ pdf_dsc_process(gx_device_pdf * pdev, const gs_param_string_array * pma)
          * but we do the same -- we ignore %%CreationDate here.
          */
 
-        if (pdf_key_eq(pkey, "Creator") && pdev->CompatibilityLevel <= 1.7) {
+        if (pdf_key_eq(pkey, "Creator")) {
             key = "/Creator";
             newsize = unescape_octals(pdev, (char *)pvalue->data, pvalue->size);
             code = cos_dict_put_c_key_string(pdev->Info, key,
                                              pvalue->data, newsize);
             continue;
-        } else if (pdf_key_eq(pkey, "Title") && pdev->CompatibilityLevel <= 1.7) {
+        } else if (pdf_key_eq(pkey, "Title")) {
             key = "/Title";
             newsize = unescape_octals(pdev, (char *)pvalue->data, pvalue->size);
             code = cos_dict_put_c_key_string(pdev->Info, key,
                                              pvalue->data, newsize);
             continue;
-        } else if (pdf_key_eq(pkey, "For") && pdev->CompatibilityLevel <= 1.7) {
+        } else if (pdf_key_eq(pkey, "For")) {
             key = "/Author";
             newsize = unescape_octals(pdev, (char *)pvalue->data, pvalue->size);
             code = cos_dict_put_c_key_string(pdev->Info, key,

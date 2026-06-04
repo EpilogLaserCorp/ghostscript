@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -677,7 +677,7 @@ wedge_vertex_list_elem_buffer_alloc(patch_fill_state_t *pfs)
        from the wild. */
     pfs->wedge_vertex_list_elem_count_max = max_level * (1 << max_level) * 2;
     pfs->wedge_vertex_list_elem_buffer = (wedge_vertex_list_elem_t *)gs_alloc_bytes(memory,
-            sizeof(wedge_vertex_list_elem_t) * pfs->wedge_vertex_list_elem_count_max,
+            sizeof(wedge_vertex_list_elem_t) * (size_t)pfs->wedge_vertex_list_elem_count_max,
             "alloc_wedge_vertex_list_elem_buffer");
     if (pfs->wedge_vertex_list_elem_buffer == NULL)
         return_error(gs_error_VMerror);
@@ -801,8 +801,26 @@ curve_samples(patch_fill_state_t *pfs,
 #       endif
 
 #       if LAZY_WEDGES
-            /* Restrict lengths for a reasonable memory consumption : */
-            k1 = ilog2(L / fixed_1 / (1 << (LAZY_WEDGES_MAX_LEVEL - 1)));
+            /* The code here is voodoo that dates back to 2004 when Igor first committed
+             * the shading code rewrite. It used to claim to "Restrict lengths for a reasonable
+             * memory consumption", and just to use the formulation below based upon LAZY_WEDGES_MAX_LEVEL.
+             * In bug 700989, we came across a Shading where we were "restricting the length" too much,
+             * so Ken came up with an alternative formulation that makes it depend upon the smoothness
+             * parameter. This is really voodoo of a different form, albeit voodoo that's based at least
+             * on something plausible!
+             * What we know is that for the file in that bug to render correctly, a smoothness value of
+             * 0.02 (the default) needs to give a k1 value no smaller than 7.
+             * It also seems likely that this only needs to be changed for Type 1 shadings (ones based
+             * on functions) as the others are likely to be (at least mostly) continuous.
+             * This logic may be subject to future optimisations/improvements/blood rituals.
+             */
+            if (pfs->Function) {
+                /* New 'smoothness based' logic. */
+                k1 = ilog2(L / fixed_1 / (1 << ((int)ceil(pfs->smoothness * 30)) ));
+            } else {
+                /* Igor's original logic. */
+                k1 = ilog2(L / fixed_1 / (1 << (LAZY_WEDGES_MAX_LEVEL - 1)));
+            }
             k = max(k, k1);
 #       endif
 #       if QUADRANGLES
@@ -1343,15 +1361,16 @@ patch_color_to_device_color_inline(const patch_fill_state_t *pfs,
      */
      if (frac_values) {
         int i;
-	int n = pfs->dev->color_info.num_components;
-	for (i = pfs->num_components; i < n; i++) {
+        int n = pfs->dev->color_info.num_components;
+        for (i = pfs->num_components; i < n; i++) {
             frac_values[i] = 0;
-	}
+        }
     }
 #endif
 
-    if (DEBUG_COLOR_INDEX_CACHE && pdevc == NULL)
+    if (pdevc == NULL)
         pdevc = &devc;
+    pdevc->tag = pfs->dev->graphics_type_tag;
     if (pfs->pcic) {
         code = gs_cached_color_index(pfs->pcic, c->cc.paint.values, pdevc, frac_values);
         if (code < 0)
@@ -1365,9 +1384,6 @@ patch_color_to_device_color_inline(const patch_fill_state_t *pfs,
         const gs_color_space *pcs = pfs->direct_space;
 
         if (pcs != NULL) {
-
-            if (pdevc == NULL)
-                pdevc = &devc;
             memcpy(fcc.paint.values, c->cc.paint.values,
                         sizeof(fcc.paint.values[0]) * pfs->num_components);
             code = pcs->type->remap_color(&fcc, pcs, pdevc, pfs->pgs,

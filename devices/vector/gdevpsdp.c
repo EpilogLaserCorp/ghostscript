@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -23,6 +23,7 @@
 #include "gxdevice.h"
 #include "gsparamx.h"
 #include "gdevpsdf.h"
+#include "sbrotlix.h"
 #include "strimpl.h"		/* for short-sighted compilers */
 #include "scfx.h"
 #include "sdct.h"
@@ -92,6 +93,7 @@ static const psdf_image_filter_name Poly_filters[] = {
     {"DCTEncode", &s_DCTE_template},
     {"FlateEncode", &s_zlibE_template, psdf_version_ll3},
     {"LZWEncode", &s_LZWE_template},
+    {"BrotliEncode", &s_brotliE_template},
     {0, 0}
 };
 
@@ -100,6 +102,7 @@ static const psdf_image_filter_name Mono_filters[] = {
     {"FlateEncode", &s_zlibE_template, psdf_version_ll3},
     {"LZWEncode", &s_LZWE_template},
     {"RunLengthEncode", &s_RLE_template},
+    {"BrotliEncode", &s_brotliE_template},
     {0, 0}
 };
 
@@ -186,6 +189,9 @@ static const char *const AutoRotatePages_names[] = {
 static const char *const ColorConversionStrategy_names[] = {
     psdf_ccs_names, 0
 };
+static const char *const BlendConversionStrategy_names[] = {
+    psdf_bcs_names, 0
+};
 static const char *const DownsampleType_names[] = {
     psdf_ds_names, 0
 };
@@ -230,6 +236,7 @@ static const gs_param_item_t psdf_param_items[] = {
     /* (TransferFunctionInfo) */
     /* (UCRandBGInfo) */
     pi("UseFlateCompression", gs_param_type_bool, UseFlateCompression),
+    pi("UseBrotliCompression", gs_param_type_bool, UseBrotliCompression),
 
     /* Color image processing parameters */
 
@@ -484,6 +491,10 @@ gdev_psdf_get_param(gx_device *dev, char *Param, void *list)
         return(psdf_write_name(plist, "ColorConversionStrategy",
                 ColorConversionStrategy_names[(int)pdev->params.ColorConversionStrategy]));
     }
+    if (strcmp(Param, "BlendConversionStrategy") == 0) {
+        return(psdf_write_name(plist, "BlendConversionStrategy",
+                BlendConversionStrategy_names[(int)pdev->params.BlendConversionStrategy]));
+    }
     if (strcmp(Param, "CalCMYKProfile") == 0) {
         return(psdf_write_string_param(plist, "CalCMYKProfile",
                                         &pdev->params.CalCMYKProfile));
@@ -568,6 +579,11 @@ gdev_psdf_get_params(gx_device * dev, gs_param_list * plist)
 
     code = psdf_write_name(plist, "ColorConversionStrategy",
                 ColorConversionStrategy_names[(int)pdev->params.ColorConversionStrategy]);
+    if (code < 0)
+        return code;
+
+    code = psdf_write_name(plist, "BlendConversionStrategy",
+                BlendConversionStrategy_names[(int)pdev->params.BlendConversionStrategy]);
     if (code < 0)
         return code;
 
@@ -788,7 +804,8 @@ static int merge_embed(gs_param_string_array * psa, gs_param_string_array * asa,
                                   "psdf_put_embed_param(update)");
     if (rdata == 0)
         return_error(gs_error_VMerror);
-    memcpy(rdata, psa->data, psa->size * sizeof(*psa->data));
+    if (psa->size > 0)
+        memcpy(rdata, psa->data, psa->size * sizeof(*psa->data));
     rsa.data = rdata;
     rsa.size = psa->size;
     rsa.persistent = false;
@@ -873,32 +890,16 @@ psdf_put_image_dict_param(gs_param_list * plist, const gs_param_name pname,
         case 1:
             return 0;
         case 0: {
-            /* Check the parameter values now. */
-            stream_state *ss = s_alloc_state(mem, templat->stype, pname);
-
-            if (ss == 0)
+            plvalue = gs_c_param_list_alloc(mem, pname);
+            if (plvalue == 0)
                 return_error(gs_error_VMerror);
-            ss->templat = templat;
-            if (templat->set_defaults)
-                templat->set_defaults(ss);
-            code = put_params(dict.list, ss);
-            if (templat->release)
-                templat->release(ss);
-            gs_free_object(mem, ss, pname);
+            gs_c_param_list_write(plvalue, mem);
+            code = param_list_copy((gs_param_list *)plvalue,
+                                   dict.list);
             if (code < 0) {
-                param_signal_error(plist, pname, code);
-            } else {
-                plvalue = gs_c_param_list_alloc(mem, pname);
-                if (plvalue == 0)
-                    return_error(gs_error_VMerror);
-                gs_c_param_list_write(plvalue, mem);
-                code = param_list_copy((gs_param_list *)plvalue,
-                                       dict.list);
-                if (code < 0) {
-                    gs_c_param_list_release(plvalue);
-                    gs_free_object(mem, plvalue, pname);
-                    plvalue = *pplvalue;
-                }
+                gs_c_param_list_release(plvalue);
+                gs_free_object(mem, plvalue, pname);
+                plvalue = *pplvalue;
             }
         }
         param_end_read_dict(plist, pname, &dict);
@@ -1063,7 +1064,7 @@ static int psdf_copy_param_string_array(gs_memory_t *mem, gs_param_list * plist,
                 gs_free_object(mem->non_gc_memory, (byte *)da->data[ix].data, "freeing old string array copy");
             gs_free_object(mem->non_gc_memory, (byte *)da->data, "freeing old string array");
         }
-        da->data = (const gs_param_string *)gs_alloc_bytes(mem->non_gc_memory, sa->size * sizeof(gs_param_string), "allocate new string array");
+        da->data = (const gs_param_string *)gs_alloc_bytes(mem->non_gc_memory, (size_t)sa->size * sizeof(gs_param_string), "allocate new string array");
         if (da->data == NULL)
             return_error(gs_note_error(gs_error_VMerror));
         memset((byte *)da->data, 0x00, sa->size * sizeof(gs_param_string));
@@ -1137,7 +1138,8 @@ gdev_psdf_put_params(gx_device * dev, gs_param_list * plist)
         params.AlwaysOutline.data = params.NeverOutline.data = NULL;
         params.AlwaysOutline.size = params.NeverOutline.size = 0;
         params.AlwaysEmbed.data = params.NeverEmbed.data = 0;
-        params.AlwaysEmbed.size = params.AlwaysEmbed.persistent = params.NeverEmbed.size = params.NeverEmbed.persistent = 0;
+        params.AlwaysEmbed.size = params.NeverEmbed.size = 0;
+	params.AlwaysEmbed.persistent = params.NeverEmbed.persistent = false;
         params.PSPageOptions.data = NULL;
         params.PSPageOptions.size = 0;
     }
@@ -1207,6 +1209,15 @@ gdev_psdf_put_params(gx_device * dev, gs_param_list * plist)
         psdf_put_enum(plist, "ColorConversionStrategy",
                       (int)params.ColorConversionStrategy,
                       ColorConversionStrategy_names, &ecode);
+    if (ecode < 0) {
+        code = ecode;
+        goto exit;
+    }
+
+    params.BlendConversionStrategy = (enum psdf_blend_conversion_strategy)
+        psdf_put_enum(plist, "BlendConversionStrategy",
+                      (int)params.BlendConversionStrategy,
+                      BlendConversionStrategy_names, &ecode);
     if (ecode < 0) {
         code = ecode;
         goto exit;
@@ -1292,7 +1303,7 @@ exit:
             if (params.PSPageOptions.size != 0 && params.PSPageOptions.data != pdev->params.PSPageOptions.data) {
                 int ix;
 
-                for (ix = 0; ix < pdev->params.PSPageOptions.size;ix++)
+                for (ix = 0; ix < params.PSPageOptions.size;ix++)
                     gs_free_object(mem->non_gc_memory, (byte *)params.PSPageOptions.data[ix].data, "freeing old string array copy");
                 gs_free_object(mem->non_gc_memory, (byte *)params.PSPageOptions.data, "freeing old string array");
             }

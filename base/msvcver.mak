@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2024 Artifex Software, Inc.
+# Copyright (C) 2001-2026 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -263,6 +263,16 @@ MS_TOOLSET_VERSION_GUESS=14.29.30133
 MSVC_VERSION_GUESS=16
 MS_TOOLSET_VERSION_GUESS=14.29.30133
 !endif
+!if "$(_NMAKE_VER)" == "14.29.30158.0"
+# VS2019 (Toolset v142)
+MSVC_VERSION_GUESS=16
+MS_TOOLSET_VERSION_GUESS=14.29.30133
+!endif
+!if "$(_NMAKE_VER)" == "14.29.30159.0"
+# VS2019 (Toolset v142)
+MSVC_VERSION_GUESS=16
+MS_TOOLSET_VERSION_GUESS=14.29.30133
+!endif
 !if "$(_NMAKE_VER)" == "14.37.32822.0"
 # VS2019 (Toolset v142)
 MSVC_VERSION_GUESS=16
@@ -287,6 +297,31 @@ MS_TOOLSET_VERSION_GUESS=14.38.33519.0
 # VS2022 (Toolset v143)
 MSVC_VERSION_GUESS=17
 MS_TOOLSET_VERSION_GUESS=14.41.34120.0
+!endif
+!if "$(_NMAKE_VER)" == "14.44.35208.0"
+# VS2022 (Toolset v143)
+MSVC_VERSION_GUESS=17
+MS_TOOLSET_VERSION_GUESS=14.44.35208
+!endif
+!if "$(_NMAKE_VER)" == "14.44.35211.0"
+# VS2022 (Toolset v143)
+MSVC_VERSION_GUESS=17
+MS_TOOLSET_VERSION_GUESS=14.44.35211
+!endif
+!if "$(_NMAKE_VER)" == "14.44.35214.0"
+# VS2022 (Toolset v143)
+MSVC_VERSION_GUESS=17
+MS_TOOLSET_VERSION_GUESS=14.44.35214
+!endif
+!if "$(_NMAKE_VER)" == "14.44.35215.0"
+# VS2022 (Toolset v143)
+MSVC_VERSION_GUESS=17
+MS_TOOLSET_VERSION_GUESS=14.44.35215
+!endif
+!if "$(_NMAKE_VER)" == "14.44.35222.0"
+# VS2022 (Toolset v143)
+MSVC_VERSION_GUESS=17
+MS_TOOLSET_VERSION_GUESS=14.44.35222
 !endif
 
 !endif
@@ -935,4 +970,10 @@ JPX_CFLAGS=-DMUTEX_pthread=0 -DUSE_OPENJPEG_JP2 -DUSE_JPIP $(JPX_SSE_CFLAGS) -DO
 !else
 JPX_CFLAGS = $JPX_CFLAGS -DUSE_JPIP -DUSE_OPENJPEG_JP2 -DOPJ_STATIC
 !endif
+!endif
+
+# The following reflects what we do in our headers, but applies it
+# to freetype without the need to "fork" the freetype code
+!if $(MSVC_VERSION) >= 8
+FT_CFLAGS=-Dinline=__inline $(FT_CFLAGS)
 !endif

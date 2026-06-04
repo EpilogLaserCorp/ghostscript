@@ -1,4 +1,4 @@
-/* Copyright (C) 2018-2023 Artifex Software, Inc.
+/* Copyright (C) 2018-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -49,7 +49,7 @@ static int pdfi_free_loop_detector(pdf_context *ctx)
     return 0;
 }
 
-int pdfi_loop_detector_add_object(pdf_context *ctx, uint64_t object)
+static int pdfi_loop_detector_add_object_unchecked(pdf_context *ctx, uint64_t object)
 {
     if (ctx->loop_detection == NULL) {
         dbgmprintf(ctx->memory, "Attempt to use loop detector without initialising it\n");
@@ -59,7 +59,7 @@ int pdfi_loop_detector_add_object(pdf_context *ctx, uint64_t object)
     if (ctx->loop_detection_entries == ctx->loop_detection_size) {
         uint64_t *New;
 
-        New = (uint64_t *)gs_alloc_bytes(ctx->memory, (ctx->loop_detection_size + INITIAL_LOOP_TRACKER_SIZE) * sizeof (uint64_t), "re-allocate loop tracking array");
+        New = (uint64_t *)gs_alloc_bytes(ctx->memory, (size_t)(ctx->loop_detection_size + INITIAL_LOOP_TRACKER_SIZE) * (size_t)sizeof (uint64_t), "re-allocate loop tracking array");
         if (New == NULL) {
             return_error(gs_error_VMerror);
         }
@@ -69,7 +69,24 @@ int pdfi_loop_detector_add_object(pdf_context *ctx, uint64_t object)
         ctx->loop_detection = New;
     }
     ctx->loop_detection[ctx->loop_detection_entries++] = object;
+
+    /* 1000 is an arbitrary limit, it is intended to ensure we don't process files where objects are nested so deeply
+     * that processing them leads to a C exec stack overflow. This allows objects to be nested 500 deep, with a mark
+     * (to clear the object) for each one which really ought to be more than adequate.
+     */
+    if (ctx->loop_detection_entries > 1000) {
+        return_error(gs_error_Fatal);
+    }
     return 0;
+}
+
+int pdfi_loop_detector_add_object(pdf_context *ctx, uint64_t object)
+{
+    if (object == 0) {
+        dbgmprintf(ctx->memory, "Attempt to add an object number of 0 to the loop detection\n");
+        return 0;
+    }
+    return pdfi_loop_detector_add_object_unchecked(ctx, object);
 }
 
 bool pdfi_loop_detector_check_object(pdf_context *ctx, uint64_t object)
@@ -102,7 +119,7 @@ int pdfi_loop_detector_mark(pdf_context *ctx)
             return code;
     }
 
-    return pdfi_loop_detector_add_object(ctx, 0);
+    return pdfi_loop_detector_add_object_unchecked(ctx, 0);
 }
 
 int pdfi_loop_detector_cleartomark(pdf_context *ctx)

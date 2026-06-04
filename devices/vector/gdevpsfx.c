@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -163,7 +163,7 @@ type1_next(gs_type1_state *pcis)
     const byte *cip, *cipe;
     crypt_state state;
 #define CLEAR (csp = pcis->ostack - 1)
-    fixed *csp = &pcis->ostack[pcis->os_count - 1];
+    fixed *csp = (&pcis->ostack[pcis->os_count]) - 1;
     const bool encrypted = pcis->pfont->data.lenIV >= 0;
     int c, code, num_results, c0;
 
@@ -289,6 +289,10 @@ type1_next(gs_type1_state *pcis)
                 case 18:
                     num_results = 6;
                 blend:
+                    CS_CHECK_POP(csp, pcis->ostack);
+                    if (!CS_CHECK_CSTACK_BOUNDS(&csp[-fixed2int_var(csp[-1])], pcis->ostack))
+                        return_error(gs_error_invalidfont);
+
                     code = gs_type1_blend(pcis, csp, num_results);
                     if (code < 0)
                         return code;
@@ -496,7 +500,7 @@ psf_convert_type1_to_type2(stream *s, const gs_glyph_data_t *pgd,
     type1_next_init(&cis, pgd, pfont);
     for (;;) {
         int c = type1_next(&cis);
-        fixed *csp = &cis.ostack[cis.os_count - 1];
+        fixed *csp = (&cis.ostack[cis.os_count]) - 1;
 
         switch (c) {
         default:
@@ -548,6 +552,10 @@ psf_convert_type1_to_type2(stream *s, const gs_glyph_data_t *pgd,
                 return_error(gs_error_invalidfont);
             if (*csp == int2fixed(3))
                 replace_hints = true;
+            if (fixed2int(csp[-1]) < 0)
+                return_error(gs_error_invalidfont);
+            if (cis.os_count < 2 + fixed2int(csp[-1]))
+                return_error(gs_error_invalidfont);
             if (*csp == int2fixed(12) || *csp == int2fixed(13))
                 cis.os_count -= fixed2int(csp[-1]);
             cis.os_count -= 2;
@@ -588,7 +596,7 @@ psf_convert_type1_to_type2(stream *s, const gs_glyph_data_t *pgd,
     CLEAR_OP();
     for (;;) {
         int c = type1_next(&cis);
-        fixed *csp = &cis.ostack[cis.os_count - 1];
+        fixed *csp = (&cis.ostack[cis.os_count]) - 1;
 #define POP(n)\
   (csp -= (n), cis.os_count -= (n))
         int i;
@@ -602,6 +610,8 @@ psf_convert_type1_to_type2(stream *s, const gs_glyph_data_t *pgd,
             CHECK_OP();
             if (first) {
                 if (width_on_stack) {
+                    if (cis.os_count < 1)
+                        return_error(gs_error_invalidfont);
                     type2_put_fixed(s, *csp); /* width */
                     /* We need to move all the stored numeric values up by
                      * one in the stack, eliminating the width, so that later
@@ -693,6 +703,9 @@ psf_convert_type1_to_type2(stream *s, const gs_glyph_data_t *pgd,
             continue;
         case CE_OFFSET + ce1_setcurrentpoint:
             if (first) {
+                if (cis.os_count < 2)
+                    return_error(gs_error_invalidfont);
+
                 /*  A workaround for fonts which use ce1_setcurrentpoint
                     in an illegal way for shifting a path.
                     See t1_hinter__setcurrentpoint for more information. */
@@ -853,6 +866,10 @@ psf_convert_type1_to_type2(stream *s, const gs_glyph_data_t *pgd,
             case 12:
             case 13:
                 /* Counter control is not implemented. */
+                if (fixed2int(csp[-1]) < 0)
+                    return_error(gs_error_invalidfont);
+                if (cis.os_count < 2 + fixed2int(csp[-1]))
+                    return_error(gs_error_invalidfont);
                 cis.os_count -= 2 + fixed2int(csp[-1]);
                 continue;
             }

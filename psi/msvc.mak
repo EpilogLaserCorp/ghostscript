@@ -1,4 +1,4 @@
-# Copyright (C) 2001-2024 Artifex Software, Inc.
+# Copyright (C) 2001-2026 Artifex Software, Inc.
 # All Rights Reserved.
 #
 # This software is provided AS-IS with no warranty, either express or
@@ -731,24 +731,11 @@ SO_PDFEXPORT_LIB=
 WITH_CUPS=0
 !endif
 
-# Define the directory where the FreeType2 library sources are stored.
-# See freetype.mak for more information.
-# Note that FT_BRIDGE=1 is now the only support configuration for anything
-# other than testing purposes (even when UFST_BRIDGE=1 - we require Freetype
-# for embedded/downloaded fonts.
-!ifndef FT_BRIDGE
-FT_BRIDGE=1
-!endif
-
 !ifndef FTSRCDIR
 FTSRCDIR=freetype
 !endif
 !ifndef FT_CFLAGS
 FT_CFLAGS=-I$(FTSRCDIR)\include
-!endif
-
-!ifdef BITSTREAM_BRIDGE
-FT_BRIDGE=0
 !endif
 
 # Define the directory where the IJG JPEG library sources are stored,
@@ -783,6 +770,10 @@ ENABLE_TIFF=$(D_)TIFF_INCLUDED$(_D)
 
 !ifndef ZSRCDIR
 ZSRCDIR=.\zlib
+!endif
+
+!ifndef BROTLISRCDIR
+BROTLISRCDIR=.\brotli
 !endif
 
 !if exist("leptonica")
@@ -1005,7 +996,7 @@ SBRFLAGS=/FR$(SBRDIR)\$(NUL)
 
 # if it's included, $(PSD)gs_pdfwr.dev should always be one of the last in the list
 PSI_FEATURE_DEVS=$(PSD)psl3.dev $(PSD)pdf.dev $(GPDF_DEV) $(PSD)epsf.dev $(PSD)ttfont.dev \
-                 $(PSD)jbig2.dev $(PSD)jpx.dev $(PSD)fapi_ps.dev $(GLD)winutf8.dev $(PSD)gs_pdfwr.dev
+       $(PSD)fapi_ps.dev $(PSD)gs_pdfwr.dev
 
 
 PCL_FEATURE_DEVS=$(PLOBJDIR)/pl.dev $(PLOBJDIR)/pjl.dev $(PXLOBJDIR)/pxl.dev $(PCL5OBJDIR)/pcl5c.dev \
@@ -1094,9 +1085,9 @@ DEVICE_DEVS17=$(DD)ljet3.dev $(DD)ljet3d.dev $(DD)ljet4pjl.dev $(DD)ljet4.dev $(
 DEVICE_DEVS18=$(DD)pj.dev $(DD)pjxl.dev $(DD)pjxl300.dev $(DD)jetp3852.dev $(DD)r4081.dev
 DEVICE_DEVS19=$(DD)lbp8.dev $(DD)m8510.dev $(DD)necp6.dev $(DD)bjc600.dev $(DD)bjc800.dev
 DEVICE_DEVS20=$(DD)pnm.dev $(DD)pnmraw.dev $(DD)ppm.dev $(DD)ppmraw.dev $(DD)pamcmyk32.dev $(DD)pamcmyk4.dev $(DD)pnmcmyk.dev $(DD)pam.dev
-DEVICE_DEVS21=$(DD)spotcmyk.dev $(DD)devicen.dev $(DD)bmpsep1.dev $(DD)bmpsep8.dev $(DD)bmp16m.dev $(DD)bmp32b.dev $(DD)psdcmyk.dev $(DD)psdrgb.dev $(DD)psdcmyk16.dev $(DD)psdrgb16.dev $(DD)psdrgbtags.dev $(DD)psdcmyktags.dev $(DD)psdcmyktags16.dev
+DEVICE_DEVS21=$(DD)spotcmyk.dev $(DD)devicen.dev $(DD)bmpsep1.dev $(DD)bmpsep8.dev $(DD)bmp16m.dev $(DD)bmp32b.dev $(DD)psdcmyk.dev $(DD)psdrgb.dev $(DD)psdcmyk16.dev $(DD)psdrgb16.dev $(DD)psdrgbtags.dev $(DD)psdcmyktags.dev $(DD)psdcmyktags16.dev $(DD)psdrgbtags16.dev
 !endif
-CONTRIB_DEVS=$(DD)pcl3.dev $(DD)hpdjplus.dev $(DD)hpdjportable.dev $(DD)hpdj310.dev $(DD)hpdj320.dev $(DD)hpdj340.dev $(DD)hpdj400.dev $(DD)hpdj500.dev $(DD)hpdj500c.dev $(DD)hpdj510.dev $(DD)hpdj520.dev $(DD)hpdj540.dev $(DD)hpdj550c.dev $(DD)hpdj560c.dev $(DD)hpdj600.dev $(DD)hpdj660c.dev $(DD)hpdj670c.dev $(DD)hpdj680c.dev $(DD)hpdj690c.dev $(DD)hpdj850c.dev $(DD)hpdj855c.dev $(DD)hpdj870c.dev $(DD)hpdj890c.dev $(DD)hpdj1120c.dev $(DD)cdj670.dev $(DD)cdj850.dev $(DD)cdj880.dev $(DD)cdj890.dev $(DD)cdj970.dev $(DD)cdj1600.dev $(DD)cdnj500.dev $(DD)chp2200.dev $(DD)lips3.dev $(DD)lxm5700m.dev $(DD)lxm3200.dev $(DD)lex2050.dev $(DD)lxm3200.dev $(DD)lex5700.dev $(DD)lex7000.dev $(DD)okiibm.dev $(DD)oki182.dev $(DD)oki4w.dev $(DD)gdi.dev $(DD)samsunggdi.dev $(DD)dl2100.dev $(DD)la50.dev $(DD)la70.dev $(DD)la75.dev $(DD)la75plus.dev $(DD)ln03.dev $(DD)xes.dev $(DD)md2k.dev $(DD)md5k.dev $(DD)lips4.dev $(DD)lips4v.dev $(DD)bj10v.dev $(DD)bj10vh.dev $(DD)md50Mono.dev $(DD)md50Eco.dev $(DD)md1xMono.dev $(DD)lp2000.dev $(DD)escpage.dev $(DD)ap3250.dev $(DD)npdl.dev $(DD)rpdl.dev $(DD)fmpr.dev $(DD)fmlbp.dev $(DD)ml600.dev $(DD)jj100.dev $(DD)lbp310.dev $(DD)lbp320.dev $(DD)mj700v2c.dev $(DD)mj500c.dev $(DD)mj6000c.dev $(DD)mj8000c.dev $(DD)pr201.dev $(DD)pr150.dev $(DD)pr1000.dev $(DD)pr1000_4.dev $(DD)lips2p.dev $(DD)bjc880j.dev $(DD)bjcmono.dev $(DD)bjcgray.dev $(DD)bjccmyk.dev $(DD)bjccolor.dev $(DD)escp.dev $(DD)lp8000.dev $(DD)lq850.dev $(DD)photoex.dev $(DD)st800.dev $(DD)stcolor.dev $(DD)alc1900.dev $(DD)alc2000.dev $(DD)alc4000.dev $(DD)alc4100.dev $(DD)alc8500.dev $(DD)alc8600.dev $(DD)alc9100.dev $(DD)lp3000c.dev $(DD)lp8000c.dev $(DD)lp8200c.dev $(DD)lp8300c.dev $(DD)lp8500c.dev $(DD)lp8800c.dev $(DD)lp9000c.dev $(DD)lp9200c.dev $(DD)lp9500c.dev $(DD)lp9800c.dev $(DD)lps6500.dev $(DD)epl2050.dev $(DD)epl2050p.dev $(DD)epl2120.dev $(DD)epl2500.dev $(DD)epl2750.dev $(DD)epl5800.dev $(DD)epl5900.dev $(DD)epl6100.dev $(DD)epl6200.dev $(DD)lp1800.dev $(DD)lp1900.dev $(DD)lp2200.dev $(DD)lp2400.dev $(DD)lp2500.dev $(DD)lp7500.dev $(DD)lp7700.dev $(DD)lp7900.dev $(DD)lp8100.dev $(DD)lp8300f.dev $(DD)lp8400f.dev $(DD)lp8600.dev $(DD)lp8600f.dev $(DD)lp8700.dev $(DD)lp8900.dev $(DD)lp9000b.dev $(DD)lp9100.dev $(DD)lp9200b.dev $(DD)lp9300.dev $(DD)lp9400.dev $(DD)lp9600.dev $(DD)lp9600s.dev $(DD)lps4500.dev $(DD)eplcolor.dev $(DD)eplmono.dev $(DD)hl7x0.dev $(DD)hl1240.dev $(DD)hl1250.dev $(DD)appledmp.dev $(DD)iwhi.dev $(DD)iwlo.dev $(DD)iwlq.dev $(DD)atx23.dev $(DD)atx24.dev $(DD)atx38.dev $(DD)itk24i.dev $(DD)itk38.dev $(DD)coslw2p.dev $(DD)coslwxl.dev $(DD)ccr.dev $(DD)cif.dev $(DD)inferno.dev $(DD)mgr4.dev $(DD)mgr8.dev $(DD)mgrgray2.dev $(DD)mgrgray4.dev $(DD)mgrgray8.dev $(DD)mgrmono.dev $(DD)miff24.dev $(DD)plan9bm.dev $(DD)xcf.dev $(DD)svgwrite.dev
+CONTRIB_DEVS=$(DD)pcl3.dev $(DD)hpdjplus.dev $(DD)hpdjportable.dev $(DD)hpdj310.dev $(DD)hpdj320.dev $(DD)hpdj340.dev $(DD)hpdj400.dev $(DD)hpdj500.dev $(DD)hpdj500c.dev $(DD)hpdj510.dev $(DD)hpdj520.dev $(DD)hpdj540.dev $(DD)hpdj550c.dev $(DD)hpdj560c.dev $(DD)hpdj600.dev $(DD)hpdj660c.dev $(DD)hpdj670c.dev $(DD)hpdj680c.dev $(DD)hpdj690c.dev $(DD)hpdj850c.dev $(DD)hpdj855c.dev $(DD)hpdj870c.dev $(DD)hpdj890c.dev $(DD)hpdj1120c.dev $(DD)cdj670.dev $(DD)cdj850.dev $(DD)cdj880.dev $(DD)cdj890.dev $(DD)cdj970.dev $(DD)cdj1600.dev $(DD)cdnj500.dev $(DD)chp2200.dev $(DD)lips3.dev $(DD)lxm5700m.dev $(DD)lxm3200.dev $(DD)lex2050.dev $(DD)lxm3200.dev $(DD)lex5700.dev $(DD)lex7000.dev $(DD)okiibm.dev $(DD)oki182.dev $(DD)oki4w.dev $(DD)gdi.dev $(DD)samsunggdi.dev $(DD)dl2100.dev $(DD)la50.dev $(DD)la70.dev $(DD)la75.dev $(DD)la75plus.dev $(DD)ln03.dev $(DD)xes.dev $(DD)md2k.dev $(DD)md5k.dev $(DD)lips4.dev $(DD)lips4v.dev $(DD)bj10v.dev $(DD)bj10vh.dev $(DD)md50Mono.dev $(DD)md50Eco.dev $(DD)md1xMono.dev $(DD)lp2000.dev $(DD)escpage.dev $(DD)ap3250.dev $(DD)npdl.dev $(DD)rpdl.dev $(DD)fmpr.dev $(DD)fmlbp.dev $(DD)ml600.dev $(DD)jj100.dev $(DD)lbp310.dev $(DD)lbp320.dev $(DD)mj700v2c.dev $(DD)mj500c.dev $(DD)mj6000c.dev $(DD)mj8000c.dev $(DD)pr201.dev $(DD)pr150.dev $(DD)pr1000.dev $(DD)pr1000_4.dev $(DD)lips2p.dev $(DD)bjc880j.dev $(DD)bjcmono.dev $(DD)bjcgray.dev $(DD)bjccmyk.dev $(DD)bjccolor.dev $(DD)escp.dev $(DD)lp8000.dev $(DD)lq850.dev $(DD)photoex.dev $(DD)st800.dev $(DD)stcolor.dev $(DD)alc1900.dev $(DD)alc2000.dev $(DD)alc4000.dev $(DD)alc4100.dev $(DD)alc8500.dev $(DD)alc8600.dev $(DD)alc9100.dev $(DD)lp3000c.dev $(DD)lp8000c.dev $(DD)lp8200c.dev $(DD)lp8300c.dev $(DD)lp8500c.dev $(DD)lp8800c.dev $(DD)lp9000c.dev $(DD)lp9200c.dev $(DD)lp9500c.dev $(DD)lp9800c.dev $(DD)lps6500.dev $(DD)epl2050.dev $(DD)epl2050p.dev $(DD)epl2120.dev $(DD)epl2500.dev $(DD)epl2750.dev $(DD)epl5800.dev $(DD)epl5900.dev $(DD)epl6100.dev $(DD)epl6200.dev $(DD)lp1800.dev $(DD)lp1900.dev $(DD)lp2200.dev $(DD)lp2400.dev $(DD)lp2500.dev $(DD)lp7500.dev $(DD)lp7700.dev $(DD)lp7900.dev $(DD)lp8100.dev $(DD)lp8300f.dev $(DD)lp8400f.dev $(DD)lp8600.dev $(DD)lp8600f.dev $(DD)lp8700.dev $(DD)lp8900.dev $(DD)lp9000b.dev $(DD)lp9100.dev $(DD)lp9200b.dev $(DD)lp9300.dev $(DD)lp9400.dev $(DD)lp9600.dev $(DD)lp9600s.dev $(DD)lps4500.dev $(DD)eplcolor.dev $(DD)eplmono.dev $(DD)hl7x0.dev $(DD)hl1240.dev $(DD)hl1250.dev $(DD)appledmp.dev $(DD)iwhi.dev $(DD)iwhic.dev $(DD)iwlo.dev $(DD)iwlow.dev $(DD)iwlq.dev $(DD)iwlqc.dev $(DD)atx23.dev $(DD)atx24.dev $(DD)atx38.dev $(DD)itk24i.dev $(DD)itk38.dev $(DD)coslw2p.dev $(DD)coslwxl.dev $(DD)ccr.dev $(DD)cif.dev $(DD)inferno.dev $(DD)mgr4.dev $(DD)mgr8.dev $(DD)mgrgray2.dev $(DD)mgrgray4.dev $(DD)mgrgray8.dev $(DD)mgrmono.dev $(DD)miff24.dev $(DD)plan9bm.dev $(DD)xcf.dev $(DD)svgwrite.dev
 
 !if "$(WITH_CONTRIB)" == "1"
 DEVICE_DEVS16=$(DEVICE_DEVS16) $(CONTRIB_DEVS)
@@ -1565,28 +1556,28 @@ DEBUGDEFS=DEBUG=1 TDEBUG=1 $(RECURSIVEDEFS)
 RECURSIVEMAKE=nmake
 
 debug:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(DEBUGDEFS) FT_BRIDGE=$(FT_BRIDGE)
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(DEBUGDEFS)
 
 gsdebug:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(DEBUGDEFS) FT_BRIDGE=$(FT_BRIDGE) gs
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(DEBUGDEFS) gs
 
 gpcl6debug:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(DEBUGDEFS) FT_BRIDGE=$(FT_BRIDGE) gpcl6
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(DEBUGDEFS) gpcl6
 
 gxpsdebug:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(DEBUGDEFS) FT_BRIDGE=$(FT_BRIDGE) gxps
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(DEBUGDEFS) gxps
 
 gpdfdebug:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(DEBUGDEFS) $(WINDEFS) gpdf
+	$(RECURSIVEMAKE) -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" $(DEBUGDEFS) $(WINDEFS) gpdf
 
 gpdldebug:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(DEBUGDEFS) FT_BRIDGE=$(FT_BRIDGE) gpdl
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(DEBUGDEFS) gpdl
 
 debugclean:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(DEBUGDEFS) FT_BRIDGE=$(FT_BRIDGE) clean
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(DEBUGDEFS) clean
 
 debugbsc:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(DEBUGDEFS) FT_BRIDGE=$(FT_BRIDGE) bsc
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(DEBUGDEFS) bsc
 
 # --------------------- Memento targets --------------------- #
 # Simply set some definitions and call ourselves back         #
@@ -1594,28 +1585,28 @@ debugbsc:
 MEMENTODEFS=$(DEBUGDEFS) MEMENTO=1
 
 memento-target:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(MEMENTODEFS) FT_BRIDGE=$(FT_BRIDGE)
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(MEMENTODEFS)
 
 gsmemento:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(MEMENTODEFS) FT_BRIDGE=$(FT_BRIDGE) gs
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(MEMENTODEFS) gs
 
 gpcl6memento:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(MEMENTODEFS) FT_BRIDGE=$(FT_BRIDGE) gpcl6
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(MEMENTODEFS) gpcl6
 
 gxpsmemento:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(MEMENTODEFS) FT_BRIDGE=$(FT_BRIDGE) gxps
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(MEMENTODEFS) gxps
 
 gpdfmemento:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(MEMENTODEFS) $(WINDEFS) gpdf
+	$(RECURSIVEMAKE) -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" $(MEMENTODEFS) $(WINDEFS) gpdf
 
 gpdlmemento:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(MEMENTODEFS) FT_BRIDGE=$(FT_BRIDGE) gpdl
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(MEMENTODEFS) gpdl
 
 mementoclean:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(MEMENTODEFS) FT_BRIDGE=$(FT_BRIDGE) clean
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(MEMENTODEFS) clean
 
 mementobsc:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(MEMENTODEFS) FT_BRIDGE=$(FT_BRIDGE) bsc
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(MEMENTODEFS) bsc
 
 # --------------------- Profile targets --------------------- #
 # Simply set some definitions and call ourselves back         #
@@ -1624,28 +1615,28 @@ PROFILEDEFS=$(RECURSIVEDEFS) PROFILE=1
 
 profile:
 profile-target:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(PROFILEDEFS) FT_BRIDGE=$(FT_BRIDGE)
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(PROFILEDEFS)
 
 gsprofile:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(PROFILEDEFS) FT_BRIDGE=$(FT_BRIDGE) gs
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(PROFILEDEFS) gs
 
 gpcl6profile:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(PROFILEDEFS) FT_BRIDGE=$(FT_BRIDGE) gpcl6
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(PROFILEDEFS) gpcl6
 
 gxpsprofile:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(PROFILEDEFS) FT_BRIDGE=$(FT_BRIDGE) gxps
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(PROFILEDEFS) gxps
 
 gpdfprofile:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" FT_BRIDGE=$(FT_BRIDGE) $(PROFILEDEFS) $(WINDEFS) gpdf
+	$(RECURSIVEMAKE) -f $(MAKEFILE) DEVSTUDIO="$(DEVSTUDIO)" $(PROFILEDEFS) $(WINDEFS) gpdf
 
 gpdlprofile:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(PROFILEDEFS) FT_BRIDGE=$(FT_BRIDGE) gpdl
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(PROFILEDEFS) gpdl
 
 profileclean:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(PROFILEDEFS) FT_BRIDGE=$(FT_BRIDGE) clean
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(PROFILEDEFS) clean
 
 profilebsc:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(PROFILEDEFS) FT_BRIDGE=$(FT_BRIDGE) bsc
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(PROFILEDEFS) bsc
 
 
 
@@ -1655,25 +1646,25 @@ profilebsc:
 SANITIZEDEFS=SANITIZE=1 $(RECURSIVEDEFS)
 
 sanitize:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(SANITIZEDEFS) FT_BRIDGE=$(FT_BRIDGE)
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(SANITIZEDEFS)
 
 gssanitize:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(SANITIZEDEFS) FT_BRIDGE=$(FT_BRIDGE) gs
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(SANITIZEDEFS) gs
 
 gpcl6sanitze:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(SANITIZEDEFS) FT_BRIDGE=$(FT_BRIDGE) gpcl6
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(SANITIZEDEFS) gpcl6
 
 gxpssanitize:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(SANITIZEDEFS) FT_BRIDGE=$(FT_BRIDGE) gxps
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(SANITIZEDEFS) gxps
 
 gpdlsanitize:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(SANITIZEDEFS) FT_BRIDGE=$(FT_BRIDGE) gpdl
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(SANITIZEDEFS) gpdl
 
 sanitizeclean:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(SANITIZEDEFS) FT_BRIDGE=$(FT_BRIDGE) clean
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(SANITIZEDEFS) clean
 
 sanitizebsc:
-	$(RECURSIVEMAKE) -f $(MAKEFILE) $(SANITIZEDEFS) FT_BRIDGE=$(FT_BRIDGE) bsc
+	$(RECURSIVEMAKE) -f $(MAKEFILE) $(SANITIZEDEFS) bsc
 
 # ---------------------- UFST targets ---------------------- #
 # Simply set some definitions and call ourselves back        #

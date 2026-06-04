@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -200,6 +200,10 @@ gsicc_set_iccsmaskprofile(const char *pname,
     icc_profile->hash_is_valid = true;
     icc_profile->num_comps =
             gscms_get_input_channel_count(icc_profile->profile_handle, icc_profile->memory);
+    if (icc_profile->num_comps > ICC_MAX_CHANNELS) {
+        rc_free_icc_profile(mem, icc_profile, "gsicc_set_iccsmaskprofile");
+        return NULL;
+    }
     icc_profile->num_comps_out =
             gscms_get_output_channel_count(icc_profile->profile_handle, icc_profile->memory);
     icc_profile->data_cs =
@@ -590,23 +594,23 @@ gsicc_fill_srcgtag_item(gsicc_rendering_param_t *r_params, char **pstrlast, bool
 
     /* Get the intent */
     curr_ptr = gs_strtok(NULL, "\t, \n\r", pstrlast);
-    if (sscanf(curr_ptr, "%d", &ri) != 1)
+    if (curr_ptr == NULL || sscanf(curr_ptr, "%d", &ri) != 1)
         return_error(gs_error_unknownerror);
     r_params->rendering_intent = ri | gsRI_OVERRIDE;
     /* Get the black point compensation setting */
     curr_ptr = gs_strtok(NULL, "\t, \n\r", pstrlast);
-    if (sscanf(curr_ptr, "%d", &blackptcomp) != 1)
+    if (curr_ptr == NULL || sscanf(curr_ptr, "%d", &blackptcomp) != 1)
         return_error(gs_error_unknownerror);
     r_params->black_point_comp = blackptcomp | gsBP_OVERRIDE;
     /* Get the over-ride embedded ICC boolean */
     curr_ptr = gs_strtok(NULL, "\t, \n\r", pstrlast);
-    if (sscanf(curr_ptr, "%d", &or_icc) != 1)
+    if (curr_ptr == NULL || sscanf(curr_ptr, "%d", &or_icc) != 1)
         return_error(gs_error_unknownerror);
     r_params->override_icc = or_icc;
     if (cmyk) {
         /* Get the preserve K control */
         curr_ptr = gs_strtok(NULL, "\t, \n\r", pstrlast);
-        if (sscanf(curr_ptr, "%d", &preserve_k) < 1)
+        if (curr_ptr == NULL || sscanf(curr_ptr, "%d", &preserve_k) < 1)
             return_error(gs_error_unknownerror);
         r_params->preserve_black = preserve_k | gsKP_OVERRIDE;
     } else {
@@ -645,7 +649,7 @@ gsicc_set_srcgtag_struct(gsicc_manager_t *icc_manager, const char* pname,
     int num_bytes;
     int k;
     static const char *const srcgtag_keys[] = {GSICC_SRCGTAG_KEYS};
-    cmm_profile_t *icc_profile;
+    cmm_profile_t *icc_profile = NULL;
     cmm_srcgtag_profile_t *srcgtag;
     bool start = true;
     gsicc_cmm_t cmm = gsCMM_DEFAULT;
@@ -684,8 +688,10 @@ gsicc_set_srcgtag_struct(gsicc_manager_t *icc_manager, const char* pname,
         }
         num_bytes = sfread(buffer_ptr,sizeof(unsigned char), info_size, str);
         code = sfclose(str);
-        if (code < 0)
-            return code;
+        if (code < 0) {
+            gs_free_object(mem, buffer_ptr, "gsicc_set_srcgtag_struct");
+             return code;
+        }
         buffer_ptr[info_size] = 0;
         if (num_bytes != info_size) {
             gs_free_object(mem, buffer_ptr, "gsicc_set_srcgtag_struct");
@@ -694,6 +700,11 @@ gsicc_set_srcgtag_struct(gsicc_manager_t *icc_manager, const char* pname,
         }
         /* Create the structure in which we will store this data */
         srcgtag = gsicc_new_srcgtag_profile(mem);
+        if (srcgtag == NULL) {
+            gs_free_object(mem, buffer_ptr, "gsicc_set_srcgtag_struct");
+            return gs_throw1(gs_error_VMerror, "creation of profile for %s failed",
+                               pname);
+        }
         /* Now parse through the data opening the profiles that are needed */
         curr_ptr = buffer_ptr;
         /* Initialize that we want color management.  Then if profile is not
@@ -705,7 +716,7 @@ gsicc_set_srcgtag_struct(gsicc_manager_t *icc_manager, const char* pname,
             srcgtag->cmyk_rend_cond[k].cmm = gsCMM_DEFAULT;
             srcgtag->gray_rend_cond[k].cmm = gsCMM_DEFAULT;
         }
-        while (start || strlen(curr_ptr) > 0) {
+        while (start || (curr_ptr != NULL && strlen(curr_ptr) > 0)) {
             if (start) {
                 curr_ptr = gs_strtok(buffer_ptr, "\t, \n\r", &last);
                 start = false;
@@ -721,6 +732,7 @@ gsicc_set_srcgtag_struct(gsicc_manager_t *icc_manager, const char* pname,
                        curr_ptr is Replace which indicates we will be doing
                        direct replacement of the colors.  */
                     curr_ptr = gs_strtok(NULL, "\t, \n\r", &last);
+                    if (curr_ptr == NULL) break;
                     if (strncmp(curr_ptr, GSICC_SRCTAG_NOCM, strlen(GSICC_SRCTAG_NOCM)) == 0 &&
                         strlen(curr_ptr) == strlen(GSICC_SRCTAG_NOCM)) {
                         cmm = gsCMM_NONE;
@@ -1062,6 +1074,7 @@ gsicc_set_profile(gsicc_manager_t *icc_manager, const char* pname, int namelen,
                But set some basic stuff that we need. Take care of DeviceN
                profile now, since we don't know the number of components etc */
             icc_profile->num_comps = num_comps;
+            if (icc_profile->num_comps > ICC_MAX_CHANNELS) return gs_throw1(-1, "problems with profile %s",pname);
             icc_profile->num_comps_out = 3;
             gsicc_set_icc_range(&icc_profile);
             icc_profile->data_cs = default_space;
@@ -1651,12 +1664,16 @@ gsicc_set_device_profile_colorants(gx_device *dev, char *name_str)
         if (profile_struct->spotnames != NULL) {
             /* Free the linked list in this object */
             gsicc_free_spotnames(profile_struct->spotnames, mem);
+            profile_struct->spotnames = NULL;
             /* Free the main object */
             gs_free_object(mem, profile_struct->spotnames,
                            "gsicc_set_device_profile_colorants");
         }
         /* Allocate structure for managing names */
         spot_names = gsicc_new_namelist(mem);
+        if (spot_names == 0)
+            return gs_throw(gs_error_VMerror, "Insufficient memory for spot name");
+
         profile_struct->spotnames = spot_names;
         spot_names->name_str = (char*) gs_alloc_bytes(mem, str_len+1,
                                                "gsicc_set_device_profile_colorants");

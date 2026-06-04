@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -29,6 +29,7 @@
 #include "szlibx.h"
 #include "scfx.h"
 #include "memory_.h"
+#include "gxdevice.h"
 
 /*
  * TIFF image loader. Should be enough to support TIFF files in XPS.
@@ -56,6 +57,7 @@ struct xps_tiff_s
 
     /* colormap */
     unsigned *colormap;
+    int colormap_max;
 
     /* assorted tags */
     unsigned subfiletype;
@@ -231,6 +233,8 @@ readlong(xps_tiff_t *tiff, unsigned int *v)
 static int
 xps_decode_tiff_uncompressed(xps_context_t *ctx, xps_tiff_t *tiff, byte *rp, byte *rl, byte *wp, byte *wl)
 {
+    if (rl - rp != wl - wp)
+        return gs_throw(-1, "mismatch in data sizes");
     memcpy(wp, rp, wl - wp);
     return gs_okay;
 }
@@ -487,7 +491,7 @@ xps_decode_tiff_jpeg(xps_context_t *ctx, xps_tiff_t *tiff, byte *rp, byte *rl, b
 }
 
 static inline int
-getcomp(byte *line, int x, int bpc)
+getcomp(byte *line, size_t x, int bpc)
 {
     switch (bpc)
     {
@@ -501,11 +505,11 @@ getcomp(byte *line, int x, int bpc)
 }
 
 static inline void
-putcomp(byte *line, int x, int bpc, int value)
+putcomp(byte *line, size_t x, int bpc, int value)
 {
     int maxval = (1 << bpc) - 1;
 
-    // clear bits first
+    /* clear bits first  */
     switch (bpc)
     {
     case 1: line[x / 8] &= ~(maxval << (7 - (x % 8))); break;
@@ -536,10 +540,10 @@ xps_unpredict_tiff(byte *line, int width, int comps, int bits)
     {
         for (k = 0; k < comps; k++)
         {
-            v = getcomp(line, i * comps + k, bits);
+            v = getcomp(line, (size_t)i * comps + k, bits);
             v = v + left[k];
             v = v % (1 << bits);
-            putcomp(line, i * comps + k, bits, v);
+            putcomp(line, (size_t)i * comps + k, bits, v);
             left[k] = v;
         }
     }
@@ -553,14 +557,14 @@ xps_unassocalpha_tiff(byte *line, int width, int comps, int bits)
 
     for (i = 0; i < width; i++)
     {
-        a = getcomp(line, i * comps + (comps - 1), bits);
+        a = getcomp(line, (size_t)i * comps + (comps - 1), bits);
         for (k = 0; k < (comps - 1); k++)
         {
             if (a > 0)
             {
-                v = getcomp(line, i * comps + k, bits);
+                v = getcomp(line, (size_t)i * comps + k, bits);
                 v = (v * m) / a;
-                putcomp(line, i * comps + k, bits, v);
+                putcomp(line, (size_t)i * comps + k, bits, v);
             }
         }
     }
@@ -576,10 +580,10 @@ xps_invert_tiff(byte *line, int width, int comps, int bits, int alpha)
     {
         for (k = 0; k < comps; k++)
         {
-            v = getcomp(line, i * comps + k, bits);
+            v = getcomp(line, (size_t)i * comps + k, bits);
             if (!alpha || k < comps - 1)
                 v = m - v;
-            putcomp(line, i * comps + k, bits, v);
+            putcomp(line, (size_t)i * comps + k, bits, v);
         }
     }
 }
@@ -611,15 +615,15 @@ xps_expand_colormap(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
 
     for (y = 0; y < image->height; y++)
     {
-        src = image->samples + (image->stride * y);
-        dst = samples + (stride * y);
+        src = image->samples + ((size_t)image->stride * y);
+        dst = samples + ((size_t)stride * y);
 
         for (x = 0; x < image->width; x++)
         {
             if (tiff->extrasamples)
             {
-                int c = getcomp(src, x * 2, image->bits);
-                int a = getcomp(src, x * 2 + 1, image->bits);
+                int c = getcomp(src, (size_t)x * 2, image->bits);
+                int a = getcomp(src, (size_t)x * 2 + 1, image->bits);
                 *dst++ = tiff->colormap[c + 0] >> 8;
                 *dst++ = tiff->colormap[c + maxval] >> 8;
                 *dst++ = tiff->colormap[c + maxval * 2] >> 8;
@@ -627,7 +631,7 @@ xps_expand_colormap(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
             }
             else
             {
-                int c = getcomp(src, x, image->bits);
+                int c = getcomp(src, (size_t)x, image->bits);
                 *dst++ = tiff->colormap[c + 0] >> 8;
                 *dst++ = tiff->colormap[c + maxval] >> 8;
                 *dst++ = tiff->colormap[c + maxval * 2] >> 8;
@@ -660,6 +664,7 @@ xps_decode_tiff_strips(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
     unsigned row;
     unsigned strip;
     unsigned i;
+    int64_t stride_bits;
     gs_color_space *old_cs;
 
     if (!tiff->rowsperstrip || !tiff->stripoffsets || !tiff->rowsperstrip)
@@ -672,7 +677,16 @@ xps_decode_tiff_strips(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
     image->height = tiff->imagelength;
     image->comps = tiff->samplesperpixel;
     image->bits = tiff->bitspersample;
-    image->stride = (image->width * image->comps * image->bits + 7) / 8;
+    if (image->width <= 0 || image->height <= 0 || image->comps <= 0 || image->bits <= 0)
+        return gs_throw(-1, "bad image dimension");
+
+    if (check_64bit_multiply(image->width, image->comps, &stride_bits) ||
+        check_64bit_multiply(stride_bits, image->bits, &stride_bits))
+        return gs_throw(-1, "image is too large");
+    stride_bits = (stride_bits + 7) / 8;
+    if (stride_bits > (int64_t)INT_MAX)
+        return gs_throw(-1, "image is too large");
+    image->stride = (int)stride_bits;
     image->invert_decode = false;
 
     old_cs = image->colorspace;
@@ -743,8 +757,8 @@ xps_decode_tiff_strips(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
         unsigned wlen = image->stride * tiff->rowsperstrip;
         byte *rp = tiff->bp + offset;
 
-        if (wp + wlen > image->samples + image->stride * image->height)
-            wlen = image->samples + image->stride * image->height - wp;
+        if (wp + wlen > image->samples + (size_t)image->stride * image->height)
+            wlen = image->samples + (size_t)image->stride * image->height - wp;
 
         if (rp + rlen > tiff->ep)
             return gs_throw(-1, "strip extends beyond the end of the file");
@@ -795,7 +809,7 @@ xps_decode_tiff_strips(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
             for (i = 0; i < rlen; i++)
                 rp[i] = bitrev[rp[i]];
 
-        wp += image->stride * tiff->rowsperstrip;
+        wp += (size_t)image->stride * tiff->rowsperstrip;
         strip ++;
     }
 
@@ -813,6 +827,9 @@ xps_decode_tiff_strips(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
     /* RGBPal */
     if (tiff->photometric == 3 && tiff->colormap)
     {
+        if (tiff->colormap_max != (3<<tiff->bitspersample))
+            return gs_rethrow(-1, "colormap too short for image");
+
         error = xps_expand_colormap(ctx, tiff, image);
         if (error)
             return gs_rethrow(error, "could not expand colormap");
@@ -821,6 +838,9 @@ xps_decode_tiff_strips(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
     /* B&W with palette */
     if (tiff->photometric == 1 && tiff->colormap)
     {
+        if (tiff->colormap_max != (3<<tiff->bitspersample))
+            return gs_rethrow(-1, "colormap too short for image");
+
         error = xps_expand_colormap(ctx, tiff, image);
         if (error)
             return gs_rethrow(error, "could not expand colormap");
@@ -926,6 +946,17 @@ xps_read_tiff_tag_value(unsigned *p, xps_tiff_t *tiff, unsigned type, unsigned o
 }
 
 
+static void *
+xps_alloc_table(void **table, xps_context_t *ctx, size_t size)
+{
+    if (*table)
+        xps_free(ctx, *table);
+    *table = NULL;
+    *table = xps_alloc(ctx, size);
+
+    return *table;
+}
+
 static int
 xps_read_tiff_tag(xps_context_t *ctx, xps_tiff_t *tiff, unsigned offset)
 {
@@ -1014,8 +1045,7 @@ xps_read_tiff_tag(xps_context_t *ctx, xps_tiff_t *tiff, unsigned offset)
         code = xps_read_tiff_tag_value(&tiff->extrasamples, tiff, type, value, 1);
         break;
     case ICCProfile:
-        tiff->profile = xps_alloc(ctx, count);
-        if (!tiff->profile)
+        if (!xps_alloc_table(&tiff->profile, ctx, count))
             return gs_throw(gs_error_VMerror, "could not allocate embedded icc profile");
         /* ICC profile data type is set to UNDEFINED.
          * TBYTE reading not correct in xps_read_tiff_tag_value */
@@ -1026,28 +1056,28 @@ xps_read_tiff_tag(xps_context_t *ctx, xps_tiff_t *tiff, unsigned offset)
         break;
 
     case JPEGTables:
+        if (tiff->bp + value < tiff->bp || tiff->bp + value + count > tiff->ep)
+            return gs_throw(gs_error_unknownerror, "JPEGTables out of bounds");
         tiff->jpegtables = tiff->bp + value;
         tiff->jpegtableslen = count;
         break;
 
     case StripOffsets:
-        tiff->stripoffsets = (unsigned*) xps_alloc(ctx, count * sizeof(unsigned));
-        if (!tiff->stripoffsets)
+        if (!xps_alloc_table(&tiff->stripoffsets, ctx, (size_t)count * sizeof(unsigned)))
             return gs_throw(gs_error_VMerror, "could not allocate strip offsets");
         code = xps_read_tiff_tag_value(tiff->stripoffsets, tiff, type, value, count);
         break;
 
     case StripByteCounts:
-        tiff->stripbytecounts = (unsigned*) xps_alloc(ctx, count * sizeof(unsigned));
-        if (!tiff->stripbytecounts)
+        if (!xps_alloc_table(&tiff->stripbytecounts, ctx, (size_t)count * sizeof(unsigned)))
             return gs_throw(gs_error_VMerror, "could not allocate strip byte counts");
         code = xps_read_tiff_tag_value(tiff->stripbytecounts, tiff, type, value, count);
         break;
 
     case ColorMap:
-        tiff->colormap = (unsigned*) xps_alloc(ctx, count * sizeof(unsigned));
-        if (!tiff->colormap)
+        if (!xps_alloc_table(&tiff->colormap, ctx, (size_t)count * sizeof(unsigned)))
             return gs_throw(gs_error_VMerror, "could not allocate color map");
+        tiff->colormap_max = count;
         code = xps_read_tiff_tag_value(tiff->colormap, tiff, type, value, count);
         break;
 
@@ -1159,7 +1189,10 @@ xps_decode_tiff(xps_context_t *ctx, byte *buf, int len, xps_image_t *image)
 
     error = xps_decode_tiff_header(ctx, tiff, buf, len);
     if (error)
-        return gs_rethrow(error, "cannot decode tiff header");
+    {
+        gs_rethrow(error, "cannot decode tiff header");
+        goto cleanup;
+    }
 
     if (!tiff->stripbytecounts)
     {
@@ -1175,9 +1208,26 @@ xps_decode_tiff(xps_context_t *ctx, byte *buf, int len, xps_image_t *image)
     if (tiff->rowsperstrip > tiff->imagelength)
         tiff->rowsperstrip = tiff->imagelength;
 
+    if (tiff->bitspersample != 1 && tiff->bitspersample != 4 && tiff->bitspersample != 8 && tiff->bitspersample != 16) {
+        gs_rethrow(error, "Illegal BitsPerSample in TIFF header");
+        goto cleanup;
+    }
+
+    if (tiff->samplesperpixel != 1 && tiff->samplesperpixel != 3 && tiff->samplesperpixel != 4 && tiff->samplesperpixel != 5) {
+        gs_rethrow(error, "Illegal SamplesPerPixel in TIFF header");
+        goto cleanup;
+    }
+
+    if (tiff->compression < 1 || (tiff->compression > 5 && (tiff->compression != 7 && tiff->compression != 32773))) {
+        gs_rethrow(error, "Illegal Compression in TIFF header");
+        goto cleanup;
+    }
+
     error = xps_decode_tiff_strips(ctx, tiff, image);
-    if (error)
-        return gs_rethrow(error, "could not decode image data");
+    if (error) {
+        gs_rethrow(error, "could not decode image data");
+        goto cleanup;
+    }
 
     /*
      * Byte swap 16-bit images to big endian if necessary.
@@ -1213,16 +1263,17 @@ xps_tiff_has_alpha(xps_context_t *ctx, byte *buf, int len)
     xps_tiff_t *tiff = &tiffst;
 
     error = xps_decode_tiff_header(ctx, tiff, buf, len);
-    if (error)
-    {
-        gs_catch(error, "cannot decode tiff header");
-        return 0;
-    }
 
     if (tiff->profile) xps_free(ctx, tiff->profile);
     if (tiff->colormap) xps_free(ctx, tiff->colormap);
     if (tiff->stripoffsets) xps_free(ctx, tiff->stripoffsets);
     if (tiff->stripbytecounts) xps_free(ctx, tiff->stripbytecounts);
+
+    if (error)
+    {
+        gs_catch(error, "cannot decode tiff header");
+        return 0;
+    }
 
     return tiff->extrasamples == 2 || tiff->extrasamples == 1;
 }

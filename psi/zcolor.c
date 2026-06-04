@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2025 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -167,8 +167,7 @@ zcurrentcolorspace(i_ctx_t * i_ctx_p)
 {
     os_ptr  op = osp;   /* required by "push" macro */
     int code;
-    ref namestr,stref, *aref;
-    byte *body;
+    ref namestr, *aref;
 
     /* Adobe applications expect that the Device spaces (DeviceGray
      * DeviceRGB and DeviceCMYK) will always return the same array.
@@ -291,7 +290,7 @@ zsetcolor(i_ctx_t * i_ctx_p)
         if (r_has_type(op, t_dictionary)) {
             ref     *pImpl, pPatInst;
 
-            if ((code = dict_find_string(op, "Implementation", &pImpl)) < 0)
+            if ((code = dict_find_string_with_type(op, "Implementation", &pImpl,t_array)) < 0)
                 return code;
             if (code > 0) {
                 code = array_get(imemory, pImpl, 0, &pPatInst);
@@ -490,7 +489,7 @@ static int copy_cspace_string(i_ctx_t * i_ctx_p, ref *dest, ref *src)
 
 static int copy_cspace_dict(i_ctx_t * i_ctx_p, ref *dest, ref *src)
 {
-    int code = 0, index, i = 0;
+    int code = 0, index;
     uint saved_space = avm_local;
     ref eltp[2], cref;
 
@@ -2212,6 +2211,9 @@ static int comparedictkey(i_ctx_t * i_ctx_p, ref *CIEdict1, ref *CIEdict2, char 
     if (r_type(tempref1) == t_null)
         return 1;
 
+    if (!r_is_array(tempref1))
+        return 0;
+
     code = comparearrays(i_ctx_p, tempref1, tempref2, 0);
 
     if (code > 0)
@@ -2294,7 +2296,7 @@ static int hashdictkey(i_ctx_t * i_ctx_p, ref *CIEdict1, char *key, gs_md5_state
     if (code <= 0)
         return 1;
 
-    if (r_type(tempref1) == t_null)
+    if (r_type(tempref1) == t_null || !r_is_array(tempref1))
         return 1;
 
     return hasharray(i_ctx_p, tempref1, md5);
@@ -2440,7 +2442,7 @@ static int hashcieaspace(i_ctx_t *i_ctx_p, ref *space, gs_md5_state_t *md5)
     ref CIEdict1, spacename;
 
     code = array_get(imemory, space, 0, &spacename);
-    if (code < 0)
+    if (code < 0 || !r_has_type(&spacename, t_name))
         return 0;
     gs_md5_append(md5, (const gs_md5_byte_t *)&spacename.value.pname, sizeof(spacename.value.pname));
 
@@ -2491,6 +2493,9 @@ static int setcieaspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int CI
     code = array_get(imemory, r, 1, &CIEDict);
     if (code < 0)
         return code;
+
+    check_read_type(CIEDict, t_dictionary);
+
     if ((*stage) > 0) {
         gs_client_color cc;
 
@@ -2608,11 +2613,13 @@ static int cieadomain(i_ctx_t * i_ctx_p, ref *space, float *ptr)
     if (code < 0)
         return code;
 
+    check_read_type(CIEdict, t_dictionary);
+
     /* If we have a RangeA entry in the dictionary, get the
      * values from that
      */
     code = dict_find_string(&CIEdict, "RangeA", &tempref);
-    if (code > 0 && !r_has_type(tempref, t_null)) {
+    if (code > 0 && r_is_array(tempref)) {
         code = get_cie_param_array(imemory, tempref, 2, ptr);
         if (code < 0)
             return code;
@@ -2632,11 +2639,13 @@ static int ciearange(i_ctx_t * i_ctx_p, ref *space, float *ptr)
     if (code < 0)
         return code;
 
+    check_read_type(CIEdict, t_dictionary);
+
     /* If we have a RangeA entry in the dictionary, get the
      * values from that
      */
     code = dict_find_string(&CIEdict, "RangeA", &tempref);
-    if (code > 0 && !r_has_type(tempref, t_null)) {
+    if (code > 0 && r_is_array(tempref)) {
         code = get_cie_param_array(imemory, tempref, 2, ptr);
         if (code < 0)
             return code;
@@ -2665,10 +2674,10 @@ static int cieacompareproc(i_ctx_t *i_ctx_p, ref *space, ref *testspace)
     ref CIEdict1, CIEdict2;
 
     code = array_get(imemory, space, 1, &CIEdict1);
-    if (code < 0)
+    if (code < 0 || !r_has_type(&CIEdict1, t_dictionary))
         return 0;
     code = array_get(imemory, testspace, 1, &CIEdict2);
-    if (code < 0)
+    if (code < 0|| !r_has_type(&CIEdict2, t_dictionary))
         return 0;
     if (!comparedictkey(i_ctx_p, &CIEdict1, &CIEdict2, (char *)"WhitePoint"))
         return 0;
@@ -2703,6 +2712,7 @@ static int hashcieabcspace(i_ctx_t * i_ctx_p, ref *space, gs_md5_state_t *md5)
     code = array_get(imemory, space, 1, &CIEdict1);
     if (code < 0)
         return 0;
+    check_read_type(CIEdict1, t_dictionary);
     if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"WhitePoint", md5))
         return 0;
     if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"BlackPoint", md5))
@@ -2746,6 +2756,7 @@ static int setcieabcspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int 
     if (code < 0)
         return code;
 
+    check_read_type(CIEDict, t_dictionary);
     if ((*stage) > 0) {
         gs_client_color cc;
         int i;
@@ -2874,7 +2885,7 @@ static int cieabcdomain(i_ctx_t * i_ctx_p, ref *space, float *ptr)
 
     /* If we have a RangeABC, get the values from that */
     code = dict_find_string(&CIEdict, "RangeABC", &tempref);
-    if (code > 0 && !r_has_type(tempref, t_null)) {
+    if (code > 0 && r_is_array(tempref)) {
         code = get_cie_param_array(imemory, tempref, 6, ptr);
         if (code < 0)
             return code;
@@ -2895,7 +2906,7 @@ static int cieabcrange(i_ctx_t * i_ctx_p, ref *space, float *ptr)
 
     /* If we have a RangeABC, get the values from that */
     code = dict_find_string(&CIEdict, "RangeABC", &tempref);
-    if (code > 0 && !r_has_type(tempref, t_null)) {
+    if (code > 0 && r_is_array(tempref)) {
         code = get_cie_param_array(imemory, tempref, 6, ptr);
         if (code < 0)
             return code;
@@ -2928,10 +2939,10 @@ static int cieabccompareproc(i_ctx_t *i_ctx_p, ref *space, ref *testspace)
     ref CIEdict1, CIEdict2;
 
     code = array_get(imemory, space, 1, &CIEdict1);
-    if (code < 0)
+    if (code < 0 || !r_has_type(&CIEdict1, t_dictionary))
         return 0;
     code = array_get(imemory, testspace, 1, &CIEdict2);
-    if (code < 0)
+    if (code < 0 || !r_has_type(&CIEdict2, t_dictionary))
         return 0;
     if (!comparedictkey(i_ctx_p, &CIEdict1, &CIEdict2, (char *)"WhitePoint"))
         return 0;
@@ -2966,6 +2977,7 @@ static int hashciedefspace(i_ctx_t *i_ctx_p, ref *space, gs_md5_state_t *md5)
     code = array_get(imemory, space, 1, &CIEdict1);
     if (code < 0)
         return 0;
+    check_read_type(CIEdict1, t_dictionary);
     if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"WhitePoint", md5))
         return 0;
     if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"BlackPoint", md5))
@@ -3016,6 +3028,7 @@ static int setciedefspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int 
     code = array_get(imemory, r, 1, &CIEDict);
     if (code < 0)
         return code;
+    check_read_type(CIEDict, t_dictionary);
     if ((*stage) > 0) {
         gs_client_color cc;
         int i;
@@ -3162,9 +3175,10 @@ static int ciedefdomain(i_ctx_t * i_ctx_p, ref *space, float *ptr)
     if (code < 0)
         return code;
 
+    check_read_type(CIEdict, t_dictionary);
     /* If we have a RangeDEF, get the values from that */
     code = dict_find_string(&CIEdict, "RangeDEF", &tempref);
-    if (code > 0 && !r_has_type(tempref, t_null)) {
+    if (code > 0 && r_is_array(tempref)) {
         code = get_cie_param_array(imemory, tempref, 6, ptr);
         if (code < 0)
             return code;
@@ -3183,9 +3197,10 @@ static int ciedefrange(i_ctx_t * i_ctx_p, ref *space, float *ptr)
     if (code < 0)
         return code;
 
+    check_read_type(CIEdict, t_dictionary);
     /* If we have a RangeDEF, get the values from that */
     code = dict_find_string(&CIEdict, "RangeDEF", &tempref);
-    if (code > 0 && !r_has_type(tempref, t_null)) {
+    if (code > 0 && r_is_array(tempref)) {
         code = get_cie_param_array(imemory, tempref, 6, ptr);
         if (code < 0)
             return code;
@@ -3218,10 +3233,10 @@ static int ciedefcompareproc(i_ctx_t *i_ctx_p, ref *space, ref *testspace)
     ref CIEdict1, CIEdict2;
 
     code = array_get(imemory, space, 1, &CIEdict1);
-    if (code < 0)
+    if (code < 0 || !r_has_type(&CIEdict1, t_dictionary))
         return 0;
     code = array_get(imemory, testspace, 1, &CIEdict2);
-    if (code < 0)
+    if (code < 0 || !r_has_type(&CIEdict2, t_dictionary))
         return 0;
     if (!comparedictkey(i_ctx_p, &CIEdict1, &CIEdict2, (char *)"WhitePoint"))
         return 0;
@@ -3265,6 +3280,7 @@ static int hashciedefgspace(i_ctx_t *i_ctx_p, ref *space, gs_md5_state_t *md5)
     gs_md5_append(md5, (const gs_md5_byte_t *)&spacename.value.pname, sizeof(spacename.value.pname));
 
     code = array_get(imemory, space, 1, &CIEdict1);
+    check_read_type(CIEdict1, t_dictionary);
     if (code < 0)
         return 0;
     if (!hashdictkey(i_ctx_p, &CIEdict1, (char *)"WhitePoint", md5))
@@ -3317,6 +3333,7 @@ static int setciedefgspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int
     code = array_get(imemory, r, 1, &CIEDict);
     if (code < 0)
         return code;
+    check_read_type(CIEDict, t_dictionary);
     if ((*stage) > 0) {
         gs_client_color cc;
         int i;
@@ -3403,6 +3420,8 @@ static int validateciedefgspace(i_ctx_t * i_ctx_p, ref **r)
             code = array_get(imemory, &arrayref, i, &tempref);
             if (code < 0)
                 return code;
+            if (!r_is_array(&tempref))
+                return_error(gs_error_typecheck);
             for (j=0;j<value[1];j++) {
                 code = array_get(imemory, &tempref, i, &valref);
                 if (code < 0)
@@ -3474,9 +3493,10 @@ static int ciedefgdomain(i_ctx_t * i_ctx_p, ref *space, float *ptr)
     if (code < 0)
         return code;
 
+    check_read_type(CIEdict, t_dictionary);
     /* If we have a RangeDEFG, get the values from that */
     code = dict_find_string(&CIEdict, "RangeDEFG", &tempref);
-    if (code > 0 && !r_has_type(tempref, t_null)) {
+    if (code > 0 && r_is_array(tempref)) {
         code = get_cie_param_array(imemory, tempref, 8, ptr);
         if (code < 0)
             return code;
@@ -3495,9 +3515,10 @@ static int ciedefgrange(i_ctx_t * i_ctx_p, ref *space, float *ptr)
     if (code < 0)
         return code;
 
+    check_read_type(CIEdict, t_dictionary);
     /* If we have a RangeDEFG, get the values from that */
     code = dict_find_string(&CIEdict, "RangeDEFG", &tempref);
-    if (code > 0 && !r_has_type(tempref, t_null)) {
+    if (code > 0 && r_is_array(tempref)) {
         code = get_cie_param_array(imemory, tempref, 8, ptr);
         if (code < 0)
             return code;
@@ -3532,10 +3553,10 @@ static int ciedefgcompareproc(i_ctx_t *i_ctx_p, ref *space, ref *testspace)
     ref CIEdict1, CIEdict2;
 
     code = array_get(imemory, space, 1, &CIEdict1);
-    if (code < 0)
+    if (code < 0 || !r_has_type(&CIEdict1, t_dictionary))
         return 0;
     code = array_get(imemory, testspace, 1, &CIEdict2);
-    if (code < 0)
+    if (code < 0 || !r_has_type(&CIEdict2, t_dictionary))
         return 0;
     if (!comparedictkey(i_ctx_p, &CIEdict1, &CIEdict2, (char *)"WhitePoint"))
         return 0;
@@ -3765,7 +3786,7 @@ static int setseparationspace(i_ctx_t * i_ctx_p, ref *sepspace, int *stage, int 
     pcs->params.separation.sep_type = sep_type;
     pcs->params.separation.mem = imemory->non_gc_memory;
     name_string_ref(imemory, &sname, &sname);
-    pcs->params.separation.sep_name = (char *)gs_alloc_bytes(pcs->params.separation.mem, r_size(&sname) + 1, "Separation name");
+    pcs->params.separation.sep_name = (char *)gs_alloc_bytes(pcs->params.separation.mem, (size_t)r_size(&sname) + 1, "Separation name");
     if (pcs->params.separation.sep_name == NULL)
         return_error(gs_error_VMerror);
 
@@ -3858,6 +3879,9 @@ static int validateseparationspace(i_ctx_t * i_ctx_p, ref **space)
     /* and also not /Separation */
     if (r_size(&sref) == 9 && strncmp((const char *)sref.value.const_bytes, "Separation", 9) == 0)
         return_error(gs_error_typecheck);
+    /* or /ICCBased */
+    if (r_size(&sref) == 8 && strncmp((const char *)sref.value.const_bytes, "ICCBased", 8) == 0)
+           return_error(gs_error_typecheck);
 
     ref_assign(*space, &altspace);
     return 0;
@@ -3941,7 +3965,6 @@ static int septransform(i_ctx_t *i_ctx_p, ref *sepspace, int *usealternate, int 
          */
         if (*stage == 10) {
             gs_function_t *pfn = NULL;
-            gs_device_n_map *pimap;
             gs_color_space * pcs;
             float in, out[4];
             int i;
@@ -4084,10 +4107,10 @@ static int sepcompareproc(i_ctx_t *i_ctx_p, ref *space, ref *testspace)
             return 0;
     }
     code = array_get(imemory, space, 3, &sname1);
-    if (code < 0)
+    if (code < 0 || !r_is_array(&sname1))
         return 0;
     code = array_get(imemory, testspace, 3, &sname2);
-    if (code < 0)
+    if (code < 0 || !r_is_array(&sname2))
         return 0;
     return(comparearrays(i_ctx_p, &sname1, &sname2, 0));
 }
@@ -4174,7 +4197,7 @@ static int devicencolorants_cont(i_ctx_t *i_ctx_p)
             mem = devn_cs->params.device_n.mem->non_gc_memory;
             switch (r_type(&space[0])) {
                 case t_string:
-                    sep_name = (char *)gs_alloc_bytes(mem, r_size(&space[0]) + 1, "devicencolorants_cont");
+                    sep_name = (char *)gs_alloc_bytes(mem, (size_t)r_size(&space[0]) + 1, "devicencolorants_cont");
                     if (sep_name == NULL)
                         return_error(gs_error_VMerror);
                     memcpy(sep_name, space[0].value.bytes, r_size(&space[0]));
@@ -4185,7 +4208,7 @@ static int devicencolorants_cont(i_ctx_t *i_ctx_p)
                         ref nref;
 
                         name_string_ref(imemory, &space[0], &nref);
-                        sep_name = (char *)gs_alloc_bytes(mem, r_size(&nref) + 1, "devicencolorants_cont");
+                        sep_name = (char *)gs_alloc_bytes(mem, (size_t)r_size(&nref) + 1, "devicencolorants_cont");
                         if (sep_name == NULL)
                             return_error(gs_error_VMerror);
                         memcpy(sep_name, nref.value.bytes, r_size(&nref));
@@ -4349,6 +4372,10 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
              */
             devn_cs = gs_currentcolorspace_inline(igs);
             code = array_get(imemory, devicenspace, 4, &sref);
+            if (code < 0)
+                return code;
+            if (!r_has_type(&sref, t_dictionary))
+                return_error(gs_error_typecheck);
 
             devn_cs->params.device_n.subtype = gs_devicen_DeviceN;
             code  = dict_find_string(&sref, "Subtype", &subtype);
@@ -4397,7 +4424,7 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
                  * space structure. Note, using non-GC memory for storage.
                  */
                 devn_cs->params.device_n.num_process_names = r_size(parr);
-                devn_cs->params.device_n.process_names = (char **)gs_alloc_bytes(devn_cs->params.device_n.mem->non_gc_memory, devn_cs->params.device_n.num_process_names * sizeof(char *), "DeviceN Process Components array");
+                devn_cs->params.device_n.process_names = (char **)gs_alloc_bytes(devn_cs->params.device_n.mem->non_gc_memory, (size_t)devn_cs->params.device_n.num_process_names * sizeof(char *), "DeviceN Process Components array");
                 if (devn_cs->params.device_n.process_names == NULL)
                     return_error(gs_error_VMerror);
 
@@ -4412,7 +4439,7 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
                         return gs_note_error(gs_error_typecheck);
                     }
                     name_string_ref(devn_cs->params.device_n.mem, &name, &name_string);
-                    devn_cs->params.device_n.process_names[ix] = (char *)gs_alloc_bytes(devn_cs->params.device_n.mem->non_gc_memory, r_size(&name_string) + 1, "Component name");
+                    devn_cs->params.device_n.process_names[ix] = (char *)gs_alloc_bytes(devn_cs->params.device_n.mem->non_gc_memory, (size_t)r_size(&name_string) + 1, "Component name");
                     if (devn_cs->params.device_n.process_names[ix] == NULL)
                         return_error(gs_error_VMerror);
                     memcpy(devn_cs->params.device_n.process_names[ix], name_string.value.bytes, r_size(&name_string));
@@ -4423,6 +4450,10 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
             if (dict_find_string(process, "ColorSpace", &cspace) <= 0) {
                 *stage = 0;
                 return gs_note_error(gs_error_undefined);
+            }
+            if (!r_has_type(cspace, t_name) && !r_is_array(cspace)) {
+                *stage = 0;
+                return gs_note_error(gs_error_typecheck);
             }
             *stage = 4;
             *cont = 1;
@@ -4450,6 +4481,7 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
         code = array_get(imemory, devicenspace, 3, &proc);
         if (code < 0)
             return code;
+        check_proc(proc);
         pfn = ref_function(&proc);
         if (pfn == NULL) {
             /* Convert tint transform to a PostScript function */
@@ -4482,7 +4514,7 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
     *stage = 2;
 
     code = array_get(imemory, devicenspace, 1, &namesarray);
-    if (code < 0)
+    if (code < 0 || !r_is_array(&namesarray))
         return code;
     num_components = r_size(&namesarray);
     /* The alternate color space has been selected as the current color space */
@@ -4519,7 +4551,7 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
                 return code;
             pcs->params.separation.sep_type = sep_type;
             pcs->params.separation.mem = imemory->non_gc_memory;
-            pcs->params.separation.sep_name = (char *)gs_alloc_bytes(pcs->params.separation.mem, r_size(&tname) + 1, "Separation name");
+            pcs->params.separation.sep_name = (char *)gs_alloc_bytes(pcs->params.separation.mem, (size_t)r_size(&tname) + 1, "Separation name");
             if (pcs->params.separation.sep_name == NULL)
                 return_error(gs_error_VMerror);
             memcpy(pcs->params.separation.sep_name, tname.value.bytes, r_size(&tname));
@@ -4527,10 +4559,13 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
             code = array_get(imemory, &namesarray, (long)0, &sname);
             if (code < 0)
                 return code;
+            if (!r_has_type(&sname, t_name) && !r_has_type(&sname, t_string))
+                return_error(gs_error_typecheck);
             istate->colorspace[0].procs.special.separation.layer_name = sname;
             code = array_get(imemory, devicenspace, 3, &proc);
             if (code < 0)
                 return code;
+            check_proc(proc);
             istate->colorspace[0].procs.special.separation.tint_transform = proc;
             code = gs_cspace_set_sepr_function(pcs, pfn);
             if (code >= 0)
@@ -4564,7 +4599,7 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
                     name_string_ref(imemory, &sname, &sname);
                     /* falls through */
                 case t_string:
-                    names[i] = (char *)gs_alloc_bytes(pcs->params.device_n.mem->non_gc_memory, r_size(&sname) + 1, "Ink name");
+                    names[i] = (char *)gs_alloc_bytes(pcs->params.device_n.mem->non_gc_memory, (size_t)r_size(&sname) + 1, "Ink name");
                     if (names[i] == NULL)
                         return_error(gs_error_VMerror);
                     memcpy(names[i], sname.value.bytes, r_size(&sname));
@@ -4583,6 +4618,7 @@ static int setdevicenspace(i_ctx_t * i_ctx_p, ref *devicenspace, int *stage, int
     code = array_get(imemory, devicenspace, 3, &proc);
     if (code < 0)
         return code;
+    check_proc(proc);
     istate->colorspace[0].procs.special.device_n.tint_transform = proc;
     code = gs_cspace_set_devn_function(pcs, pfn);
     if (code < 0) {
@@ -4673,6 +4709,9 @@ static int validatedevicenspace(i_ctx_t * i_ctx_p, ref **space)
     /* and also not /Separation */
     if (r_size(&sref) == 9 && strncmp((const char *)sref.value.const_bytes, "Separation", 9) == 0)
            return_error(gs_error_typecheck);
+    /* or /ICCBased */
+    if (r_size(&sref) == 8 && strncmp((const char *)sref.value.const_bytes, "ICCBased", 8) == 0)
+           return_error(gs_error_typecheck);
 
     ref_assign(*space, &altspace);
     return 0;
@@ -4696,6 +4735,8 @@ static int devicencomponents(i_ctx_t * i_ctx_p, ref *space, int *n)
     code = array_get(imemory, space, 1, &namesarray);
     if (code < 0)
         return code;
+    if (!r_is_array(&namesarray))
+        return_error(gs_error_typecheck);
     *n = r_size(&namesarray);
     return 0;
 }
@@ -4708,6 +4749,8 @@ static int devicendomain(i_ctx_t * i_ctx_p, ref *space, float *ptr)
     if (code < 0)
         return code;
 
+    if (!r_is_array(&namesarray))
+        return_error(gs_error_typecheck);
     limit = r_size(&namesarray) * 2;
     for (i = 0;i < limit;i+=2) {
         ptr[i] = 0;
@@ -4799,7 +4842,6 @@ static int devicentransform(i_ctx_t *i_ctx_p, ref *devicenspace, int *usealterna
          */
         if (*stage == 10) {
             gs_function_t *pfn = NULL;
-            gs_device_n_map *pimap;
             gs_color_space * pcs;
             float *in, *out;
             int i;
@@ -4813,10 +4855,10 @@ static int devicentransform(i_ctx_t *i_ctx_p, ref *devicenspace, int *usealterna
             check_op(pfn->params.m);
 
             /* Allocate memory to hold the input and output values */
-            in = (float *)gs_alloc_bytes(i_ctx_p->pgs->memory, pfn->params.m * sizeof(float), "devicen_transform");
+            in = (float *)gs_alloc_bytes(i_ctx_p->pgs->memory, (size_t)pfn->params.m * sizeof(float), "devicen_transform");
             if (in == NULL)
                 return gs_note_error(gs_error_VMerror);
-            out = (float *)gs_alloc_bytes(i_ctx_p->pgs->memory, pfn->params.n * sizeof(float), "devicen_transform");
+            out = (float *)gs_alloc_bytes(i_ctx_p->pgs->memory, (size_t)pfn->params.n * sizeof(float), "devicen_transform");
             if (out == NULL) {
                 gs_free_object(i_ctx_p->pgs->memory, in, "devicen_transform");
                 return gs_note_error(gs_error_VMerror);
@@ -4882,6 +4924,8 @@ static int devicenbasecolor(i_ctx_t * i_ctx_p, ref *space, int base, int *cont)
         code = array_get(imemory, space, 1, &narray);
         if (code < 0)
             return code;
+        if (!r_is_array(&narray))
+            return_error(gs_error_typecheck);
         n_comp = r_size(&narray);
         ref_stack_pop(&o_stack, n_comp);
         op = osp;
@@ -4986,6 +5030,10 @@ static int devicencompareproc(i_ctx_t *i_ctx_p, ref *space, ref *testspace)
     code = array_get(imemory, testspace, 3, &sname2);
     if (code < 0)
         return 0;
+    if (r_type(&sname1) != r_type(&sname2))
+        return 0;
+    if (!r_is_array(&sname1))
+        return 0;
     return(comparearrays(i_ctx_p, &sname1, &sname2, 0));
 }
 static int deviceninitialproc(i_ctx_t *i_ctx_p, ref *space)
@@ -4997,6 +5045,9 @@ static int deviceninitialproc(i_ctx_t *i_ctx_p, ref *space)
     code = array_get(imemory, space, 1, &namesarray);
     if (code < 0)
         return code;
+    if (!r_is_array(&namesarray))
+        return_error(gs_error_typecheck);
+
     num_components = r_size(&namesarray);
     cc.pattern = 0x00;
     for (i=0;i<num_components;i++)
@@ -5076,6 +5127,9 @@ static int setindexedspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int
     code = array_get(imemory, r, 2, &hival);
     if (code < 0)
         return code;
+    if (!r_has_type(&hival, t_integer))
+        return_error(gs_error_typecheck);
+
     if (r_has_type(&lookup, t_string)) {
         int num_values = (hival.value.intval + 1) * cs_num_components(pcs_base);
         byte *data_tmp;
@@ -5124,6 +5178,9 @@ static int setindexedspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int
             pcs = gs_cspace_alloc(imemory, &gs_color_space_type_Indexed_Named);
         else
             pcs = gs_cspace_alloc(imemory, &gs_color_space_type_Indexed);
+
+        if (pcs == NULL)
+            return_error(gs_error_VMerror);
 
         pcs->params.indexed.lookup.map = NULL;
         code = zcs_begin_map(i_ctx_p, pcs, &map, &lookup, (hival.value.intval + 1),
@@ -5286,7 +5343,7 @@ static int indexedbasecolor(i_ctx_t * i_ctx_p, ref *space, int base, int *cont)
         push(pcs->params.indexed.n_comps);
         op -= pcs->params.indexed.n_comps - 1;
 
-        rval = (float *)gs_alloc_bytes(imemory, pcs->params.indexed.n_comps * sizeof(float), "indexedbasecolor");
+        rval = (float *)gs_alloc_bytes(imemory, (size_t)pcs->params.indexed.n_comps * sizeof(float), "indexedbasecolor");
         if (rval == NULL)
             return gs_note_error(gs_error_VMerror);
 
@@ -5360,6 +5417,9 @@ static int indexedvalidate(i_ctx_t *i_ctx_p, ref *space, float *values, int num_
     if (code < 0)
         return code;
 
+    if (!r_has_type(&hival, t_integer))
+        return_error(gs_error_typecheck);
+
     if (*values > hival.value.intval)
         *values = (float)hival.value.intval;
 
@@ -5415,6 +5475,9 @@ static int setpatternspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int
         }
     }
     pcs = gs_cspace_alloc(imemory, &gs_color_space_type_Pattern);
+    if (pcs == NULL)
+        return_error(gs_error_VMerror);
+
     pcs->base_space = pcs_base;
     pcs->params.pattern.has_base_space = (pcs_base != NULL);
     rc_increment_cs(pcs_base);
@@ -5509,7 +5572,7 @@ static int patterncomponent(i_ctx_t * i_ctx_p, ref *space, int *n)
         if (r_has_type(op, t_dictionary)) {
             ref     *pImpl, pPatInst;
 
-            code = dict_find_string(op, "Implementation", &pImpl);
+            code = dict_find_string_with_type(op, "Implementation", &pImpl, t_array);
         if (code > 0) {
             code = array_get(imemory, pImpl, 0, &pPatInst);
             if (code < 0)
@@ -5757,6 +5820,8 @@ static int setlabspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont,
     code = array_get(imemory, r, 1, &labdict);
     if (code < 0)
         return code;
+    if (!r_has_type(&labdict, t_dictionary))
+        return_error(gs_error_typecheck);
 /* Get all the parts */
     code = dict_floats_param( imemory, &labdict, "Range", 4, range_buff,
                               dflt_range );
@@ -5825,9 +5890,12 @@ static int labrange(i_ctx_t * i_ctx_p, ref *space, float *ptr)
     if (code < 0)
         return code;
 
+    if (!r_has_type(&CIEdict, t_dictionary))
+        return_error(gs_error_typecheck);
+
     /* If we have a Range entry, get the values from that */
     code = dict_find_string(&CIEdict, "Range", &tempref);
-    if (code > 0 && !r_has_type(tempref, t_null)) {
+    if (code > 0 && r_is_array(tempref)) {
         for (i=0;i<4;i++) {
             code = array_get(imemory, tempref, i, &valref);
             if (code < 0)
@@ -5858,9 +5926,12 @@ static int labdomain(i_ctx_t * i_ctx_p, ref *space, float *ptr)
     if (code < 0)
         return code;
 
+    if (!r_has_type(&CIEdict, t_dictionary))
+        return_error(gs_error_typecheck);
+
     /* If we have a Range, get the values from that */
     code = dict_find_string(&CIEdict, "Range", &tempref);
-    if (code > 0 && !r_has_type(tempref, t_null)) {
+    if (code > 0 && r_is_array(tempref)) {
         for (i=0;i<4;i++) {
             code = array_get(imemory, tempref, i, &valref);
             if (code < 0)
@@ -5946,7 +6017,7 @@ static int checkGamma(i_ctx_t * i_ctx_p, ref *CIEdict, int numvalues)
     ref *tempref, valref;
 
     code = dict_find_string(CIEdict, "Gamma", &tempref);
-    if (code > 0 && !r_has_type(tempref, t_null)) {
+    if (code > 0 && r_is_array(tempref)) {
         if (numvalues > 1) {
             /* Array of gammas (RGB) */
             if (!r_is_array(tempref))
@@ -5990,6 +6061,8 @@ static int hashcalgrayspace(i_ctx_t *i_ctx_p, ref *space, gs_md5_state_t *md5)
     code = array_get(imemory, space, 0, &spacename);
     if (code < 0)
         return 0;
+    if (!r_has_type(&spacename, t_name))
+        return_error(gs_error_typecheck);
     gs_md5_append(md5, (const gs_md5_byte_t *)&spacename.value.pname, sizeof(spacename.value.pname));
 
     code = array_get(imemory, space, 1, &cgdict1);
@@ -5997,7 +6070,7 @@ static int hashcalgrayspace(i_ctx_t *i_ctx_p, ref *space, gs_md5_state_t *md5)
         return 0;
     check_read_type(cgdict1, t_dictionary);
 
-    code = dict_find_string(&cgdict1, "WhitePoint", &tempref);
+    code = dict_find_string_with_type(&cgdict1, "WhitePoint", &tempref, t_array);
     if (code > 0) {
         code = hasharray(i_ctx_p, tempref, md5);
     }
@@ -6008,7 +6081,7 @@ static int hashcalgrayspace(i_ctx_t *i_ctx_p, ref *space, gs_md5_state_t *md5)
         }
     }
 
-    code = dict_find_string(&cgdict1, "BlackPoint", &tempref);
+    code = dict_find_string_with_type(&cgdict1, "BlackPoint", &tempref, t_array);
     if (code > 0) {
         code = hasharray(i_ctx_p, tempref, md5);
     }
@@ -6050,6 +6123,9 @@ static int setcalgrayspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int
     code = array_get(imemory, r, 1, &graydict);
     if (code < 0)
         return code;
+    if (!r_has_type(&graydict, t_dictionary))
+        return_error(gs_error_typecheck);
+
 /* Get all the parts */
     code = dict_float_param(&graydict, "Gamma",
                  dflt_gamma, &gamma);
@@ -6135,6 +6211,9 @@ static int hashcalrgbspace(i_ctx_t *i_ctx_p, ref *space, gs_md5_state_t *md5)
     code = array_get(imemory, space, 0, &spacename);
     if (code < 0)
         return 0;
+    if (!r_has_type(&spacename, t_name))
+        return_error(gs_error_typecheck);
+
     gs_md5_append(md5, (const gs_md5_byte_t *)&spacename.value.pname, sizeof(spacename.value.pname));
 
     code = array_get(imemory, space, 1, &crgbdict1);
@@ -6142,7 +6221,7 @@ static int hashcalrgbspace(i_ctx_t *i_ctx_p, ref *space, gs_md5_state_t *md5)
         return 0;
     check_read_type(crgbdict1, t_dictionary);
 
-    code = dict_find_string(&crgbdict1, "WhitePoint", &tempref);
+    code = dict_find_string_with_type(&crgbdict1, "WhitePoint", &tempref, t_array);
     if (code > 0) {
         code = hasharray(i_ctx_p, tempref, md5);
     }
@@ -6153,7 +6232,7 @@ static int hashcalrgbspace(i_ctx_t *i_ctx_p, ref *space, gs_md5_state_t *md5)
         }
     }
 
-    code = dict_find_string(&crgbdict1, "BlackPoint", &tempref);
+    code = dict_find_string_with_type(&crgbdict1, "BlackPoint", &tempref, t_array);
     if (code > 0) {
         code = hasharray(i_ctx_p, tempref, md5);
     }
@@ -6164,7 +6243,7 @@ static int hashcalrgbspace(i_ctx_t *i_ctx_p, ref *space, gs_md5_state_t *md5)
         }
     }
 
-    code = dict_find_string(&crgbdict1, "Matrix", &tempref);
+    code = dict_find_string_with_type(&crgbdict1, "Matrix", &tempref, t_array);
     if (code > 0) {
         code = hasharray(i_ctx_p, tempref, md5);
     }
@@ -6176,7 +6255,7 @@ static int hashcalrgbspace(i_ctx_t *i_ctx_p, ref *space, gs_md5_state_t *md5)
         }
     }
 
-    code = dict_find_string(&crgbdict1, "Gamma", &tempref);
+    code = dict_find_string_with_type(&crgbdict1, "Gamma", &tempref, t_array);
     if (code > 0) {
         code = hasharray(i_ctx_p, tempref, md5);
     }
@@ -6210,6 +6289,9 @@ static int setcalrgbspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int 
     code = array_get(imemory, r, 1, &rgbdict);
     if (code < 0)
         return code;
+    if (!r_has_type(&rgbdict, t_dictionary))
+        return_error(gs_error_typecheck);
+
 /* Get all the parts */
     code = dict_floats_param( imemory,
                               &rgbdict,
@@ -6307,6 +6389,9 @@ static int seticcspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int CIE
     ref     ICCdict, *tempref, *altref=NULL, *nocie = NULL;
     int components, code;
     float range[8];
+    byte *body = NULL;
+    uint body_size = 0;
+    bool free_body = false;
 
     code = dict_find_string(systemdict, "NOCIE", &nocie);
     if (code > 0) {
@@ -6367,28 +6452,40 @@ static int seticcspace(i_ctx_t * i_ctx_p, ref *r, int *stage, int *cont, int CIE
                         return gs_note_error(gs_error_undefined);
                     /* Check for string based ICC and convert to a file */
                     if (r_has_type(tempref, t_string)){
-                        uint n = r_size(tempref);
                         ref rss;
-                        byte *body;
                         uint save_space = icurrent_space;
 
+                        body_size = r_size(tempref);
+
                         ialloc_set_space(idmemory, avm_system);
-                        body = ialloc_string(n, "seticcspace");
-                        ialloc_set_space(idmemory, save_space);
-                        if (!body)
+                        body = ialloc_string(body_size, "seticcspace");
+                        if (!body) {
+                            ialloc_set_space(idmemory, save_space);
                             return_error(gs_error_VMerror);
-                        memcpy(body, tempref->value.const_bytes, n);
-                        code = make_rss(i_ctx_p, &rss, body, n, avm_system, 0L, n, false);
+                        }
+                        memcpy(body, tempref->value.const_bytes, body_size);
+                        code = make_rss(i_ctx_p, &rss, body, body_size, avm_system, 0L, body_size, false);
                         if (code < 0) {
-                            ifree_string(body, n, "seticcspace");
+                            ifree_string(body, body_size, "seticcspace");
+                            ialloc_set_space(idmemory, save_space);
                             return code;
                         }
+                        ialloc_set_space(idmemory, save_space);
+                        free_body = true;
                         ref_assign(tempref, &rss);
                     }
                     /* Make space on operand stack to pass the ICC dictionary */
                     push(1);
                     ref_assign(op, &ICCdict);
                     code = seticc(i_ctx_p, components, op, (float *)&range);
+                    if (free_body) {
+                        /* We assigned a string in order to create a ReusableStream, now we need to free it */
+                        uint save_space = icurrent_space;
+                        ialloc_set_space(idmemory, avm_system);
+                        ifree_string(body, body_size, "seticcspace");
+                        ialloc_set_space(idmemory, save_space);
+                    }
+
                     if (code < 0) {
                         code = dict_find_string(&ICCdict, "Alternate", &altref); /* Alternate is optional */
                         if (code > 0 && (altref != NULL) && (r_type(altref) != t_null)) {
@@ -6443,6 +6540,9 @@ static int iccompareproc(i_ctx_t *i_ctx_p, ref *space, ref *testspace)
         return 0;
     code2 = array_get(imemory, testspace, 1, &ICCdict2);
     if (code2 < 0)
+        return 0;
+
+    if (!r_has_type(&ICCdict1, t_dictionary) || !r_has_type(&ICCdict2, t_dictionary))
         return 0;
 
     /* As a quick check see if current is same as new */
@@ -6543,20 +6643,7 @@ static int validateiccspace(i_ctx_t * i_ctx_p, ref **r)
             if (sref.value.bytes && strncmp((const char *)sref.value.bytes, "Pattern", 7) == 0)
                 return_error(gs_error_typecheck);
         } else {
-            if (r_is_array(tempref)) {
-                code = array_get(imemory, tempref, 0, &valref);
-                if (code < 0)
-                    return code;
-                if (!r_has_type(&valref, t_name) && !r_has_type(&valref, t_string))
-                    return_error(gs_error_typecheck);
-                if (r_has_type(&valref, t_name))
-                    name_string_ref(imemory, &valref, &sref);
-                else
-                    sref.value.bytes = valref.value.bytes;
-                if (sref.value.bytes && strncmp((const char *)sref.value.bytes, "Pattern", 7) == 0)
-                    return_error(gs_error_typecheck);
-            } else
-                return_error(gs_error_typecheck);
+            return_error(gs_error_typecheck);
         }
     } else {
         ref nameref;
@@ -6606,6 +6693,9 @@ static int iccalternatespace(i_ctx_t * i_ctx_p, ref *space, ref **r, int *CIESub
     if (code < 0)
         return code;
 
+    if (!r_has_type(&ICCdict, t_dictionary))
+        return_error(gs_error_typecheck);
+
     code = dict_find_string(&ICCdict, "N", &tempref);
     if (code < 0)
         return code;
@@ -6646,6 +6736,9 @@ static int icccomponents(i_ctx_t * i_ctx_p, ref *space, int *n)
     if (code < 0)
         return code;
 
+    if (!r_has_type(&ICCdict, t_dictionary))
+        return_error(gs_error_typecheck);
+
     code = dict_find_string(&ICCdict, "N", &tempref);
     if (code < 0)
         return code;
@@ -6665,6 +6758,9 @@ static int iccdomain(i_ctx_t * i_ctx_p, ref *space, float *ptr)
     code = array_get(imemory, space, 1, &ICCdict);
     if (code < 0)
         return code;
+    if (!r_has_type(&ICCdict, t_dictionary))
+        return_error(gs_error_typecheck);
+
     code = dict_find_string(&ICCdict, "N", &tempref);
     if (code < 0)
         return code;
@@ -6675,7 +6771,7 @@ static int iccdomain(i_ctx_t * i_ctx_p, ref *space, float *ptr)
 
     components = tempref->value.intval;
     code = dict_find_string(&ICCdict, "Range", &tempref);
-    if (code > 0 && !r_has_type(tempref, t_null)) {
+    if (code > 0 && r_is_array(tempref)) {
         for (i=0;i<components * 2;i++) {
             code = array_get(imemory, tempref, i, &valref);
             if (code < 0)
@@ -6701,6 +6797,9 @@ static int iccrange(i_ctx_t * i_ctx_p, ref *space, float *ptr)
     code = array_get(imemory, space, 1, &ICCdict);
     if (code < 0)
         return code;
+    if (!r_has_type(&ICCdict, t_dictionary))
+        return_error(gs_error_typecheck);
+
     code = dict_find_string(&ICCdict, "N", &tempref);
     if (code < 0)
         return code;
@@ -6710,7 +6809,7 @@ static int iccrange(i_ctx_t * i_ctx_p, ref *space, float *ptr)
         return gs_note_error(gs_error_typecheck);
     components = tempref->value.intval;
     code = dict_find_string(&ICCdict, "Range", &tempref);
-    if (code > 0 && !r_has_type(tempref, t_null)) {
+    if (code > 0 && r_is_array(tempref)) {
         for (i=0;i<components * 2;i++) {
             code = array_get(imemory, tempref, i, &valref);
             if (code < 0)
@@ -7286,7 +7385,6 @@ zsetcmykcolor(i_ctx_t * i_ctx_p)
 static int currentbasecolor(i_ctx_t *i_ctx_p, int base, ref arr)
 {
     ref *parr = &arr;
-    es_ptr ep = esp;
     int i, code = 0, cont=1, CIESubst=0;
     unsigned int depth = 1;
     PS_colour_space_t *obj;

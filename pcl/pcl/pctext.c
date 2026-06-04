@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -522,6 +522,8 @@ show_char_invisible_foreground(const pcl_state_t * pcs, const gs_char * pbuff)
      * doesn't then we drop the text.
      */
     data = (char *)gs_alloc_bytes(pcs->memory, 15, "temporary special_op string");
+    if (data == NULL)
+        return_error(gs_error_VMerror);
     memset(data, 0x00, 15);
     memcpy(data, "PreserveTrMode", 15);
     gs_c_param_list_write(&list, pcs->memory);
@@ -912,8 +914,8 @@ pcl_show_chars_slow(pcl_state_t * pcs,
             } else {
                 if (use_rmargin && (pcs->cap.x == rmargin))
                     break;
-                else if (pcs->cap.x >= page_size) {
-                    pcs->cap.x = page_size;
+                else if (pcs->cap.x >= (coord)page_size) {
+                    pcs->cap.x = (coord)page_size;
                     break;
                 }
             }
@@ -970,18 +972,18 @@ pcl_show_chars_slow(pcl_state_t * pcs,
          * this is the case, go back to the original position.
          */
         if (pcs->last_was_BS) {
-            pcs->cap.x += pcs->last_width;
+            pcs->cap.x += (coord)pcs->last_width;
             pcs->last_was_BS = false;
         } else
-            pcs->cap.x += width;
+            pcs->cap.x += (coord)width;
 
         /* check for going beyond the margin if not wrapping */
         if (!wrap) {
             if (use_rmargin && (pcs->cap.x > rmargin)) {
-                pcs->cap.x = rmargin;
+                pcs->cap.x = (coord)rmargin;
                 break;
-            } else if (pcs->cap.x >= page_size) {
-                pcs->cap.x = page_size;
+            } else if (pcs->cap.x >= (coord)page_size) {
+                pcs->cap.x = (coord)page_size;
                 break;
             }
         }

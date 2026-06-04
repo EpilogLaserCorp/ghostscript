@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -56,10 +56,10 @@ static int
 xps_parse_gradient_stops(xps_context_t *ctx, char *base_uri, xps_item_t *node,
     struct stop *stops, int maxcount)
 {
-    unsigned short sample_in[8], sample_out[8]; /* XPS allows up to 8 bands */
+    unsigned short sample_in[XPS_MAX_COLORS], sample_out[XPS_MAX_COLORS]; /* XPS allows up to 8 bands */
     gsicc_rendering_param_t rendering_params;
     gsicc_link_t *icclink = 0;
-    float sample[8];
+    float sample[XPS_MAX_COLORS];
     int before, after;
     int count;
     int i, k;
@@ -284,17 +284,17 @@ xps_create_gradient_stop_function(xps_context_t *ctx, struct stop *stops, int co
     range[5] = 1.0;
     sparams.Range = range;
 
-    functions = xps_alloc(ctx, k * sizeof(void*));
+    functions = xps_alloc(ctx, (size_t)k * sizeof(void*));
     if (!functions) {
         gs_throw(gs_error_VMerror, "out of memory: functions.\n");
         return NULL;
     }
-    bounds = xps_alloc(ctx, (k - 1) * sizeof(float));
+    bounds = xps_alloc(ctx, ((size_t)k - 1) * sizeof(float));
     if (!bounds) {
         gs_throw(gs_error_VMerror, "out of memory: bounds.\n");
         return NULL;
     }
-    encode = xps_alloc(ctx, (k * 2) * sizeof(float));
+    encode = xps_alloc(ctx, ((size_t)k * 2) * sizeof(float));
     if (!encode) {
         gs_throw(gs_error_VMerror, "out of memory: encode.\n");
         return NULL;
@@ -349,7 +349,7 @@ xps_create_gradient_stop_function(xps_context_t *ctx, struct stop *stops, int co
         lparams.C0 = c0;
 
         c1 = xps_alloc(ctx, 3 * sizeof(float));
-        if (!c0) {
+        if (!c1) {
             gs_throw(gs_error_VMerror, "out of memory: c1.\n");
             return NULL;
         }

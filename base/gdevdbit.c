@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -168,7 +168,7 @@ gx_default_copy_alpha_hl_color(gx_device * dev, const byte * data, int data_x,
     gs_memory_t *mem = dev->memory;
     int bpp = dev->color_info.depth;
     uchar ncomps = dev->color_info.num_components;
-    uint out_raster;
+    uint64_t out_raster, product = 0;
     int code = 0;
     gx_color_value src_cv[GS_CLIENT_COLOR_MAX_COMPONENTS];
     gx_color_value curr_cv[GS_CLIENT_COLOR_MAX_COMPONENTS];
@@ -183,6 +183,7 @@ gx_default_copy_alpha_hl_color(gx_device * dev, const byte * data, int data_x,
     gx_color_value *composite;
     byte *gb_buff;
     int x_curr, w_curr, gb_buff_start;
+    int has_tags = device_encodes_tags(dev);
 
     byte_depth = bpp / ncomps;
     shift = 16 - byte_depth;
@@ -190,8 +191,10 @@ gx_default_copy_alpha_hl_color(gx_device * dev, const byte * data, int data_x,
 
     fit_copy(dev, data, data_x, raster, id, x, y, width, height);
     row_alpha = data;
-    out_raster = bitmap_raster(width * byte_depth);
-    gb_buff = gs_alloc_bytes(mem, out_raster * ncomps, "copy_alpha_hl_color(gb_buff)");
+    out_raster = bitmap_raster(width * (size_t)byte_depth);
+    if (check_64bit_multiply(out_raster, ncomps, (int64_t *) &product) != 0)
+        return gs_note_error(gs_error_undefinedresult);
+    gb_buff = gs_alloc_bytes(mem, product, "copy_alpha_hl_color(gb_buff)");
     if (gb_buff == 0) {
         code = gs_note_error(gs_error_VMerror);
         return code;
@@ -286,7 +289,7 @@ gx_default_copy_alpha_hl_color(gx_device * dev, const byte * data, int data_x,
                     /* We need to do the weighting by the alpha value */
                     alpha += (alpha>>7); /* Expand from 0..255->0..256 */
                     /* First get the old color */
-                    for (k = 0; k < ncomps; k++) {
+                    for (k = 0; k < ncomps-has_tags; k++) {
                         /* We only have 8 and 16 bit depth to worry about.
                            However, this stuff should really be done with
                            the device encode/decode procedure. */
@@ -305,17 +308,40 @@ gx_default_copy_alpha_hl_color(gx_device * dev, const byte * data, int data_x,
                            the old and the new */
                         blend_cv[k] =  ((curr_cv[k]<<8) +
                                         (((long) src_cv[k] - (long) curr_cv[k]) * alpha))>>8;
-                        composite = &(blend_cv[0]);
                     }
+                    /* DO NOT BLEND TAGS. */
+                    if (has_tags)
+                    {
+                        byte *ptr = ((src_planes[k]) + (sx - data_x) * word_width);
+                        curr_cv[k] = 0;
+                        switch (word_width) {
+                            case 2:
+                                curr_cv[k] += (*ptr++ << 8);
+                            case 1:
+                                curr_cv[k] += *ptr;
+                        }
+                        blend_cv[k] = curr_cv[k] | src_cv[k];
+                    }
+                    composite = &(blend_cv[0]);
                 }
                 /* Update our plane data buffers.  Just reuse the current one */
-                for (k = 0; k < ncomps; k++) {
+                for (k = 0; k < ncomps-has_tags; k++) {
                     byte *ptr = ((src_planes[k]) + (sx - data_x) * word_width);
                     switch (word_width) {
                         case 2:
                             *ptr++ = composite[k] >> 8;
                         case 1:
                             *ptr++ = composite[k] >> shift;
+                    }
+                }
+                if (has_tags)
+                {
+                    byte *ptr = ((src_planes[k]) + (sx - data_x) * word_width);
+                    switch (word_width) {
+                        case 2:
+                            *ptr++ = composite[k] >> 8;
+                        case 1:
+                            *ptr++ = composite[k];
                     }
                 }
             } /* else on alpha != 0 */
@@ -385,7 +411,7 @@ gx_default_copy_alpha(gx_device * dev, const byte * data, int data_x,
                               GB_RASTER_STANDARD | GB_PACKING_CHUNKY |
                               GB_COLORS_NATIVE | GB_ALPHA_NONE);
             params.x_offset = 0;
-            params.raster = bitmap_raster(dev->width * dev->color_info.depth);
+            params.raster = bitmap_raster(dev->width * (size_t)dev->color_info.depth);
             params.data[0] = lin;
             rect.p.y = ry;
             rect.q.y = ry+1;
@@ -539,6 +565,7 @@ gx_default_fill_mask(gx_device * orig_dev,
 {
     gx_device *dev = orig_dev;
     gx_device_clip cdev;
+    int code = 0;
 
     if (w == 0 || h == 0)
         return 0;
@@ -577,12 +604,15 @@ gx_default_fill_mask(gx_device * orig_dev,
     }
     if (depth > 1) {
         /****** CAN'T DO ROP OR HALFTONE WITH ALPHA ******/
-        return (*dev_proc(dev, copy_alpha))
+        code = (*dev_proc(dev, copy_alpha))
             (dev, data, dx, raster, id, x, y, w, h,
              gx_dc_pure_color(pdcolor), depth);
     } else
-        return pdcolor->type->fill_masked(pdcolor, data, dx, raster, id,
+        code = pdcolor->type->fill_masked(pdcolor, data, dx, raster, id,
                                           x, y, w, h, dev, lop, false);
+    if (dev != orig_dev)
+        gx_destroy_clip_device_on_stack(&cdev);
+    return code;
 }
 
 /* Default implementation of strip_tile_rect_devn.  With the current design
@@ -600,7 +630,6 @@ gx_default_strip_tile_rect_devn(gx_device * dev, const gx_strip_bitmap * tiles,
     int rwidth = tiles->rep_width;
     int rheight = tiles->rep_height;
     int shift = tiles->shift;
-    gs_id tile_id = tiles->id;
     int code;
 
     if (rwidth == 0 || rheight == 0)

@@ -1,4 +1,4 @@
-/* Copyright (C) 2018-2024 Artifex Software, Inc.
+/* Copyright (C) 2018-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -94,21 +94,30 @@ static const op_struct_t ops_table[] = {
 };
 
 /* Fix up an if or ifelse forward reference. */
-static void
+static int
 psc_fixup(byte *p, byte *to)
 {
     int skip = to - (p + 3);
 
+    if (skip > 0xFFFF)
+        return_error(gs_error_rangecheck);
+
     p[1] = (byte)(skip >> 8);
     p[2] = (byte)skip;
+    return 0;
 }
-static void psc_fixup_ifelse(byte *p)
+static int
+psc_fixup_ifelse(byte *p)
 {
     int iflen = (p[0] << 8) + p[1];
 
     iflen += 3;         /* To skip past the 'if' body and the 'else' header */
+    if (iflen > 0xFFFF)
+        return_error(gs_error_rangecheck);
+
     p[0] = (byte)(iflen >> 8);
     p[1] = (byte)iflen;
+    return 0;
 }
 
 /* Store an int in the  buffer */
@@ -179,22 +188,23 @@ pdfi_parse_type4_func_stream(pdf_context *ctx, pdf_c_stream *function_stream, in
                     depth++;
                 } else {
                     /* recursion, move on 3 bytes, and parse the sub level */
-                    if (depth++ == MAX_PSC_FUNCTION_NESTING)
+                    if (depth == MAX_PSC_FUNCTION_NESTING)
                         return_error (gs_error_syntaxerror);
                     *size += 3;
                     code = pdfi_parse_type4_func_stream(ctx, function_stream, depth + 1, ops, size);
-                    depth --;
                     if (code < 0)
                         return code;
                     if (p) {
                         if (clause == NULL) {
                             clause = p;
                             *p = (byte)PtCr_if;
-                            psc_fixup(p, ops + *size);
+                            if ((code = psc_fixup(p, ops + *size)) < 0)
+                                return code;
                         } else {
                             *p = (byte)PtCr_else;
-                            psc_fixup(p, ops + *size);
-                            psc_fixup_ifelse(clause + 1);
+                            if ((code = psc_fixup(p, ops + *size)) < 0 ||
+                                (code = psc_fixup_ifelse(clause + 1) < 0))
+                                return code;
                             clause = NULL;
                         }
                         p = ops + *size;
@@ -567,6 +577,11 @@ pdfi_build_function_3(pdf_context *ctx, gs_function_params_t * mnDR,
     code = pdfi_make_float_array_from_dict(ctx, (float **)&params.Bounds, function_dict, "Bounds");
     if (code < 0)
         goto function_3_error;
+
+    if (code != params.k - 1) {
+        code = gs_note_error(gs_error_rangecheck);
+        goto function_3_error;
+    }
 
     code = pdfi_make_float_array_from_dict(ctx, (float **)&params.Encode, function_dict, "Encode");
     if (code < 0)

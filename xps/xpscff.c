@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -79,7 +79,7 @@ xps_read_cff_real(byte *p, byte *e, float *val)
 
     /* b0 was 30 */
 
-    while (txt < buf + (sizeof buf) - 3 && p < e)
+    while (txt < buf + (sizeof buf) - 4 && p < e)
     {
         int b, n;
 
@@ -171,7 +171,7 @@ xps_read_cff_integer(byte *p, byte *e, int b0, int *val)
 }
 
 static int
-xps_read_cff_dict(byte *p, byte *e, xps_font_t *font, gs_font_type1 *pt1)
+xps_read_cff_dict(byte *p, byte *e, xps_font_t *font, gs_font_type1 *pt1, int depth)
 {
     struct { int ival; float fval; } args[CFF_ARGS_SIZE];
     int offset;
@@ -179,6 +179,9 @@ xps_read_cff_dict(byte *p, byte *e, xps_font_t *font, gs_font_type1 *pt1)
 
     int privatelen = 0;
     int privateofs = 0;
+
+    if (depth > 16)
+        return gs_throw(-1, "too many nested dicts");
 
     memset(args, 0x00, sizeof(args));
 
@@ -238,7 +241,7 @@ xps_read_cff_dict(byte *p, byte *e, xps_font_t *font, gs_font_type1 *pt1)
                 if (args[0].ival == 1)
                 {
                     pt1->data.interpret = gs_type1_interpret;
-                    pt1->data.lenIV = -1; // FIXME
+                    pt1->data.lenIV = -1; /* FIXME */
                 }
             }
 
@@ -383,7 +386,7 @@ xps_read_cff_dict(byte *p, byte *e, xps_font_t *font, gs_font_type1 *pt1)
         int code = xps_read_cff_dict(
                 font->cffdata + privateofs,
                 font->cffdata + privateofs + privatelen,
-                font, pt1);
+                font, pt1, depth+1);
         if (code < 0)
             return gs_rethrow(code, "cannot read private dictionary");
     }
@@ -577,7 +580,7 @@ xps_read_cff_file(xps_font_t *font, gs_font_type1 *pt1)
         return gs_throw(-1, "cannot read gsubr index");
 
     /* Read the top and private dictionaries */
-    code = xps_read_cff_dict(dictp, dicte, font, pt1);
+    code = xps_read_cff_dict(dictp, dicte, font, pt1, 0);
     if (code < 0)
         return gs_rethrow(code, "cannot read top dictionary");
 
@@ -600,7 +603,7 @@ xps_read_cff_file(xps_font_t *font, gs_font_type1 *pt1)
 
     pt1->data.subroutineNumberBias = subrbias(nsubrs);
     pt1->data.gsubrNumberBias = subrbias(ngsubrs);
-    // nominal and defaultWidthX
+    /* nominal and defaultWidthX */
 
     return 0;
 }
@@ -755,12 +758,12 @@ xps_cff_append(gs_gstate *pgs, gs_font_type1 *pt1, gs_glyph glyph, int donthint)
 
     gs_type1_set_callback_data(pcis, &cxs);
 
-    // TODO: check if this is set in the font dict
-    // gs_type1_set_lsb(pcis, &mpt);
-    // gs_type1_set_width(pcis, &mpt);
+    /* TODO: check if this is set in the font dict
+       gs_type1_set_lsb(pcis, &mpt);
+       gs_type1_set_width(pcis, &mpt);
 
-    // ...
-
+     ...
+     */
     while (1)
     {
         code = pt1->data.interpret(pcis, pgd, &value);
@@ -790,7 +793,7 @@ xps_post_callback_build_char(gs_show_enum *penum, gs_gstate *pgs,
     float w2[6];
     int code;
 
-    // get the metrics
+    /* get the metrics */
     w2[0] = 0;
     w2[1] = 1;
 
@@ -908,10 +911,10 @@ xps_init_postscript_font(xps_context_t *ctx, xps_font_t *font)
 
     /* Base font specific */
 
-    pt1->FontBBox.p.x = 0; // -0.5;
-    pt1->FontBBox.p.y = 0; // -0.5;
-    pt1->FontBBox.q.x = 0; // 1.5;
-    pt1->FontBBox.q.y = 0; // 1.5;
+    pt1->FontBBox.p.x = 0; /* -0.5; */
+    pt1->FontBBox.p.y = 0; /* -0.5; */
+    pt1->FontBBox.q.x = 0; /* 1.5; */
+    pt1->FontBBox.q.y = 0; /* 1.5; */
 
     uid_set_UniqueID(&pt1->UID, pt1->id);
 
@@ -962,7 +965,7 @@ xps_init_postscript_font(xps_context_t *ctx, xps_font_t *font)
     code = xps_read_cff_file(font, pt1);
     if (code < 0)
     {
-        // TODO free pt1 here?
+        /* TODO free pt1 here? */
         return gs_rethrow(code, "cannot read cff file structure");
     }
 
