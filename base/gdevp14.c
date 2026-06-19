@@ -9230,15 +9230,11 @@ gs_pdf14_device_push(gs_memory_t *mem, gs_gstate * pgs,
     p14dev->log2_align_mod = target->log2_align_mod;
     if (pdf14pct->params.overprint_sim_push) {
         p14dev->color_info.num_components = p14dev->color_info.num_components + pdf14pct->params.num_spot_colors_int;
-        if (target->num_planar_planes == 0) {
-            p14dev->num_planar_planes = 0;
-        } else {
-            p14dev->num_planar_planes = p14dev->color_info.num_components;
-        }
-    } else {
-        p14dev->color_info.num_components = target->color_info.num_components;
-        p14dev->num_planar_planes = target->num_planar_planes;
     }
+    if (target->num_planar_planes == 0)
+        p14dev->num_planar_planes = 0;
+    else
+        p14dev->num_planar_planes = p14dev->color_info.num_components;
     p14dev->interpolate_threshold = dev_proc(target, dev_spec_op)(target, gxdso_interpolate_threshold, NULL, 0);
 
     p14dev->alpha = 1.0;
@@ -9284,8 +9280,11 @@ gs_pdf14_device_push(gs_memory_t *mem, gs_gstate * pgs,
     /* The number of color planes should not exceed that of the target.
        Unless we are using a blend CS */
     if (!(p14dev->blend_cs_state != PDF14_BLEND_CS_UNSPECIFIED || p14dev->overprint_sim)) {
-        if (p14dev->color_info.num_components > target->color_info.num_components - device_encodes_tags(target) + device_encodes_tags((gx_device *)p14dev))
+        if (p14dev->color_info.num_components > target->color_info.num_components - device_encodes_tags(target) + device_encodes_tags((gx_device *)p14dev)) {
             p14dev->color_info.num_components = target->color_info.num_components - device_encodes_tags(target) + device_encodes_tags((gx_device *)p14dev);
+            if (p14dev->num_planar_planes != 0)
+                p14dev->num_planar_planes = p14dev->color_info.num_components;
+        }
         if (p14dev->color_info.max_components > target->color_info.max_components)
             p14dev->color_info.max_components = target->color_info.max_components;
     }

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2025 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -605,11 +605,14 @@ gx_image_enum_begin(gx_device * dev, const gs_gstate * pgs,
         (is_fzero(mat.yx) ? fixed_0 :
          float2fixed_rounded_boxed(height * mat.yx));
     col_extent.y = float2fixed_rounded_boxed(height * mat.yy);
-    gx_image_enum_common_init((gx_image_enum_common_t *)penum,
+    code = gx_image_enum_common_init((gx_image_enum_common_t *)penum,
                               (const gs_data_image_t *)pim,
                               &image1_enum_procs, dev,
                               (masked ? 1 : (penum->alpha ? cs_num_components(pcs)+1 : cs_num_components(pcs))),
                               format);
+    if (code < 0)
+        goto fail;
+
     if (penum->rect.w == width && penum->rect.h == height) {
         x_extent = row_extent;
         y_extent = col_extent;
@@ -778,7 +781,18 @@ gx_image_enum_begin(gx_device * dev, const gs_gstate * pgs,
      * the row, plus 1 byte for end-of-run, plus up to 7 leading
      * bits for data_x offset within a packed byte.
      */
-    bsize = ((bps > 8 ? width * 2 : width) + 15) * spp;
+    if (bps > 8) {
+        if (width > (max_uint / 2) - 15)
+            return_error(gs_error_limitcheck);
+        bsize = width * 2;
+    } else
+        if (width < max_uint - 15)
+            bsize = width;
+        else
+            return_error(gs_error_limitcheck);
+    if (check_uint32_multiply(bsize + 15, spp, &bsize) != 0)
+        return_error(gs_error_limitcheck);
+
     buffer = gs_alloc_bytes(mem, bsize, "image buffer");
     if (buffer == 0) {
         code = gs_error_VMerror;

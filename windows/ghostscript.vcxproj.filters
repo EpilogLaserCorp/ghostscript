@@ -6768,6 +6768,12 @@
       <Filter>base</Filter>
     </ClCompile>
     <ClCompile Include="..\contrib\gdevsvg.c" />
+    <ClCompile Include="..\jpegxr\cr_parse_boxed.c">
+      <Filter>jpegxr</Filter>
+    </ClCompile>
+    <ClCompile Include="..\jpegxr\cw_emit_boxed.c">
+      <Filter>jpegxr</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\base\aes.h">

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2025 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -496,14 +496,14 @@ hpgl_PE(hpgl_args_t * pargs, hpgl_state_t * pgls)
                         pgls->g.relative_coords = hpgl_plot_relative;
                     hpgl_args_set_real2(&args, pe_fixed2float(xy[0], fbits),
                                         pe_fixed2float(xy[1], fbits));
+                    /* prevent paths from getting excessively large */
+                    if (!pgls->g.polygon_mode
+                        && point_count > point_count_max) {
+                        hpgl_call(hpgl_draw_current_path
+                                  (pgls, hpgl_rm_vector));
+                        point_count = 0;
+                    }
                     if (pargs->phase & pe_pen_up) {
-                        /* prevent paths from getting excessively large */
-                        if (!pgls->g.polygon_mode
-                            && point_count > point_count_max) {
-                            hpgl_call(hpgl_draw_current_path
-                                      (pgls, hpgl_rm_vector));
-                            point_count = 0;
-                        }
                         hpgl_call(hpgl_PU(&args, pgls));
                     } else
                         hpgl_call(hpgl_PD(&args, pgls));
@@ -541,6 +541,8 @@ pe_args(const gs_memory_t * mem, hpgl_args_t * pargs, int count)
             ch = *++p;
             if ((ch & 127) <= 32 || (ch & 127) == 127)
                 continue;
+            if (SHIFT > 30)
+                goto syntax_error;
             if (pargs->phase & pe_7bit) {
                 ch -= 63;
                 if (ch & ~63)

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -185,8 +185,12 @@ gs_type2_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
     for (;;) {
         uint c0;
 
-        if (endp != NULL && cip > endp)
-            return_error(gs_error_invalidfont);
+        if (endp != NULL && cip >= endp) {
+            code = gs_type1_endchar(pcis);
+            if (code > 0)
+                return_error(gs_error_invalidfont);
+            return code;
+        }
 
         c0 = *cip++;
 

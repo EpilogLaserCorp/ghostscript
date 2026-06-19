@@ -1,4 +1,4 @@
-/* Copyright (C) 2025 Artifex Software, Inc.
+/* Copyright (C) 2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -419,7 +419,7 @@ send_codepoint(txt_interp_instance_t *instance, int val)
     {
         instance->col = 0;
         code = send_utf8(instance, '\n');
-        if (code < 0)
+        if (code < 0 && code != gs_error_NeedInput)
             return code;
         return send_utf8(instance, '\r');
     }
@@ -429,7 +429,7 @@ send_codepoint(txt_interp_instance_t *instance, int val)
         while (spaces--)
         {
             int code = send_utf8(instance, ' ');
-            if (code < 0)
+            if (code < 0 && code != gs_error_NeedInput)
                 return code;
             instance->col++;
         }
@@ -445,7 +445,7 @@ send_codepoint(txt_interp_instance_t *instance, int val)
     {
         instance->col = 0;
         code = send_utf8(instance, '\n');
-        if (code < 0)
+        if (code < 0 && code != gs_error_NeedInput))
             return code;
         return send_utf8(instance, '\r');
     }
@@ -495,14 +495,17 @@ process_block(txt_interp_instance_t *instance, const byte *ptr, int n)
             if (instance->buffered == 3 && s[0] == 0xef && s[1] == 0xbb && s[2] == 0xbf)
             {
                 instance->state = TXT_STATE_UTF8;
+                drop_buffered(instance, 3);
             }
             else if (instance->buffered == 2 && s[0] == 0xff && s[1] == 0xfe)
             {
                 instance->state = TXT_STATE_UTF16_LE;
+                drop_buffered(instance, 2);
             }
             else if (instance->buffered == 2 && s[0] == 0xfe && s[1] == 0xff)
             {
                 instance->state = TXT_STATE_UTF16_BE;
+                drop_buffered(instance, 2);
             }
             else if (instance->buffered >= 3)
             {
@@ -514,8 +517,10 @@ process_block(txt_interp_instance_t *instance, const byte *ptr, int n)
             if (instance->state != TXT_STATE_INIT)
             {
                 code = send_pcl_init(instance);
-                if (code < 0)
-                    return code;
+                if (code < 0) {
+                    if (code != gs_error_NeedInput || n == 0)
+                        return code;
+                }
             }
             break;
         case TXT_STATE_UTF8:
@@ -526,20 +531,26 @@ process_block(txt_interp_instance_t *instance, const byte *ptr, int n)
                 if (instance->buffered >= 2 && (s[1] & 0xC0) != 0x80)
                 {
                     code = send_urc(instance, 1);
-                    if (code < 0)
-                        return code;
+                    if (code < 0) {
+                        if (code != gs_error_NeedInput || n == 0)
+                            return code;
+                    }
                 }
                 else if (instance->buffered >= 3 && (s[2] & 0xC0) != 0x80)
                 {
                     code = send_urc(instance, 2);
-                    if (code < 0)
-                        return code;
+                    if (code < 0) {
+                        if (code != gs_error_NeedInput || n == 0)
+                            return code;
+                    }
                 }
                 else if (instance->buffered == 4 && (s[3] & 0xC0) != 0x80)
                 {
                     code = send_urc(instance, 3);
-                    if (code < 0)
-                        return code;
+                    if (code < 0) {
+                        if (code != gs_error_NeedInput || n == 0)
+                            return code;
+                    }
                 }
                 else if (instance->buffered == 4)
                 {
@@ -547,8 +558,10 @@ process_block(txt_interp_instance_t *instance, const byte *ptr, int n)
                     val = ((s[0] & 0x7)<<18) | ((s[1] & 0x3f)<<12) | ((s[2] & 0x3f)<<6) |  (s[3] & 0x3f);
                     drop_buffered(instance, 4);
                     code = send_codepoint(instance, val);
-                    if (code < 0)
-                        return code;
+                    if (code < 0) {
+                        if (code != gs_error_NeedInput || n == 0)
+                            return code;
+                    }
                 }
                 else if (instance->buffered != 1 && instance->buffered != 2 && instance->buffered != 3)
                 {
@@ -562,14 +575,18 @@ process_block(txt_interp_instance_t *instance, const byte *ptr, int n)
                 if (instance->buffered >= 2 && (s[1] & 0xC0) != 0x80)
                 {
                     code = send_urc(instance, 1);
-                    if (code < 0)
-                        return code;
+                    if (code < 0) {
+                        if (code != gs_error_NeedInput || n == 0)
+                            return code;
+                    }
                 }
                 else if (instance->buffered >= 3 && (s[2] & 0xC0) != 0x80)
                 {
                     code = send_urc(instance, 2);
-                    if (code < 0)
-                        return code;
+                    if (code < 0) {
+                        if (code != gs_error_NeedInput || n == 0)
+                            return code;
+                    }
                 }
                 else if (instance->buffered == 3)
                 {
@@ -577,8 +594,10 @@ process_block(txt_interp_instance_t *instance, const byte *ptr, int n)
                     val = ((s[0] & 0xF)<<12) | ((s[1] & 0x3f)<<6) | (s[2] & 0x3f);
                     drop_buffered(instance, 3);
                     code = send_codepoint(instance, val);
-                    if (code < 0)
-                        return code;
+                    if (code < 0) {
+                        if (code != gs_error_NeedInput || n == 0)
+                            return code;
+                    }
                 }
                 else if (instance->buffered != 1 && instance->buffered != 2)
                 {
@@ -592,8 +611,10 @@ process_block(txt_interp_instance_t *instance, const byte *ptr, int n)
                 if (instance->buffered >= 2 && (s[1] & 0xC0) != 0x80)
                 {
                     code = send_urc(instance, 1);
-                    if (code < 0)
-                        return code;
+                    if (code < 0) {
+                        if (code != gs_error_NeedInput || n == 0)
+                            return code;
+                    }
                 }
                 else if (instance->buffered == 2)
                 {
@@ -601,8 +622,10 @@ process_block(txt_interp_instance_t *instance, const byte *ptr, int n)
                     val = ((s[0] & 0x1F)<<6) | (s[1] & 0x3f);
                     drop_buffered(instance, 2);
                     code = send_codepoint(instance, val);
-                    if (code < 0)
-                        return code;
+                    if (code < 0) {
+                        if (code != gs_error_NeedInput || n == 0)
+                            return code;
+                    }
                 }
                 else if (instance->buffered != 1)
                 {
@@ -614,8 +637,10 @@ process_block(txt_interp_instance_t *instance, const byte *ptr, int n)
             {
                 /* A continuation byte at the start. Should never see this. */
                 code = send_urc(instance, 1);
-                if (code < 0)
-                    return code;
+                if (code < 0) {
+                    if (code != gs_error_NeedInput || n == 0)
+                        return code;
+                }
             }
             else if (s[0] < 0x80)
             {
@@ -623,15 +648,19 @@ process_block(txt_interp_instance_t *instance, const byte *ptr, int n)
                 val = s[0];
                 drop_buffered(instance, 1);
                 code = send_codepoint(instance, val);
-                if (code < 0)
-                    return code;
+                if (code < 0) {
+                    if (code != gs_error_NeedInput || n == 0)
+                        return code;
+                }
             }
             else
             {
                 /* Bytes we should never see in a UTF-8 file! (0xf8-0xff) */
                 code = send_urc(instance, 1);
-                if (code < 0)
-                    return code;
+                if (code < 0) {
+                    if (code != gs_error_NeedInput || n == 0)
+                        return code;
+                }
             }
             break;
         case TXT_STATE_UTF16_LE:
@@ -648,6 +677,7 @@ process_block(txt_interp_instance_t *instance, const byte *ptr, int n)
                     code = send_urc(instance, 2);
                     if (code < 0)
                         return code;
+                    break;
                 }
                 val = (((s[0] | (s[1]<<8)) - 0xdc00)<<10) + (s[2] | (s[3]<<8)) - 0xdc00 + 0x10000;
                 drop_buffered(instance, 4);
@@ -658,8 +688,10 @@ process_block(txt_interp_instance_t *instance, const byte *ptr, int n)
                 drop_buffered(instance, 2);
             }
             code = send_codepoint(instance, val);
-            if (code < 0)
-                return code;
+            if (code < 0) {
+                if (code != gs_error_NeedInput || n == 0)
+                    return code;
+            }
             break;
         case TXT_STATE_UTF16_BE:
             if (instance->buffered < 2)
@@ -675,6 +707,7 @@ process_block(txt_interp_instance_t *instance, const byte *ptr, int n)
                     code = send_urc(instance, 2);
                     if (code < 0)
                         return code;
+                    break;
                 }
                 val = (((s[1] | (s[0]<<8)) - 0xdc00)<<10) + (s[3] | (s[2]<<8)) - 0xdc00 + 0x10000;
                 drop_buffered(instance, 4);
@@ -685,15 +718,19 @@ process_block(txt_interp_instance_t *instance, const byte *ptr, int n)
                 drop_buffered(instance, 2);
             }
             code = send_codepoint(instance, val);
-            if (code < 0)
-                return code;
+            if (code < 0) {
+                if (code != gs_error_NeedInput || n == 0)
+                    return code;
+            }
             break;
         case TXT_STATE_ASCII:
             while (instance->buffered > 0)
             {
                 code = send_codepoint(instance, s[0]);
-                if (code < 0)
-                    return code;
+                if (code < 0) {
+                    if (code != gs_error_NeedInput || n == 0)
+                        return code;
+                }
                 drop_buffered(instance, 1);
             }
             break;
