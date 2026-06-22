@@ -833,6 +833,33 @@ int convert_DeviceN_alternate(gx_device_pdf * pdev, const gs_gstate * pgs, const
         pcs = pcs->base_space;
     }
 
+    if (pdev->PDFA != 0) {
+        for (i = 0; i < pcs->params.device_n.num_components; ++i) {
+            if (utf8_check((unsigned char *)pcs->params.device_n.names[i]) != NULL) {
+                switch(pdev->PDFACompatibilityPolicy) {
+                    case 0:
+                        emprintf(pdev->memory,
+                             "Ink name in Separation space not valid UTF-8, reverting to normal PDF output.\n");
+                        pdev->AbortPDFAX = true;
+                        pdev->PDFA = 0;
+                        break;
+                    case 1:
+                        emprintf(pdev->memory,
+                             "Ink name in Separation space not valid UTF-8, reverting to normal PDF output.\n");
+                        pdev->AbortPDFAX = true;
+                        pdev->PDFA = 0;
+                        break;
+                    default:
+                    case 2:
+                        emprintf(pdev->memory,
+                             "Ink name in Separation space not valid UTF-8, aborting.\n");
+                        return_error(gs_error_limitcheck);
+                        break;
+                }
+                break;
+            }
+        }
+    }
     pca = cos_array_alloc(pdev, "pdf_color_space");
     if (pca == 0)
         return_error(gs_error_VMerror);
@@ -1187,6 +1214,29 @@ int convert_separation_alternate(gx_device_pdf * pdev, const gs_gstate * pgs, co
     if (pca == 0)
         return_error(gs_error_VMerror);
 
+    if (pdev->PDFA != 0 && utf8_check((unsigned char *)pcs->params.separation.sep_name) != NULL) {
+        switch(pdev->PDFACompatibilityPolicy) {
+            case 0:
+                emprintf(pdev->memory,
+                     "Ink name in Separation space not valid UTF-8, reverting to normal PDF output.\n");
+                pdev->AbortPDFAX = true;
+                pdev->PDFA = 0;
+                break;
+            case 1:
+                emprintf(pdev->memory,
+                     "Ink name in Separation space not valid UTF-8, reverting to normal PDF output.\n");
+                pdev->AbortPDFAX = true;
+                pdev->PDFA = 0;
+                break;
+            default:
+            case 2:
+                emprintf(pdev->memory,
+                     "Ink name in Separation space not valid UTF-8, aborting.\n");
+                return_error(gs_error_limitcheck);
+                break;
+        }
+    }
+
     {
         frac conc[GS_CLIENT_COLOR_MAX_COMPONENTS];
         gs_client_color cc;
@@ -1206,13 +1256,27 @@ int convert_separation_alternate(gx_device_pdf * pdev, const gs_gstate * pgs, co
             csi2 = gs_color_space_get_index(icc_space);
         } while(csi2 != gs_color_space_index_ICC && icc_space->base_space);
 
-        memset(&cc.paint.values, 0x00, GS_CLIENT_COLOR_MAX_COMPONENTS);
+        memset(&cc.paint.values, 0x00, GS_CLIENT_COLOR_MAX_COMPONENTS * sizeof(float));
         cc.paint.values[0] = 0;
 
         save_use_alt = sep_space->params.separation.use_alt_cspace;
         sep_space->params.separation.use_alt_cspace = true;
 
+        /* Force the colour management code to use the tint transform and
+         * give us the values in the Alternate space. Otherwise, for
+         * SEP_NONE or SEP_ALL it gives us the wrong answer. For SEP_NONE
+         * it always returns 0 and for SEP_ALL it sets the first component
+         * (only!) of the space to the tint value.
+         */
+        if (sep_space->params.separation.sep_type == SEP_ALL || sep_space->params.separation.sep_type == SEP_NONE) {
+            save_type = sep_space->params.separation.sep_type;
+            sep_space->params.separation.sep_type = SEP_OTHER;
+        }
+
         sep_space->type->concretize_color(&cc, sep_space, conc, pgs, (gx_device *)pdev);
+
+        if (save_type == SEP_ALL || save_type == SEP_NONE)
+            sep_space->params.separation.sep_type = save_type;
 
         for (i = 0;i < pdev->color_info.num_components;i++)
             cc.paint.values[i] = frac2float(conc[i]);
@@ -1257,6 +1321,13 @@ int convert_separation_alternate(gx_device_pdf * pdev, const gs_gstate * pgs, co
         memset (&conc, 0x00, sizeof(frac) * GS_CLIENT_COLOR_MAX_COMPONENTS);
         sep_space->type->concretize_color(&cc, sep_space, conc, pgs, (gx_device *)pdev);
 
+        /* Put back the values we hacked in order to force the colour management code
+         * to do what we want.
+         */
+        sep_space->params.separation.use_alt_cspace = save_use_alt;
+        if (save_type == SEP_ALL || save_type == SEP_NONE)
+            sep_space->params.separation.sep_type = save_type;
+
         for (i = 0;i < pdev->color_info.num_components;i++)
             cc.paint.values[i] = frac2float(conc[i]);
 
@@ -1283,14 +1354,6 @@ int convert_separation_alternate(gx_device_pdf * pdev, const gs_gstate * pgs, co
         }
         for (i = 0;i < pdev->color_info.num_components;i++)
             out_high[i] = cc.paint.values[i];
-
-        /* Put back the values we hacked in order to force the colour management code
-         * to do what we want.
-         */
-        sep_space->params.separation.use_alt_cspace = save_use_alt;
-        if (save_type == SEP_ALL || save_type == SEP_NONE) {
-            sep_space->params.separation.sep_type = save_type;
-        }
     }
 
     switch(pdev->params.ColorConversionStrategy) {

@@ -594,8 +594,8 @@ xps_expand_colormap(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
     int maxval = 1 << image->bits;
     byte *samples;
     byte *src, *dst;
-    int stride;
     int x, y;
+    uint32_t stride, size;
 
     /* colormap has first all red, then all green, then all blue values */
     /* colormap values are 0..65535, bits is 4 or 8 */
@@ -607,7 +607,11 @@ xps_expand_colormap(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
     if (image->bits != 1 && image->bits != 4 && image->bits != 8)
         return gs_throw(-1, "invalid number of bits for RGBPal");
 
-    stride = image->width * (image->comps + 2);
+    if (check_uint32_multiply((uint32_t)image->width, ((uint32_t)image->comps + 2), &stride) != 0)
+        return gs_throw(gs_error_limitcheck, "image is too large");
+
+    if (check_uint32_multiply((uint32_t)image->height, stride, &size) != 0)
+        return gs_throw(gs_error_limitcheck, "image is too large");
 
     samples = xps_alloc(ctx, (size_t)stride * image->height);
     if (!samples)
@@ -661,7 +665,7 @@ xps_decode_tiff_strips(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
     /* type 5 / lzw -- each strip is handled separately */
 
     byte *wp;
-    unsigned row;
+    uint32_t row;
     unsigned strip;
     unsigned i;
     int64_t stride_bits;
@@ -672,6 +676,9 @@ xps_decode_tiff_strips(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
 
     if (tiff->planar != 1)
         return gs_throw(-1, "image data is not in chunky format");
+
+    if (tiff->imagewidth > (unsigned int)INT_MAX || tiff->imagelength > (unsigned int)INT_MAX)
+        return gs_throw(-1, "image is too large");
 
     image->width = tiff->imagewidth;
     image->height = tiff->imagelength;
@@ -741,11 +748,14 @@ xps_decode_tiff_strips(xps_context_t *ctx, xps_tiff_t *tiff, xps_image_t *image)
         image->yres = 96;
     }
 
-    image->samples = xps_alloc(ctx, (size_t)image->stride * image->height);
+    if (check_uint32_multiply((uint32_t)image->stride, (uint32_t)image->height, &row) != 0)
+        return gs_throw(-1, "image row is too large");
+
+    image->samples = xps_alloc(ctx, (size_t)row);
     if (!image->samples)
         return gs_throw(gs_error_VMerror, "could not allocate image samples");
 
-    memset(image->samples, 0x55, (size_t)image->stride * image->height);
+    memset(image->samples, 0x55, (size_t)row);
 
     wp = image->samples;
 
@@ -1045,7 +1055,7 @@ xps_read_tiff_tag(xps_context_t *ctx, xps_tiff_t *tiff, unsigned offset)
         code = xps_read_tiff_tag_value(&tiff->extrasamples, tiff, type, value, 1);
         break;
     case ICCProfile:
-        if (!xps_alloc_table(&tiff->profile, ctx, count))
+        if (!xps_alloc_table((void **)&tiff->profile, ctx, count))
             return gs_throw(gs_error_VMerror, "could not allocate embedded icc profile");
         /* ICC profile data type is set to UNDEFINED.
          * TBYTE reading not correct in xps_read_tiff_tag_value */
@@ -1063,19 +1073,25 @@ xps_read_tiff_tag(xps_context_t *ctx, xps_tiff_t *tiff, unsigned offset)
         break;
 
     case StripOffsets:
-        if (!xps_alloc_table(&tiff->stripoffsets, ctx, (size_t)count * sizeof(unsigned)))
+        if (count > INT_MAX / sizeof(unsigned))
+            return gs_throw(gs_error_limitcheck, "could not allocate strip offsets");
+        if (!xps_alloc_table((void **)&tiff->stripoffsets, ctx, (size_t)count * sizeof(unsigned)))
             return gs_throw(gs_error_VMerror, "could not allocate strip offsets");
         code = xps_read_tiff_tag_value(tiff->stripoffsets, tiff, type, value, count);
         break;
 
     case StripByteCounts:
-        if (!xps_alloc_table(&tiff->stripbytecounts, ctx, (size_t)count * sizeof(unsigned)))
+        if (count > INT_MAX / sizeof(unsigned))
+            return gs_throw(gs_error_limitcheck, "could not allocate strip offsets");
+        if (!xps_alloc_table((void **)&tiff->stripbytecounts, ctx, (size_t)count * sizeof(unsigned)))
             return gs_throw(gs_error_VMerror, "could not allocate strip byte counts");
         code = xps_read_tiff_tag_value(tiff->stripbytecounts, tiff, type, value, count);
         break;
 
     case ColorMap:
-        if (!xps_alloc_table(&tiff->colormap, ctx, (size_t)count * sizeof(unsigned)))
+        if (count > INT_MAX / sizeof(unsigned))
+            return gs_throw(gs_error_limitcheck, "could not allocate strip offsets");
+        if (!xps_alloc_table((void **)&tiff->colormap, ctx, (size_t)count * sizeof(unsigned)))
             return gs_throw(gs_error_VMerror, "could not allocate color map");
         tiff->colormap_max = count;
         code = xps_read_tiff_tag_value(tiff->colormap, tiff, type, value, count);

@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2025 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -31,6 +31,7 @@
 #include "plmain.h"
 #include "ctype_.h"             /* for toupper() */
 #include <stdlib.h>             /* for atoi() */
+#include "gserrors.h"
 
 /* ------ pjl state definitions ------ */
 
@@ -870,7 +871,7 @@ gs_set(pjl_parser_state_t *pst, const char *variable, const char *token, int str
 {
     int code;
     int len1 = strlen(variable)+1;
-    int len2 = NULL ? 0 : strlen(token)+1;
+    int len2 = token == NULL ? 0 : strlen(token)+1;
     char *buffer = (char *)gs_alloc_bytes(pst->mem, len1+len2, "gs_set buffer");
 
     if (buffer == NULL)
@@ -1355,6 +1356,7 @@ pjl_process(pjl_parser_state * pst, void *pstate, stream_cursor_read * pr)
 
             if (!memcmp(p + 1, "\033%-12345X", min(avail, 9))) {        /* Might be a UEL. */
                 if (avail < 9) {        /* Not enough data to know yet. */
+                    code = gs_error_NeedInput;
                     break;
                 }
                 /* Skip the UEL and continue. */
@@ -1371,6 +1373,7 @@ pjl_process(pjl_parser_state * pst, void *pstate, stream_cursor_read * pr)
                     p++, avail--;
                 if (!memcmp(p + 1, "@PJL", min(avail, 4))) { /* Might be PJL. */
                     if (avail < 4) {        /* Not enough data to know yet. */
+                        code = gs_error_NeedInput;
                         break;
                     }
                     /* Definitely a PJL command. */

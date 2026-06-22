@@ -260,6 +260,10 @@ xps_create_gradient_stop_function(xps_context_t *ctx, struct stop *stops, int co
     int i;
 
     k = count - 1; /* number of intervals / functions */
+    if (k > INT_MAX / sizeof(float)) {
+        gs_throw(gs_error_limitcheck, "out of memory: range\n");
+        return NULL;
+    }
 
     domain = xps_alloc(ctx, 2 * sizeof(float));
     if (!domain) {
@@ -823,8 +827,16 @@ xps_draw_linear_gradient(xps_context_t *ctx, xps_item_t *root, int spread, gs_fu
         float dist[4];
         float d0, d1;
         int i0, i1;
+        gs_point pt;
 
         len = sqrt(dx * dx + dy * dy);
+        /* transfrom the 'len' into device spaces */
+        gs_distance_transform(0, len, &ctm_only(ctx->pgs), &pt);
+        /* If *both* the x and y distances are under half a pixel, ignore the gradient
+         * (it is apparently possible for either to be zero...)
+         */
+        if (fabs(pt.x) < 0.5 && fabs(pt.y) < 0.5)
+            return 0;
         a = dx / len;
         b = dy / len;
 

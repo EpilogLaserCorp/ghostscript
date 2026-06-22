@@ -32,6 +32,7 @@
 #include "igc.h"
 #include "gsutil.h"		/* gs_next_ids prototype */
 #include "icstate.h"
+#include "assert.h"
 
 /* Structure descriptor */
 private_st_alloc_save();
@@ -483,8 +484,10 @@ alloc_save_change_in(gs_ref_memory_t *mem, const ref * pcont,
         cp->offset = AC_OFFSET_STATIC;
     else if (r_is_array(pcont) || r_has_type(pcont, t_dictionary))
         cp->offset = AC_OFFSET_REF;
-    else if (r_is_struct(pcont))
+    else if (r_is_struct(pcont)) {
+        assert ((byte *) where - (byte *) pcont->value.pstruct <= max_short && (byte *) where - (byte *) pcont->value.pstruct >= min_short);
         cp->offset = (byte *) where - (byte *) pcont->value.pstruct;
+    }
     else {
         if_debug3('u', "Bad type %u for save!  pcont = "PRI_INTPTR", where = "PRI_INTPTR"\n",
                  r_type(pcont), (intptr_t) pcont, (intptr_t) where);
@@ -548,6 +551,25 @@ alloc_save_remove(gs_ref_memory_t *mem, ref_packed *obj, client_name_t cname)
         if (cp->offset == AC_OFFSET_ALLOCATED && cp->where == obj) {
             if (mem->scan_limit == cp)
                 mem->scan_limit = cp->next;
+            *cpp = cp->next;
+            gs_free_object((gs_memory_t *)mem, cp, "alloc_save_remove");
+        } else
+            cpp = &(*cpp)->next;
+    }
+}
+
+/* Remove a change list element that references into a ref array. */
+/* Used when freeing a ref array from the current save level */
+void
+alloc_save_remove_change(gs_ref_memory_t *mem, ref_packed *arr, unsigned int num_refs, client_name_t cname)
+{
+    alloc_change_t **cpp = &mem->changes;
+    ref *arr1 = (ref *)arr;
+
+    for (; *cpp != NULL;) {
+        alloc_change_t *cp = *cpp;
+
+        if (cp->offset == AC_OFFSET_REF && (ref *)cp->where > arr1 && (ref *)cp->where < arr1 + num_refs) {
             *cpp = cp->next;
             gs_free_object((gs_memory_t *)mem, cp, "alloc_save_remove");
         } else
