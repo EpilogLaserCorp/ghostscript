@@ -1227,9 +1227,9 @@ svg_write_header(gx_device_svg* svg)
 		SVG_XMLNS, SVG_VERSION);
 	/* svg_write(svg, line); */
 	svg_write_bytes_sputs(svg, line, strlen(line));
-	gs_snprintf(line, sizeof(line), "\n\twidth='%.3fin' height='%.3fin' viewBox='0 0 %d %d'>\n",
+	gs_snprintf(line, sizeof(line), "\n\twidth='%.3fin' height='%.3fin' viewBox='0 0 %lf %lf'>\n",
 		(double)svg->MediaSize[0] / 72.0, (double)svg->MediaSize[1] / 72.0,
-		(int)svg->MediaSize[0], (int)svg->MediaSize[1]);
+		(double)svg->MediaSize[0], (double)svg->MediaSize[1]);
 	svg_write_bytes_sputs(svg, line, strlen(line));
 
 	/*
@@ -1451,8 +1451,8 @@ svg_beginpage(gx_device_vector* vdev)
 	// Write clip rect for the new page
 	gs_snprintf(line, sizeof(line), "<clipPath id='clip%i'>\n", ++svg->highestUsedId);
 	svg_write_bytes_sputs(svg, line, strlen(line));
-	gs_snprintf(line, sizeof(line), "<rect x='%d' y='%d' width='%d' height='%d' stroke='none' fill='none'/>\n",
-		0, 0, (int)svg->MediaSize[0], (int)svg->MediaSize[1]);
+	gs_snprintf(line, sizeof(line), "<rect x='%d' y='%d' width='%lf' height='%lf' stroke='none' fill='none'/>\n",
+		0, 0, (double)svg->MediaSize[0], (double)svg->MediaSize[1]);
 	svg_write_bytes_sputs(svg, line, strlen(line));
 	svg_write_sputs(svg, "</clipPath>\n");
 
