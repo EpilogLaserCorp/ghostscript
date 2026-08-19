@@ -119,7 +119,7 @@ gx_path_type_t peek_path_type(struct path_type_stack_node* root)
 #endif
 
 /* internal line buffer */
-#define SVG_LINESIZE 100
+#define SVG_LINESIZE 256
 
 /* default constants */
 #define SVG_DEFAULT_LINEWIDTH	0.0
@@ -442,7 +442,8 @@ static int write_png_start(
 	gs_matrix_fixed ctm,
 	gs_matrix ImageMatrix,
 	uint width,
-	uint height);
+	uint height,
+	const char* imageRendering);
 static int write_png_data(
 	gx_device* dev,
 	struct mem_encode* state);
@@ -490,6 +491,7 @@ static int svg_write_bytes_sputs(gx_device_svg* svg, const char* string, uint le
 static int svg_write_bytes(gx_device_svg* svg, const char* string, uint length);
 static int svg_write_sputs(gx_device_svg* svg, const char* string);
 static int svg_write(gx_device_svg* svg, const char* string);
+static int svg_snprintf_checked(gx_device_svg* svg, char* buf, size_t size, const char* caller, const char* format, ...);
 
 static int svg_write_header(gx_device_svg* svg);
 
@@ -1202,6 +1204,22 @@ svg_write(gx_device_svg* svg, const char* string)
 	return svg_write_bytes(svg, string, strlen(string));
 }
 
+/* gs_snprintf wrapper that reports (rather than silently truncating) when a
+   compound line -- one built from several attributes of unbounded/variable
+   length, e.g. a clip-path id concatenated with other content -- overflows
+   its fixed-size buffer. */
+static int
+svg_snprintf_checked(gx_device_svg* svg, char* buf, size_t size, const char* caller, const char* format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	int len = gs_vsnprintf(buf, (int)size, format, args);
+	va_end(args);
+	if (len >= (int)size - 1)
+		dmprintf2(svg->memory, "%s: line buffer truncated (needed >= %d bytes)\n", caller, len);
+	return len;
+}
+
 static int
 svg_write_header(gx_device_svg* svg)
 {
@@ -1724,8 +1742,8 @@ svg_writeclip(gx_device_svg* svg, gx_clip_path* pcpath, gs_matrix matrix)
 			if (code >= 0)
 			{
 				bboxArea =
-					abs(fixed2float(bbox.q.x - bbox.p.x)) *
-					abs(fixed2float(bbox.q.y - bbox.p.y));
+					fabsf(fixed2float(bbox.q.x - bbox.p.x)) *
+					fabsf(fixed2float(bbox.q.y - bbox.p.y));
 
 				++path_list_size;
 			}
@@ -2066,8 +2084,9 @@ svg_beginpath(gx_device_vector* vdev, gx_path_type_t type)
 
 		svg_write_state_to_svg(svg, emptyPen, emptyBrush);
 
-		char line[SVG_LINESIZE * 2];
-		gs_snprintf(line, sizeof(line), "%s%sd='", path_fill_rule, svg->validClipPath ? clip_path_id : "");
+		char line[SVG_LINESIZE];
+		svg_snprintf_checked(svg, line, sizeof(line), "svg_beginpath",
+			"%s%sd='", path_fill_rule, svg->validClipPath ? clip_path_id : "");
 		svg_write(svg, line);
 
 		svg->writing_clip = false;
@@ -2076,8 +2095,8 @@ svg_beginpath(gx_device_vector* vdev, gx_path_type_t type)
 	{
 		svg_write(svg, "<path ");
 
-		char line[SVG_LINESIZE * 2];
-		gs_snprintf(line, sizeof(line), "%sd='", path_fill_rule);
+		char line[SVG_LINESIZE];
+		svg_snprintf_checked(svg, line, sizeof(line), "svg_beginpath", "%sd='", path_fill_rule);
 		svg_write(svg, line);
 	}
 
@@ -2315,7 +2334,8 @@ static int write_png_start(
 	gs_matrix_fixed ctm,
 	gs_matrix ImageMatrix,
 	uint width,
-	uint height)
+	uint height,
+	const char* imageRendering)
 {
 	char line[SVG_LINESIZE];
 
@@ -2349,8 +2369,9 @@ static int write_png_start(
 	char clip_path_id[SVG_LINESIZE];
 	gs_snprintf(clip_path_id, sizeof(clip_path_id), "clip-path='url(#clip%i)' ", svg->usedIds);
 
-	gs_snprintf(line, sizeof(line), "<image %swidth='%d' height='%d' xlink:href=\"data:image/png;base64,",
-		svg->validClipPath ? clip_path_id : "", width, height);
+	svg_snprintf_checked(svg, line, sizeof(line), "write_png_start",
+		"<image %swidth='%d' height='%d' image-rendering='%s' xlink:href=\"data:image/png;base64,",
+		svg->validClipPath ? clip_path_id : "", width, height, imageRendering);
 	svg_write(dev, line);
 
 	return 0;
@@ -2487,8 +2508,8 @@ static int svg_begin_typed_image(
 	pie->ctm = pis->ctm;
 	pie->ImageMatrix = pim->ImageMatrix;
 
-	pie->ctm.tx += -copysignf(1.0, pie->ImageMatrix.yy) * (pie->ctm.xx * pie->ImageMatrix.tx / abs(pie->ImageMatrix.xx) + pie->ctm.yx * pie->ImageMatrix.ty / abs(pie->ImageMatrix.yy));
-	pie->ctm.ty += -copysignf(1.0, pie->ImageMatrix.yy) * (pie->ctm.xy * pie->ImageMatrix.tx / abs(pie->ImageMatrix.xx) + pie->ctm.yy * pie->ImageMatrix.ty / abs(pie->ImageMatrix.yy));
+	pie->ctm.tx += -copysignf(1.0, pie->ImageMatrix.yy) * (pie->ctm.xx * pie->ImageMatrix.tx / fabsf(pie->ImageMatrix.xx) + pie->ctm.yx * pie->ImageMatrix.ty / fabsf(pie->ImageMatrix.yy));
+	pie->ctm.ty += -copysignf(1.0, pie->ImageMatrix.yy) * (pie->ctm.xy * pie->ImageMatrix.tx / fabsf(pie->ImageMatrix.xx) + pie->ctm.yy * pie->ImageMatrix.ty / fabsf(pie->ImageMatrix.yy));
 
 	/* Initialize PNG structures */
 	pie->png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
@@ -2541,7 +2562,8 @@ static int svg_begin_typed_image(
 		pie->ctm,
 		pie->ImageMatrix,
 		pie->width,
-		pie->height
+		pie->height,
+		ppi->Interpolate ? "auto" : "pixelated"
 	);
 
 	/* write the file information */
@@ -3433,7 +3455,8 @@ static int make_png_from_mdev(
 		ctm,
 		m,
 		mdev->width,
-		mdev->height
+		mdev->height,
+		"auto"
 	);
 
 	/* write the file information */
