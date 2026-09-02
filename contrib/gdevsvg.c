@@ -25,6 +25,7 @@
 #include "gdevvec.h"
 #include "stream.h"
 #include "gxpath.h"
+#include "gxpaint.h"
 #include "gzcpath.h"
 #include "gxdownscale.h"
 #include "gsptype1.h"
@@ -750,6 +751,63 @@ static int make_alpha_mdev(gx_device* dev, gx_device_memory** ppmdev, gs_fixed_r
 	dev_proc((*ppmdev), decode_color) = svgalpha_decode_color;
 }
 
+/* Build a path from a clip path's rectangle list, for clips held as rectangles rather than as
+   a path (path_valid == false). Returns false, having built nothing, when there is no real
+   constraint to add. Callers must gx_path_free() the path when true is returned. */
+static bool
+svg_rect_clip_to_path(gx_device_svg* svg, const gx_clip_path* pcpath, gs_memory_t* mem,
+	gx_path* rect_path)
+{
+	const gx_clip_rect* rect;
+	const gx_clip_rect* single = NULL;
+	int added = 0;
+
+	// A transposed list stores x/y swapped; not handled here, so leave the clip alone rather
+	// than emit the wrong region.
+	if ((pcpath->rect_list == NULL) || pcpath->rect_list->list.transpose)
+		return false;
+
+	gx_path_init_local(rect_path, mem);
+
+	if (pcpath->rect_list->list.count == 1)
+	{
+		single = &pcpath->rect_list->list.single;
+		rect = single;
+	}
+	else
+	{
+		rect = pcpath->rect_list->list.head;
+	}
+
+	while (rect != NULL)
+	{
+		// Skip empty rects, and the page rect, which constrains nothing
+		if ((rect->xmax > rect->xmin) && (rect->ymax > rect->ymin) &&
+			!((rect->xmin == 0) && (rect->ymin == 0) &&
+				(rect->xmax == svg->width) && (rect->ymax == svg->height)))
+		{
+			if (gx_path_add_rectangle(rect_path,
+					int2fixed(rect->xmin), int2fixed(rect->ymin),
+					int2fixed(rect->xmax), int2fixed(rect->ymax)) < 0)
+			{
+				gx_path_free(rect_path, "svg_rect_clip_to_path");
+				return false;
+			}
+			++added;
+		}
+
+		rect = (single != NULL) ? NULL : rect->next;
+	}
+
+	if (added == 0)
+	{
+		gx_path_free(rect_path, "svg_rect_clip_to_path");
+		return false;
+	}
+
+	return true;
+}
+
 static void
 transform_path(gx_path* ppath, const gs_matrix tr)
 {
@@ -1025,7 +1083,6 @@ static int gdev_svg_fill_path(
 			make_alpha_mdev(dev, &pmdev, bbox, pdcolor->colors.pattern.p_tile->depth);
 			pmdev->color_info = dev->color_info;
 
-
 			code = (*dev_proc(pmdev, open_device))((gx_device*)pmdev);
 			code = (*dev_proc(pmdev, fill_rectangle))((gx_device*)pmdev, 0, 0,
 				pmdev->width, pmdev->height, 0xffffffff);
@@ -1061,7 +1118,39 @@ static int gdev_svg_fill_path(
 			/* Restore the paths to their original locations. Maybe not needed */
 			gx_path_translate(ppath, bbox.p.x, bbox.p.y);
 
-			svg->current_image_clip_path = pcpath;
+			// Clip the image to ppath (the shape actually filled) intersected with any active clip
+			// (pcpath), so it paints outside neither constraint.
+			gx_clip_path shape_clip;
+			gx_cpath_path_list active_clip_entry;
+			gx_path active_clip_rects;
+			bool built_rect_path = false;
+
+			memset(&shape_clip, 0, sizeof(shape_clip));
+			shape_clip.path = *ppath;
+			shape_clip.rule = params->rule;
+
+			if (pcpath != NULL)
+			{
+				memset(&active_clip_entry, 0, sizeof(active_clip_entry));
+				active_clip_entry.next = NULL;
+
+				if (pcpath->path_valid && (pcpath->path.subpath_count > 0))
+				{
+					active_clip_entry.path = pcpath->path;
+					active_clip_entry.rule = pcpath->rule;
+					shape_clip.path_list = &active_clip_entry;
+				}
+				else if (svg_rect_clip_to_path(svg, pcpath, ppath->memory, &active_clip_rects))
+				{
+					// The clip is held as rectangles, so turn them into a path and let it
+					// compose like any other layer instead of being dropped.
+					built_rect_path = true;
+					active_clip_entry.path = active_clip_rects;
+					active_clip_entry.rule = -1;	// disjoint rectangles: nonzero winding
+					shape_clip.path_list = &active_clip_entry;
+				}
+			}
+			svg->current_image_clip_path = &shape_clip;
 
 			/* Restore the paths to their original locations. Maybe not needed */
 			make_png_from_mdev(pmdev, fixed2float(bbox.p.x), fixed2float(bbox.p.y));
@@ -1069,6 +1158,9 @@ static int gdev_svg_fill_path(
 
 			close_clip_groups(svg);
 			svg_write(svg, "</g> <!-- pathfillimage -->\n");
+
+			if (built_rect_path)
+				gx_path_free(&active_clip_rects, "gdev_svg_fill_path(active_clip_rects)");
 
 			gs_gstate_free(pgs);
 
@@ -1715,7 +1807,6 @@ static int
 svg_writeclip(gx_device_svg* svg, gx_clip_path* pcpath, gs_matrix matrix)
 {
 	gs_fixed_rect bbox;
-	float bboxArea;
 	int code = 0, mainBboxCode;
 	gx_cpath_path_list* path_list;
 	int clipPathIndex = -1, index = 0;
@@ -1731,22 +1822,16 @@ svg_writeclip(gx_device_svg* svg, gx_clip_path* pcpath, gs_matrix matrix)
 	bool winding_fill = (pcpath->rule <= 0);
 	gx_path_type_t clip_path_type = gx_path_type_stroke | (winding_fill ? gx_path_type_winding_number : gx_path_type_even_odd);
 
-	// Count how many paths there are
+	// Count how many paths there are. This must count every path_list entry unconditionally,
+	// matching the second loop below (which unconditionally walks the same list to fill all_paths)
+	// - otherwise all_paths is undersized and that loop overflows it.
 	int path_list_size = 0;
 	if (pcpath->path_list != NULL)
 	{
 		path_list = pcpath->path_list;
 		do
 		{
-			code = gx_path_bbox(&path_list->path, &bbox);
-			if (code >= 0)
-			{
-				bboxArea =
-					fabsf(fixed2float(bbox.q.x - bbox.p.x)) *
-					fabsf(fixed2float(bbox.q.y - bbox.p.y));
-
-				++path_list_size;
-			}
+			++path_list_size;
 		} while ((path_list = path_list->next));
 	}
 	++path_list_size; // Add once for the path contained in pcpath->path
@@ -1766,9 +1851,26 @@ svg_writeclip(gx_device_svg* svg, gx_clip_path* pcpath, gs_matrix matrix)
 	svg->usedIds = svg->highestUsedId + 1;
 	int original_clip_path_id = svg->usedIds;
 
-	// Fill in an array of path pointers, with the 1st being the main path
+	// Fill in an array of path pointers, with the 1st being the main path. Each path carries
+	// its own insideness rule, so they are collected alongside and applied per path below.
 	gx_path** all_paths = (gx_path**)malloc(path_list_size * sizeof(gx_path*));
+	int* all_rules = (int*)malloc(path_list_size * sizeof(int));
+	if ((all_paths == NULL) || (all_rules == NULL))
+	{
+		// Leave no clip at all rather than a reference to one that was never written
+		free(all_paths);
+		free(all_rules);
+
+		svg->validClipPath = false;
+		svg->start_clip_mark = -1;
+
+		--svg->usedIds; // Return to original value
+		svg->highestUsedId = svg->usedIds;
+
+		return_error(gs_error_VMerror);
+	}
 	all_paths[0] = &pcpath->path;
+	all_rules[0] = pcpath->rule;
 	if (pcpath->path_list != NULL)
 	{
 		int i = 0;
@@ -1776,6 +1878,7 @@ svg_writeclip(gx_device_svg* svg, gx_clip_path* pcpath, gs_matrix matrix)
 		do
 		{
 			all_paths[i + 1] = &path_list->path;
+			all_rules[i + 1] = path_list->rule;
 			++i;
 		} while ((path_list = path_list->next));
 	}
@@ -1806,9 +1909,13 @@ svg_writeclip(gx_device_svg* svg, gx_clip_path* pcpath, gs_matrix matrix)
 			continue;
 		}
 
-		// Write the path
-		svg_write_clip_start(svg, matrix, winding_fill);
-		gdev_vector_dopath(svg, path, clip_path_type, NULL);
+		// Write the path using its own rule, not the main path's
+		bool path_winding_fill = (all_rules[i] <= 0);
+		gx_path_type_t path_clip_type = gx_path_type_stroke |
+			(path_winding_fill ? gx_path_type_winding_number : gx_path_type_even_odd);
+
+		svg_write_clip_start(svg, matrix, path_winding_fill);
+		gdev_vector_dopath(svg, path, path_clip_type, NULL);
 		svg_write_clip_end(svg);
 
 		svg->validClipPath = true;
@@ -1910,6 +2017,9 @@ svg_writeclip(gx_device_svg* svg, gx_clip_path* pcpath, gs_matrix matrix)
 
 		svg->validClipPath = true;
 	}
+
+	free(all_paths);
+	free(all_rules);
 
 	if (!svg->validClipPath && has_main_clip)
 	{
