@@ -125,8 +125,10 @@ typedef struct {
     int num_splits;
     int max_splits;
     unsigned long *sizes;
-    char *outname;
+    char *outname;              /* pattern for the temporary files being written */
+    char *final_outname;        /* pattern for the names they are renamed to */
     char *outname_formatted;
+    int write_error;            /* set if any split file failed to open or write */
 } split_data;
 
 #define PATH_STR_LEN 1024
@@ -650,12 +652,26 @@ inode_write(FILE *out, romfs_inode *node, int compression, int inode_count, int 
         sprintf(splits->outname_formatted, splits->outname, which);
         if (splits->sizes[which] == 0) {
             out2 = fopen(splits->outname_formatted, "w");
+            if (out2 == NULL) {
+                fprintf(stderr, "failed to open '%s' for writing\n", splits->outname_formatted);
+                splits->write_error = 1;
+                return;
+            }
             start_file(out2);
         } else {
             out2 = fopen(splits->outname_formatted, "a");
+            if (out2 == NULL) {
+                fprintf(stderr, "failed to open '%s' for writing\n", splits->outname_formatted);
+                splits->write_error = 1;
+                return;
+            }
         }
         splits->sizes[which] += do_inode_write(out2, node, compression, inode_count, totlen, 1, verbose);
-        fclose(out2);
+        /* Record write failures so the outputs are never renamed into place truncated. */
+        if (ferror(out2))
+            splits->write_error = 1;
+        if (fclose(out2) != 0)
+            splits->write_error = 1;
     } else
         (void)do_inode_write(out, node, compression, inode_count, totlen, 0, verbose);
 }
@@ -2502,11 +2518,14 @@ merge_to_ps(const char *os_prefix, const char *inname, FILE * in, FILE * config,
     mergefile(os_prefix, inname, in, config, false, verbose);
 }
 
-static void
-make_split_name(split_data *splits, const char *filename)
+/* Insert 'insert' before filename's extension, e.g. "foo.c" -> "fooc%d.c". Returns a
+   malloc'd string; exits on allocation failure. */
+static char *
+insert_before_extension(const char *filename, const char *insert)
 {
   const char *s = filename;
   const char *t = NULL;
+  size_t insert_len = strlen(insert);
   char *u;
 
   while (*s) {
@@ -2517,26 +2536,60 @@ make_split_name(split_data *splits, const char *filename)
   if (t == NULL)
     t = s;
 
-  free(splits->outname);
-  splits->outname = u = malloc(s-filename+4);
+  u = malloc(s-filename+insert_len+1);
   if (u == NULL) {
-    fprintf(stderr, "malloc failure while constructing split filename\n");
+    fprintf(stderr, "malloc failure while constructing filename\n");
     exit(1);
   }
   memcpy(u, filename, t-filename);
-  u[t-filename] = 'c';
-  u[t-filename+1] = '%';
-  u[t-filename+2] = 'd';
+  memcpy(u+(t-filename), insert, insert_len);
   if (s-t)
-     memcpy(u+(t-filename)+3, t, s-t);
-  u[s-filename+3] = 0;
+     memcpy(u+(t-filename)+insert_len, t, s-t);
+  u[s-filename+insert_len] = 0;
+
+  return u;
+}
+
+/* Name of the temporary file that 'filename' is written to before being renamed into place. */
+static char *
+make_tmp_name(const char *filename)
+{
+  return insert_before_extension(filename, ".tmp");
+}
+
+static void
+make_split_name(split_data *splits, const char *filename, const char *final_filename)
+{
+  size_t len, final_len;
+
+  free(splits->outname);
+  splits->outname = insert_before_extension(filename, "c%d");
+  free(splits->final_outname);
+  splits->final_outname = insert_before_extension(final_filename, "c%d");
+
+  len = strlen(splits->outname);
+  final_len = strlen(splits->final_outname);
+  if (final_len > len)
+    len = final_len;
 
   free(splits->outname_formatted);
-  splits->outname_formatted = malloc(s-filename+4+32);
+  splits->outname_formatted = malloc(len+32);
   if (splits->outname_formatted == NULL) {
     fprintf(stderr, "malloc failure while constructing split filename\n");
     exit(1);
   }
+}
+
+/* Rename 'from' over 'to', replacing any existing file. Returns 0 on success. */
+static int
+rename_over(const char *from, const char *to)
+{
+  remove(to);
+  if (rename(from, to) != 0) {
+    fprintf(stderr, "failed to rename '%s' to '%s'\n", from, to);
+    return -1;
+  }
+  return 0;
 }
 
 int
@@ -2545,6 +2598,7 @@ main(int argc, char *argv[])
     int i;
     int inode_count = 0, totlen = 0;
     FILE *out;
+    char *tmpfilename;
     const char *outfilename = "obj/gsromfs.c";
     const char *os_prefix = "";
     const char *rom_prefix = "";
@@ -2604,7 +2658,16 @@ main(int argc, char *argv[])
         atarg += 2;
     }
     printf("   writing romfs data to '%s'\n", outfilename);
-    out = fopen(outfilename, "w");
+
+    /* Write to temporary files and only rename them into place once everything has been
+       written. If this run is killed or fails, the real outputs are left untouched, so the
+       next build regenerates them rather than compiling truncated ones. */
+    tmpfilename = make_tmp_name(outfilename);
+    out = fopen(tmpfilename, "w");
+    if (out == NULL) {
+        fprintf(stderr, "   failed to open '%s' for writing\n", tmpfilename);
+        exit(1);
+    }
 
     start_file(out);
 
@@ -2652,7 +2715,7 @@ main(int argc, char *argv[])
                     printf("   Invalid number of files to split to: %s\n", argv[atarg]);
                     exit(1);
                 }
-                make_split_name(&splits, outfilename);
+                make_split_name(&splits, tmpfilename, outfilename);
                 break;
               case 'g':
                 {
@@ -2707,8 +2770,15 @@ main(int argc, char *argv[])
             FILE *out2;
             sprintf(splits.outname_formatted, splits.outname, i);
             out2 = fopen(splits.outname_formatted, "w");
+            if (out2 == NULL) {
+                fprintf(stderr, "failed to open '%s' for writing\n", splits.outname_formatted);
+                exit(1);
+            }
             fprintf(out2, "const int mkromfs_dummy_chunk%d;\n", i);
-            fclose(out2);
+            if (ferror(out2))
+                splits.write_error = 1;
+            if (fclose(out2) != 0)
+                splits.write_error = 1;
         }
     }
 
@@ -2722,15 +2792,52 @@ main(int argc, char *argv[])
     for (i=0; i<inode_count; i++)
         fprintf(out, "\t%snode_%d,\n", splits.max_splits ? "mkromfs_" : "", i);
     fprintf(out, "\t0 };\n");
-    fclose(out);
+    if (ferror(out))
+        splits.write_error = 1;
+    if (fclose(out) != 0)
+        splits.write_error = 1;
+
+    /* Only publish if every output was written cleanly. Renaming after a failed write (a full
+       disk, say) would put exactly the truncated files this is meant to prevent into place. */
+    if (splits.write_error) {
+        fprintf(stderr, "romfs output was not written completely - keeping previous files\n");
+        exit(1);
+    }
+
+    /* Move the temporaries into place. The index is renamed last because it is the file the
+       makefiles depend on: if we are interrupted part way through, it stays absent or stale
+       and the next build regenerates the lot. */
+    if (splits.max_splits) {
+        char *final_formatted = malloc(strlen(splits.final_outname)+32);
+
+        if (final_formatted == NULL) {
+            fprintf(stderr, "malloc failure while constructing split filename\n");
+            exit(1);
+        }
+        for (i = 0; i < splits.max_splits; i++) {
+            sprintf(splits.outname_formatted, splits.outname, i);
+            sprintf(final_formatted, splits.final_outname, i);
+            if (rename_over(splits.outname_formatted, final_formatted) != 0) {
+                free(final_formatted);
+                exit(1);
+            }
+        }
+        free(final_formatted);
+    }
+    if (rename_over(tmpfilename, outfilename) != 0)
+        exit(1);
+
     while (Xlist_head) {
         Xlist_scan = Xlist_head->next;
         free(Xlist_head);
         Xlist_head = Xlist_scan;
     }
     printf("Total %%rom%% structure size is %d bytes.\n", totlen);
+    free(tmpfilename);
     if (splits.outname != NULL)
        free(splits.outname);
+    if (splits.final_outname != NULL)
+       free(splits.final_outname);
     if (splits.outname_formatted != NULL)
         free(splits.outname_formatted);
     if (splits.sizes != NULL)
