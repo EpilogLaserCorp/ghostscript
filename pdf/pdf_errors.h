@@ -1,4 +1,4 @@
-/* Copyright (C) 2022-2025 Artifex Software, Inc.
+/* Copyright (C) 2022-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -62,6 +62,7 @@ PARAM(E_PDF_INVALID_DECRYPT_LEN,       "Invalid /Length in Encryption dictionary
 PARAM(E_PDF_GROUP_NO_CS,               "Group attributes dictionary is missing /CS"),
 PARAM(E_PDF_GROUP_BAD_CS,              "Group attributes dictionary has an invalid /CS"),
 PARAM(E_BAD_GROUP_DICT,                "Error retrieving Group dictionary for a page or XObject"),
+PARAM(E_PDF_GROUP_ERROR,               "Error setting a transparency Group, ignoring the group; output may be incorrect."),
 PARAM(E_BAD_HALFTONE,                  "Error setting a halftone"),
 PARAM(E_PDF_BADENCRYPT,                "Encrypt diciotnary not a dictionary"),
 PARAM(E_PDF_MISSINGTYPE,               "A dictionary is missing a required /Type key."),

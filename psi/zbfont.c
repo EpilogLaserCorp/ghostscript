@@ -175,16 +175,16 @@ gs_font_map_glyph_by_dict(const gs_memory_t *mem, const ref *map, gs_glyph glyph
                     if (vv.value.intval > 65535) {
                         if (length < 4)
                             return 4;
-                        unicode_return[0] = v->value.intval >> 24;
-                        unicode_return[1] = (v->value.intval & 0x00FF0000) >> 16;
-                        unicode_return[2] = (v->value.intval & 0x0000FF00) >> 8;
-                        unicode_return[3] = v->value.intval & 0xFF;
+                        unicode_return[0] = vv.value.intval >> 24;
+                        unicode_return[1] = (vv.value.intval & 0x00FF0000) >> 16;
+                        unicode_return[2] = (vv.value.intval & 0x0000FF00) >> 8;
+                        unicode_return[3] = vv.value.intval & 0xFF;
                         return 4;
                     } else {
                         if (length < 2)
                             return 2;
-                        unicode_return[0] = v->value.intval >> 8;
-                        unicode_return[1] = v->value.intval & 0xFF;
+                        unicode_return[0] = vv.value.intval >> 8;
+                        unicode_return[1] = vv.value.intval & 0xFF;
                         return 2;
                     }
                 }
@@ -695,11 +695,32 @@ sub_font_params(gs_memory_t *mem, const ref *op, gs_matrix *pmat, gs_matrix *pom
         (dict_find_string(pfontinfo, "OrigFontName", &pfontname) > 0) && (r_has_type(pfontname, t_name) || r_has_type(pfontname, t_string))) {
         if ((dict_find_string(pfontinfo, "OrigFontStyle", &pfontstyle) > 0) && (r_has_type(pfontstyle, t_name) || r_has_type(pfontstyle, t_string)) &&
                 r_size(pfontstyle) > 0) {
-            const byte *tmpStr1 = pfontname->value.const_bytes;
-            const byte *tmpStr2 = pfontstyle->value.const_bytes;
-            int fssize1 = r_size(pfontname), fssize2 = r_size(pfontstyle), fssize = fssize1 + fssize2 + 1;
-            byte *sfname = gs_alloc_string(mem, fssize, "sub_font_params");
+            const byte *tmpStr1 = NULL, *tmpStr2 = NULL;
+            ref pfn_str, pfs_str;
+            int fssize1, fssize2, fssize;
+            byte *sfname;
 
+            if (r_has_type(pfontstyle, t_string)) {
+                tmpStr1 = pfontstyle->value.const_bytes;
+                fssize1 = r_size(pfontstyle);
+            }
+            else {
+                name_string_ref(mem, pfontstyle, &pfs_str);
+                tmpStr1 = pfs_str.value.const_bytes;
+                fssize1 = r_size(&pfs_str);
+            }
+            if (r_has_type(pfontname, t_string)) {
+                tmpStr2 = pfontname->value.const_bytes;
+                fssize2 = r_size(pfontname);
+            }
+            else {
+                name_string_ref(mem, pfontname, &pfn_str);
+                tmpStr2 = pfn_str.value.const_bytes;
+                fssize2 = r_size(&pfn_str);
+            }
+
+            fssize = fssize1 + fssize2 + 1;
+            sfname = gs_alloc_string(mem, fssize, "sub_font_params");
             if (sfname == NULL)
                 return_error(gs_error_VMerror);
             memcpy(sfname, tmpStr1, fssize1);
@@ -843,7 +864,7 @@ build_gs_font(i_ctx_t *i_ctx_p, os_ptr op, gs_font ** ppfont, font_type ftype,
          * or some other questionable situation in which the FID
          * was preserved.  Pretend the FID wasn't there.
          */
-        if (obj_eq(pfont->memory, pfont_dict(pfont), op)) {
+        if (obj_eq(pfont->memory, pfont_dict(pfont), op) && pfont->FontType == ftype) {
             if (pfont->base == pfont) {	/* original font */
                 if (!level2_enabled)
                     return_error(gs_error_invalidfont);

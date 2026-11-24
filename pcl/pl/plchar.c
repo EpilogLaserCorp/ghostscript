@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2025 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -58,6 +58,7 @@
 /* Define whether to cache TrueType characters. */
 /* This would only be disabled for debugging. */
 #define CACHE_TRUETYPE_CHARS
+#define IF_COMPOUND_CHAR_LIMIT 8
 
 /* Structure descriptors */
 gs_private_st_ptrs1(st_pl_font_glyph, pl_font_glyph_t, "pl_font_glyph_t",
@@ -326,7 +327,10 @@ pl_bitmap_build_char(gs_show_enum * penum, gs_gstate * pgs, gs_font * pfont,
         image.Height = pl_get_uint16(params + 6);
         /* Determine the amount of pseudo-bolding. */
         if (plfont->bold_fraction != 0) {
-            bold = (uint) (2 * image.Height * plfont->bold_fraction + 0.5);
+            if (image.Height < image.Width)
+                bold = (uint) (2 * image.Height * plfont->bold_fraction + 0.5);
+            else
+                bold = (uint) (2 * image.Width * plfont->bold_fraction + 0.5);
             bold_lines = alloc_bold_lines(pgs->memory, image.Width, bold,
                                           "pl_bitmap_build_char(bold_line)");
             if (bold_lines == 0) {
@@ -423,7 +427,7 @@ pl_tt_string_proc(gs_font_type42 * pfont, ulong offset, uint length,
     *pdata = plfont->header + plfont->offsets.GT +
         (plfont->large_sizes ? 6 : 4) + offset;
 
-    if (*pdata > plfont->header + plfont->header_size)
+    if (((*pdata) + length) > plfont->header + plfont->header_size)
         return_error(gs_error_invalidfont);
 
     return 0;
@@ -565,14 +569,16 @@ pl_tt_get_outline(gs_font_type42 * pfont, uint index, gs_glyph_data_t * pdata)
         if (data_size <= 4) {
             /* empty outline */
             gs_glyph_data_from_null(pdata);
-        } else if (cdata[1] == 0) {
-            gs_glyph_data_from_bytes(pdata,
-                                     cdata,
-                                     6 + desc_size, data_size - 4, NULL);
-        } else if (cdata[1] == 1) {
+        } else if (cdata[1] == 0 && (6 + desc_size + data_size - 4) <= pfg->data_len) {
+            gs_glyph_data_from_bytes(pdata, cdata, 6 + desc_size, data_size - 4, NULL);
+        } else if (cdata[1] == 1 && (10 + data_size - 8) <= pfg->data_len) {
             gs_glyph_data_from_bytes(pdata, cdata, 10, data_size - 8, NULL);
-        } else if (cdata[1] == 2) {
+        } else if (cdata[1] == 2 && (12 + data_size - 10) <= pfg->data_len) {
             gs_glyph_data_from_bytes(pdata, cdata, 12, data_size - 10, NULL);
+        }
+        else {
+            /* invalid, treat as empty outline */
+            gs_glyph_data_from_null(pdata);
         }
     }
     return 0;
@@ -622,13 +628,20 @@ tt_find_table(gs_font_type42 * pfont, const char *tname, uint * plen)
  * unknown, return gs_error_invalidfont.
  */
 static int
-pl_cmap_lookup(const uint key, const byte * table, uint * pvalue)
-{                               /* Dispatch according to the table type. */
+pl_cmap_lookup(const uint key, const byte * table, size_t table_len, uint * pvalue)
+{
+    const byte *table_lim = table + table_len;
+
+    /* Dispatch according to the table type. */
     switch (pl_get_uint16(table)) {
         case 0:
             {                   /* Apple standard 1-to-1 mapping. */
-                *pvalue = table[key + 6];
-                if_debug2('J', "[J]%u => %u\n", key, *pvalue);
+                if (table + key + 6 < table_lim) {
+                    *pvalue = table[key + 6];
+                    if_debug2('J', "[J]%u => %u\n", key, *pvalue);
+                }
+                else
+                    return_error(gs_error_undefined);
                 break;
             }
         case 4:
@@ -640,6 +653,9 @@ pl_cmap_lookup(const uint key, const byte * table, uint * pvalue)
                 const byte *idRangeOffset = idDelta + segCount2;
                 /*const byte *glyphIdArray = idRangeOffset + segCount2; */
                 uint i2;
+
+                if (idRangeOffset > table_lim)
+                    return_error(gs_error_undefined);
 
                 for (i2 = 0; i2 < segCount2 - 3; i2 += 2) {
                     int delta, roff;
@@ -654,8 +670,15 @@ pl_cmap_lookup(const uint key, const byte * table, uint * pvalue)
                         if_debug1('J', "[J]%u out of range\n", key);
                         return_error(gs_error_undefined);
                     }
+                    if (endCount + i2 + 2 > table_lim) {
+                        break;
+                    }
                     if (key > pl_get_uint16(endCount + i2))
                         continue;
+
+                    if (idRangeOffset + i2 + 2 > table_lim) {
+                        break;
+                    }
                     delta = pl_get_int16(idDelta + i2);
                     roff = pl_get_int16(idRangeOffset + i2);
                     if (roff == 0) {
@@ -663,8 +686,11 @@ pl_cmap_lookup(const uint key, const byte * table, uint * pvalue)
                         if_debug2('J', "[J]%u => %u\n", key, *pvalue);
                         return 0;
                     }
-                    glyph = pl_get_uint16(idRangeOffset + i2 + roff +
-                                          ((key - start) << 1));
+
+                    if ((2 + idRangeOffset + i2 + roff + ((key - start) << 1)) > table_lim) {
+                        break;
+                    }
+                    glyph = pl_get_uint16(idRangeOffset + i2 + roff + ((key - start) << 1));
                     *pvalue = (glyph == 0 ? 0 : glyph + delta);
                     if_debug2('J', "[J]%u => %u\n", key, *pvalue);
                     return 0;
@@ -679,11 +705,21 @@ pl_cmap_lookup(const uint key, const byte * table, uint * pvalue)
             }
         case 6:
             {                   /* Single interval lookup. */
-                uint firstCode = pl_get_uint16(table + 6);
-                uint entryCount = pl_get_uint16(table + 8);
+                uint firstCode;
+                uint entryCount;
 
+                if (table + 10 > table_lim) {
+                    return_error(gs_error_undefined);
+                }
+
+                firstCode = pl_get_uint16(table + 6);
+                entryCount = pl_get_uint16(table + 8);
                 if (key < firstCode || key >= firstCode + entryCount) {
                     if_debug1('J', "[J]%u out of range\n", key);
+                    return_error(gs_error_undefined);
+                }
+
+                if (table + 12 + ((key - firstCode) << 1) > table_lim) {
                     return_error(gs_error_undefined);
                 }
                 *pvalue =
@@ -706,6 +742,7 @@ pl_tt_cmap_encode_char(gs_font_type42 * pfont, ulong cmap_offset,
     const byte *cmap;
     const byte *cmap_sub;
     const byte *table;
+    size_t table_len;
     uint value;
     int code;
 
@@ -716,8 +753,12 @@ pl_tt_cmap_encode_char(gs_font_type42 * pfont, ulong cmap_offset,
     cmap_sub = cmap + 4;
     {
         uint i;
+        uint16_t ncmaps = pl_get_uint16(cmap + 2);
 
-        for (i = 0; i < pl_get_uint16(cmap + 2); ++i) {
+        if (ncmaps * 8 + 2 >= cmap_len)
+            return GS_NO_GLYPH;
+
+        for (i = 0; i < ncmaps; ++i) {
             if_debug3m('j', pfont->memory,
                        "[j]cmap %d: platform %u encoding %u\n", i,
                        pl_get_uint16(cmap_sub + i * 8),
@@ -730,10 +771,11 @@ pl_tt_cmap_encode_char(gs_font_type42 * pfont, ulong cmap_offset,
     }
     {
         uint offset = cmap_offset + pl_get_uint32(cmap_sub + 4);
+        table_len = cmap_offset + cmap_len - offset;
 
-        access(offset, cmap_offset + cmap_len - offset, table);
+        access(offset, table_len, table);
     }
-    code = pl_cmap_lookup((uint) chr, table, &value);
+    code = pl_cmap_lookup((uint) chr, table, table_len, &value);
     return (code < 0 ? GS_NO_GLYPH : value);
 }
 
@@ -1113,11 +1155,12 @@ typedef struct intelli_metrics_s
 /* Merge the bounding box of a character into the composite box, */
 /* and set the escapement.  Return true if the character is defined. */
 static bool
-pl_intelli_merge_box(float wbox[6], const pl_font_t * plfont, gs_glyph glyph)
+pl_intelli_merge_box(float wbox[6], const pl_font_t * plfont, gs_glyph glyph, int depth)
 {
     const byte *cdata = pl_font_lookup_glyph(plfont, glyph)->data;
 
-    if (cdata == 0)
+    /* 8 is an arbitrary limit to catch circular referencing glyphs */
+    if (cdata == 0 || depth > IF_COMPOUND_CHAR_LIMIT)
         return false;
     wbox[1] = 0;
     if (cdata[3] == 4) {        /* Compound character.  Merge the component boxes; */
@@ -1125,9 +1168,12 @@ pl_intelli_merge_box(float wbox[6], const pl_font_t * plfont, gs_glyph glyph)
         bool found = false;
         uint i;
 
-        for (i = 0; i < cdata[6]; ++i)
-            found |= pl_intelli_merge_box(wbox, plfont,
-                                          pl_get_uint16(cdata + 8 + i * 6));
+        for (i = 0; i < cdata[6]; ++i) {
+            gs_glyph g = (gs_glyph)pl_get_uint16(cdata + 8 + i * 6);
+            if (g == glyph)
+                return false;
+            found |= pl_intelli_merge_box(wbox, plfont, g, ++depth);
+        }
         wbox[0] = (float)pl_get_int16(cdata + 4);
         return found;
     }
@@ -1154,7 +1200,7 @@ pl_intelli_merge_box(float wbox[6], const pl_font_t * plfont, gs_glyph glyph)
 /* Do the work for rendering an Intellifont character. */
 /* The caller has done the setcachedevice. */
 static int
-pl_intelli_show_char(gs_gstate * pgs, const pl_font_t * plfont, gs_glyph glyph)
+pl_intelli_show_char(gs_gstate * pgs, const pl_font_t * plfont, gs_glyph glyph, int depth)
 {
     int code;
     const byte *cdata, *cdata_end;
@@ -1166,6 +1212,10 @@ pl_intelli_show_char(gs_gstate * pgs, const pl_font_t * plfont, gs_glyph glyph)
     font_glyph = pl_font_lookup_glyph(plfont, glyph);
     cdata = font_glyph->data;
     cdata_end = cdata + font_glyph->data_len;
+
+    /* 8 is an arbitrary limit to catch circular referencing glyphs */
+    if (depth > IF_COMPOUND_CHAR_LIMIT)
+        return_error(gs_error_invalidfont);
 
     if (cdata == 0) {
         if_debug1m('1', pgs->memory, "[1] no character data for glyph %ld\n",
@@ -1181,9 +1231,13 @@ pl_intelli_show_char(gs_gstate * pgs, const pl_font_t * plfont, gs_glyph glyph)
             const byte *edata = cdata + 8 + i * 6;
             double x_offset = pl_get_int16(edata + 2);
             double y_offset = pl_get_int16(edata + 4);
+            gs_glyph g = (gs_glyph)pl_get_uint16(edata);
+
+            if (g == glyph)
+                return_error(gs_error_invalidfont);
 
             gs_translate(pgs, x_offset, y_offset);
-            code = pl_intelli_show_char(pgs, plfont, pl_get_uint16(edata));
+            code = pl_intelli_show_char(pgs, plfont, g, ++depth);
             gs_setmatrix(pgs, &save_ctm);
             if (code < 0)
                 return code;
@@ -1212,7 +1266,7 @@ pl_intelli_show_char(gs_gstate * pgs, const pl_font_t * plfont, gs_glyph glyph)
             return -1;
 
         for (i = 0; i < num_loops; ++i) {
-            const byte *xyc = cdata + pl_get_uint16(outlines + 4 + i * 8);
+            const byte *xyc;
             uint num_points;
             uint num_aux_points;
             const byte *x_coords, *y_coords, *x_coords_last;
@@ -1228,6 +1282,12 @@ pl_intelli_show_char(gs_gstate * pgs, const pl_font_t * plfont, gs_glyph glyph)
                 code = gs_note_error(gs_error_invalidfont);
                 break;
             }
+            xyc = cdata + pl_get_uint16(outlines + 4 + i * 8);
+            if (xyc + 4 >= cdata_end) {
+                code = gs_note_error(gs_error_invalidfont);
+                break;
+            }
+
             num_points = pl_get_uint16(xyc);
             num_aux_points = pl_get_uint16(xyc + 2);
 
@@ -1460,7 +1520,7 @@ pl_intelli_build_char(gs_show_enum * penum, gs_gstate * pgs, gs_font * pfont,
     wbox[0] = wbox[1] = 0;
     wbox[2] = wbox[3] = 65536.0;
     wbox[4] = wbox[5] = -65536.0;
-    if (!pl_intelli_merge_box(wbox, plfont, glyph)) {
+    if (!pl_intelli_merge_box(wbox, plfont, glyph, 0)) {
         wbox[2] = wbox[3] = wbox[4] = wbox[5] = 0;
         code = gs_setcachedevice(penum, pgs, wbox);
         return (code < 0 ? code : 0);
@@ -1468,7 +1528,7 @@ pl_intelli_build_char(gs_show_enum * penum, gs_gstate * pgs, gs_font * pfont,
     code = gs_setcachedevice(penum, pgs, wbox);
     if (code < 0)
         return code;
-    code = pl_intelli_show_char(pgs, plfont, glyph);
+    code = pl_intelli_show_char(pgs, plfont, glyph, 0);
     if (code < 0)
         return code;
     /* Since we don't take into account which side of the loops is */

@@ -767,6 +767,8 @@ pjl_search_for_file(pjl_parser_state_t * pst, char *pathname, char *filename,
             /* done */
             if (fstatus == ~(uint) 0)
                 return 0;
+            if (fstatus > PJL_PATH_NAME_LENGTH)
+                continue;
             fontfilename[fstatus] = '\0';
             if (fontfilename[fstatus - 1] != '.') {     /* skip over . and .. */
                 /* a directory */
@@ -804,6 +806,8 @@ pjl_fsdirlist(pjl_parser_state_t * pst, char *pathname, int entry, int count)
             /* done */
             if (fstatus == ~(uint) 0)
                 return 0;
+            if (fstatus > PJL_PATH_NAME_LENGTH)
+                continue;
             fontfilename[fstatus] = '\0';
             /* NB - debugging output only */
             dmprintf1(pst->mem, "%s\n", fontfilename);
@@ -1424,6 +1428,9 @@ pjl_process(pjl_parser_state * pst, void *pstate, stream_cursor_read * pr)
                 pst->line = temp;
                 pst->line_size += 256;
                 pst->line[pst->pos] = p[1], pst->pos++;
+            } else {
+                code = -1;
+                break;
             }
         } else
             pst->line[pst->pos] = p[1], pst->pos++;

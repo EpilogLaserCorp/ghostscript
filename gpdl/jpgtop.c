@@ -1,4 +1,4 @@
-/* Copyright (C) 2019-2025 Artifex Software, Inc.
+/* Copyright (C) 2019-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -698,8 +698,11 @@ jpg_impl_process(pl_interp_implementation_t * impl, stream_cursor_read * pr)
             }
             ok = jpeg_start_decompress(&jpg->cinfo);
             (void)consume_jpeg_data(jpg, pr);
-            if (ok == FALSE)
+            if (ok == FALSE) {
+                if (jpg->jsrc.bytes_in_buffer == jpg->bytes_available_on_entry)
+                    need_more_data = 1;
                 break;
+            }
             jpg->state = ii_state_jpeg_rows;
             break;
         }

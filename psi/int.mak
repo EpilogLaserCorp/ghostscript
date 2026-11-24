@@ -363,7 +363,7 @@ $(PSOBJ)zfilter.$(OBJ) : $(PSSRC)zfilter.c $(OP) $(memory__h)\
 $(PSOBJ)zfproc.$(OBJ) : $(PSSRC)zfproc.c $(GH) $(memory__h) $(stat__h)\
  $(oper_h)\
  $(estack_h) $(files_h) $(gsstruct_h) $(ialloc_h) $(ifilter_h) $(istruct_h)\
- $(store_h) $(stream_h) $(strimpl_h)\
+ $(store_h) $(stream_h) $(strimpl_h) $(isave_h) $(isstate_h)\
  $(INT_MAK) $(MAKEDIRS)
 	$(PSCC) $(PSO_)zfproc.$(OBJ) $(C_) $(PSSRC)zfproc.c
 
@@ -760,7 +760,7 @@ $(PSOBJ)zchar1.$(OBJ) : $(PSSRC)zchar1.c $(OP) $(memory__h)\
  $(gxdevice_h) $(gxfixed_h) $(gxmatrix_h)\
  $(gxfont_h) $(gxfont1_h) $(gxtype1_h) $(gxfcid_h) $(gxchar_h) $(gzstate_h)\
  $(estack_h) $(ialloc_h) $(ichar_h) $(ichar1_h) $(icharout_h)\
- $(idict_h) $(ifont_h) $(igstate_h) $(iname_h) $(iutil_h) $(store_h)\
+ $(idict_h) $(iddict_h) $(ifont_h) $(igstate_h) $(iname_h) $(iutil_h) $(store_h)\
  $(gxfcache_h) \
  $(INT_MAK) $(MAKEDIRS)
 	$(PSCC) $(PSO_)zchar1.$(OBJ) $(C_) $(PSSRC)zchar1.c
@@ -811,7 +811,7 @@ $(PSOBJ)zchar32.$(OBJ) : $(PSSRC)zchar32.c $(OP)\
 
 $(PSOBJ)zfont32.$(OBJ) : $(PSSRC)zfont32.c $(OP)\
  $(gsccode_h) $(gsmatrix_h) $(gsutil_h) $(gxfont_h) $(gxtext_h)\
- $(bfont_h) $(store_h) $(ichar_h) $(INT_MAK) $(MAKEDIRS)
+ $(bfont_h) $(store_h) $(ichar_h) $(iddict_h) $(INT_MAK) $(MAKEDIRS)
 	$(PSCC) $(PSO_)zfont32.$(OBJ) $(C_) $(PSSRC)zfont32.c
 
 type32_=$(PSOBJ)zchar32.$(OBJ) $(PSOBJ)zfont32.$(OBJ)
@@ -1597,17 +1597,6 @@ $(PSOBJ)zicc.$(OBJ) : $(PSSRC)zicc.c  $(OP) $(math__h) $(memory__h)\
  $(gsicc_cache_h) $(INT_MAK) $(MAKEDIRS)
 	$(PSCC) $(PSO_)zicc.$(OBJ) $(C_) $(PSSRC)zicc.c
 
-# ---------------- Support for %disk IODevices ---------------- #
-
-# Note that we go ahead and create 7 %disk devices. The internal
-# overhead of any unused %disk structures is minimal.
-# We could have more, but the DynaLab font installer has problems
-# with more than 7 disk devices.
-diskn_=$(GLOBJ)gsiodisk.$(OBJ)
-$(GLD)diskn.dev : $(LIB_MAK) $(ECHOGS_XE) $(diskn_) $(INT_MAK) $(MAKEDIRS)
-	$(SETMOD) $(GLD)diskn $(diskn_)
-	$(ADDMOD) $(GLD)diskn -iodev disk0 disk1 disk2 disk3 disk4 disk5 disk6
-	$(ADDMOD) $(GLD)diskn -ps gs_diskn
 
 # ------------------ Support high level Forms ------------------ #
 form_=$(GLOBJ)zform.$(OBJ)

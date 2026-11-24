@@ -638,7 +638,7 @@ gsicc_get_device_class(cmm_profile_t *icc_profile)
 
 /* This inititializes the srcgtag structure in the ICC manager */
 static int
-gsicc_set_srcgtag_struct(gsicc_manager_t *icc_manager, const char* pname,
+gsicc_set_srcgtag_struct(gx_device *pdev, gsicc_manager_t *icc_manager, const char* pname,
                         int namelen)
 {
     gs_memory_t *mem;
@@ -657,8 +657,10 @@ gsicc_set_srcgtag_struct(gsicc_manager_t *icc_manager, const char* pname,
     /* If we don't have an icc manager or if this thing is already set
        then ignore the call.  For now, I am going to allow it to
        be set one time. */
-    if (icc_manager == NULL || icc_manager->srcgtag_profile != NULL) {
+    if (icc_manager == NULL)
         return 0;
+    if (icc_manager->srcgtag_profile != NULL) {
+        return dev_proc(pdev, dev_spec_op)(pdev, gxdso_set_srcgtag, icc_manager->srcgtag_profile, sizeof(srcgtag));
     } else {
         mem = icc_manager->memory->non_gc_memory;
         code = gsicc_open_search(pname, namelen, mem, mem->gs_lib_ctx->profiledir,
@@ -891,6 +893,7 @@ gsicc_set_srcgtag_struct(gsicc_manager_t *icc_manager, const char* pname,
     memcpy(srcgtag->name, pname, namelen);
     srcgtag->name[namelen] = 0x00;
     icc_manager->srcgtag_profile = srcgtag;
+    code = dev_proc(pdev, dev_spec_op)(pdev, gxdso_set_srcgtag, srcgtag, sizeof(srcgtag));
     return 0;
 }
 
@@ -2126,9 +2129,7 @@ gsicc_set_device_profile(gx_device * pdev, gs_memory_t * mem,
     if (gsicc_verify_device_profiles(pdev) < 0)
         return gs_rethrow(-1, "Error in device profiles");
 
-    if (icc_profile->num_comps != 1 &&
-        icc_profile->num_comps != 3 &&
-        icc_profile->num_comps != 4) {
+    if (icc_profile->num_comps > 4) {
         /* NCLR Profile.  Set up default colorant names */
         code = gsicc_set_device_profile_colorants(pdev, NULL);
         if (code < 0)
@@ -3143,7 +3144,7 @@ gs_setsrcgtagicc(const gs_gstate * pgs, gs_param_string * pval)
         return_error(gs_error_VMerror);
     memcpy(pname,pval->data,namelen-1);
     pname[namelen-1] = 0;
-    code = gsicc_set_srcgtag_struct(pgs->icc_manager, (const char*) pname,
+    code = gsicc_set_srcgtag_struct(pgs->device, pgs->icc_manager, (const char*) pname,
                                    namelen);
     gs_free_object(mem, pname, "set_srcgtag_icc");
     if (code < 0)

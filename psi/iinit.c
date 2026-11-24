@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2024 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -63,6 +63,28 @@
 /* Ditto the size of ll3dict. */
 #ifndef LL3DICT_SIZE
 #  define LL3DICT_SIZE 43
+#endif
+/* Ditto the size of userdict. */
+#ifndef USERDICT_SIZE
+#  define USERDICT_SIZE 211
+#endif
+/* Ditto the size of $error. */
+#ifndef DOLLARERROR_SIZE
+#  define DOLLARERROR_SIZE 43
+#endif
+/* Ditto the size of errordict. */
+#ifndef ERRORDICT_SIZE
+#  define ERRORDICT_SIZE 43
+#endif
+#ifndef STATUSDICT_SIZE
+#  define STATUSDICT_SIZE 91
+#endif
+#ifndef SERVERDICT_SIZE
+#  define SERVERDICT_SIZE 11
+#endif
+/* Ditto the size of FontDirectory. */
+#ifndef FONTDIRECTORY_SIZE
+#  define FONTDIRECTORY_SIZE 101
 #endif
 /* Ditto the size of filterdict. */
 #ifndef FILTERDICT_SIZE
@@ -154,11 +176,38 @@ const struct {
         "globaldict", 0, false
     },
     {
-        "userdict", 0, true
+        "userdict", USERDICT_SIZE, true
+    },
+    {
+        "$error", DOLLARERROR_SIZE, true
+    },
+    {
+        "errordict", ERRORDICT_SIZE, true
+    },
+    {
+        "FontDirectory", FONTDIRECTORY_SIZE, true
+    },
+    {
+        "statusdict", STATUSDICT_SIZE, true
+    },
+    {
+        "serverdict", SERVERDICT_SIZE, true
     },
     {
         "filterdict", FILTERDICT_SIZE, false
     },
+#endif
+};
+const char *const initial_referred[] =
+{
+#ifdef INITIAL_REFERRED
+    INITIAL_REFERRED
+#else
+    "$error",
+    "errordict",
+    "FontDirectory",
+    "statusdict",
+    "serverdict"
 #endif
 };
 /* systemdict and globaldict are magically inserted at the bottom */
@@ -298,6 +347,23 @@ obj_init(i_ctx_t **pi_ctx_p, gs_dual_memory_t *idmem)
                     if (make_initial_dict(i_ctx_p, def->oname, idicts) == 0)
                         return_error(gs_error_VMerror);
                 }
+        }
+
+        /* Create dictionaries which are stored inside systemdict, but in local VM
+         * (apart from userdict, which additionally needs to be on the initial
+         * dictionary stack). This used to be done in PostScript in gs_init.ps, but
+         * that required the use of .forceput.
+         * This is all complicated by the intention to potentially build the interpreter
+         * supporting only lower versions of PostScript. This could all be simplified
+         * now, since we don't really support that any more.
+         */
+        for (i = 0; i < countof(initial_referred); i++) {
+            const char *dname = initial_referred[i];
+            ref *r;
+
+            r = make_initial_dict(i_ctx_p, dname, idicts);
+            if (r == NULL)
+                return_error(gs_error_VMerror);
         }
 
         /* Set up the initial dstack. */

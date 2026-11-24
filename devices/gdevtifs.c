@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2025 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -526,10 +526,11 @@ static int tiff_chunky_post_cm(void  *arg, byte **dst, byte **src, int w, int h,
 /* Special version, called with 8 bit grey input to be downsampled to 1bpp
  * output. */
 int
-tiff_downscale_and_print_page(gx_device_printer *dev, TIFF *tif,
+tiff_downscale_and_print_page(gx_device_printer *dev, TIFF **tifp,
                               gx_downscaler_params *params,
                               int aw, int bpc, int num_comps)
 {
+    TIFF *tif = *tifp;
     gx_device_tiff *const tfdev = (gx_device_tiff *)dev;
     int code = 0;
     byte *data = NULL;
@@ -558,12 +559,13 @@ tiff_downscale_and_print_page(gx_device_printer *dev, TIFF *tif,
                                      tfdev->icclink->num_output);
     }
     if (code < 0)
-        return code;
+        goto error;
 
     data = gs_alloc_bytes(dev->memory, max_size, "tiff_print_page(data)");
-    if (data == NULL) {
-        gx_downscaler_fin(&ds);
-        return_error(gs_error_VMerror);
+    if (data == NULL)
+    {
+        code = gs_note_error(gs_error_VMerror);
+        goto error;
     }
 
     for (row = 0; row < height && code >= 0; row++) {
@@ -576,8 +578,14 @@ tiff_downscale_and_print_page(gx_device_printer *dev, TIFF *tif,
             break;
     }
 
+error:
     if (code >= 0)
         code = TIFFWriteDirectory(tif);
+    else
+    {
+       TIFFClose(tif);
+       *tifp = NULL;
+    }
 
     gx_downscaler_fin(&ds);
     gs_free_object(dev->memory, data, "tiff_print_page(data)");

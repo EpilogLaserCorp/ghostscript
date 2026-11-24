@@ -147,7 +147,7 @@ typedef struct pdf14_abuf_state_s {
     gs_gstate* pgs;
     gs_blend_mode_t blend_mode;
     bool group_needed;
-    OP_FS_STATE orig_state;
+    GS_OP_FS_STATE orig_state;
 } pdf14_abuf_state_t;
 
 /* Buffer stack	data structure */
@@ -1930,8 +1930,10 @@ pdf14_pop_transparency_mask(pdf14_ctx *ctx, gs_gstate *pgs, gx_device *dev)
         } else {
             /* Assign as mask buffer */
             ctx->mask_stack = pdf14_mask_element_new(ctx->memory);
-            if (ctx->mask_stack == NULL)
+            if (ctx->mask_stack == NULL) {
+                pdf14_buf_free(tos);
                 return gs_note_error(gs_error_VMerror);
+            }
             ctx->mask_stack->mask_buf = tos;
         }
         ctx->smask_blend = false;  /* just in case */
@@ -1944,8 +1946,10 @@ pdf14_pop_transparency_mask(pdf14_ctx *ctx, gs_gstate *pgs, gx_device *dev)
         /* the data after a resize */
         new_data_buf = gs_alloc_bytes(ctx->memory, tos->planestride + CAL_SLOP,
                                         "pdf14_pop_transparency_mask");
-        if (new_data_buf == NULL)
+        if (new_data_buf == NULL) {
+            pdf14_buf_free(tos);
             return_error(gs_error_VMerror);
+        }
         /* Initialize with 0.  Need to do this since in Smask_Luminosity_Mapping
            we won't be filling everything during the remap if it had not been
            written into by the PDF14 fill rect */
@@ -2053,8 +2057,10 @@ pdf14_pop_transparency_mask(pdf14_ctx *ctx, gs_gstate *pgs, gx_device *dev)
             rc_decrement(ctx->mask_stack, "pdf14_pop_transparency_mask(ctx->mask_stack)");
         }
         ctx->mask_stack = pdf14_mask_element_new(ctx->memory);
-        if (ctx->mask_stack == NULL)
+        if (ctx->mask_stack == NULL) {
+            pdf14_buf_free(tos);
             return gs_note_error(gs_error_VMerror);
+        }
         ctx->mask_stack->mask_buf = tos;
     }
     return code;
@@ -2285,7 +2291,7 @@ pdf14_get_buffer_information(const gx_device * dev,
                          gs_alloc_bytes(mem,
                                         planestride *
                                                 (buf->n_chan +
-                                                 buf->has_tags ? 1 : 0) + CAL_SLOP,
+                                                 (buf->has_tags ? 1 : 0)) + CAL_SLOP,
                                         "pdf14_get_buffer_information");
             if (transbuff->transbytes == NULL)
                 return gs_error_VMerror;
@@ -3760,7 +3766,6 @@ pdf14_discard_trans_layer(gx_device *dev, gs_gstate * pgs)
     /* The things that need to be cleaned up */
     pdf14_ctx *ctx = pdev->ctx;
     pdf14_smaskcolor_t *smaskcolor = pdev->smaskcolor;
-    pdf14_group_color_t *group_color = pdev->color_model_stack;
 
     /* Free up the smask color */
     if (smaskcolor != NULL) {
@@ -3770,12 +3775,8 @@ pdf14_discard_trans_layer(gx_device *dev, gs_gstate * pgs)
     }
 
     /* Free up the nested color procs and decrement the profiles */
-    if (group_color != NULL) {
-        while (group_color->previous != NULL)
-            pdf14_pop_group_color(dev, pgs);
-        gs_free_object(dev->memory->stable_memory, group_color, "pdf14_discard_trans_layer");
-        pdev->color_model_stack = NULL;
-    }
+    while (pdev->color_model_stack)
+        pdf14_pop_group_color(dev, NULL);
 
     /* Start the context clean up */
     if (ctx != NULL) {
@@ -4041,9 +4042,9 @@ pdf14_set_marking_params(gx_device *dev, const gs_gstate *pgs)
     pdev->strokeconstantalpha = pgs->strokeconstantalpha;
 
     if (pgs->is_fill_color)
-        pdev->op_state = PDF14_OP_STATE_FILL;
+        pdev->op_state = GS_OP_STATE_FILL;
     else
-        pdev->op_state = PDF14_OP_STATE_STROKE;
+        pdev->op_state = GS_OP_STATE_STROKE;
 
     if_debug6m('v', dev->memory,
                "[v]set_marking_params, opacity = %g, shape = %g, bm = %d, op = %d, eop = %d seop = %d\n",
@@ -4165,7 +4166,7 @@ pdf14_fill_path(gx_device *dev,	const gs_gstate *pgs,
 
     if (pdcolor == NULL)
        return_error(gs_error_unknownerror);	/* color must be defined */
-    ((pdf14_device *)dev)->op_state = pgs->is_fill_color ? PDF14_OP_STATE_FILL : PDF14_OP_STATE_STROKE;
+    ((pdf14_device *)dev)->op_state = pgs->is_fill_color ? GS_OP_STATE_FILL : GS_OP_STATE_STROKE;
     if (gx_dc_is_pattern1_color(pdcolor)){
         if( gx_pattern1_get_transptr(pdcolor) != NULL ||
             gx_pattern1_clist_has_trans(pdcolor) ){
@@ -4357,9 +4358,9 @@ pdf14_stroke_path(gx_device *dev, const	gs_gstate	*pgs,
         update_lop_for_pdf14(&new_pgs, pdcolor);
     pdf14_set_marking_params(dev, &new_pgs);
     if (code >= 0) {
-        PDF14_OP_FS_STATE save_op_state = ((pdf14_device *)dev)->op_state;
+        GS_OP_FS_STATE save_op_state = ((pdf14_device *)dev)->op_state;
 
-        ((pdf14_device*)dev)->op_state = PDF14_OP_STATE_STROKE;
+        ((pdf14_device*)dev)->op_state = GS_OP_STATE_STROKE;
         code = gx_default_stroke_path(dev, &new_pgs, ppath, params, pdcolor, pcpath);
         ((pdf14_device*)dev)->op_state = save_op_state;
     }
@@ -4516,7 +4517,7 @@ pdf14_fill_stroke_prefill(gx_device* dev, gs_gstate* pgs, gx_path* ppath,
             dev->color_info.polarity == GX_CINFO_POLARITY_SUBTRACTIVE)
             (void)gs_setblendmode(pgs, BLEND_MODE_CompatibleOverprint); /* Can never fail */
     }
-    p14dev->op_state = PDF14_OP_STATE_FILL;
+    p14dev->op_state = GS_OP_STATE_FILL;
     return code;
 }
 
@@ -4541,7 +4542,7 @@ pdf14_fill_stroke_prestroke(gx_device* dev, gs_gstate* pgs, float stroke_alpha,
             dev->color_info.polarity == GX_CINFO_POLARITY_SUBTRACTIVE)
             (void)gs_setblendmode(pgs, BLEND_MODE_CompatibleOverprint); /* Can never fail */
     }
-    p14dev->op_state = PDF14_OP_STATE_STROKE;
+    p14dev->op_state = GS_OP_STATE_STROKE;
 }
 
 /* Cleanup after the stroke in fill-stroke  */
@@ -4570,7 +4571,7 @@ pdf14_fill_stroke_poststroke(gx_device* dev, gs_gstate* pgs, float fill_alpha, b
 /* cleanup in fill-stroke  */
 static int
 pdf14_fill_stroke_cleanup(gx_device* dev, gs_gstate* pgs, float fill_alpha, float stroke_alpha,
-    gs_blend_mode_t blend_mode, PDF14_OP_FS_STATE save_op_state)
+    gs_blend_mode_t blend_mode, GS_OP_FS_STATE save_op_state)
 {
     pdf14_device* p14dev = (pdf14_device*)dev;
     int code2;
@@ -4604,7 +4605,7 @@ pdf14_fill_stroke_path(gx_device *dev, const gs_gstate *cpgs, gx_path *ppath,
     float fill_alpha = cpgs->fillconstantalpha;
     gs_blend_mode_t blend_mode = cpgs->blend_mode;
     pdf14_device* p14dev = (pdf14_device*)dev;
-    PDF14_OP_FS_STATE save_op_state = p14dev->op_state;
+    GS_OP_FS_STATE save_op_state = p14dev->op_state;
     gs_log2_scale_point path_log2scale;
     bool group_needed = true;
     gx_device* curr_pgs_dev = cpgs->device;
@@ -4746,8 +4747,8 @@ do_pdf14_copy_alpha_color(gx_device * dev, const byte * data, int data_x,
     intptr_t shape_off = num_chan * planestride;
     intptr_t alpha_g_off = shape_off + (has_shape ? planestride : 0);
     intptr_t tag_off = alpha_g_off + (has_alpha_g ? planestride : 0);
-    bool overprint = pdev->op_state == PDF14_OP_STATE_FILL ? pdev->overprint : pdev->stroke_overprint;
-    gx_color_index drawn_comps = pdev->op_state == PDF14_OP_STATE_FILL ?
+    bool overprint = pdev->op_state == GS_OP_STATE_FILL ? pdev->overprint : pdev->stroke_overprint;
+    gx_color_index drawn_comps = pdev->op_state == GS_OP_STATE_FILL ?
                                  pdev->drawn_comps_fill : pdev->drawn_comps_stroke;
     gx_color_index comps;
     byte shape = 0; /* Quiet compiler. */
@@ -4948,8 +4949,8 @@ do_pdf14_copy_alpha_color_16(gx_device * dev, const byte * data, int data_x,
     intptr_t shape_off = num_chan * planestride;
     intptr_t alpha_g_off = shape_off + (has_shape ? planestride : 0);
     intptr_t tag_off = alpha_g_off + (has_alpha_g ? planestride : 0);
-    bool overprint = pdev->op_state == PDF14_OP_STATE_FILL ? pdev->overprint : pdev->stroke_overprint;
-    gx_color_index drawn_comps = pdev->op_state == PDF14_OP_STATE_FILL ?
+    bool overprint = pdev->op_state == GS_OP_STATE_FILL ? pdev->overprint : pdev->stroke_overprint;
+    gx_color_index drawn_comps = pdev->op_state == GS_OP_STATE_FILL ?
         pdev->drawn_comps_fill : pdev->drawn_comps_stroke;
     gx_color_index comps;
     uint16_t shape = 0; /* Quiet compiler. */
@@ -5740,7 +5741,7 @@ pdf14_set_params(gs_gstate * pgs,
         pgs->strokeconstantalpha = pparams->strokeconstantalpha;
     if (pparams->changed & PDF14_SET_FILLSTROKE_STATE) {
         gs_swapcolors_quick(pgs);
-        if (pparams->op_fs_state == PDF14_OP_STATE_STROKE)
+        if (pparams->op_fs_state == GS_OP_STATE_STROKE)
             pgs->is_fill_color = false;
         else
             pgs->is_fill_color = true;
@@ -6218,18 +6219,10 @@ pdf14_recreate_device(gs_memory_t *mem,	gs_gstate	* pgs,
     pdev->pad = target->pad;
     pdev->log2_align_mod = target->log2_align_mod;
 
-    /* The prototype has the color setup without tags. If we are
-     * using tags, then we need to extend num_components and depth.
-     */
-    if (has_tags) {
-        pdev->color_info.num_components++;
-        pdev->color_info.depth = pdev->color_info.num_components * (deep ? 16 : 8);
-    }
-
-    if (pdf14pct->params.overprint_sim_push && pdf14pct->params.num_spot_colors_int > 0 && target->num_planar_planes == 0)
-        pdev->num_planar_planes = dev->color_info.num_components + pdf14pct->params.num_spot_colors_int;
+    if (target->num_planar_planes == 0)
+        pdev->num_planar_planes = 0;
     else
-        pdev->num_planar_planes = target->num_planar_planes;
+        pdev->num_planar_planes = dev->color_info.num_components;
     pdev->interpolate_threshold = dev_proc(target, dev_spec_op)(target, gxdso_interpolate_threshold, NULL, 0);
 
     if (dev_proto.initialize_device_procs != NULL)
@@ -6441,10 +6434,10 @@ pdf14_composite(gx_device * dev, gx_device * * pcdev,
                    See gx_spot_colors_set_overprint in gscspace for issues... */
                 const gs_overprint_t * op_pct = (const gs_overprint_t *) pct;
                 gx_color_index drawn_comps;
-                PDF14_OP_FS_STATE curr_state = p14dev->op_state;
+                GS_OP_FS_STATE curr_state = p14dev->op_state;
 
                 p14dev->op_state = op_pct->params.op_state;
-                if (p14dev->op_state == PDF14_OP_STATE_NONE) {
+                if (p14dev->op_state == GS_OP_STATE_NONE) {
                     if (op_pct->params.retain_any_comps) {
                         drawn_comps = op_pct->params.drawn_comps;
                     } else {
@@ -7008,7 +7001,7 @@ pdf14_copy_planes(gx_device * dev, const byte * data, int data_x, int raster,
     fake_tos.dirty.q.y = y + h;
     fake_tos.has_alpha_g = 0;
     fake_tos.has_shape = 0;
-    fake_tos.has_tags = 0;
+    fake_tos.has_tags = device_encodes_tags(dev);
     fake_tos.idle = false;
     fake_tos.isolated = false;
     fake_tos.knockout = false;
@@ -8093,8 +8086,8 @@ do_mark_fill_rectangle_ko_simple(gx_device *dev, int x, int y, int w, int h,
     int shift = 8;
     byte shape = 0; /* Quiet compiler. */
     byte src_alpha;
-    bool overprint = pdev->op_state == PDF14_OP_STATE_FILL ? pdev->overprint : pdev->stroke_overprint;
-    gx_color_index drawn_comps = pdev->op_state == PDF14_OP_STATE_FILL ?
+    bool overprint = pdev->op_state == GS_OP_STATE_FILL ? pdev->overprint : pdev->stroke_overprint;
+    gx_color_index drawn_comps = pdev->op_state == GS_OP_STATE_FILL ?
         pdev->drawn_comps_fill : pdev->drawn_comps_stroke;
     gx_color_index comps;
     bool has_backdrop = buf->backdrop != NULL;
@@ -8314,8 +8307,8 @@ do_mark_fill_rectangle_ko_simple16(gx_device *dev, int x, int y, int w, int h,
     gs_graphics_type_tag_t curr_tag = GS_UNKNOWN_TAG;  /* Quiet compiler */
     uint16_t shape = 0; /* Quiet compiler. */
     uint16_t src_alpha;
-    bool overprint = pdev->op_state == PDF14_OP_STATE_FILL ? pdev->overprint : pdev->stroke_overprint;
-    gx_color_index drawn_comps = pdev->op_state == PDF14_OP_STATE_FILL ?
+    bool overprint = pdev->op_state == GS_OP_STATE_FILL ? pdev->overprint : pdev->stroke_overprint;
+    gx_color_index drawn_comps = pdev->op_state == GS_OP_STATE_FILL ?
         pdev->drawn_comps_fill : pdev->drawn_comps_stroke;
     gx_color_index comps;
     bool has_backdrop = buf->backdrop != NULL;
@@ -9074,7 +9067,7 @@ pdf14_dev_spec_op(gx_device *pdev, int dev_spec_op,
 cleanup:
                 if (pdf14_abuf->group_needed) {
                     code1 = pdf14_fill_stroke_cleanup(pdev, pdf14_abuf->pgs, pdf14_abuf->fill_alpha,
-                        pdf14_abuf->stroke_alpha, pdf14_abuf->blend_mode, (PDF14_OP_FS_STATE)pdf14_abuf->orig_state);
+                        pdf14_abuf->stroke_alpha, pdf14_abuf->blend_mode, pdf14_abuf->orig_state);
                     if (code1 < 0)
                         code = gs_note_error(gs_error_Fatal);
                 }
@@ -9228,9 +9221,6 @@ gs_pdf14_device_push(gs_memory_t *mem, gs_gstate * pgs,
     gx_device_set_target((gx_device_forward *)p14dev, target);
     p14dev->pad = target->pad;
     p14dev->log2_align_mod = target->log2_align_mod;
-    if (pdf14pct->params.overprint_sim_push) {
-        p14dev->color_info.num_components = p14dev->color_info.num_components + pdf14pct->params.num_spot_colors_int;
-    }
     if (target->num_planar_planes == 0)
         p14dev->num_planar_planes = 0;
     else
@@ -9334,7 +9324,7 @@ gs_pdf14_device_push(gs_memory_t *mem, gs_gstate * pgs,
         p14dev->height = 1;
     }
 
-    p14dev->op_state = pgs->is_fill_color ? PDF14_OP_STATE_FILL : PDF14_OP_STATE_NONE;
+    p14dev->op_state = pgs->is_fill_color ? GS_OP_STATE_FILL : GS_OP_STATE_NONE;
     code = dev_proc((gx_device *) p14dev, open_device) ((gx_device *) p14dev);
     *pdev = (gx_device *) p14dev;
     pdf14_set_marking_params((gx_device *)p14dev, pgs);
@@ -10688,8 +10678,6 @@ pdf14_create_clist_device(gs_memory_t *mem, gs_gstate * pgs,
         if (pdev->color_info.max_components > target->color_info.max_components)
             pdev->color_info.max_components = target->color_info.max_components;
     }
-    if (pdf14pct->params.overprint_sim_push && pdf14pct->params.num_spot_colors_int > 0 && target->num_planar_planes == 0)
-        nc = pdev->color_info.num_components + pdf14pct->params.num_spot_colors_int;
 
     pdev->color_info.num_components = nc;
     pdev->color_info.depth = pdev->color_info.num_components * (8<<deep);
@@ -10698,7 +10686,7 @@ pdf14_create_clist_device(gs_memory_t *mem, gs_gstate * pgs,
 
     pdev->interpolate_threshold = dev_proc(target, dev_spec_op)(target, gxdso_interpolate_threshold, NULL, 0);
 
-    pdev->op_state = pgs->is_fill_color ? PDF14_OP_STATE_FILL : PDF14_OP_STATE_NONE;
+    pdev->op_state = pgs->is_fill_color ? GS_OP_STATE_FILL : GS_OP_STATE_NONE;
 
     if (deep) {
         set_dev_proc(pdev, encode_color, pdf14_encode_color16);
@@ -11547,17 +11535,17 @@ pdf14_clist_update_params(pdf14_clist_device * pdev, const gs_gstate * pgs,
         changed |= PDF14_SET_STROKECONSTANTALPHA;
         params.strokeconstantalpha = pdev->strokeconstantalpha = pgs->strokeconstantalpha;
     }
-    if ((pgs->is_fill_color && pdev->op_state != PDF14_OP_STATE_FILL)) {
+    if ((pgs->is_fill_color && pdev->op_state != GS_OP_STATE_FILL)) {
         changed |= PDF14_SET_FILLSTROKE_STATE;
-        params.op_fs_state = pdev->op_state = PDF14_OP_STATE_FILL;
+        params.op_fs_state = pdev->op_state = GS_OP_STATE_FILL;
         if_debug0m('v', pgs->memory,
-            "[v]c_pdf14_clist_update_params op_fs_state written in clist as PDF14_OP_STATE_FILL \n");
+            "[v]c_pdf14_clist_update_params op_fs_state written in clist as GS_OP_STATE_FILL \n");
     }
-    if ((!pgs->is_fill_color && pdev->op_state != PDF14_OP_STATE_STROKE)) {
+    if ((!pgs->is_fill_color && pdev->op_state != GS_OP_STATE_STROKE)) {
         changed |= PDF14_SET_FILLSTROKE_STATE;
-        params.op_fs_state = pdev->op_state = PDF14_OP_STATE_STROKE;
+        params.op_fs_state = pdev->op_state = GS_OP_STATE_STROKE;
         if_debug0m('v', pgs->memory,
-            "[v]c_pdf14_clist_update_params op_fs_state written in clist as PDF14_OP_STATE_STROKE \n");
+            "[v]c_pdf14_clist_update_params op_fs_state written in clist as GS_OP_STATE_STROKE \n");
     }
     if (crop_blend_params) {
         params.ctm = group_params->ctm;
