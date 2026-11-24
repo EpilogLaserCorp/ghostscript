@@ -345,8 +345,8 @@ extern unsigned char _jxr_select_hp_index(jxr_image_t image, unsigned tx, unsign
 # define WIDTH_BLOCKS(image) (((image)->width1 + 16) >> 4)
 # define HEIGHT_BLOCKS(image) (((image)->height1 + 16) >> 4)
 
-# define EXTENDED_WIDTH_BLOCKS(image) (((size_t)(image)->extended_width) >> 4)
-# define EXTENDED_HEIGHT_BLOCKS(image) (((size_t)(image)->extended_height) >> 4)
+# define EXTENDED_WIDTH_BLOCKS(image) (((image)->extended_width) >> 4)
+# define EXTENDED_HEIGHT_BLOCKS(image) (((image)->extended_height) >> 4)
 
 /* TRUE if tiling is supported in this image. */
 # define TILING_FLAG(image) ((image)->header_flags1 & 0x80)

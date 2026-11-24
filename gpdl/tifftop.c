@@ -651,6 +651,10 @@ do_tiff_decode(tiff_interp_instance_t *tiff)
     TIFFGetField(tiff->handle, TIFFTAG_TILELENGTH, &tiff->tile_height);
     TIFFGetField(tiff->handle, TIFFTAG_BITSPERSAMPLE, &tiff->bpc);
     TIFFGetField(tiff->handle, TIFFTAG_SAMPLESPERPIXEL, &tiff->num_comps);
+    if (tiff->num_comps > GS_IMAGE_MAX_COMPONENTS) {
+        emprintf(tiff->memory, "Unsupported TIFF format: too many components\n");
+        goto fail_decode;
+    }
     tiff->raw_num_comps = tiff->num_comps;
     TIFFGetField(tiff->handle, TIFFTAG_PLANARCONFIG, &planar);
     f = 0;
@@ -695,6 +699,9 @@ do_tiff_decode(tiff_interp_instance_t *tiff)
         /* RGBA, so alpha data */
         alpha = 1;
     }
+
+    tiff->bpp = tiff->bpc * tiff->num_comps;
+
     if (alpha && tiff->bpp < 8)
     {
         /* We need to expand the data to 8bpp to blend for alpha. */
@@ -739,7 +746,6 @@ do_tiff_decode(tiff_interp_instance_t *tiff)
     }
     tiff->proc_samples = tiff->samples;
 
-    tiff->bpp = tiff->bpc * tiff->num_comps;
     switch(tiff->photometric) {
     case PHOTOMETRIC_MINISWHITE:
         invert = 1;
@@ -980,7 +986,7 @@ do_tiff_decode(tiff_interp_instance_t *tiff)
 
             if (!tiff->is_rgba && tiff->tiled) {
                 if (tiff->palette) {
-                    size_t n = size_mla(tiff->memory, &code, tiff->tile_width, tiff->tile_height, 1, 0);
+                    size_t n = TIFFTileSize(tiff->handle);
                     byte *q = tiff->samples;
                     byte *p = tiff->proc_samples;
                     if (code < 0)

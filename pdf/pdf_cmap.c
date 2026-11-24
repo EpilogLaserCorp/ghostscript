@@ -153,7 +153,7 @@ static int cmap_endcodespacerange_func(gs_memory_t *mem, pdf_ps_ctx_t *s, byte *
                 s2 = s->cur[-(si * 2)].size < MAX_CMAP_CODE_SIZE ? s->cur[-(si * 2)].size : MAX_CMAP_CODE_SIZE;
                 memcpy(code_space->ranges[i].first, s->cur[-((si * 2) + 1)].val.string, s1);
                 memcpy(code_space->ranges[i].last, s->cur[-(si * 2)].val.string, s2);
-                code_space->ranges[i].size = s->cur[-(si * 2)].size;
+                code_space->ranges[i].size = s2;
             }
         }
         else {
@@ -301,7 +301,7 @@ static int cmap_endfbrange_func(gs_memory_t *mem, pdf_ps_ctx_t *s, byte *buf, by
 {
     pdf_cmap *pdficmap = (pdf_cmap *)s->client_data;
     int ncodemaps, to_pop = pdf_ps_stack_count_to_mark(s, PDF_PS_OBJ_MARK);
-    unsigned int i, j, k;
+    unsigned int i, j;
     pdfi_cmap_range_map_t *pdfir;
     pdf_ps_stack_object_t *stobj;
 
@@ -359,7 +359,7 @@ static int cmap_endfbrange_func(gs_memory_t *mem, pdf_ps_ctx_t *s, byte *buf, by
             uint cidbase;
             int m, size;
 
-            if (stobj[i + 2].size < 1)
+            if (stobj[i + 2].size < 1 || stobj[i].size != stobj[i + 1].size)
                 continue;
 
             else if (stobj[i + 2].size == 1) {
@@ -437,7 +437,11 @@ static int cmap_endfbrange_func(gs_memory_t *mem, pdf_ps_ctx_t *s, byte *buf, by
             }
             else {
                 int m, size, keysize;
+                uint64_t kk;
                 uint codelo = 0, codehi = 0;
+
+                if (stobj[i + 2].size < 1 || stobj[i].size != stobj[i + 1].size)
+                    continue;
 
                 size = stobj[i].size;
                 for (m = 0; m < size; m++) {
@@ -451,8 +455,9 @@ static int cmap_endfbrange_func(gs_memory_t *mem, pdf_ps_ctx_t *s, byte *buf, by
                 if (codehi <= codelo || stobj[i + 2].size < (codehi - codelo))
                     continue;
 
-                for (k = codelo; k <= codehi; k++) {
+                for (kk = (uint64_t)codelo; kk <= (uint64_t)codehi; kk++) {
                     uint cidbase;
+                    uint k = (uint)kk;
                     int ind = k - codelo;
 
                     if (stobj[i + 2].val.arr[ind].type != PDF_PS_OBJ_STRING)

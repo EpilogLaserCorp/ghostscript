@@ -685,7 +685,7 @@ xps_decode_font_char_imp(xps_font_t *font, int code)
                     if (startCharCode < 0 || endCharCode < 0 || startGlyphCode < 0)
                         return gs_error_invalidfont;
                     if (code >= startGlyphCode && code <= (startGlyphCode + (endCharCode - startCharCode))) {
-                        return startGlyphCode + (code - startCharCode);
+                        return startCharCode + (code - startGlyphCode);
                     }
                 }
             }
@@ -733,7 +733,6 @@ xps_measure_font_glyph(xps_context_t *ctx, xps_font_t *font, int gid, xps_glyph_
     int hadv, vadv, vorg;
     int vtop, ymax, desc;
     int scale;
-    byte *fontmax = font->data + font->length;
 
     /* some insane defaults */
 
@@ -741,6 +740,13 @@ xps_measure_font_glyph(xps_context_t *ctx, xps_font_t *font, int gid, xps_glyph_
     hadv = 500;
     vadv = -1000;
     vorg = 1000;
+
+    if (gid > (max_int / 4) - 4) {
+        mtx->hadv = 0;
+        mtx->vadv = 0;
+        mtx->vorg = 0;
+        return;
+    }
 
     /*
      * Horizontal metrics are easy.
@@ -809,8 +815,10 @@ xps_measure_font_glyph(xps_context_t *ctx, xps_font_t *font, int gid, xps_glyph_
         if (idx > n - 1)
             idx = n - 1;
 
-        vadv = u16(font->data + ofs + idx * 4);
-        vtop = u16(font->data + ofs + idx * 4 + 2);
+        if (idx * 4 + 2 <= len) {
+            vadv = u16(font->data + ofs + idx * 4);
+            vtop = u16(font->data + ofs + idx * 4 + 2);
+        }
 
         glyf = xps_find_sfnt_table(font, "glyf", &glyf_len);
         loca = xps_find_sfnt_table(font, "loca", &loca_len);

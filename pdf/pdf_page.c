@@ -1015,8 +1015,12 @@ int pdfi_page_render(pdf_context *ctx, uint64_t page_num, bool init_graphics)
                 /* If setting the page group failed for some reason, abandon the page group,
                  *  but continue with the page
                  */
-                if (code < 0)
+                if (code < 0) {
+                    code = pdfi_set_error_stop(ctx, code, NULL, E_PDF_GROUP_ERROR, "pdfi_page_render", NULL);
+                    if (code < 0)
+                        goto exit1;
                     page_group_known = false;
+                }
             }
         } else {
             /* Couldn't push the transparency compositor.

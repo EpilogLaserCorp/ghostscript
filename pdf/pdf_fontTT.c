@@ -141,7 +141,7 @@ static uint pdfi_type42_get_glyph_index(gs_font_type42 *pfont, gs_glyph glyph)
     pdf_font_truetype *ttfont = (pdf_font_truetype *)pfont->client_data;
     uint gind = 0;
     uint cc = 0;
-    int i, code = 0;
+    int code = 0;
 
     if ((ttfont->descflags & 4) != 0 || glyph >= GS_MIN_GLYPH_INDEX) {
         gind = (uint)glyph < GS_MIN_GLYPH_INDEX ? glyph : glyph - GS_MIN_GLYPH_INDEX;
@@ -203,7 +203,7 @@ static uint pdfi_type42_get_glyph_index(gs_font_type42 *pfont, gs_glyph glyph)
             }
             else {
                 /* Slow linear search */
-                for (i = 0; sgl->Glyph != 0x00; i++) {
+                for (; sgl->Glyph != 0x00;) {
                     if (sgl->Glyph[0] == gname.data[0]
                         && strlen(sgl->Glyph) == gname.size
                         && !strncmp((char *)sgl->Glyph, (char *)gname.data, gname.size))
@@ -744,9 +744,17 @@ pdfi_copy_truetype_font(pdf_context *ctx, pdf_font *spdffont, pdf_dict *font_dic
     font->refcnt = 1;
     font->pfont = (gs_font_base *)dpfont42;
     dpfont42->client_data = (void *)font;
-
     font->filename = NULL;
+
     pdfi_countup(font->post);
+    pdfi_countup(font->sfnt);
+    pdfi_countup(font->copyright);
+    pdfi_countup(font->notice);
+    pdfi_countup(font->fullname);
+    pdfi_countup(font->familyname);
+    font->Encoding = NULL;
+    font->ToUnicode = NULL;
+    font->Widths = NULL;
 
     if (dpfont42->data.len_glyphs != NULL) {
         dpfont42->data.len_glyphs = (uint *)gs_alloc_byte_array(dpfont42->memory, dpfont42->data.numGlyphs + 1, sizeof(uint), "pdfi_copy_truetype_font");
@@ -793,22 +801,12 @@ pdfi_copy_truetype_font(pdf_context *ctx, pdf_font *spdffont, pdf_dict *font_dic
     font->FontDescriptor = NULL;
     (void)pdfi_dict_knownget_type(ctx, font_dict, "FontDescriptor", PDF_DICT, (pdf_obj **)&font->FontDescriptor);
 
-    pdfi_countup(font->sfnt);
-    pdfi_countup(font->copyright);
-    pdfi_countup(font->notice);
-    pdfi_countup(font->fullname);
-    pdfi_countup(font->familyname);
-
     if (font->BaseFont != NULL && ((pdf_name *)font->BaseFont)->length <= gs_font_name_max) {
         memcpy(dpfont42->key_name.chars, ((pdf_name *)font->BaseFont)->data, ((pdf_name *)font->BaseFont)->length);
         dpfont42->key_name.size = ((pdf_name *)font->BaseFont)->length;
         memcpy(dpfont42->font_name.chars, ((pdf_name *)font->BaseFont)->data, ((pdf_name *)font->BaseFont)->length);
         dpfont42->font_name.size = ((pdf_name *)font->BaseFont)->length;
     }
-
-    font->Encoding = NULL;
-    font->ToUnicode = NULL;
-    font->Widths = NULL;
 
     pdfi_font_set_first_last_char(ctx, font_dict, (pdf_font *)font);
     (void)pdfi_font_create_widths(ctx, font_dict, (pdf_font*)font, (double)0.001);

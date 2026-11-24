@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2023 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -24,6 +24,7 @@
 #include "gxfunc.h"
 #include "stream.h"
 #include "gsccolor.h"           /* Only for GS_CLIENT_COLOR_MAX_COMPONENTS */
+#include "gxdevice.h"
 
 #define POLE_CACHE_DEBUG 0      /* A temporary development technology need.
                                    Remove after the beta testing. */
@@ -1463,7 +1464,7 @@ gs_function_Sd_init(gs_function_t ** ppfn,
                          params->m, params->n);
     if (code < 0)
         return code;
-    if (params->m > max_Sd_m)
+    if (params->m > max_Sd_m || params->n > max_Sd_n)
         return_error(gs_error_limitcheck);
     switch (params->Order) {
         case 0:		/* use default */
@@ -1521,12 +1522,15 @@ gs_function_Sd_init(gs_function_t ** ppfn,
             for (i = 0; i < pfn->params.m; i++) {
                 pfn->params.array_step[i] = sa * order;
                 was = sa;
-                sa = (pfn->params.Size[i] * order - (order - 1)) * sa;
-                /* If the calculation of sa went backwards then we overflowed! */
-                if (was > sa)
-                    return_error(gs_error_VMerror);
+                if (check_int_multiply(pfn->params.Size[i], order, &sa) < 0)
+                    return_error(gs_error_limitcheck);
+                sa -= (order - 1);
+                if (check_int_multiply(sa, was, &sa) < 0)
+                    return_error(gs_error_limitcheck);
+
                 pfn->params.stream_step[i] = ss;
-                ss = pfn->params.Size[i] * ss;
+                if (check_int_multiply(pfn->params.Size[i], ss, &ss) < 0)
+                    return_error(gs_error_limitcheck);
             }
             pfn->params.pole = (double *)gs_alloc_byte_array(mem,
                                     sa, sizeof(double), "gs_function_Sd_init");

@@ -680,7 +680,7 @@ static separation_colors
 gx_check_process_names_DeviceN(gs_color_space * pcs, gs_gstate * pgs)
 {
     int i, num_comp, num_spots = 0, num_rgb_process = 0;
-    int num_cmyk_process = 0, num_other = 0;
+    int num_cmyk_process = 0;
     char **names;
     const char *pname;
     uint name_size;
@@ -697,7 +697,7 @@ gx_check_process_names_DeviceN(gs_color_space * pcs, gs_gstate * pgs)
 
         /* Classify */
         if (strncmp(pname, "None", name_size) == 0) {
-            num_other++;
+            continue;
         } else {
             if (strncmp(pname, "Cyan", name_size) == 0 ||
                 strncmp(pname, "Magenta", name_size) == 0 ||
@@ -835,7 +835,7 @@ gx_set_overprint_DeviceN(const gs_color_space * pcs, gs_gstate * pgs)
 
         /* Only DeviceCMYK can use overprint mode */
         params.effective_opm = pgs->color[0].effective_opm = 0;
-        params.op_state = OP_STATE_NONE;
+        params.op_state = GS_OP_STATE_NONE;
         params.is_fill_color =pgs->is_fill_color;
         return gs_gstate_update_overprint(pgs, &params);
     }

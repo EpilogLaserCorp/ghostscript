@@ -1,4 +1,4 @@
-/* Copyright (C) 2001-2025 Artifex Software, Inc.
+/* Copyright (C) 2001-2026 Artifex Software, Inc.
    All Rights Reserved.
 
    This software is provided AS-IS with no warranty, either express or
@@ -398,6 +398,9 @@ gs_type1_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                         if (encrypted) {
                             int skip = pdata->lenIV;
 
+                            if (cip + skip >= cipend)
+                                return_error(gs_error_invalidfont);
+
                             /* Skip initial random bytes */
                             for (; skip > 0; ++cip, --skip)
                                 decrypt_skip_next(*cip, state);
@@ -515,11 +518,10 @@ gs_type1_interpret(gs_type1_state * pcis, const gs_glyph_data_t *pgd,
                                     /* We need to check for the number of operands value on the stack */
                                     CS_CHECK_POP(csp, cstack);
                                     /* Then check that all those operands are available on the stack */
-                                    if (!CS_CHECK_CSTACK_BOUNDS(&csp[-fixed2int_var(csp[-1])], cstack))
+                                    if (!CS_CHECK_CSTACK_BOUNDS(&csp[-1 - fixed2int_var(csp[-1])], cstack))
                                         return_error(gs_error_invalidfont);
 
-                                    code = gs_type1_blend(pcis, csp,
-                                                          num_results);
+                                    code = gs_type1_blend(pcis, csp, num_results);
                                     if (code < 0)
                                         return code;
                                     if (!CS_CHECK_CSTACK_BOUNDS(&csp[1 - code], cstack))

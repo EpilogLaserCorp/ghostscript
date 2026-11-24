@@ -693,6 +693,8 @@ format2_charset_proc(const byte *p, const byte *pe, unsigned int i)
 static int
 format0_fdselect_proc(const byte *p, const byte *pe, unsigned int i)
 {
+    if (p + i + 4 > pe)
+        return_error(gs_error_rangecheck);
     return (int)(*(p + i));
 }
 
@@ -1948,6 +1950,8 @@ pdfi_read_cff(pdf_context *ctx, pdfi_gs_cff_font_priv *ptpriv)
                 gs_font_type1 *pt1font;
 
                 pdfi_init_cff_font_priv(ctx, &fdptpriv, font->cffdata, (font->cffend - font->cffdata), true);
+
+                pdfi_cff_font_priv_defaults(&fdptpriv);
 
                 offsets.private_off = 0;
 

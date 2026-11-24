@@ -1,4 +1,4 @@
-.. Copyright (C) 2001-2025 Artifex Software, Inc.
+.. Copyright (C) 2001-2026 Artifex Software, Inc.
 .. All Rights Reserved.
 
 .. title:: PostScript Files Distributed with Ghostscript
@@ -165,9 +165,6 @@ These files are found in the ``Resource/Init`` subdirectory of the Ghostscript s
 ``cidfmap``
    CID font mapping table. Allows substitution of a CID font for another CID font or a TrueType font for a CID font.
 
-``FAPIconfig``
-   A configuration file for Font API client.
-
 ``FAPIfontmap``
    Font mapping table for Font-API-handled fonts.
 
@@ -186,9 +183,6 @@ Unless otherwise stated, these files are found in the ``Resource/Init`` subdirec
 
 ``gs_cet.ps``
    Sets a number of alternate defaults to make Ghostscript behave more like Adobe CPSI. Useful for running the CET conformance test suite.
-
-``gs_diskn.ps``
-   This file implements the ``%disk IODevice`` (``diskn.dev`` feature). See the :ref:`language documentation<Language.html>` for information on the use of the ``%disk#`` devices. These PostScript modifications primarily perform the searching of all ``Searchable`` file systems in a defined ``SearchOrder`` when a file reference does not contain an explicit ``%device%`` specifier (such as ``%os%`` or ``%disk0%``). This is required to emulate undocumented behaviour of Adobe PostScript printers that have a disk and was experimentally determined.
 
 ``gs_kanji.ps``
    This file provides support for the Wadalab free Kanji font. It is not included automatically in any configuration. This file is stored in the ``lib`` subdirectory.

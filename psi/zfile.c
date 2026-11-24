@@ -940,8 +940,22 @@ static int zaddcontrolpath(i_ctx_t *i_ctx_p)
 
 static int zactivatepathcontrol(i_ctx_t *i_ctx_p)
 {
+    ref *safety, *safe;
+    int code = 0;
+
     gs_activate_path_control(imemory, 1);
-    return 0;
+
+    /* Set the PostScript level 'safe' parameter. This now correctly prevents
+     * /tests_private/ps/ps3cet/27-09.ps from changing FontDir, GenericResourceDir
+     * and GenericResourcePathSep by using setsystemparams (this is implemented
+     * in PostScript in gs_ll2.ps and relies on systemdict->SAFETY->safe being true).
+     */
+    if (dict_find_string(systemdict, "SAFETY", &safety) > 0 &&
+        dict_find_string(safety, "safe", &safe) > 0) {
+        make_bool(safe, true);
+        code = idict_put_string(systemdict, "safe", safe);
+    }
+    return code;
 }
 static int zcurrentpathcontrolstate(i_ctx_t *i_ctx_p)
 {
@@ -1078,12 +1092,16 @@ zopen_file(i_ctx_t *i_ctx_p, const gs_parsed_file_name_t *pfn,
             open_file = iodev_os_open_file;
         /* Check OS files to make sure we allow the type of access */
         if (open_file == iodev_os_open_file) {
-            code = check_file_permissions(i_ctx_p, pfn->fname, pfn->len, pfn->iodev,
-                file_access[0] == 'r' ? "PermitFileReading" : "PermitFileWriting");
-
-            if (code < 0 && !file_is_tempfile(i_ctx_p,
-                                          (const uchar *)pfn->fname, pfn->len))
-                return code;
+            if (file_access[0] == 'r' || file_access[1] == '+') {
+                code = check_file_permissions(i_ctx_p, pfn->fname, pfn->len, pfn->iodev, "PermitFileReading");
+                if (code < 0 && !file_is_tempfile(i_ctx_p, (const uchar *)pfn->fname, pfn->len))
+                    return code;
+            }
+            if (file_access[0] == 'w' || file_access[1] == '+') {
+                code = check_file_permissions(i_ctx_p, pfn->fname, pfn->len, pfn->iodev, "PermitFileWriting");
+                if (code < 0 && !file_is_tempfile(i_ctx_p, (const uchar *)pfn->fname, pfn->len))
+                    return code;
+            }
         }
         return open_file(iodev, pfn->fname, pfn->len, file_access, ps, mem);
     }
